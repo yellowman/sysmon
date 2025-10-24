@@ -191,6 +191,8 @@ char	*errtostr( int value )
 			/* invalid? */
 		case SYSM_SNMP_HIGHRATE:
 			return "High Rate";
+		case SYSM_PKTLOSS_EXCEED:
+			return "Pkt Loss High";
 		default:
 			return "ERROR";
 	}
@@ -622,6 +624,8 @@ char *type_to_name(int type)
 			return "ircd";
 		case SYSM_TYPE_PINGv6:
 			return "pingv6";
+		case SYSM_TYPE_PKTLOSS:
+			return "pktloss";
 		default:
 			return "ERROR";
 	}

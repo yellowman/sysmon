@@ -521,3 +521,333 @@ void    stop_test_ping(struct monitorent *here)
 	return;
 }
 
+/*
+ * ===================================================================
+ * PACKET LOSS MONITORING IMPLEMENTATION
+ * ===================================================================
+ */
+
+/*
+ * pktloss_add_sample - Add a sample to the packet loss history
+ *
+ * Adds a new sample to the circular buffer, overwriting oldest if full.
+ * Updates running totals with overflow protection.
+ */
+void pktloss_add_sample(struct pktloss_data *data, time_t timestamp,
+                        unsigned int sent, unsigned int rcvd)
+{
+	struct pktloss_sample *sample;
+	unsigned int lost;
+
+	if (data == NULL) {
+		print_err(1, "pktloss_add_sample: NULL data pointer");
+		return;
+	}
+
+	/* Calculate packets lost */
+	lost = (sent > rcvd) ? (sent - rcvd) : 0;
+
+	/* Get current sample slot (circular buffer) */
+	sample = &data->history[data->history_head];
+
+	/* Store sample data */
+	sample->timestamp = timestamp;
+	sample->sent = sent;
+	sample->received = rcvd;
+	sample->lost = lost;
+
+	/* Advance head (circular) */
+	data->history_head = (data->history_head + 1) % PKTLOSS_HISTORY_SIZE;
+
+	/* Update count (max at buffer size) */
+	if (data->history_count < PKTLOSS_HISTORY_SIZE) {
+		data->history_count++;
+	}
+
+	/* Update running totals with overflow protection */
+	if (data->total_sent > (ULLONG_MAX - sent)) {
+		/* Overflow would occur - reset counters */
+		print_err(1, "pktloss: total_sent overflow, resetting counters");
+		data->total_sent = sent;
+		data->total_received = rcvd;
+		data->total_lost = lost;
+	} else {
+		data->total_sent += sent;
+		data->total_received += rcvd;
+		data->total_lost += lost;
+	}
+
+	if (debug) {
+		print_err(0, "pktloss: added sample - sent=%u rcvd=%u lost=%u",
+		          sent, rcvd, lost);
+	}
+}
+
+/*
+ * start_test_pktloss - Initialize packet loss monitoring
+ *
+ * Allocates pktloss_data structure and embedded pingdata.
+ * Sets up ICMP socket and prepares for packet loss tracking.
+ */
+void start_test_pktloss(struct monitorent *here)
+{
+	struct pktloss_data *pktdata;
+	struct pingdata *localstruct;
+
+	if (glob_icmp_fd == -1) {
+		/* No ICMP socket - mark as OK and return */
+		here->retval = SYSM_OK;
+		return;
+	}
+
+	/* Allocate packet loss tracking structure */
+	pktdata = MALLOC(sizeof(struct pktloss_data), "pktloss_data");
+	if (pktdata == NULL) {
+		print_err(1, "pktloss: MALLOC failed for pktloss_data");
+		here->retval = SYSM_ERR;
+		return;
+	}
+
+	/* Initialize to zero */
+	memset(pktdata, 0, sizeof(struct pktloss_data));
+
+	/* Allocate embedded pingdata structure */
+	pktdata->ping = MALLOC(sizeof(struct pingdata), "pktloss_pingdata");
+	if (pktdata->ping == NULL) {
+		print_err(1, "pktloss: MALLOC failed for pingdata");
+		FREE(pktdata);
+		here->retval = SYSM_ERR;
+		return;
+	}
+
+	/* Initialize pingdata */
+	memset(pktdata->ping, 0, sizeof(struct pingdata));
+	localstruct = pktdata->ping;
+
+	/* Set up pingdata (same as start_test_ping) */
+	here->filedes = -1;
+	gettimeofday(&here->lastserv, NULL);
+
+	localstruct->nreceived = 0;
+	localstruct->packetsent = 0;
+	localstruct->datap = &localstruct->outpack[8 + sizeof(struct timeval)];
+
+	memset(&localstruct->ping_target, 0, sizeof(struct sockaddr));
+
+	if (debug || here->checkent->trace) {
+		print_err(here->checkent->trace,
+		          "pktloss: setting up monitoring of %s",
+		          here->checkent->hostname);
+	}
+
+	/* Set up target address */
+	localstruct->to = (struct sockaddr_in *)&localstruct->ping_target;
+	localstruct->to->sin_family = AF_INET;
+
+	/* DNS lookup */
+	localstruct->hp = my_gethostbyname(here->checkent->hostname, AF_INET);
+	if (!localstruct->hp) {
+		here->retval = SYSM_NODNS;
+		FREE(localstruct);
+		FREE(pktdata);
+		here->monitordata = NULL;
+		return;
+	}
+
+	localstruct->to->sin_family = localstruct->hp->h_addrtype_v4;
+	memcpy((caddr_t)&localstruct->to->sin_addr,
+	       localstruct->hp->my_h_addr_v4,
+	       localstruct->hp->h_length_v4);
+
+	/* Allocate packet buffer */
+	localstruct->packet = (u_char *)MALLOC(ICMP_PACKET_SIZE, "pktloss_packet");
+	if (!localstruct->packet) {
+		print_err(1, "pktloss: out of memory for packet");
+		here->retval = here->checkent->lastcheck;
+		FREE(localstruct);
+		FREE(pktdata);
+		here->monitordata = NULL;
+		return;
+	}
+
+	/* Fill packet data */
+	for (localstruct->counter = 8; localstruct->counter < 128;
+	     ++localstruct->counter) {
+		*localstruct->datap++ = localstruct->counter;
+	}
+
+	/* Generate ICMP identity */
+	localstruct->ident = generate_ident();
+
+	if (debug || here->checkent->trace) {
+		print_err(0, "pktloss: Created ICMP identity %d",
+		          localstruct->ident);
+	}
+
+	/* Store pktloss_data in monitordata */
+	here->monitordata = pktdata;
+
+	/* Send initial ping */
+	pinger_v4(localstruct, here);
+
+	if (debug || here->checkent->trace) {
+		print_err(here->checkent->trace,
+		          "pktloss: Sent initial ICMP echo-request to %s",
+		          here->checkent->hostname);
+	}
+
+	/* Track last send time */
+	gettimeofday(&localstruct->lastsentat, NULL);
+}
+
+/*
+ * service_test_pktloss - Monitor packet loss and update history
+ *
+ * Called periodically to:
+ * 1. Send ICMP echo requests
+ * 2. Track responses
+ * 3. Record packet loss in history
+ * 4. Check against tolerance threshold
+ */
+void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
+{
+	struct pktloss_data *pktdata;
+	struct pingdata *localstruct;
+	unsigned int sent, rcvd, lost;
+	time_t now;
+
+	if (here == NULL) {
+		return;
+	}
+
+	pktdata = here->monitordata;
+	if (pktdata == NULL) {
+		print_err(0, "pktloss: NULL monitordata");
+		return;
+	}
+
+	localstruct = pktdata->ping;
+	if (localstruct == NULL) {
+		print_err(0, "pktloss: NULL pingdata");
+		return;
+	}
+
+	memcpy(&here->lastserv, now_timeval, sizeof(struct timeval));
+
+	/* Check if it's time to send more packets */
+	if (mydifftime(localstruct->lastsentat, here->lastserv) <= icmp_packet_delay) {
+		return; /* Not yet time */
+	}
+
+	if (debug || here->checkent->trace) {
+		print_err(0, "pktloss: %s - sent=%d received=%d",
+		          here->checkent->hostname,
+		          localstruct->packetsent,
+		          localstruct->nreceived);
+	}
+
+	/* Check if we've sent all pings */
+	if ((localstruct->packetsent >= here->checkent->send_pings) &&
+	    (mydifftime(localstruct->lastsentat, here->lastserv) >= icmp_packet_delay)) {
+
+		/* Record this cycle's results */
+		sent = localstruct->packetsent;
+		rcvd = localstruct->nreceived;
+		lost = sent - rcvd;
+
+		time(&now);
+		pktloss_add_sample(pktdata, now, sent, rcvd);
+
+		if (debug || here->checkent->trace) {
+			print_err(0, "pktloss: cycle complete - %u/%u lost (%.1f%%)",
+			          lost, sent, (100.0 * lost) / sent);
+		}
+
+		/* Check tolerance */
+		if (lost > here->checkent->pktloss_tolerance) {
+			if (lost == sent) {
+				/* 100% packet loss = unpingable */
+				here->retval = SYSM_UNPINGABLE;
+				if (debug || here->checkent->trace) {
+					print_err(1, "pktloss: %s - 100%% loss (unpingable)",
+					          here->checkent->hostname);
+				}
+			} else {
+				/* Exceeds tolerance but not 100% */
+				here->retval = SYSM_PKTLOSS_EXCEED;
+				if (debug || here->checkent->trace) {
+					print_err(1, "pktloss: %s - loss %u exceeds tolerance %u",
+					          here->checkent->hostname,
+					          lost, here->checkent->pktloss_tolerance);
+				}
+			}
+		} else {
+			/* Within tolerance */
+			here->retval = SYSM_OK;
+			if (debug || here->checkent->trace) {
+				print_err(0, "pktloss: %s - within tolerance",
+				          here->checkent->hostname);
+			}
+		}
+
+		/* Clean up for this cycle */
+		if (localstruct->packet) {
+			FREE(localstruct->packet);
+		}
+		FREE(localstruct);
+		FREE(pktdata);
+		here->monitordata = NULL;
+		return;
+	}
+
+	/* Send more pings if needed */
+	if ((localstruct->nreceived < here->checkent->min_pings) &&
+	    (mydifftime(localstruct->lastsentat, here->lastserv) >= 1)) {
+
+		pinger_v4(localstruct, here);
+
+		if (debug || here->checkent->trace) {
+			print_err(here->checkent->trace,
+			          "pktloss: Sent ICMP echo-request to %s",
+			          here->checkent->hostname);
+		}
+	}
+
+	/* Check if we have minimum required responses */
+	if (here->checkent->min_pings <= localstruct->nreceived) {
+		/* Have minimum, but continue to send_pings limit */
+		if (localstruct->packetsent < here->checkent->send_pings) {
+			/* Keep sending */
+			return;
+		}
+	}
+}
+
+/*
+ * stop_test_pktloss - Clean up packet loss monitoring
+ *
+ * Frees pktloss_data and embedded pingdata structures.
+ */
+void stop_test_pktloss(struct monitorent *here)
+{
+	struct pktloss_data *pktdata;
+	struct pingdata *localstruct;
+
+	pktdata = here->monitordata;
+
+	if (pktdata != NULL) {
+		localstruct = pktdata->ping;
+
+		if (localstruct != NULL) {
+			if (localstruct->packet != NULL) {
+				FREE(localstruct->packet);
+			}
+			FREE(localstruct);
+		}
+
+		FREE(pktdata);
+	}
+
+	here->monitordata = NULL;
+}
+

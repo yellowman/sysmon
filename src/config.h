@@ -206,6 +206,7 @@
 #define SYSM_TYPE_PING_LATENCY 19 /* latency - stick timeval in packet */
 #define SYSM_TYPE_PINGv6 20 /* IPv6 PING */
 #define SYSM_TYPE_UDP_RTT 21 /* udp rtt packet timeval coolness */
+#define SYSM_TYPE_PKTLOSS 22 /* packet loss monitoring with history */
 
 /* Return Values */
 #define SYSM_ERR	-2
@@ -222,6 +223,7 @@
 #define SYSM_INPROG	10
 #define SYSM_BAD_AUTH 	11
 #define SYSM_BAD_RESP 	12
+#define SYSM_PKTLOSS_EXCEED 13 /* packet loss exceeds tolerance */
 #define X500_WEDGED 	13
 #define SYSM_KILLED	14 /* killed locally */
 #define SYSM_HOSTUNRCH	15
@@ -248,13 +250,42 @@
 #define SYSM_CONTACT_DOWN	1
 #define SYSM_CONTACT_UP		2
 
+/* Packet loss monitoring constants */
+#define PKTLOSS_HISTORY_SIZE     1440  /* 24 hours @ 1 minute intervals */
+#define PKTLOSS_DEFAULT_HISTORY  24    /* Default hours to keep */
+#define PKTLOSS_MAX_HISTORY      168   /* Max 7 days (1 week) */
+
+/* Forward declaration for pingdata (defined in icmp.c) */
+struct pingdata;
+
+/* Packet loss history sample */
+struct pktloss_sample {
+	time_t timestamp;           /* When this sample was taken */
+	unsigned int sent;          /* Packets sent this cycle */
+	unsigned int received;      /* Packets received this cycle */
+	unsigned int lost;          /* Packets lost (sent - received) */
+};
+
+/* Packet loss tracking data (stored in monitorent->monitordata) */
+struct pktloss_data {
+	struct pktloss_sample history[PKTLOSS_HISTORY_SIZE];
+	unsigned int history_head;      /* Circular buffer head index */
+	unsigned int history_count;     /* Number of valid samples */
+	unsigned long long total_sent;      /* Running total (64-bit for long runs) */
+	unsigned long long total_received;  /* Running total */
+	unsigned long long total_lost;      /* Running total */
+
+	/* Reuse pingdata for actual ICMP operations */
+	struct pingdata *ping;
+};
+
 struct hostinfo {
         unsigned char *hostname; /* name of system to check */
-        unsigned int type; /* 1 = tcp, 2 = udp, 3 = ping, 4 = snmp, 5 = nntp 
+        unsigned int type; /* 1 = tcp, 2 = udp, 3 = ping, 4 = snmp, 5 = nntp
 		6 = smtp, 7 = imap, 8 = pop3 9 = umichX500 10 = pop2
 		11 = bootp 12 = dns 13 = www-content, 14 = radius,
-		15 = https, 16 = sysmon, 17 = ssh, 18=ircd, 
-		19= latency, 20 = ping6, 21 = rtt */
+		15 = https, 16 = sysmon, 17 = ssh, 18=ircd,
+		19= latency, 20 = ping6, 21 = rtt, 22 = pktloss */
         unsigned int port; /* only relevant for tcp/udp */
         unsigned char *message; /* message to print for outages */
         unsigned char *contact; /* e-mail contact for this */
@@ -311,6 +342,11 @@ struct hostinfo {
 	unsigned int send_pings; /* number of pings to send to host */
 	unsigned int min_pings; /* min number of pings to require for
 		host to be up */
+
+	/* Packet loss specific configuration */
+	unsigned int pktloss_tolerance;     /* Max packets that can be lost before alert */
+	unsigned int pktloss_history_hours; /* Hours of history to keep (default 24) */
+	time_t pktloss_last_check;          /* Last time we evaluated packet loss */
 
 	bool reverse; /* if true then {if down, follow siblings}, else
 			behave as we do otherwise */
