@@ -1,0 +1,93 @@
+#!/bin/sh
+#
+# chkconfig: 345 56 50
+# description: System Monitoring Daemon
+#              Sysmon is a network monitoring tool designed to provide high
+#              performance and accurate network monitoring. Currently
+#              supported protocols include SMTP, IMAP, HTTP, TCP, UDP,
+#              NNTP, and PING tests.
+#              
+# processname: sysmond
+## pidfile: /var/run/sysmond.pid
+# config: /etc/sysmon.conf
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# Get config.
+test -f /etc/sysconfig/network && . /etc/sysconfig/network
+
+# Check that networking is up.
+[ -z "$NETWORKING" -o "$NETWORKING" = "no" ] && exit 0
+
+[ -e /usr/sbin/sysmond ] || exit 0
+[ -f /etc/sysmon.conf ] || exit 0
+RETVAL=0
+
+start(){
+    echo -n "Starting sysmond: "
+    daemon sysmond
+    RETVAL=$?
+    echo
+    touch /var/lock/subsys/sysmond
+    return $RETVAL
+}
+
+stop(){
+    echo -n "Stopping sysmond: "
+    killproc sysmond
+    RETVAL=$?
+    echo
+    rm -f /var/lock/subsys/sysmond
+    return $RETVAL
+
+}
+
+reload(){
+    echo -n "Reloading configuration: "	
+    killproc sysmond -HUP
+    RETVAL=$?
+    echo
+    return $RETVAL
+}
+
+restart(){
+    stop
+    start
+}
+
+condrestart(){
+    [ -z "$DURING_INSTALL" ] && [ -e /var/lock/subsys/sysmond ] && restart
+    return 0
+}
+
+
+# See how we were called.
+case "$1" in
+  start)
+	start
+	;;
+  stop)
+	stop
+	;;
+  status)
+	status sysmond
+	;;
+ restart)
+	restart
+	;;
+  reload)
+	reload
+	;;
+  condrestart)
+	condrestart
+	;;
+  probe)
+	;;
+  *)
+	echo "Usage: sysmond {start|stop|status|restart|condrestart|reload}"
+	RETVAL=1
+esac
+
+exit $RETVAL
+

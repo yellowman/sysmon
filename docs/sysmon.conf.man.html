@@ -1,0 +1,332 @@
+Content-type: text/html
+
+<HTML><HEAD><TITLE>Manpage of SYSMON.CONF</TITLE>
+</HEAD><BODY>
+<H1>SYSMON.CONF</H1>
+Section: System Administration (5)<BR>Updated: 21 June 2000<BR><A HREF="#index">Index</A>
+<A HREF="http://localhost/cgi-bin/man/man2html">Return to Main Contents</A><HR>
+
+<A NAME="lbAB">&nbsp;</A>
+<H2>NAME</H2>
+
+sysmon.conf - sysmond(man) configuration file
+<A NAME="lbAC">&nbsp;</A>
+<H2>DESCRIPTION</H2>
+
+The
+<I>sysmon.conf</I>
+
+file is the main configuration file for the
+<B>sysmond</B>(man)
+
+which monitors systems and services on various machines connected to a
+network.
+<P>
+Every rule consists of at least three fields, and at most nine.
+<P>
+Lines starting with a hash mark (``#'') and empty lines are ignored.
+<P>
+This release of
+<B>sysmond</B>
+
+is able to understand an extended syntax.  A rule may have a replacement
+performed on it, if a variable is declared earlier in the configuration
+file.
+<P>
+<A NAME="lbAD">&nbsp;</A>
+<H2>GLOBAL SETTINGS</H2>
+
+There are various global settings that
+<B>sysmond</B>
+
+can be configured with.  Currently there is some
+inconsistency with some of the settings, but we expect to make
+them more standard in a newer version of 
+<B>sysmond</B>.
+
+<P>
+<A NAME="lbAE">&nbsp;</A>
+<H3>Values that can be configured with ``set''</H3>
+
+<P>
+pmesg sender from subject upcolor downcolor recentcolor
+<P>
+These variables are configured in the following format
+<P>
+<DL COMPACT>
+<DT><DD>
+<PRE>
+set pmesg = &quot;value&quot;
+set sender = &quot;value&quot;
+set from = &quot;value&quot;
+set subject = &quot;value&quot;
+set upcolor = &quot;value&quot;
+set downcolor = &quot;value&quot;
+set recentcolor = &quot;value&quot;
+</PRE>
+
+</DL>
+<P>
+
+<P>
+<A NAME="lbAF">&nbsp;</A>
+<H3>Generic Variables</H3>
+
+The set command allows the creation of generic variables which can
+be automatically replaced further down in a configuration file.  This
+can be used to seperate routers from servers, while still providing
+an easy way to update all the devices being monitored with a new &quot;contact&quot;.
+The example that follows, all cases of $oncall will be replaced with
+<A HREF="mailto:oncall@example.com">oncall@example.com</A>
+<P>
+Example:
+<DL COMPACT>
+<DT><DD>
+<PRE>
+set oncall = &quot;<A HREF="mailto:oncall@example.com">oncall@example.com</A>&quot;
+
+router.example.com ping &quot;main router&quot; $oncall
+
+</PRE>
+
+</DL>
+<P>
+
+<P>
+<A NAME="lbAG">&nbsp;</A>
+<H3>Values that can be configured with ``config''</H3>
+
+<P>
+queuetime include showupalso errorsto maxqueued replyto noheartbeat
+pageinterval logging dnslog dnsexpire statusfile nosubject numfailures
+<P>
+<A NAME="lbAH">&nbsp;</A>
+<H3>queuetime</H3>
+
+The ``config queuetime'' directive is used to specify the number of
+seconds between the completion of the last test of the service
+and the start of the next test of the service.  This time is in seconds,
+and the default is 60.
+<P>
+<A NAME="lbAI">&nbsp;</A>
+<H3>include</H3>
+
+The ``config include'' directive is used to specify the path to another
+file that should be included at that point in the current file.  This
+is useful if you have software that generates some of your configuration
+files, and you wish to have a per-router configuration file, while
+maintaining your current dependencies.  Other uses could be having an
+oncall database that is generated to allow automatic changing of shifts.
+<P>
+<A NAME="lbAJ">&nbsp;</A>
+<H3>showupalso</H3>
+
+The ``config showupalso'' directive allows all hosts (both those as
+being monitored as up and down) and services being monitored to appear in
+the html or text status file that is created by sysmond.  This does
+not affect the display of the curses client.
+<P>
+<A NAME="lbAK">&nbsp;</A>
+<H3>errorsto</H3>
+
+The ``config errorsto'' directive inserts an Errors-to: header in any
+e-mail that sysmond generates to a contact.  This is useful if the
+address that sysmond is sending from is not a real account, to allow
+bounces or page-not-sent messages to be collected in a central location.
+<P>
+<P>
+<A NAME="lbAL">&nbsp;</A>
+<H3>maxqueued</H3>
+
+The ``config maxqueued'' directive takes an integer argument that
+specifies the number of simultaneous checks that may be performed at
+once.  Large networks may experience problems with polling if sysmond
+receives a large number of icmp responses at once because many hosts
+are being pinged at once, or if the operating system or daemon has
+a restricted number of filedescriptors available.  The default is 100.
+<P>
+<A NAME="lbAM">&nbsp;</A>
+<H3>replyto</H3>
+
+The ``config replyto'' directive inserts a Reply-to: header in any
+e-mail that sysmond generates to a contact.  This is useful to have
+users that reply to a message about an outage reach a support person
+at an organization.
+<P>
+<A NAME="lbAN">&nbsp;</A>
+<H3>noheartbeat</H3>
+
+The ``config noheartbeat'' directive disables the default behavior of
+sysmond to send a registration packet to our registration server.  This
+information is collected to determine the hardware platforms and
+operating systems being used for monitoring so we can concentrate
+testing and development on these systems.  Disabling this feature will
+cause no adverse affect to monitoring, as the packet is sent blindly
+once on startup.
+<P>
+<A NAME="lbAO">&nbsp;</A>
+<H3>pageinterval</H3>
+
+The ``config pageinterval'' directive allows you to configure a reminder
+interval that a host is still down.  This is an integer representing 
+the number of minutes since the last e-mail message to a contact
+about the outage.  Once that timer has been reached, another message is
+sent.  This is useful for people who sleep through their pagers.
+<P>
+<A NAME="lbAP">&nbsp;</A>
+<H3>logging </H3>
+
+The ``config logging'' directive allows you to specify a syslog facility
+to be logged to.  These options vary slightly from one operating system
+to the next.  Sysmon supports logging to the following facilities:
+<DL COMPACT>
+<DT><DD>
+<PRE>
+kern user mail daemon auth syslog lpr news uucp cron authpriv
+local0-local7 none
+</PRE>
+
+</DL>
+<P>
+
+The default is daemon.
+<P>
+<A NAME="lbAQ">&nbsp;</A>
+<H3>dnslog</H3>
+
+The ``config dnslog'' directive allows you to configure the logging
+interval of the internal dns cache statistics.  This number is
+an integer representing the number of seconds between logging intervals.
+The default is 900 seconds (15 minutes).
+<P>
+<A NAME="lbAR">&nbsp;</A>
+<H3>dnsexpire</H3>
+
+The ``config dnsexpire'' directive allows you to configure the internal
+time-to-live of dns entries cached.  This number is an integer representing
+the number of seconds an element should be allowed to stay in the cache.
+The default is 1500 seconds (25 minutes).
+<P>
+<A NAME="lbAS">&nbsp;</A>
+<H3>statusfile</H3>
+
+The ``config statusfile'' directive takes two arguments.  The first is the
+specification of the file, be it &quot;text&quot; or &quot;html&quot;.  The second argument is
+the path to the file that gets written.  The default is to not write a
+status file.
+<P>
+<A NAME="lbAT">&nbsp;</A>
+<H3>nosubject</H3>
+
+The ``config nosubject'' directive specifies that there should be no
+subject in the messages sent to the contact address.  This is necessary
+to not consume characters for some e-mail to pager gateways such that
+the full message gets delivered.
+<P>
+<A NAME="lbAU">&nbsp;</A>
+<H3>numfailures</H3>
+
+The ``config numfailures'' directive takes an integer argument and
+specifies the number of times that a site must be monitored as
+down before a message is sent to the contact address.  The default is
+4.
+<P>
+<A NAME="lbAV">&nbsp;</A>
+<H3>sleeptime</H3>
+
+The ``config sleeptime'' option is now obsolete.  See the queuetime
+configuration option.
+<P>
+<A NAME="lbAW">&nbsp;</A>
+<H2>EXAMPLES</H2>
+
+Here are some examples, which should give you an idea of how each option
+can be configured.
+<DL COMPACT>
+<DT><DD>
+<PRE>
+# 
+# insert examples here
+#
+</PRE>
+
+</DL>
+<P>
+
+<P>
+<A NAME="lbAX">&nbsp;</A>
+<H2>FILES</H2>
+
+
+<DL COMPACT>
+<DT><I>/etc/sysmon.conf</I>
+
+<DD>
+Configuration file for
+<B>sysmond</B>
+
+<P>
+</DL>
+<A NAME="lbAY">&nbsp;</A>
+<H2>BUGS</H2>
+
+Insufficent documentation to document the bugs, let alone the features.
+<P>
+<A NAME="lbAZ">&nbsp;</A>
+<H2>SEE ALSO</H2>
+
+<B>sysmond</B>(man)
+
+<P>
+<P>
+
+<A NAME="lbBA">&nbsp;</A>
+<H2>COLLABORATORS</H2>
+
+Sysmon is primarily written by
+<DL COMPACT>
+<DT>Jared Mauch<DD>
+<DT><A HREF="mailto:jared@puck.nethre.net">jared@puck.nether.net</A><DD>
+<P>
+
+
+<P>
+</DL>
+
+<HR>
+<A NAME="index">&nbsp;</A><H2>Index</H2>
+<DL>
+<DT><A HREF="#lbAB">NAME</A><DD>
+<DT><A HREF="#lbAC">DESCRIPTION</A><DD>
+<DT><A HREF="#lbAD">GLOBAL SETTINGS</A><DD>
+<DL>
+<DT><A HREF="#lbAE">Values that can be configured with ``set''</A><DD>
+<DT><A HREF="#lbAF">Generic Variables</A><DD>
+<DT><A HREF="#lbAG">Values that can be configured with ``config''</A><DD>
+<DT><A HREF="#lbAH">queuetime</A><DD>
+<DT><A HREF="#lbAI">include</A><DD>
+<DT><A HREF="#lbAJ">showupalso</A><DD>
+<DT><A HREF="#lbAK">errorsto</A><DD>
+<DT><A HREF="#lbAL">maxqueued</A><DD>
+<DT><A HREF="#lbAM">replyto</A><DD>
+<DT><A HREF="#lbAN">noheartbeat</A><DD>
+<DT><A HREF="#lbAO">pageinterval</A><DD>
+<DT><A HREF="#lbAP">logging </A><DD>
+<DT><A HREF="#lbAQ">dnslog</A><DD>
+<DT><A HREF="#lbAR">dnsexpire</A><DD>
+<DT><A HREF="#lbAS">statusfile</A><DD>
+<DT><A HREF="#lbAT">nosubject</A><DD>
+<DT><A HREF="#lbAU">numfailures</A><DD>
+<DT><A HREF="#lbAV">sleeptime</A><DD>
+</DL>
+<DT><A HREF="#lbAW">EXAMPLES</A><DD>
+<DT><A HREF="#lbAX">FILES</A><DD>
+<DT><A HREF="#lbAY">BUGS</A><DD>
+<DT><A HREF="#lbAZ">SEE ALSO</A><DD>
+<DT><A HREF="#lbBA">COLLABORATORS</A><DD>
+</DL>
+<HR>
+This document was created by man2html, using the manual pages.<BR>
+Time: 19:15:21 GMT, September 18, 2000
+</BODY>
+</HTML>

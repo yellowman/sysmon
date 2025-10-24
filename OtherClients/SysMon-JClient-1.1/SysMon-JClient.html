@@ -1,0 +1,67 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+   <TITLE>SysMon-JClient-1.1</TITLE>
+</HEAD>
+<BODY BGCOLOR="#FFF4D5">
+
+<H1 ALIGN=CENTER><I>SysMon-JClient</I></H1>
+
+<P>This is a java based interface to the <I>sysmond</I> (System Monitoring
+   Daemon written by Jared Mauch). This program was written by Alex Tang
+   <A HREF="mailto:altitude@airflash.com">&lt;altitude@airflash.com&gt;</A>.
+</p>
+
+<HR>
+<center>
+<APPLET 
+		code=MonitorClient.class
+		id=MonitorClient
+		width=600
+		height=400 ><PARAM name=Host value="petrified.cic.net"><PARAM name=Port value=1345></APPLET>
+</center>
+<HR>
+
+<H2>About:</H2>
+
+<P>SysMon-JClient is a java based interface to the Sysmon (System
+   Monitoring Daemon) written by <A HREF="mailto:jared@puck.nether.net">Jared
+   Mauch</A></P>
+
+<H2>Feb 2, 1997: Version 1.1 Released!</H2>
+
+<P>The new version has the following enhancements: </P>
+
+<UL>
+	<LI>You can now cancel a pending refresh by clicking on the &quot;Cancel
+		Refresh&quot; button. </LI>
+
+	<LI>The applet can be spawned into a separate window. This allows you to
+		resize the applet to your liking.</LI>
+</UL>
+
+<H2>How to run as a Java Application:</H2>
+
+<P>Running JClient as an application has one main advanatge:&nbsp;you can
+   select which host you want to connect to. To run JClient as an
+   application, do the following:</P>
+
+<UL>
+	<LI>Download the application file. It is available as a &quot;<A
+	   HREF="ftp://petrified.cic.net/pub/SysMon-JClient/SysMon-JClient-1.1.zip">ZIP</A>&quot;
+	   or a &quot;<A
+	   HREF="ftp://petrified.cic.net/pub/SysMon-JClient/SysMon-JClient-1.1.tar.gz">TAR.GZ</A>&quot;
+	   </LI>
+
+	<LI>Unzip or untar the file into a directory.</LI>
+
+	<LI>For UNIX&nbsp;users, run the &quot;JClient.sh&quot; shell script, or
+		for Win32 users, run&nbsp;&quot;JClient.bat&quot;. This script sets up
+		the java CLASSPATH and runs the application. If you want to change the
+		default host and port that JClient connects to, edit the shell script
+		or batch file.</LI> 
+
+</UL>
+
+</BODY>
+</HTML>

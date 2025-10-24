@@ -1,0 +1,66 @@
+WISHLIST (Last updated 25-Apr-2006) -- aka TODO
+
+	Version, Features and Dates are all projected.
+
+Future: (Unknown)
+	* multiple textfiles
+		. by groups?
+		. by state (all, 'down' status..)
+	* pageinterval configurable per host
+	* pings per check configurable.  also configurable per-host.
+		loss+numbers to send (min_pings, send_pings) (half done)
+	* textfile displays objects that are down when the parent is also down
+	* config flaptime <minutes>;
+		display host in html/text file for next <minutes>
+		amount of time as green after host came back up
+	* native dns checks (send packet, do we want recurs, aa checks? need to
+		parse response) - need addl feats, docs
+	* http://example.com:1345/ textfile+auth+object history
+	* snmp custom "down" message
+	* snmp custom "up" message
+	* ability to compare two snmp oids w/ each other and alert if
+		equal, not equal, etc..
+	* ability to configure descriptions for snmp errors on a per-object
+		basis
+	* show FILENAME in errors (standardize format?)
+		parser_file_error(char *filename, int lineno, "msg");
+		or replace msg with integer pointing to canned message
+	* documentation
+	* need to aggregate snmp queries to a single host/ip in one
+		larger snmp message with centralized snmp dispatcher
+	* what to do w/ snmp traps? (by 0.94)
+	* config savestate /path/to/file (save state for sw upgrades)
+	* snpp notification
+	* make paused data visible in curses client
+	* packetloss check 
+		keep history for 24 hours (configurable glob and per-host)
+		tolerance config for pings lost in a period
+		if total loss, just report as down
+		example: far-away-site pktloss 15 1 2 "far-site" mail@site
+		will send 15 pings every 1 minute, if more than 2 lost, report
+	* rtt check? (use external rtt agent?)
+	* SAA?
+	* ircd check? (connect, send quit, no banner)
+	* documentation
+	* config authfile (file-type sysmon|passwd|htpasswd|etc)
+	* curses client fix
+	* revoke root!
+	* make WAKEUP_CHECKS go out and actually do that, instead of just 
+		be killer...  also go out and make us pass better states 
+		around such that wakeup_checks actually only calls checks 
+		every few times, instead of every iteration
+	* config minnumfailures (but before it appears in txt file, ie: 
+		becomes yellow)
+	* All bugs gone :)
+0.93: (Jul, 2006)
+	* better documentation
+        * rework queuer to sort by age and queue longest since check
+                instead of current pseudo-linear+random system
+        * ability to cap queue size based on check-type
+	* log listening port
+        * per-object pmesg (DONE? - needs docs+testing 20030708)
+        * queueinterval configurable per-host
+                (DONE? - needs docs+testing 20030708)
+
+
+

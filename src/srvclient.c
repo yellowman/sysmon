@@ -1,0 +1,969 @@
+/* $Id: srvclient.c,v 1.68 2014/07/09 16:38:46 jared Exp $ */
+#include "config.h"
+
+extern int snmp_debug;
+
+bool in_client_poll = FALSE;
+
+#ifdef HAVE_LIBWRAP
+#ifdef HAVE_TCPD_H
+int allow_severity = ALLOWSEVERITY;
+int deny_severity = DENYSEVERITY;
+#endif /* HAVE_TCPD_H */
+#endif
+
+void client_poll();
+
+void send_stat_start(struct clientstatus client, struct all_elements_list *head, int obj)
+{
+	char buff[256];
+	struct all_elements_list *here = NULL;
+
+	if (head == NULL)
+	{
+		return; /* shouldn't happen, just doing sanity checking */
+	}
+
+	for (here = head; here!= NULL;here=here->next)
+	{
+		if (here->value->data->lastcheck != 0)
+		{
+	                if (obj == 1)
+	                {
+	                        snprintf(buff, 256, "%s", here->value->unique_name);
+			} else {
+
+			/* down in some fashion */
+			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%d:%ld", 
+			here->value->data->hostname, here->value->data->type, 
+			here->value->data->port, here->value->data->lastcheck,
+			here->value->data->downct, 
+			here->value->data->contacted, 
+			here->value->data->deathtime);
+			}
+
+			/* write it out the socket */
+			sendline(client.filedes, buff);
+		}
+	}
+	return;
+}
+
+int	send_stat(struct clientstatus *client, char *buff)
+{
+	int retval;
+	if (strncmp(buff, "STATO", 5) == 0)
+	{
+		send_stat_start(*client, currenthead, 1);
+	} else {
+		send_stat_start(*client, currenthead, 0);
+	}
+	if (paused)
+	{
+		retval = sendline(client->filedes, "333 Paused Currently");
+	} else {
+		retval = sendline(client->filedes, "333 Not currently Paused");
+	}
+	if (retval == -1)
+	{
+		print_err(0, "unable to send message to client");
+		client->filedes = -1;
+		return -1;
+	}
+
+	return 0;
+}
+
+int	send_conf(struct clientstatus *client)
+{
+
+	struct all_elements_list *here;
+
+	here = currenthead;
+
+	if (client->authlvl  <= 0)
+	{
+		sendline(client->filedes, "444 Permission Denied");
+		return 0;
+	}
+
+	/* send xml */
+	while (here != NULL)
+	{
+		send_object_xml(client->filedes, NULL, here->value);
+		here=here->next;
+	}
+
+	/* done printing config */
+	if (sendline(client->filedes, "333") == -1)
+	{
+		print_err(0, "unable to send message to client");
+		return -1;
+	}
+	return 1;
+}
+
+/*
+ * conditionally send line to either FILE or file(can be socket)
+ */
+void do_send_xml(int fd, FILE *fh, char *buff)
+{
+        if (fh == NULL) 
+	{
+		sendline(fd, buff);
+	} else {
+		 fprintf(fh, "%s\n", buff);
+	}
+}
+
+/*
+ * send_object_xml - send an object described as obj
+ * to either FILE or file(can be socket).  do FILE = null
+ * if you want it to go to the socket.
+ */
+void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
+{
+	char buffer[1024];
+
+	snprintf(buffer, 1000, "<%s>", XML_OBJECT_STATUS);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%s</%s>", XML_HOSTNAME, obj->data->hostname ,XML_HOSTNAME);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJECT_PORT, obj->data->port, XML_OBJECT_PORT);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_TYPE, type_to_name(obj->data->type), XML_OBJECT_TYPE);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_MESSAGE, obj->data->message, XML_OBJECT_MESSAGE);
+	do_send_xml(fd, fh, buffer);
+
+	if (obj->data->contact != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_CONTACT, obj->data->contact, XML_OBJECT_CONTACT);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* XML_OBJ_GROUP */
+        if (obj->data->group != NULL)
+        {
+                snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_GROUP, obj->data->group, XML_OBJECT_GROUP);
+                do_send_xml(fd, fh, buffer);
+        }
+
+        /* XML_OBJ_NOTES */
+        if (obj->data->notes != NULL)
+        {
+                snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_NOTES, obj->data->notes, XML_OBJECT_NOTES);
+                do_send_xml(fd, fh, buffer);
+        }
+
+	if (obj->data->type == SYSM_TYPE_SNMP)
+	{
+		if (obj->data->snmp_community != NULL)
+		{
+			snprintf(buffer, 1000, "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
+			do_send_xml(fd, fh, buffer);
+		}
+		if (obj->data->snmp_oid != NULL)
+		{
+			snprintf(buffer, 1000, "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);
+			do_send_xml(fd, fh, buffer);
+		}
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_SNMP_TYPE, snmp_type_to_name(obj->data->snmp_test_type), XML_SNMP_TYPE);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_LOW, obj->data->snmp_low, XML_SNMP_LOW);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_HIGH, obj->data->snmp_high, XML_SNMP_HIGH);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_EXACT, obj->data->snmp_exact, XML_SNMP_EXACT);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_SysUpTime, obj->data->system_uptime, XML_SNMP_SysUpTime);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%d</%s>", XML_SNMP_OCTETS, obj->data->snmp_octets, XML_SNMP_OCTETS);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_RATE, obj->data->snmp_rate, XML_SNMP_RATE);
+		do_send_xml(fd, fh, buffer);
+
+		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_LASTRESP, obj->data->last_snmp_resptime, XML_SNMP_LASTRESP);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJECT_STATE, obj->data->lastcheck, XML_OBJECT_STATE);
+	do_send_xml(fd, fh, buffer);
+
+	if (obj->data->username != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_AUTH_USER, obj->data->username , XML_AUTH_USER);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->password != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_AUTH_PASSWD, obj->data->password, XML_AUTH_PASSWD);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->hdr != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_HEADER, obj->data->hdr, XML_HEADER);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->hdrval != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_HEADER_VAL, obj->data->hdrval, XML_HEADER_VAL);
+		do_send_xml(fd, fh, buffer);
+	}
+	
+	if (obj->data->secret != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_RADIUS_SECRET, obj->data->secret, XML_RADIUS_SECRET);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->lastmsgid != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_MESSAGE_ID, obj->data->lastmsgid, XML_MESSAGE_ID);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->unique_id != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_UNIQUE_ID, obj->data->unique_id, XML_UNIQUE_ID);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->url != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJ_URL, obj->data->url, XML_OBJ_URL);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->url_text != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url, XML_OBJ_URL_TEXT);
+		do_send_xml(fd, fh, buffer);
+	}
+	
+	if (obj->data->command != NULL)
+	{
+		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJ_EXEC, obj->data->command, XML_OBJ_EXEC);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_TOT_CHECKED, obj->data->totalchecked, XML_TOT_CHECKED);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_TOT_DOWN, obj->data->totaldown, XML_TOT_DOWN);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_DOWN_CT, obj->data->downct, XML_DOWN_CT);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_UP_CT, obj->data->upct, XML_UP_CT);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_MAX_DOWN, obj->data->max_down, XML_MAX_DOWN);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_QUEUE_INT, obj->data->queuetime, XML_QUEUE_INT);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_SEND_PING, obj->data->send_pings, XML_SEND_PING);
+	do_send_xml(fd, fh, buffer);
+	
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_MIN_PING, obj->data->min_pings, XML_MIN_PING);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJ_REVERSED, obj->data->reverse, XML_OBJ_REVERSED);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJ_CONTACTED, obj->data->contacted, XML_OBJ_CONTACTED);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_OBJ_CONTACTEDAT, obj->data->lastcontacted, XML_OBJ_CONTACTEDAT);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_CONTACT_UP, obj->data->contact_when, XML_CONTACT_UP);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%d</%s>", XML_QUEUED, obj->data->queued, XML_QUEUED);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_LASTCHECK, obj->data->lchecktime, XML_LASTCHECK);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_CHECK_START, obj->data->check_start, XML_CHECK_START);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_OUTAGE_TIME, obj->data->deathtime, XML_OUTAGE_TIME);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_LAST_TIME_UP, obj->data->last_up, XML_LAST_TIME_UP);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, 1000, "</%s>", XML_OBJECT_STATUS);
+	do_send_xml(fd, fh, buffer);
+}
+
+/*
+ *
+ */
+
+void srv_client_do_trace(struct clientstatus *client, char *buff)
+{
+        char objname[128];
+        struct graph_elements *found_obj = NULL;
+ 
+        strncpy(objname, buff+6, 127);
+        objname[127] = '\0';
+        if (debug)
+                print_err(1, "will search for object :%s:", objname);
+
+        found_obj = find_object_by_name(objname);
+        if (found_obj == NULL)
+        {
+                sendline(client->filedes, "403 object not found");
+                return;
+        } else {
+		if (found_obj->data->trace == FALSE)
+		{
+			found_obj->data->trace = TRUE;
+			sendline(client->filedes, "333 tracing enabled");
+		} else {
+			found_obj->data->trace = FALSE;
+			sendline(client->filedes, "333 tracing disabled");
+		}
+	}
+        return;
+
+}
+
+/*
+ * FIXME BUG: send the object in xml format
+ */
+void srv_client_do_showobject(struct clientstatus *client, char *buff)
+{
+	char objname[128];
+	struct graph_elements *found_obj = NULL;
+
+	strncpy(objname, buff+8, 127);
+	objname[127] = '\0';
+	if (debug)
+		print_err(1, "will search for object :%s:", objname);
+	if (!client->xml)
+	{
+		sendline(client->filedes, "403 do mode xml first");
+		return;
+	}
+
+	found_obj = find_object_by_name(objname);
+	if (found_obj == NULL)
+	{
+		sendline(client->filedes, "403 object not found");
+		return;
+	} else {
+		send_object_xml(client->filedes, NULL, found_obj);
+	}
+	return;
+}
+
+/*
+ * Acklowledge an object status
+ */
+void do_ack(struct clientstatus *client, char *buff)
+{
+        char objname[128];
+        struct graph_elements *found_obj = NULL;
+
+        if (client->authlvl  <= 0)
+        {
+                sendline(client->filedes, "444 Permission Denied");
+        }
+
+        strncpy(objname, buff+4, 127);
+        objname[127] = '\0';
+        if (debug)
+                print_err(1, "will search for object :%s:", objname);
+        if (!client->xml)
+        {
+                sendline(client->filedes, "403 do mode xml first");
+                return;
+        }
+
+        found_obj = find_object_by_name(objname);
+        if (found_obj == NULL)
+        {
+                sendline(client->filedes, "403 object not found");
+                return;
+        } else {
+                found_obj->data->acked = TRUE;
+		sendline(client->filedes, "333 object updated");
+        }
+        return;
+}
+
+/*
+ * UPD <objectname> <string>
+ * like ACK but read a second line that includes a note
+ */
+int     do_upd(struct clientstatus *client, char *buff)
+{
+
+        char objname[128];
+	char *ptr = NULL;
+        struct graph_elements *found_obj = NULL;
+	int sc = 0;
+	int x;
+
+        if (client->authlvl  <= 0)
+        {
+                sendline(client->filedes, "444 Permission Denied");
+                return 0;
+        }
+
+        strncpy(objname, buff+4, 127);
+        objname[127] = '\0';
+	ptr = index(objname, ' ');
+	if (ptr != NULL)
+		*ptr = 0;
+
+	if (debug)
+		print_err(1, "do_upd/will search for object :%s:", objname);
+
+	found_obj = find_object_by_name(objname);
+	if (found_obj == NULL)
+	{
+		sendline(client->filedes, "403 object not found");
+		return 1;
+	} else {
+		for (x = 0; x < strlen(buff); x++)
+		{
+			if (buff[x] == ' ')
+				sc++;
+			if (sc == 2)
+				break;
+		}
+		if (sc == 2)
+		{
+		if (found_obj->data->notes != NULL)
+		{
+			FREE(found_obj->data->notes);
+		}
+		found_obj->data->notes = strdup(buff+x+1);
+		sendline(client->filedes, "333 object updated");
+		} else {
+			sendline(client->filedes, "403 update error");
+		}
+
+	}
+	return 0;
+}
+
+
+/*
+ * MODE xml
+ *
+ * Change output mode into XML formatted text for easy parsing
+ * by CGI or other programs
+ */
+
+void srv_client_do_mode(struct clientstatus *client, char *buff)
+{
+	if (strcmp(buff+5, "xml") == 0)
+	{
+		client->xml = TRUE;
+		sendline(client->filedes, "333 xml enabled");
+		return;
+	} else if (strcmp(buff+5, "outagelog") == 0) {
+		if (!client->outage_log)
+		{
+			client->outage_log = TRUE;
+			sendline(client->filedes, "333 outagelog enabled");
+		} else {
+			client->outage_log = FALSE;
+			sendline(client->filedes, "333 outagelog disabled");
+		}
+		return;
+	} else {
+		sendline(client->filedes, "444 unknown MODE subcommand");
+	}
+}
+
+/*
+ * AUTH xxx
+ *
+ * compares xxx against authkey to determine if they should be able
+ * to authenticate and perform some functions.
+ */ 
+int	do_auth(struct clientstatus *client, char *buff)
+{
+	if (authkey != NULL)
+	{
+		if (strcmp(authkey, buff+5) == 0)
+		{
+			client->authlvl=2;
+			sendline(client->filedes, "333 Good Authentication");
+			return 1;
+		}
+	}
+        if (sendline(client->filedes, "444") == -1)
+        {
+                print_err(0, "unable to send message to client");
+                return -1;
+        }
+
+        return 0;
+}
+
+void do_client_http(struct clientstatus *client, char *request)
+{
+	char *url1;
+	url1 = (char *)index(request, ' ');
+	if (url1 == NULL)
+	{
+		print_err(0, "malformed GET request from a.b.c.d");
+		return;
+	}
+	print_err(1, "do_client_http: url = %s", url1+1);
+}
+
+void send_uptime(struct clientstatus *client, time_t now_t)
+{
+	char buffer[256];
+
+	snprintf(buffer, 256, "Uptime = %s", str_difftime_sec(boottime, now_t));
+	sendline(client->filedes, buffer);
+}
+
+/* CLIENT managment code */
+void	do_service(struct clientstatus *here, char *buff, time_t now_t)
+{
+	/* Local buffer */
+	char lb[256];
+	if (debug)
+	{
+		snprintf(lb, 250, "[%s]:%s",here->ip, buff);
+		print_err(0, "%s", lb);
+	}
+
+	if (strncmp(buff, "STAT", 4) == 0)
+	{
+		send_stat(here, buff);
+	}
+	else if (strncmp(buff, "UPTIME", 6) ==0)
+	{
+		send_uptime(here, now_t);
+	}
+	else if (strncmp(buff, "NFD", 3) == 0 && (here->authlvl >1))
+	{
+		snprintf(lb, 256, "%d is the next FD- %d queued", nextfd(), numqueued);
+		sendline(here->filedes, lb);
+		sendline(here->filedes, "what do you think about that?");
+	}
+	else if (strncmp(buff, "ABORT", 5) == 0 && (here->authlvl >1))
+	{
+		/* dump a core or something */
+		ABORT();
+	}
+	else if (strncmp(buff, "KILLIT", 6) == 0 && (here->authlvl >1))
+	{
+		stop_daemon = TRUE;
+	}
+	else if (strncmp(buff, "QUIT", 4) == 0)
+	{
+		/* Send a quit message to far side */
+		sendline(here->filedes, "333 Good Bye, please come again");
+		/* Disallow any further communication */
+		close(here->filedes);
+		here->filedes = -1;
+	}
+        else if (strncmp(buff, "SNMPD", 5) == 0 && (here->authlvl >1))
+        {
+                /* Toggle Debugging */
+                if (snmp_debug == 1)
+                        snmp_debug = 0;
+                else
+                        snmp_debug = 1;
+                sendline(here->filedes, "Toggled snmp debugging");
+                print_err(0, "Toggled snmp debugging at client request");
+        }
+	else if (strncmp(buff, "DEBUG", 5) == 0 && (here->authlvl >1))
+	{
+		/* Toggle Debugging */
+		if (debug == 1)
+			debug = 0;
+		else 
+			debug = 1;
+		sendline(here->filedes, "Toggled debugging");
+		print_err(0, "Toggled debugging at client request");
+	}
+	else if (strncmp(buff, "CONF", 4) == 0)
+	{
+		send_conf(here);
+	}
+	else if (strncmp(buff, "EXPIREDNS", 9) == 0 && (here->authlvl >1))
+	{
+		expire_dns(now_t);
+	}
+	else if (strncmp(buff, "PRINTQ", 6) == 0 && (here->authlvl >1))
+	{
+		print_queue(here->filedes);
+	}
+	else if (strncmp(buff, "VERS", 4) == 0)
+	{
+		sendline(here->filedes, SYSM_VERS);
+	}
+	else if (strncmp(buff, "MODE", 4) == 0)
+	{
+		srv_client_do_mode(here, buff);
+	}
+	else if (strncmp(buff, "NOOP", 4) == 0)
+	{
+		sendline(here->filedes, "333 noop");
+	}
+	else if (strncmp(buff, "SHOWOBJ ", 8) == 0)
+	{
+		srv_client_do_showobject(here, buff);
+	}
+	else if (strncmp(buff, "TRACE ", 6) == 0)
+	{
+		srv_client_do_trace(here, buff);
+	}
+	else if (strncmp(buff, "AUTH", 4) == 0)
+	{
+		do_auth(here, buff);
+	}
+	else if (strncmp(buff, "UPD ", 4) == 0)
+	{
+		do_upd(here, buff);
+	}
+	else if (strncmp(buff, "ACK ", 4) == 0)
+	{
+		do_ack(here, buff);
+	}
+ 	else if (strncmp(buff, "GET ", 4) == 0) /* Client is a web browser */
+	{
+		do_client_http(here, buff);
+	}
+	else
+	{
+		if (sendline(here->filedes, "444 - Unk")  == -1)
+		{
+			print_err(0, "error sending message to client");
+			close(here->filedes);
+			here->filedes = -1;
+		}
+		/* Log the unknown request */
+		print_err(0, "Client sent unknown request: %s", buff);
+	}
+}
+
+/*
+ * log object state change to listening clients
+ *
+ * we get passed an object, it's old state, it's new state
+ * and send it to the necessary clients that are
+ * listening.
+ */
+void client_send_statechange(char *obj_name, int old_state, int new_state)
+{
+	struct clientstatus *here;
+	char buff[1024];
+
+        if (clienthead == NULL)
+                return;
+	
+	for (here = clienthead->next; here != NULL ; here = here->next)
+	{
+		if (here->outage_log)
+		{
+			snprintf(buff, 1020, "state-change: %d:%s",
+				new_state, obj_name);
+			sendline(here->filedes, buff);
+		}
+	}
+
+}
+
+
+void timeout_clients()
+{
+	struct clientstatus *here;
+	time_t now;
+
+	if (clienthead == NULL)
+		return;
+
+        time(&now);
+
+	for (here = clienthead->next; here != NULL ; here = here->next)
+		if ((now - here->lastactivity) > inactivetime )
+		{
+			sendline(here->filedes, "444 - Timed out");
+			if (here->filedes != -1)
+				if (close(here->filedes) == -1)
+					perror("waah! closing stuff\n");
+			here->filedes = -1;
+		}
+}
+
+void	dead_client_cleanup()
+{
+	/* free clients with filedes = -1 */
+
+	struct clientstatus *here, *last, *freeme;
+
+	if (clienthead == NULL)
+		return;
+
+	last = clienthead;
+	freeme = NULL;
+        for (here = clienthead->next; here != NULL ; here = here->next)
+        {
+		if (freeme != NULL)
+		{
+			if (freeme->un != NULL)
+				FREE(freeme->un);
+			if (freeme->ip != NULL)
+				FREE(freeme->ip);
+			FREE(freeme);
+			freeme = NULL;
+		}
+		
+		if (here->filedes == -1)
+		{
+			freeme = here;	
+			last->next = here->next;
+		} else {
+			last = here;
+		}
+	}
+	if (freeme != NULL)
+	{
+			if (freeme->un != NULL)
+				FREE(freeme->un);
+			if (freeme->ip != NULL)
+				FREE(freeme->ip);
+		FREE(freeme);
+		freeme = NULL;
+	}
+}
+
+void	setup_client()
+{
+        int msgsock; /* message socket for talking back and forth */
+        struct sockaddr_in remote;
+        int size;
+	struct clientstatus *thisclient, *linkafter;
+
+        size = sizeof (remote );
+
+        /* do the accept() on the socket, then take care of it */
+        msgsock = accept(clienthead->filedes,(struct sockaddr *)&remote,&size);
+
+        if (msgsock == -1)
+        {
+                perror("accept");
+                return;
+        }
+
+#ifdef HAVE_LIBWRAP
+#ifdef HAVE_TCPD_H
+        if(!hosts_ctl(DAEMONNAME,
+			STRING_UNKNOWN,
+			inet_ntoa(remote.sin_addr),
+			STRING_UNKNOWN)) {
+        	sendline(msgsock, "333 - You are not welcome here.");
+		print_err(0,"denying connection from %s", inet_ntoa(remote.sin_addr));
+        	close(msgsock);
+		return;
+	}
+#endif /* HAVE_TCPD_H */
+#endif
+
+        /* figure out who's connecting and log it */
+	if (!nologconnects)
+	{
+	        print_err(0, 
+			"accepting connection from %s", 
+			inet_ntoa(remote.sin_addr));
+	}
+
+
+        /* print our greeting banner */
+        if (debug)
+	{
+		print_err(0, "sending hello banner");
+	}
+
+        sendline(msgsock, "111 - v1.0 Ready - Welcome");
+
+	if (debug)
+	{
+		print_err(0, "setting up client structure");
+	}
+
+	thisclient = MALLOC(sizeof(struct clientstatus), "new_client");
+
+	memset(thisclient, 0, sizeof(struct clientstatus));
+
+	time(&thisclient->lastactivity); /* set current time */
+	thisclient->filedes = msgsock; /* save accept()'ed fd */
+	thisclient->un = NULL; /* no username yet */
+	thisclient->ip = MALLOC(20, "thisclient_ip");
+	strcpy(thisclient->ip, inet_ntoa(remote.sin_addr)); /* save source ip */
+	thisclient->authlvl = 0; /* no auth yet */
+	thisclient->xml = FALSE;
+	thisclient->outage_log = FALSE;
+	thisclient->clientver = 0; /* no client vers yet, sent ours */
+	thisclient->next = NULL; /* next client = NOTHING */
+
+	linkafter = clienthead; /* start to walk client list */
+
+	while (linkafter->next != NULL) /* until next client is null */
+		linkafter = linkafter->next; /* do walk */
+	linkafter->next = thisclient; /* link us at the end of it */
+}
+
+void	check_for_new_clients()
+{
+	/* check the specified socket for awating connections, if so, take
+	   care of them */
+	fd_set rd, wr, except;
+	struct timeval local_timeout;
+	
+	if (clienthead->filedes == -1)
+	/* do nothing */
+		return;
+
+	local_timeout.tv_sec = 0;
+	local_timeout.tv_usec = 0;
+
+	FD_ZERO(&wr);
+	FD_ZERO(&except);
+	FD_ZERO(&rd);
+	FD_SET(clienthead->filedes, &rd);
+
+	if (debug)
+	{
+		print_err(0, "srvclient.c:check_for_new_clients:Checking for a client");
+	}
+
+	while (select(clienthead->filedes+1,&rd,&wr,&except,&local_timeout)!=0)
+		setup_client();
+
+}
+
+void	service_clients()
+{
+	struct clientstatus *here;
+	char throwmeout[1024], buff[1024];
+	struct timeval tv;
+	fd_set rd,wr,except;
+	time_t now_t;
+	int maxfd;
+	int ret;
+
+	time(&now_t);
+	
+	FD_ZERO(&wr);
+	FD_ZERO(&rd);
+	FD_ZERO(&except);
+	maxfd = -1;
+
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+
+	for (here = clienthead->next;here != NULL;here = here->next)
+	{
+		if (here->filedes == -1)
+			continue;
+		FD_SET(here->filedes, &rd);
+		if (here->filedes > maxfd)
+			maxfd = here->filedes;
+	}
+	if (maxfd != -1)
+	{
+		ret = select(maxfd+1, &rd, &wr, &except, &tv);
+
+		for (here=clienthead->next;here!=NULL;here=here->next)
+		{
+			if (here->filedes == -1)
+				continue;
+			if (FD_ISSET(here->filedes, &rd))
+			{
+				getline_tcp(here->filedes, buff);
+				getline_tcp(here->filedes, throwmeout);
+				do_service(here, buff, now_t);
+				here->lastactivity = now_t;
+			}
+		}
+	}
+}
+
+void	client_poll()
+{
+        fd_set rd, wr, except;
+        struct timeval local_timeout;
+	struct clientstatus *here;
+
+	if (in_client_poll)
+	{
+		return;
+	}
+
+	in_client_poll = TRUE;
+
+        if (clienthead->filedes == -1)
+	{
+	        /* do nothing */
+                return;
+	}
+
+        local_timeout.tv_sec = 0;
+        local_timeout.tv_usec = 0;
+
+        FD_ZERO(&wr);
+        FD_ZERO(&except);
+        FD_ZERO(&rd);
+
+	/* check for new clients */
+	check_for_new_clients();
+
+	/* process old clients new data */
+	service_clients();
+
+	/* timeout old clients */
+	timeout_clients();
+
+	/* free dead client memory */
+	dead_client_cleanup();
+
+	for (here = clienthead; here != NULL; here = here->next)
+		if (here->filedes != -1)
+	        	FD_SET(here->filedes, &rd);
+
+	if (select(clienthead->filedes+1,&rd,&wr,&except,&local_timeout) != 0)
+	{
+		if (FD_ISSET(clienthead->filedes, &rd))
+		{
+		        check_for_new_clients();
+		}
+		service_clients();
+	}
+
+	in_client_poll = FALSE;
+}
