@@ -75,7 +75,9 @@ void	parse_data(char *buff, struct downdata *stuff, int bufflen)
 			switch(field)
 			{
 				case 1:
-					strcpy(stuff->hostname, space);
+					/* Use strncpy with explicit null termination */
+				strncpy(stuff->hostname, space, sizeof(stuff->hostname) - 1);
+				stuff->hostname[sizeof(stuff->hostname) - 1] = '\0';
 					break;
 				case 2:
 					stuff->type = atoi(space);
@@ -144,7 +146,8 @@ void	top_banner(char *server)
 #endif
 
         time (&t); /* get the time */
-        strcpy(nfo,ctime(&t)+4); /* convert it to a string, copy to buffer */
+        /* Use strftime for safer time formatting */
+        strftime(nfo, sizeof(nfo), "%b %d %H:%M:%S %Y", localtime(&t));
 
 #ifdef NICEINTERFACE
 	sprintf(tempbuff, "Server: %-30s%-20s%-20s", server, 
@@ -285,7 +288,8 @@ void	my_client_sleep(int sleeptime)
 		of one second */
 
                 time(&now);
-		strcpy(nfo, ctime(&now)+4); /* convert it to a string */
+		/* Use strftime for safer time formatting */
+	strftime(nfo, sizeof(nfo), "%b %d %H:%M:%S %Y", localtime(&now));
 		doupdate();
 		refresh();
 		mvaddstr(0, 58, nfo);
@@ -316,15 +320,17 @@ int	main(int argc, char **argv)
 	temp = getenv("SYSMON_HOST");
 	if (temp != NULL)
 	{
-		strcpy(server, temp);
+		/* Protect against overly long environment variables */
+		snprintf(server, sizeof(server), "%s", temp);
 	} 
 	switch(argc)
 	{
 		case 2:
-			strcpy(server, argv[1]);
+			/* Protect against long command-line arguments */
+			snprintf(server, sizeof(server), "%s", argv[1]);
 			break;
 		case 3:
-			strcpy(server, argv[1]);
+			snprintf(server, sizeof(server), "%s", argv[1]);
 			port = atoi(argv[2]);
 			break;
 		default:

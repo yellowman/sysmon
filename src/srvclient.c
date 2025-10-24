@@ -824,7 +824,8 @@ void	setup_client()
 	thisclient->filedes = msgsock; /* save accept()'ed fd */
 	thisclient->un = NULL; /* no username yet */
 	thisclient->ip = MALLOC(20, "thisclient_ip");
-	strcpy(thisclient->ip, inet_ntoa(remote.sin_addr)); /* save source ip */
+	/* Use snprintf for IP address to prevent any potential overflow */
+	snprintf(thisclient->ip, 20, "%s", inet_ntoa(remote.sin_addr)); /* save source ip */
 	thisclient->authlvl = 0; /* no auth yet */
 	thisclient->xml = FALSE;
 	thisclient->outage_log = FALSE;

@@ -372,7 +372,8 @@ void send_radius_packet(int filedes, struct monitorent *here, int seq)
 	packetindex++;
 	packet[packetindex] = 8;
 	packetindex++;
-	strcpy(packet+packetindex, "sysmon");
+	/* Use memcpy for fixed-length string copy */
+	memcpy(packet+packetindex, "sysmon", 6);
 	packetindex += 6;
 
 	packet[packetindex] = 61;

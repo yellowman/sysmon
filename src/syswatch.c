@@ -35,7 +35,8 @@ unsigned short int warnlog = 1; /* default = on */
 unsigned short disable_icmp = 0;
 
 /* command line specified vars & args */
-char configfile[256]; /* config file path */
+#define CONFIGFILE_SIZE 256
+char configfile[CONFIGFILE_SIZE]; /* config file path */
 bool donotify = 1; /* Do notifies - a value of 0 doesn't notify contacts */
 int dofork = 0; /* 0 = fork, 1 = don't */
 bool ckconfigonly = FALSE; /* 0 = normal, 1 = just check config then exit */
@@ -273,10 +274,14 @@ void cmdline(int argc, char **argv, char *conf_file, int *listenport)
 				case 'f':
 					if (x+1 == argc)
 						usage();
-					strcpy(conf_file,argv[x]+2);
-					if (strlen(conf_file) == 0)
+					/* Use snprintf to prevent buffer overflow */
+					if (strlen(argv[x]+2) > 0)
 					{
-						strcpy(conf_file,argv[x+1]);
+						snprintf(conf_file, CONFIGFILE_SIZE, "%s", argv[x]+2);
+					}
+					else if (x+1 < argc)
+					{
+						snprintf(conf_file, CONFIGFILE_SIZE, "%s", argv[x+1]);
 						x++;
 					}
 					break;
@@ -1885,7 +1890,8 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	strcpy(configfile, CFILE);
+	/* Use snprintf to prevent buffer overflow from long CFILE macro */
+	snprintf(configfile, sizeof(configfile), "%s", CFILE);
 
 	if (argc > 1)
 	{
