@@ -1,5 +1,6 @@
 /* $Id: icmp.c,v 1.64 2014/07/09 16:29:39 jared Exp $ */
 #include "config.h"
+#include <math.h>
 
 extern struct protoent *icmpproto;
 extern int glob_icmp_fd;
@@ -846,6 +847,356 @@ void stop_test_pktloss(struct monitorent *here)
 		}
 
 		FREE(pktdata);
+	}
+
+	here->monitordata = NULL;
+}
+
+/*
+ * ============================================================================
+ * RTT (Round-Trip Time) and Jitter Measurement (SAA-lite)
+ * ============================================================================
+ *
+ * Implements latency and jitter monitoring for VoIP quality assessment
+ * and network performance monitoring.
+ *
+ * Features:
+ * - ICMP-based RTT measurement
+ * - RFC 3550 jitter calculation
+ * - Rolling average over N samples
+ * - Per-host thresholds
+ */
+
+/* RTT tracking structure */
+struct rtt_data {
+	struct pingdata *ping;              /* Reuse existing ICMP infrastructure */
+
+	/* RTT tracking */
+	double rtt_current;                 /* Current RTT in milliseconds */
+	double rtt_min;                     /* Minimum RTT seen */
+	double rtt_max;                     /* Maximum RTT seen */
+	double rtt_avg;                     /* Rolling average RTT */
+	double rtt_sum;                     /* Sum for averaging */
+	unsigned int rtt_count;             /* Number of RTT samples collected */
+
+	/* Jitter tracking (RFC 3550 algorithm) */
+	double jitter_current;              /* Current jitter in milliseconds */
+	double rtt_previous;                /* Previous RTT for jitter calculation */
+
+	/* Timing */
+	struct timeval last_send_time;      /* When we sent last packet */
+};
+
+/*
+ * calculate_rtt_ms - Calculate RTT in milliseconds
+ *
+ * Calculates the time difference between send and receive timestamps.
+ *
+ * Returns: RTT in milliseconds (double precision)
+ */
+static double calculate_rtt_ms(struct timeval *send, struct timeval *recv)
+{
+	double elapsed;
+
+	elapsed = (recv->tv_sec - send->tv_sec) * 1000.0;
+	elapsed += (recv->tv_usec - send->tv_usec) / 1000.0;
+
+	return elapsed;
+}
+
+/*
+ * update_jitter - Update jitter using RFC 3550 algorithm
+ *
+ * Implements the jitter calculation from RFC 3550 (RTP):
+ *   D = |RTT_current - RTT_previous|
+ *   jitter = jitter + (D - jitter) / 16
+ *
+ * This provides a smoothed average of packet delay variation,
+ * which is the key metric for VoIP quality assessment.
+ */
+static void update_jitter(struct rtt_data *data, double rtt)
+{
+	double diff;
+
+	if (data == NULL) {
+		return;
+	}
+
+	/* RFC 3550 jitter calculation */
+	diff = fabs(rtt - data->rtt_previous);
+	data->jitter_current = data->jitter_current + (diff - data->jitter_current) / 16.0;
+}
+
+/*
+ * start_test_rtt - Initialize RTT/jitter monitoring
+ *
+ * Sets up ICMP-based RTT monitoring with jitter calculation.
+ * Allocates resources and sends the first probe packet.
+ */
+void start_test_rtt(struct monitorent *here)
+{
+	struct rtt_data *rttdata;
+	struct pingdata *localstruct;
+
+	/* Check ICMP socket available */
+	if (glob_icmp_fd == -1) {
+		here->retval = SYSM_OK;
+		return;
+	}
+
+	/* Allocate RTT tracking structure */
+	rttdata = MALLOC(sizeof(struct rtt_data), "rtt_data");
+	if (rttdata == NULL) {
+		print_err(1, "start_test_rtt: MALLOC failed for rtt_data");
+		here->retval = SYSM_ERR;
+		return;
+	}
+	memset(rttdata, 0, sizeof(struct rtt_data));
+
+	/* Allocate embedded pingdata (similar to start_test_ping) */
+	rttdata->ping = MALLOC(sizeof(struct pingdata), "rtt_pingdata");
+	if (rttdata->ping == NULL) {
+		print_err(1, "start_test_rtt: MALLOC failed for pingdata");
+		FREE(rttdata);
+		here->retval = SYSM_ERR;
+		return;
+	}
+	memset(rttdata->ping, 0, sizeof(struct pingdata));
+	localstruct = rttdata->ping;
+
+	/* Initialize RTT statistics */
+	rttdata->rtt_min = 999999.0;
+	rttdata->rtt_max = 0.0;
+	rttdata->rtt_avg = 0.0;
+	rttdata->rtt_sum = 0.0;
+	rttdata->rtt_count = 0;
+	rttdata->jitter_current = 0.0;
+	rttdata->rtt_previous = 0.0;
+
+	/* Setup pingdata (same pattern as start_test_ping) */
+	here->filedes = -1;
+	gettimeofday(&here->lastserv, NULL);
+
+	localstruct->nreceived = 0;
+	localstruct->packetsent = 0;
+	localstruct->datap = &localstruct->outpack[8 + sizeof(struct timeval)];
+
+	/* Initialize ping_target */
+	memset(&localstruct->ping_target, 0, sizeof(struct sockaddr));
+	localstruct->to = (struct sockaddr_in *)&localstruct->ping_target;
+	localstruct->to->sin_family = AF_INET;
+
+	/* DNS lookup */
+	localstruct->hp = my_gethostbyname(here->checkent->hostname, AF_INET);
+	if (!localstruct->hp) {
+		FREE(rttdata->ping);
+		FREE(rttdata);
+		here->retval = SYSM_NODNS;
+		return;
+	}
+
+	/* Set address family and copy address */
+	localstruct->to->sin_family = localstruct->hp->h_addrtype_v4;
+	memcpy((caddr_t)&localstruct->to->sin_addr, localstruct->hp->my_h_addr_v4,
+		localstruct->hp->h_length_v4);
+
+	/* Allocate packet buffer */
+	if (!(localstruct->packet = (u_char *)MALLOC(ICMP_PACKET_SIZE, "rtt_packet"))) {
+		print_err(1, "start_test_rtt: out of memory for packet");
+		FREE(rttdata->ping);
+		FREE(rttdata);
+		here->retval = SYSM_ERR;
+		return;
+	}
+
+	/* Fill data pattern */
+	for (localstruct->counter = 8; localstruct->counter < 128; ++localstruct->counter) {
+		*localstruct->datap++ = localstruct->counter;
+	}
+
+	/* Generate ICMP identity */
+	localstruct->ident = generate_ident();
+
+	if (debug || here->checkent->trace) {
+		print_err(0, "RTT test started for %s (ident: %d, rtt_threshold: %u, jitter_threshold: %u, samples: %u)",
+			here->checkent->hostname, localstruct->ident,
+			here->checkent->rtt_threshold, here->checkent->jitter_threshold,
+			here->checkent->rtt_samples);
+	}
+
+	/* Record send time before sending */
+	gettimeofday(&rttdata->last_send_time, NULL);
+
+	/* Send initial ping using existing pinger_v4 function */
+	pinger_v4(localstruct, here);
+
+	/* Track last send time */
+	gettimeofday(&localstruct->lastsentat, NULL);
+
+	/* Save rttdata to monitordata */
+	here->monitordata = rttdata;
+	here->retval = -1;  /* Pending result */
+}
+
+/*
+ * service_test_rtt - Service RTT/jitter monitoring
+ *
+ * Checks for ICMP replies, calculates RTT and jitter, and determines
+ * if thresholds are exceeded.
+ */
+void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
+{
+	struct rtt_data *rttdata;
+	struct pingdata *ping;
+	struct timeval recv_time;
+	struct sockaddr_in from;
+	socklen_t fromlen;
+	char recv_buf[512];
+	int recv_len;
+	struct ip *ip_hdr;
+	struct icmphdr *icmp_hdr;
+	int ip_hdr_len;
+	double rtt_ms;
+	double elapsed_since_send;
+
+	if (here == NULL || here->monitordata == NULL) {
+		return;
+	}
+
+	rttdata = (struct rtt_data *)here->monitordata;
+	ping = rttdata->ping;
+
+	/* Check for ICMP reply */
+	fromlen = sizeof(from);
+	recv_len = recvfrom(glob_icmp_fd, recv_buf, sizeof(recv_buf), MSG_DONTWAIT,
+	                    (struct sockaddr *)&from, &fromlen);
+
+	if (recv_len > 0) {
+		/* Record receive time immediately */
+		gettimeofday(&recv_time, NULL);
+
+		/* Parse IP header */
+		ip_hdr = (struct ip *)recv_buf;
+		ip_hdr_len = ip_hdr->ip_hl << 2;
+
+		/* Parse ICMP header */
+		icmp_hdr = (struct icmphdr *)(recv_buf + ip_hdr_len);
+
+		/* Check if this is our ICMP echo reply */
+		if (icmp_hdr->type == ICMP_ECHOREPLY &&
+		    icmp_hdr->un.echo.id == ping->ident) {
+
+			/* Calculate RTT */
+			rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, &recv_time);
+
+			/* Update RTT statistics */
+			rttdata->rtt_current = rtt_ms;
+			if (rtt_ms < rttdata->rtt_min) {
+				rttdata->rtt_min = rtt_ms;
+			}
+			if (rtt_ms > rttdata->rtt_max) {
+				rttdata->rtt_max = rtt_ms;
+			}
+			rttdata->rtt_sum += rtt_ms;
+			rttdata->rtt_count++;
+			rttdata->rtt_avg = rttdata->rtt_sum / rttdata->rtt_count;
+
+			ping->nreceived++;
+
+			/* Update jitter (if we have previous RTT) */
+			if (rttdata->rtt_count > 1) {
+				update_jitter(rttdata, rtt_ms);
+			}
+			rttdata->rtt_previous = rtt_ms;
+
+			if (debug) {
+				print_err(1, "RTT sample #%u: %.2fms (avg=%.2fms, jitter=%.2fms)",
+					rttdata->rtt_count, rtt_ms, rttdata->rtt_avg,
+					rttdata->jitter_current);
+			}
+
+			/* Check if we have enough samples */
+			if (rttdata->rtt_count >= here->checkent->rtt_samples) {
+				/* Threshold checking */
+				if (rttdata->rtt_avg > here->checkent->rtt_threshold) {
+					here->retval = SYSM_RTT_HIGH;
+
+					if (debug) {
+						print_err(1, "RTT threshold exceeded for %s: avg=%.2fms (threshold=%ums)",
+							here->checkent->hostname, rttdata->rtt_avg,
+							here->checkent->rtt_threshold);
+					}
+				} else if (here->checkent->jitter_threshold > 0 &&
+				           rttdata->jitter_current > here->checkent->jitter_threshold) {
+					here->retval = SYSM_JITTER_HIGH;
+
+					if (debug) {
+						print_err(1, "Jitter threshold exceeded for %s: jitter=%.2fms (threshold=%ums)",
+							here->checkent->hostname, rttdata->jitter_current,
+							here->checkent->jitter_threshold);
+					}
+				} else {
+					here->retval = SYSM_OK;
+				}
+
+				/* Log final statistics */
+				if (debug) {
+					print_err(1, "RTT test complete for %s: min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
+						here->checkent->hostname, rttdata->rtt_min, rttdata->rtt_avg,
+						rttdata->rtt_max, rttdata->jitter_current);
+				}
+
+				/* Cleanup */
+				FREE(ping->packet);
+				FREE(ping);
+				FREE(rttdata);
+				here->monitordata = NULL;
+				return;
+			}
+
+			/* Send another packet using pinger_v4 */
+			gettimeofday(&rttdata->last_send_time, NULL);
+			pinger_v4(ping, here);
+			gettimeofday(&ping->lastsentat, NULL);
+		}
+	}
+
+	/* Check for timeout (30 seconds) */
+	elapsed_since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
+	if (elapsed_since_send > 30000.0) {
+		print_err(1, "RTT test timeout for %s after %.0fms",
+			here->checkent->hostname, elapsed_since_send);
+		here->retval = SYSM_TIMEDOUT;
+		FREE(ping->packet);
+		FREE(ping);
+		FREE(rttdata);
+		here->monitordata = NULL;
+	}
+}
+
+/*
+ * stop_test_rtt - Clean up RTT/jitter monitoring
+ *
+ * Frees all resources allocated for RTT monitoring.
+ */
+void stop_test_rtt(struct monitorent *here)
+{
+	struct rtt_data *rttdata;
+
+	if (here == NULL || here->monitordata == NULL) {
+		return;
+	}
+
+	rttdata = (struct rtt_data *)here->monitordata;
+
+	if (rttdata != NULL) {
+		if (rttdata->ping != NULL) {
+			if (rttdata->ping->packet != NULL) {
+				FREE(rttdata->ping->packet);
+			}
+			FREE(rttdata->ping);
+		}
+		FREE(rttdata);
 	}
 
 	here->monitordata = NULL;

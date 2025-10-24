@@ -4,7 +4,7 @@
 %n 6500
 %{
 
-#define YY_DECL int sysmon_conf_yylex YY_PROTO(( void ))
+#define YY_DECL int sysmon_conf_yylex(void)
 
 
 /* include our config header.  nothing else should be #included here */
@@ -36,6 +36,12 @@ bool parser_reverse = FALSE;
 bool parser_snmp_octets = FALSE;
 bool parser_catch_snmptrap = FALSE;
 bool parser_trap_alert = FALSE;
+char *parser_rtt_threshold = NULL;
+int parser_i_rtt_threshold = 0;
+char *parser_jitter_threshold = NULL;
+int parser_i_jitter_threshold = 0;
+char *parser_rtt_samples = NULL;
+int parser_i_rtt_samples = 5;  /* Default: 5 samples */
 char *parser_sender = NULL;
 char *parser_subject = NULL;
 char *parser_upcolor = NULL;
@@ -1352,11 +1358,119 @@ port\ [^;]+;          {
   parser_i_port = atol(parser_port);
   if (parser_i_port == -1)
   {
-	print_err(1, "Invalid port specified in %s line %d", 
+	print_err(1, "Invalid port specified in %s line %d",
 		current_parsing_filename, line_no);
   }
   if (debug)
-    print_err(0, "port : %s/%d ", parser_port, parser_i_port); 
+    print_err(0, "port : %s/%d ", parser_port, parser_i_port);
+
+}
+
+rtt_threshold\ [^;]+;          {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: rtt_threshold specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_rtt_threshold != NULL)
+  {
+        FREE(parser_rtt_threshold);
+  }
+  parser_rtt_threshold = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_rtt_threshold");
+
+  strncpy( parser_rtt_threshold, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_rtt_threshold[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_rtt_threshold = atol(parser_rtt_threshold);
+  if (debug)
+    print_err(0, "rtt_threshold : %s/%d ", parser_rtt_threshold, parser_i_rtt_threshold);
+
+}
+
+jitter_threshold\ [^;]+;          {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: jitter_threshold specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_jitter_threshold != NULL)
+  {
+        FREE(parser_jitter_threshold);
+  }
+  parser_jitter_threshold = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_jitter_threshold");
+
+  strncpy( parser_jitter_threshold, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_jitter_threshold[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_jitter_threshold = atol(parser_jitter_threshold);
+  if (debug)
+    print_err(0, "jitter_threshold : %s/%d ", parser_jitter_threshold, parser_i_jitter_threshold);
+
+}
+
+rtt_samples\ [^;]+;          {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: rtt_samples specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_rtt_samples != NULL)
+  {
+        FREE(parser_rtt_samples);
+  }
+  parser_rtt_samples = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_rtt_samples");
+
+  strncpy( parser_rtt_samples, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_rtt_samples[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_rtt_samples = atol(parser_rtt_samples);
+  if (parser_i_rtt_samples < 1)
+  {
+	print_err(1, "Invalid rtt_samples (must be >= 1) in %s line %d",
+		current_parsing_filename, line_no);
+	parser_i_rtt_samples = 5;  /* Default to 5 */
+  }
+  if (debug)
+    print_err(0, "rtt_samples : %s/%d ", parser_rtt_samples, parser_i_rtt_samples);
 
 }
 
@@ -2407,6 +2521,9 @@ void add_object()
 		new_ele->value->data->reverse = parser_reverse;
 		new_ele->value->data->snmp_octets = parser_snmp_octets;
 		new_ele->value->data->trap_alert = parser_trap_alert;
+		new_ele->value->data->rtt_threshold = parser_i_rtt_threshold;
+		new_ele->value->data->jitter_threshold = parser_i_jitter_threshold;
+		new_ele->value->data->rtt_samples = parser_i_rtt_samples;
 		new_ele->value->data->contact_when = parser_when;
 		new_ele->value->data->unique_id = gen_unique_id();
 		if (parser_desc == NULL)
@@ -2843,6 +2960,12 @@ void initalize_parser()
 	parser_nosubject = FALSE;
 	parser_catch_snmptrap = 0;
 	parser_trap_alert = FALSE;
+	parser_rtt_threshold = NULL;
+	parser_i_rtt_threshold = 0;
+	parser_jitter_threshold = NULL;
+	parser_i_jitter_threshold = 0;
+	parser_rtt_samples = NULL;
+	parser_i_rtt_samples = 5;  /* Default: 5 samples */
 	parser_html_refresh = 60;
 	parser_snmp_type = NULL;
 	parser_snmp_low = NULL;

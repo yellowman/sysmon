@@ -195,6 +195,8 @@ char	*errtostr( int value )
 			return "Pkt Loss High";
 		case SYSM_SNMP_TRAP:
 			return "SNMP Trap";
+		case SYSM_JITTER_HIGH:
+			return "Jitter too high";
 		default:
 			return "ERROR";
 	}
