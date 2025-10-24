@@ -1075,9 +1075,34 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		/* Record receive time immediately */
 		gettimeofday(&recv_time, NULL);
 
+		/* Validate minimum packet size for IP header */
+		if (recv_len < sizeof(struct ip)) {
+			if (debug) {
+				print_err(1, "service_test_rtt: Received packet too small for IP header (%d bytes)", recv_len);
+			}
+			goto timeout_check;
+		}
+
 		/* Parse IP header */
 		ip_hdr = (struct ip *)recv_buf;
 		ip_hdr_len = ip_hdr->ip_hl << 2;
+
+		/* Validate IP header length */
+		if (ip_hdr_len < 20 || ip_hdr_len > recv_len) {
+			if (debug) {
+				print_err(1, "service_test_rtt: Invalid IP header length (%d), recv_len=%d", ip_hdr_len, recv_len);
+			}
+			goto timeout_check;
+		}
+
+		/* Validate enough space for ICMP header */
+		if (recv_len < ip_hdr_len + (int)sizeof(struct icmphdr)) {
+			if (debug) {
+				print_err(1, "service_test_rtt: Packet too small for ICMP header (recv_len=%d, ip_hdr_len=%d)",
+					recv_len, ip_hdr_len);
+			}
+			goto timeout_check;
+		}
 
 		/* Parse ICMP header */
 		icmp_hdr = (struct icmphdr *)(recv_buf + ip_hdr_len);
@@ -1161,6 +1186,7 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		}
 	}
 
+timeout_check:
 	/* Check for timeout (30 seconds) */
 	elapsed_since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
 	if (elapsed_since_send > 30000.0) {
