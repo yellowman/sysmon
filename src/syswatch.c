@@ -1011,6 +1011,9 @@ void stop_this(struct monitorent *here)
 		case SYSM_TYPE_PING:
 		       	stop_test_ping(here);
 		       	break;
+		case SYSM_TYPE_PKTLOSS:
+		       	stop_test_pktloss(here);
+		       	break;
 #ifdef ENABLE_SNMP
 		case SYSM_TYPE_SNMP:
 		       	stop_test_snmp(here);
@@ -1094,6 +1097,8 @@ void service_this(struct monitorent *here, struct timeval *now_timeval, time_t n
 				break;
 			case SYSM_TYPE_PING: service_test_ping(here, now_timeval);
 				break;
+			case SYSM_TYPE_PKTLOSS: service_test_pktloss(here, now_timeval);
+				break;
 #ifdef ENABLE_SNMP
 			case SYSM_TYPE_SNMP: service_test_snmp(here);
 				break;
@@ -1147,8 +1152,11 @@ void service_this(struct monitorent *here, struct timeval *now_timeval, time_t n
 			case SYSM_TYPE_UDP: 
 				start_test_udp(here, now_t);
 				break;
-			case SYSM_TYPE_PING: 
+			case SYSM_TYPE_PING:
 				start_test_ping(here);
+				break;
+			case SYSM_TYPE_PKTLOSS:
+				start_test_pktloss(here);
 				break;
 #ifdef ENABLE_SNMP
 			case SYSM_TYPE_SNMP: 

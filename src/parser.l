@@ -2482,6 +2482,13 @@ void add_object()
 		} else {
 			new_ele->value->data->secret = NULL;
 		}
+		if (parser_i_type == SYSM_TYPE_PKTLOSS)
+		{
+			/* Initialize packet loss defaults */
+			new_ele->value->data->pktloss_tolerance = 0;  /* Alert on any loss by default */
+			new_ele->value->data->pktloss_history_hours = PKTLOSS_DEFAULT_HISTORY;
+			new_ele->value->data->pktloss_last_check = 0;
+		}
 		if (parser_numfailures != NULL)
 		{
 			if (parser_obj_i_numfailures == -1)

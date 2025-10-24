@@ -223,8 +223,8 @@
 #define SYSM_INPROG	10
 #define SYSM_BAD_AUTH 	11
 #define SYSM_BAD_RESP 	12
-#define SYSM_PKTLOSS_EXCEED 13 /* packet loss exceeds tolerance */
 #define X500_WEDGED 	13
+#define SYSM_PKTLOSS_EXCEED 23 /* packet loss exceeds tolerance */
 #define SYSM_KILLED	14 /* killed locally */
 #define SYSM_HOSTUNRCH	15
 #define SYSM_RTT_HIGH   16
@@ -692,6 +692,9 @@ void setup_icmp_fd();
 void handle_icmp_responses();
 void start_test_ping(struct monitorent *);
 void service_test_ping(struct monitorent *, struct timeval *);
+void start_test_pktloss(struct monitorent *);
+void service_test_pktloss(struct monitorent *, struct timeval *);
+void pktloss_add_sample(struct pktloss_data *, time_t, unsigned int, unsigned int);
 unsigned short int generate_ident();
 unsigned short in_cksum();
 
@@ -730,6 +733,7 @@ void service_test_sshd(struct monitorent *here, time_t);
 void stop_test_tcp(struct monitorent *);
 void stop_test_udp(struct monitorent *);
 void stop_test_ping(struct monitorent *);
+void stop_test_pktloss(struct monitorent *);
 void stop_test_snmp(struct monitorent *);
 void process_snmp_trap(int);
 void stop_test_nntp(struct monitorent *);

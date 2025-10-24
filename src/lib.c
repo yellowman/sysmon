@@ -572,6 +572,10 @@ short int name_to_type(char *sent_type)
 			if (strcmp(type, "pingv6") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PINGv6;
 			break;
+		case 8:
+			if (strcmp(type, "pktloss") == 0 && (!disable_icmp))
+				return SYSM_TYPE_PKTLOSS;
+			break;
 		case 9:
 			if (strcmp(type, "umichx500") == 0)
 				return SYSM_TYPE_X500;
