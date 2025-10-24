@@ -328,13 +328,13 @@ void gen_ra(char *data, int len)
 void send_radius_packet(int filedes, struct monitorent *here, int seq)
 {
 	/* Send the Packet */
-	unsigned char packet[1024];
+	unsigned char packet[TEMPBUF_SIZE];
 	struct radius_packet_head *radpkt;
 	int packetindex = 0;
 	int ret;
 	int pwlen = 0;
 
-	memset(packet, 0, 1024);
+	memset(packet, 0, sizeof(packet));
 	radpkt = (struct radius_packet_head *)&packet;
 	
 	radpkt->code = RADIUS_Access_Request;
@@ -372,7 +372,8 @@ void send_radius_packet(int filedes, struct monitorent *here, int seq)
 	packetindex++;
 	packet[packetindex] = 8;
 	packetindex++;
-	strcpy(packet+packetindex, "sysmon");
+	/* Use memcpy for fixed-length string copy */
+	memcpy(packet+packetindex, "sysmon", 6);
 	packetindex += 6;
 
 	packet[packetindex] = 61;

@@ -8,12 +8,27 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 {
 	int x;
         time_t t; /* used to get the time */
-	char out[1024];
-	char tmp[1024];
+	/* Increase buffer size to reduce overflow risk */
+	char out[LARGE_TEMPBUF_SIZE];
+	char tmp[TEMPBUF_SIZE];
 	float value;
 	float tmp1;
 	float tmp2;
 	struct my_hostent *hp;
+	/* Track current string length to prevent overflow */
+	size_t current_len = 0;
+
+	/* Safe append macro - only appends if there's room */
+	#define SAFE_APPEND(str_to_append) do { \
+		const char *_s = (str_to_append); \
+		if (_s) { \
+			size_t _len = strlen(_s); \
+			if (current_len + _len < sizeof(out)) { \
+				strncat(out, _s, sizeof(out) - current_len - 1); \
+				current_len += _len; \
+			} \
+		} \
+	} while(0)
 
 	if (str == NULL)
 	{
@@ -21,7 +36,7 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 	}
 	time(&t);
 
-	memset(out, 0, 1024);	/* zero it out */
+	memset(out, 0, sizeof(out));	/* zero it out */
 
         /* parse str as follows:             */
         /* %m = My host Name                 */
@@ -50,7 +65,7 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 	hp = my_gethostbyname(svc->hostname, -1);
 	if (hp == NULL)
 	{
-		sprintf(out, "translate_string() error with %s", svc->hostname);
+		snprintf(out, sizeof(out), "translate_string() error with %s", svc->hostname);
 		return strdup(out);
 	}
 
@@ -65,10 +80,10 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 			switch(str[x])
 			{
 				case 'n':
-					strcat(out, "\n");
+					SAFE_APPEND("\n");
 					break;
 				case 'r':
-					strcat(out, "\r");
+					SAFE_APPEND("\r");
 					break;
 			}
 			continue;
@@ -78,48 +93,48 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
                         switch (str[x])
                         {
                                 case 'm':
-                                        strcat(out, myhostname);
+                                        SAFE_APPEND(myhostname);
                                         break;
 				case 'H':
-					strcat(out, get_hostname(hp));
+					SAFE_APPEND(get_hostname(hp));
 					break;
                                 case 'd': /* downtime */
-                                        strcat(out, str_difftime(svc->deathtime,t));
+                                        SAFE_APPEND(str_difftime(svc->deathtime,t));
                                         break;
                                 case 'l': /* uptime */
-                                        strcat(out, str_difftime(svc->last_up,t));
+                                        SAFE_APPEND(str_difftime(svc->last_up,t));
                                         break;
                                 case 'D': /* downtime 2 */
-                                        strcat(out, str_difftime_sec(svc->deathtime, t));
+                                        SAFE_APPEND(str_difftime_sec(svc->deathtime, t));
                                         break;
 				case 'G':
-					snprintf(tmp, 1024, "%s%s", out, svc->group);
-					memcpy(out,tmp,1024);
+					snprintf(tmp, sizeof(tmp), "%s%s", out, svc->group);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
 					break;
                                 case 'i':
-                                        snprintf(tmp, 1024, "%s%ld%p", out, 
+                                        snprintf(tmp, sizeof(tmp), "%s%ld%p", out, 
 						svc->deathtime, svc);
-					memcpy(out,tmp,1024);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
                                         break;
 				case 'I':
-					snprintf(tmp, 1024, "%s%s", out, 
+					snprintf(tmp, sizeof(tmp), "%s%s", out, 
 						get_ip(hp));
-					memcpy(out,tmp,1024);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
 					break;
 				case 'c':
-					snprintf(tmp, 1024, "%s %ld", out, 
+					snprintf(tmp, sizeof(tmp), "%s %ld", out, 
 						svc->downct);
-					memcpy(out,tmp,1024);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
 					break;
 				case 'C':
-					snprintf(tmp, 1024, "%s %ld", out, 
+					snprintf(tmp, sizeof(tmp), "%s %ld", out, 
 						svc->upct);
-					memcpy(out,tmp,1024);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
 					break;
 				case 'p':
-					snprintf(tmp, 1024, "%s %d", out, 
+					snprintf(tmp, sizeof(tmp), "%s %d", out, 
 						svc->port);
-					memcpy(out,tmp,1024);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
 					break;
 				case 'r':
 			                tmp1 = svc->totaldown;
@@ -127,31 +142,37 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 			                value = (100.0000-((tmp1/tmp2) * 100));
 			                if (value<0) value=0.000;
 			                if (tmp2==0) value=100.00;
-					snprintf(tmp, 1024, "%s %10.6f%%", out,
+					snprintf(tmp, sizeof(tmp), "%s %10.6f%%", out,
 						value);
-					memcpy(out,tmp,1024);
+					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
 					break;
                                 case 's':
-                                        strcat(out, type_to_name(svc->type));
+                                        SAFE_APPEND( type_to_name(svc->type));
                                         break;
 				case 'T':
-					strcat(out, ctime(&t)+11);
-					out[strlen(out)-6]='\0';
+					{
+						char time_str[16];
+						strftime(time_str, sizeof(time_str), "%H:%M:%S", localtime(&t));
+						SAFE_APPEND(time_str);
+					}
 					break;
                                 case 't':
-                                        strcat(out, ctime(&t)+4);
-                                        out[strlen(out)-6]='\0';
+					{
+						char date_str[32];
+						strftime(date_str, sizeof(date_str), "%b %d %H:%M:%S", localtime(&t));
+						SAFE_APPEND(date_str);
+					}
                                         /* time */
                                         break;
                                 case 'U':
-					strcat(out, svc->lastcheck ?
+					SAFE_APPEND( svc->lastcheck ?
 					  "down" : "up");
 					break;
                                 case 'u':
-                                        strcat(out, errtostr(svc->lastcheck));
+                                        SAFE_APPEND( errtostr(svc->lastcheck));
                                         break;
                                 case 'w':
-                                        strcat(out, svc->message);
+                                        SAFE_APPEND( svc->message);
                                         break;
 				case 'V':
 					/* add to out the following:
@@ -162,11 +183,14 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 					*/
 					break;
                                 case 'h':
-                                        strcat(out, svc->hostname);
+                                        SAFE_APPEND( svc->hostname);
                                         break;
                         }
                 } else {
-                        strncat(out, str+x, 1);
+			if (current_len + 1 < sizeof(out)) {
+				strncat(out, str+x, 1);
+				current_len++;
+			}
 		}
         }
 

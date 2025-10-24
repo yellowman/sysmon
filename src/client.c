@@ -75,7 +75,9 @@ void	parse_data(char *buff, struct downdata *stuff, int bufflen)
 			switch(field)
 			{
 				case 1:
-					strcpy(stuff->hostname, space);
+					/* Use strncpy with explicit null termination */
+				strncpy(stuff->hostname, space, sizeof(stuff->hostname) - 1);
+				stuff->hostname[sizeof(stuff->hostname) - 1] = '\0';
 					break;
 				case 2:
 					stuff->type = atoi(space);
@@ -104,8 +106,8 @@ void	parse_data(char *buff, struct downdata *stuff, int bufflen)
 void	show_data(struct downdata down, int ln)
 {
 	char *data = timedata(down.deathtime);
-	char tempbuff[1024];
-	sprintf(tempbuff, "%-25.24s%-6s%-5d%-6d%-6s%-15s%s\n", down.hostname,
+	char tempbuff[TEMPBUF_SIZE];
+	snprintf(tempbuff, sizeof(tempbuff), "%-25.24s%-6s%-5d%-6d%-6s%-15s%s\n", down.hostname,
                 type_to_name(down.type), down.port, down.downct,
                 yes_no(down.notified), errtostr(down.lastcheck), data);
 #ifdef NICEINTERFACE
@@ -120,11 +122,11 @@ void	show_data(struct downdata down, int ln)
 void	bottom_banner()
 {
 	int maxx, maxy;
-	char tempbuff[1024];
+	char tempbuff[TEMPBUF_SIZE];
 
 	getmaxyx(stdscr, maxy, maxx); /* get the max x, and the max y */
 
-        memset(tempbuff, 0, 1024);
+        memset(tempbuff, 0, sizeof(tempbuff));
         memset(tempbuff, '-', maxx);
 	mvaddstr(maxy-2, 0, tempbuff);
 	mvaddstr(maxy-1, 0, " q = quit   space = refresh   h = help\n");
@@ -135,27 +137,28 @@ void	bottom_banner()
 void	top_banner(char *server)
 {
         time_t t;
-        char nfo[30];
+        char nfo[TIME_STR_SIZE];
 
 #ifdef NICEINTERFACE
-	char tempbuff[1024];
+	char tempbuff[TEMPBUF_SIZE];
 	int maxx, maxy;
 	getmaxyx(stdscr, maxy, maxx);
 #endif
 
         time (&t); /* get the time */
-        strcpy(nfo,ctime(&t)+4); /* convert it to a string, copy to buffer */
+        /* Use strftime for safer time formatting */
+        strftime(nfo, sizeof(nfo), "%b %d %H:%M:%S %Y", localtime(&t));
 
 #ifdef NICEINTERFACE
-	sprintf(tempbuff, "Server: %-30s%-20s%-20s", server, 
+	snprintf(tempbuff, sizeof(tempbuff), "Server: %-30s%-20s%-20s", server,
 		"     Current Time: ", nfo);
 	mvaddstr(0,0, tempbuff);
-	
-	sprintf(tempbuff, "%-25s%-6s%-5s%-6s%-6s%-15s%s\n", 
-		"Hostname", "Type", "Port", 
+
+	snprintf(tempbuff, sizeof(tempbuff), "%-25s%-6s%-5s%-6s%-6s%-15s%s\n",
+		"Hostname", "Type", "Port",
 		"Count", "Notif", "Stat", "Time Failed");
 	mvaddstr(1,0, tempbuff);
-	memset(tempbuff, 0, 1024);
+	memset(tempbuff, 0, sizeof(tempbuff));
 	memset(tempbuff, '-', maxx);
 	mvaddstr(2,0,tempbuff);
 	mvaddstr(3,0, "");
@@ -253,7 +256,7 @@ void	my_client_sleep(int sleeptime)
 {
         time_t start = time(NULL); /* record start time */
         time_t now = time(NULL); /* time now */
-        char ch = '\0', nfo[30];
+        char ch = '\0', nfo[TIME_STR_SIZE];
         int maxx, maxy;
 
         getmaxyx(stdscr, maxy, maxx); /* get the max x, and the max y */
@@ -285,7 +288,8 @@ void	my_client_sleep(int sleeptime)
 		of one second */
 
                 time(&now);
-		strcpy(nfo, ctime(&now)+4); /* convert it to a string */
+		/* Use strftime for safer time formatting */
+	strftime(nfo, sizeof(nfo), "%b %d %H:%M:%S %Y", localtime(&now));
 		doupdate();
 		refresh();
 		mvaddstr(0, 58, nfo);
@@ -304,11 +308,11 @@ void	my_client_sleep(int sleeptime)
 
 int	main(int argc, char **argv)
 {
-	char server[1024]; /* remove server to connect to */
+	char server[SERVER_NAME_SIZE]; /* remote server to connect to */
 	char *temp;
 	int port = SYSMON_PORTNUM; /* remote port number */
 #ifdef NICEINTERFACE
-	char tempbuf[1024];
+	char tempbuf[TEMPBUF_SIZE];
 #endif /* NICEINTERFACE */
 
 	myname = argv[0]; /* save myname */
@@ -316,15 +320,17 @@ int	main(int argc, char **argv)
 	temp = getenv("SYSMON_HOST");
 	if (temp != NULL)
 	{
-		strcpy(server, temp);
+		/* Protect against overly long environment variables */
+		snprintf(server, sizeof(server), "%s", temp);
 	} 
 	switch(argc)
 	{
 		case 2:
-			strcpy(server, argv[1]);
+			/* Protect against long command-line arguments */
+			snprintf(server, sizeof(server), "%s", argv[1]);
 			break;
 		case 3:
-			strcpy(server, argv[1]);
+			snprintf(server, sizeof(server), "%s", argv[1]);
 			port = atoi(argv[2]);
 			break;
 		default:
@@ -350,8 +356,8 @@ int	main(int argc, char **argv)
 
 	clear();
 	refresh();
-	sprintf(tempbuf, 
-		"Connecting to server %s and getting inital data...\n", 
+	snprintf(tempbuf, sizeof(tempbuf),
+		"Connecting to server %s and getting inital data...\n",
 		server);
 	mvaddstr(0,0, tempbuf);
 

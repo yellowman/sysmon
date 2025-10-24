@@ -998,6 +998,7 @@ snprintf_convert_float(char *buffer, size_t buf_size,
 {
   char print_buf[160], print_buf_len = 0;
   char format_str[80], *format_str_ptr;
+  size_t remaining_format_size;
 
   format_str_ptr = format_str;
 
@@ -1022,8 +1023,9 @@ snprintf_convert_float(char *buffer, size_t buf_size,
     *format_str_ptr++ = '0';
   if (flags & HASH_FLAG)
     *format_str_ptr++ = '#';
-    
-  sprintf(format_str_ptr, "%d.%d", width, precision);
+
+  remaining_format_size = sizeof(format_str) - (format_str_ptr - format_str);
+  snprintf(format_str_ptr, remaining_format_size, "%d.%d", width, precision);
   format_str_ptr += strlen(format_str_ptr);
 
   if (flags & IS_LONG_DOUBLE)
@@ -1031,7 +1033,7 @@ snprintf_convert_float(char *buffer, size_t buf_size,
   *format_str_ptr++ = format_char;
   *format_str_ptr++ = '\0';
 
-  sprintf(print_buf, format_str, dbl_val);
+  snprintf(print_buf, sizeof(print_buf), format_str, dbl_val);
   print_buf_len = strlen(print_buf);
 
   if (print_buf_len > buf_size)

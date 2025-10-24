@@ -35,7 +35,8 @@ unsigned short int warnlog = 1; /* default = on */
 unsigned short disable_icmp = 0;
 
 /* command line specified vars & args */
-char configfile[256]; /* config file path */
+#define CONFIGFILE_SIZE 256
+char configfile[CONFIGFILE_SIZE]; /* config file path */
 bool donotify = 1; /* Do notifies - a value of 0 doesn't notify contacts */
 int dofork = 0; /* 0 = fork, 1 = don't */
 bool ckconfigonly = FALSE; /* 0 = normal, 1 = just check config then exit */
@@ -273,10 +274,14 @@ void cmdline(int argc, char **argv, char *conf_file, int *listenport)
 				case 'f':
 					if (x+1 == argc)
 						usage();
-					strcpy(conf_file,argv[x]+2);
-					if (strlen(conf_file) == 0)
+					/* Use snprintf to prevent buffer overflow */
+					if (strlen(argv[x]+2) > 0)
 					{
-						strcpy(conf_file,argv[x+1]);
+						snprintf(conf_file, CONFIGFILE_SIZE, "%s", argv[x]+2);
+					}
+					else if (x+1 < argc)
+					{
+						snprintf(conf_file, CONFIGFILE_SIZE, "%s", argv[x+1]);
 						x++;
 					}
 					break;
@@ -440,6 +445,10 @@ void stop_it(time_t now)
 void setup_client_listen(int listenport)
 {
 	clienthead = MALLOC(sizeof(struct clientstatus), "clienthead");
+	if (clienthead == NULL) {
+		print_err(1, "syswatch.c: MALLOC failed for clienthead");
+		exit(1);
+	}
 
 	/* listen on port PORTNUM */
 	if (listenport == 0)
@@ -514,6 +523,10 @@ void queue_check(struct hostinfo *entry, unsigned char *unique_name)
 	}
 	entry->warnlog = 0; /* reset warnings for long time btw checks */
 	newentry = MALLOC(sizeof(struct monitorent), "new entry - monitorent in queue_check");
+	if (newentry == NULL) {
+		print_err(1, "syswatch.c: MALLOC failed for queue entry");
+		return;
+	}
 
 	newentry->checkent = entry;
 	newentry->unique_name = unique_name; /* DO NOT FREE */
@@ -762,6 +775,10 @@ int queue_checks_qsort_way(time_t now)
 	/* allocate some space for all the objects */
 	alloc_size = ((sizeof(struct graph_elements*) * (elements_to_monitor+1)));
 	queue_list = MALLOC(alloc_size, "queue_list");
+	if (queue_list == NULL) {
+		print_err(1, "syswatch.c: MALLOC failed for queue_list");
+		return 60;
+	}
 	for (curr = 0; curr < elements_to_monitor ; curr++)
 	{
 		queue_list[curr] = NULL;
@@ -1827,6 +1844,10 @@ int main(int argc, char **argv)
 	set_defaults();
 
 	ident_hash = MALLOC(0xffff, "ident_hash");
+	if (ident_hash == NULL) {
+		fprintf(stderr, "FATAL: Cannot allocate memory for ident_hash\n");
+		exit(1);
+	}
 	boottime = time(NULL);
 
 	myname = argv[0];
@@ -1885,7 +1906,8 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	strcpy(configfile, CFILE);
+	/* Use snprintf to prevent buffer overflow from long CFILE macro */
+	snprintf(configfile, sizeof(configfile), "%s", CFILE);
 
 	if (argc > 1)
 	{

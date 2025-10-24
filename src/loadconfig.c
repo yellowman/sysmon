@@ -136,6 +136,7 @@ unsigned char *do_set_replace(unsigned char *string)
 	unsigned char buff[MAX_STRLEN];
 	unsigned char *repl = NULL;
 	int x,y;
+	size_t current_len = 0;
 
 	memset(new_string, 0, MAX_STRLEN);
 	for (x = 0;x < strlen(string) ;x++)
@@ -154,11 +155,18 @@ unsigned char *do_set_replace(unsigned char *string)
 			repl = find_value(buff);
 			if (repl != NULL)
 			{
-				strcat(new_string, repl);
+				size_t repl_len = strlen(repl);
+			if (current_len + repl_len < MAX_STRLEN) {
+				strncat(new_string, repl, MAX_STRLEN - current_len - 1);
+				current_len += repl_len;
+			}
 				x = (y-1);
 			}
 		} else {
+			if (current_len + 1 < MAX_STRLEN) {
 			strncat(new_string, string+x, 1);
+			current_len++;
+		}
 		}
 	}
 	if (repl != NULL)

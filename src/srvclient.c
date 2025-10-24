@@ -123,43 +123,43 @@ void do_send_xml(int fd, FILE *fh, char *buff)
  */
 void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 {
-	char buffer[1024];
+	char buffer[TEMPBUF_SIZE];
 
-	snprintf(buffer, 1000, "<%s>", XML_OBJECT_STATUS);
+	snprintf(buffer, sizeof(buffer), "<%s>", XML_OBJECT_STATUS);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%s</%s>", XML_HOSTNAME, obj->data->hostname ,XML_HOSTNAME);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HOSTNAME, obj->data->hostname ,XML_HOSTNAME);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJECT_PORT, obj->data->port, XML_OBJECT_PORT);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_PORT, obj->data->port, XML_OBJECT_PORT);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_TYPE, type_to_name(obj->data->type), XML_OBJECT_TYPE);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_TYPE, type_to_name(obj->data->type), XML_OBJECT_TYPE);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_MESSAGE, obj->data->message, XML_OBJECT_MESSAGE);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_MESSAGE, obj->data->message, XML_OBJECT_MESSAGE);
 	do_send_xml(fd, fh, buffer);
 
 	if (obj->data->contact != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_CONTACT, obj->data->contact, XML_OBJECT_CONTACT);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_CONTACT, obj->data->contact, XML_OBJECT_CONTACT);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	/* XML_OBJ_GROUP */
         if (obj->data->group != NULL)
         {
-                snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_GROUP, obj->data->group, XML_OBJECT_GROUP);
+                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_GROUP, obj->data->group, XML_OBJECT_GROUP);
                 do_send_xml(fd, fh, buffer);
         }
 
         /* XML_OBJ_NOTES */
         if (obj->data->notes != NULL)
         {
-                snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJECT_NOTES, obj->data->notes, XML_OBJECT_NOTES);
+                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_NOTES, obj->data->notes, XML_OBJECT_NOTES);
                 do_send_xml(fd, fh, buffer);
         }
 
@@ -167,154 +167,154 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	{
 		if (obj->data->snmp_community != NULL)
 		{
-			snprintf(buffer, 1000, "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
 			do_send_xml(fd, fh, buffer);
 		}
 		if (obj->data->snmp_oid != NULL)
 		{
-			snprintf(buffer, 1000, "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);
 			do_send_xml(fd, fh, buffer);
 		}
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_SNMP_TYPE, snmp_type_to_name(obj->data->snmp_test_type), XML_SNMP_TYPE);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_TYPE, snmp_type_to_name(obj->data->snmp_test_type), XML_SNMP_TYPE);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_LOW, obj->data->snmp_low, XML_SNMP_LOW);
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LOW, obj->data->snmp_low, XML_SNMP_LOW);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_HIGH, obj->data->snmp_high, XML_SNMP_HIGH);
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_HIGH, obj->data->snmp_high, XML_SNMP_HIGH);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_EXACT, obj->data->snmp_exact, XML_SNMP_EXACT);
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_EXACT, obj->data->snmp_exact, XML_SNMP_EXACT);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_SysUpTime, obj->data->system_uptime, XML_SNMP_SysUpTime);
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_SysUpTime, obj->data->system_uptime, XML_SNMP_SysUpTime);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%d</%s>", XML_SNMP_OCTETS, obj->data->snmp_octets, XML_SNMP_OCTETS);
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_SNMP_OCTETS, obj->data->snmp_octets, XML_SNMP_OCTETS);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_RATE, obj->data->snmp_rate, XML_SNMP_RATE);
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_RATE, obj->data->snmp_rate, XML_SNMP_RATE);
 		do_send_xml(fd, fh, buffer);
 
-		snprintf(buffer, 1000, "<%s>%ld</%s>", XML_SNMP_LASTRESP, obj->data->last_snmp_resptime, XML_SNMP_LASTRESP);
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LASTRESP, obj->data->last_snmp_resptime, XML_SNMP_LASTRESP);
 		do_send_xml(fd, fh, buffer);
 	}
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJECT_STATE, obj->data->lastcheck, XML_OBJECT_STATE);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_STATE, obj->data->lastcheck, XML_OBJECT_STATE);
 	do_send_xml(fd, fh, buffer);
 
 	if (obj->data->username != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_AUTH_USER, obj->data->username , XML_AUTH_USER);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER, obj->data->username , XML_AUTH_USER);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->password != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_AUTH_PASSWD, obj->data->password, XML_AUTH_PASSWD);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD, obj->data->password, XML_AUTH_PASSWD);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->hdr != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_HEADER, obj->data->hdr, XML_HEADER);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER, obj->data->hdr, XML_HEADER);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->hdrval != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_HEADER_VAL, obj->data->hdrval, XML_HEADER_VAL);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL, obj->data->hdrval, XML_HEADER_VAL);
 		do_send_xml(fd, fh, buffer);
 	}
 	
 	if (obj->data->secret != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_RADIUS_SECRET, obj->data->secret, XML_RADIUS_SECRET);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET, obj->data->secret, XML_RADIUS_SECRET);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->lastmsgid != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_MESSAGE_ID, obj->data->lastmsgid, XML_MESSAGE_ID);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_MESSAGE_ID, obj->data->lastmsgid, XML_MESSAGE_ID);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->unique_id != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_UNIQUE_ID, obj->data->unique_id, XML_UNIQUE_ID);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_UNIQUE_ID, obj->data->unique_id, XML_UNIQUE_ID);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->url != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJ_URL, obj->data->url, XML_OBJ_URL);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL, obj->data->url, XML_OBJ_URL);
 		do_send_xml(fd, fh, buffer);
 	}
 
 	if (obj->data->url_text != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url, XML_OBJ_URL_TEXT);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url, XML_OBJ_URL_TEXT);
 		do_send_xml(fd, fh, buffer);
 	}
 	
 	if (obj->data->command != NULL)
 	{
-		snprintf(buffer, 1000, "<%s>%s</%s>", XML_OBJ_EXEC, obj->data->command, XML_OBJ_EXEC);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC, obj->data->command, XML_OBJ_EXEC);
 		do_send_xml(fd, fh, buffer);
 	}
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_TOT_CHECKED, obj->data->totalchecked, XML_TOT_CHECKED);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_TOT_CHECKED, obj->data->totalchecked, XML_TOT_CHECKED);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_TOT_DOWN, obj->data->totaldown, XML_TOT_DOWN);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_TOT_DOWN, obj->data->totaldown, XML_TOT_DOWN);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_DOWN_CT, obj->data->downct, XML_DOWN_CT);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_DOWN_CT, obj->data->downct, XML_DOWN_CT);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_UP_CT, obj->data->upct, XML_UP_CT);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_UP_CT, obj->data->upct, XML_UP_CT);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_MAX_DOWN, obj->data->max_down, XML_MAX_DOWN);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_MAX_DOWN, obj->data->max_down, XML_MAX_DOWN);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_QUEUE_INT, obj->data->queuetime, XML_QUEUE_INT);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_QUEUE_INT, obj->data->queuetime, XML_QUEUE_INT);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_SEND_PING, obj->data->send_pings, XML_SEND_PING);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_SEND_PING, obj->data->send_pings, XML_SEND_PING);
 	do_send_xml(fd, fh, buffer);
 	
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_MIN_PING, obj->data->min_pings, XML_MIN_PING);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_MIN_PING, obj->data->min_pings, XML_MIN_PING);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJ_REVERSED, obj->data->reverse, XML_OBJ_REVERSED);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJ_REVERSED, obj->data->reverse, XML_OBJ_REVERSED);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_OBJ_CONTACTED, obj->data->contacted, XML_OBJ_CONTACTED);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJ_CONTACTED, obj->data->contacted, XML_OBJ_CONTACTED);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_OBJ_CONTACTEDAT, obj->data->lastcontacted, XML_OBJ_CONTACTEDAT);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_OBJ_CONTACTEDAT, obj->data->lastcontacted, XML_OBJ_CONTACTEDAT);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_CONTACT_UP, obj->data->contact_when, XML_CONTACT_UP);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_CONTACT_UP, obj->data->contact_when, XML_CONTACT_UP);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%d</%s>", XML_QUEUED, obj->data->queued, XML_QUEUED);
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_QUEUED, obj->data->queued, XML_QUEUED);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_LASTCHECK, obj->data->lchecktime, XML_LASTCHECK);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LASTCHECK, obj->data->lchecktime, XML_LASTCHECK);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_CHECK_START, obj->data->check_start, XML_CHECK_START);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_CHECK_START, obj->data->check_start, XML_CHECK_START);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_OUTAGE_TIME, obj->data->deathtime, XML_OUTAGE_TIME);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_OUTAGE_TIME, obj->data->deathtime, XML_OUTAGE_TIME);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "<%s>%ld</%s>", XML_LAST_TIME_UP, obj->data->last_up, XML_LAST_TIME_UP);
+	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LAST_TIME_UP, obj->data->last_up, XML_LAST_TIME_UP);
 	do_send_xml(fd, fh, buffer);
 
-	snprintf(buffer, 1000, "</%s>", XML_OBJECT_STATUS);
+	snprintf(buffer, sizeof(buffer), "</%s>", XML_OBJECT_STATUS);
 	do_send_xml(fd, fh, buffer);
 }
 
@@ -681,7 +681,7 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 void client_send_statechange(char *obj_name, int old_state, int new_state)
 {
 	struct clientstatus *here;
-	char buff[1024];
+	char buff[TEMPBUF_SIZE];
 
         if (clienthead == NULL)
                 return;
@@ -823,8 +823,16 @@ void	setup_client()
 	time(&thisclient->lastactivity); /* set current time */
 	thisclient->filedes = msgsock; /* save accept()'ed fd */
 	thisclient->un = NULL; /* no username yet */
-	thisclient->ip = MALLOC(20, "thisclient_ip");
-	strcpy(thisclient->ip, inet_ntoa(remote.sin_addr)); /* save source ip */
+	thisclient->ip = MALLOC(IP_ADDR_STR_SIZE, "thisclient_ip");
+	if (thisclient->ip == NULL) {
+		print_err(1, "srvclient.c: MALLOC failed for client IP");
+		close(msgsock);
+		return;
+	}
+	/* Use inet_ntop for thread-safe IP conversion */
+	if (inet_ntop(AF_INET, &remote.sin_addr, thisclient->ip, IP_ADDR_STR_SIZE) == NULL) {
+		snprintf(thisclient->ip, IP_ADDR_STR_SIZE, "unknown");
+	}
 	thisclient->authlvl = 0; /* no auth yet */
 	thisclient->xml = FALSE;
 	thisclient->outage_log = FALSE;
@@ -870,7 +878,7 @@ void	check_for_new_clients()
 void	service_clients()
 {
 	struct clientstatus *here;
-	char throwmeout[1024], buff[1024];
+	char throwmeout[TEMPBUF_SIZE], buff[1024];
 	struct timeval tv;
 	fd_set rd,wr,except;
 	time_t now_t;

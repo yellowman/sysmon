@@ -104,6 +104,13 @@
 #define	MAX_ARGS		100
 #define MAX_STRLEN		32768
 
+/* Buffer size constants for security */
+#define IP_ADDR_STR_SIZE	20	/* Enough for "xxx.xxx.xxx.xxx\0" (16 chars + margin) */
+#define TEMPBUF_SIZE		1024	/* Standard temporary buffer */
+#define LARGE_TEMPBUF_SIZE	4096	/* Large temporary buffer */
+#define SERVER_NAME_SIZE	1024	/* Server hostname buffer */
+#define TIME_STR_SIZE		32	/* Time string buffer */
+
 /* the following should be read from /etc/services */
 
 /* SSH Remote Login Protocol */
