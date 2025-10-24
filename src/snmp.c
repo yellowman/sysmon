@@ -38,35 +38,46 @@ int snmp_debug = 0;
 
 void process_snmp_trap(int skt)
 {
-	/* Read the packet off the socket, read the src, process
-	   the trap, etc.. */
-
-	/* For now, just log the raw packet dump via print_err(0,*) */
 	char buffer[4096];
 	int len;
-/*	struct sockaddr from; */
-	char from[16];
-	int fromlen;
-	struct in_addr foo;
+	struct sockaddr_in from;
+	socklen_t fromlen = sizeof(from);
+	struct in_addr trap_source;
+	char ip_string[INET_ADDRSTRLEN];
+	struct graph_elements *obj;
 
-	len = recvfrom(skt, buffer, 4095, 0, (struct sockaddr*)from, &fromlen);
-	memcpy(&foo, (from+4), 4);
-	print_err(1, "caught a snmp trap from %s that was %d bytes", inet_ntoa(foo), len);
+	/* Receive trap packet */
+	len = recvfrom(skt, buffer, 4095, 0, (struct sockaddr*)&from, &fromlen);
 
-	print_in_hex(buffer, len);
-
-	printf("\nfrom+fromlen\n");
-	print_in_hex(from, fromlen);
-
-	if (len == -1)
-	{
+	if (len == -1) {
 		perror("snmp.c:recvfrom");
+		return;
 	}
 
-#ifdef FOO
-	print_err(1, "received a packet from %s of length %d", 
-		inet_ntoa((struct in_addr*)from), fromlen);
-#endif /* FOO */
+	/* Extract source IP */
+	trap_source = from.sin_addr;
+	inet_ntop(AF_INET, &trap_source, ip_string, sizeof(ip_string));
+
+	/* Always log the trap */
+	print_err(1, "caught a snmp trap from %s that was %d bytes", ip_string, len);
+
+	/* Debug: dump packet in hex */
+	if (debug) {
+		print_in_hex(buffer, len);
+	}
+
+	/* NEW: Check if any object matches this IP and has trap_alert enabled */
+	obj = find_object_by_ip(ip_string);
+
+	if (obj != NULL && obj->data->trap_alert) {
+		/* Trigger alert */
+		send_trap_alert(obj, trap_source);
+	} else if (debug && obj != NULL) {
+		print_err(1, "trap from %s - object found but trap_alert not enabled",
+			obj->data->hostname);
+	} else if (debug) {
+		print_err(1, "trap from %s - no matching object found", ip_string);
+	}
 }
 
 #ifdef ENABLE_SNMP
@@ -404,3 +415,73 @@ void service_test_snmp(struct monitorent *here)
 	return;
 }
 #endif /* ENABLE_SNMP */
+
+/*
+ * find_object_by_ip - Find a monitored object by its IP address
+ *
+ * Searches through all configured objects and returns the first one
+ * that matches the given IP address string.
+ *
+ * Returns: pointer to graph_elements if found, NULL otherwise
+ */
+struct graph_elements *find_object_by_ip(char *ip_string)
+{
+	struct all_elements_list *walker;
+	struct hostent *he;
+	char ip_addr[INET_ADDRSTRLEN];
+
+	if (ip_string == NULL) {
+		return NULL;
+	}
+
+	/* Walk through all configured objects */
+	for (walker = currenthead; walker != NULL; walker = walker->next) {
+		if (walker->value == NULL || walker->value->data == NULL) {
+			continue;
+		}
+
+		/* First check if hostname is directly the IP address */
+		if (strcmp((char *)walker->value->data->hostname, ip_string) == 0) {
+			return walker->value;
+		}
+
+		/* Try to resolve hostname to IP and compare */
+		he = gethostbyname((char *)walker->value->data->hostname);
+		if (he != NULL && he->h_addr_list[0] != NULL) {
+			if (inet_ntop(AF_INET, he->h_addr_list[0], ip_addr, sizeof(ip_addr)) != NULL) {
+				if (strcmp(ip_addr, ip_string) == 0) {
+					return walker->value;
+				}
+			}
+		}
+	}
+
+	return NULL;  /* Not found */
+}
+
+/*
+ * send_trap_alert - Send an alert when SNMP trap is received
+ *
+ * Triggers the alert system to notify the configured contact that
+ * an SNMP trap was received from this device.
+ */
+void send_trap_alert(struct graph_elements *obj, struct in_addr source)
+{
+	time_t now;
+
+	if (obj == NULL || obj->data == NULL) {
+		print_err(1, "send_trap_alert: NULL object pointer");
+		return;
+	}
+
+	if (debug) {
+		print_err(1, "Sending trap alert for %s (%s)",
+			obj->data->hostname, inet_ntoa(source));
+	}
+
+	/* Get current time */
+	time(&now);
+
+	/* Use existing alert infrastructure */
+	page_someone(obj->data, SYSM_SNMP_TRAP, now);
+}

@@ -193,6 +193,8 @@ char	*errtostr( int value )
 			return "High Rate";
 		case SYSM_PKTLOSS_EXCEED:
 			return "Pkt Loss High";
+		case SYSM_SNMP_TRAP:
+			return "SNMP Trap";
 		default:
 			return "ERROR";
 	}

@@ -225,6 +225,7 @@
 #define SYSM_BAD_RESP 	12
 #define X500_WEDGED 	13
 #define SYSM_PKTLOSS_EXCEED 23 /* packet loss exceeds tolerance */
+#define SYSM_SNMP_TRAP  24 /* SNMP trap received */
 #define SYSM_KILLED	14 /* killed locally */
 #define SYSM_HOSTUNRCH	15
 #define SYSM_RTT_HIGH   16
@@ -347,6 +348,9 @@ struct hostinfo {
 	unsigned int pktloss_tolerance;     /* Max packets that can be lost before alert */
 	unsigned int pktloss_history_hours; /* Hours of history to keep (default 24) */
 	time_t pktloss_last_check;          /* Last time we evaluated packet loss */
+
+	/* SNMP trap alert configuration */
+	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
 
 	bool reverse; /* if true then {if down, follow siblings}, else
 			behave as we do otherwise */
@@ -855,6 +859,8 @@ void stop_check_dns(struct monitorent *);
 /* snmp.c */
 void service_test_snmp(struct monitorent *);
 void start_test_snmp(struct monitorent *);
+struct graph_elements *find_object_by_ip(char *);
+void send_trap_alert(struct graph_elements *, struct in_addr);
 
 /* radius check */
 void start_check_radius(struct monitorent *, time_t);

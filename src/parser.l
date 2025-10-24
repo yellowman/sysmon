@@ -35,6 +35,7 @@ int parser_html_refresh = 60;
 bool parser_reverse = FALSE;
 bool parser_snmp_octets = FALSE;
 bool parser_catch_snmptrap = FALSE;
+bool parser_trap_alert = FALSE;
 char *parser_sender = NULL;
 char *parser_subject = NULL;
 char *parser_upcolor = NULL;
@@ -218,6 +219,14 @@ reverse{WS}*;	{
 		print_err(1, "Warning, reverse specified when not inside an object %d", line_no);
 	parser_reverse = TRUE;
 
+}
+
+trap_alert{WS}*;	{
+	if (parser_name == NULL)
+		print_err(1, "Warning, trap_alert specified when not inside an object at line %d", line_no);
+	parser_trap_alert = TRUE;
+	if (debug)
+		print_err(0, "parser.l: enabling trap alerts for this object");
 }
 
 snmp-octets{WS}*;   {
@@ -532,6 +541,7 @@ object[^\{]+{WS}+\{	{
 
   parser_reverse = FALSE;
   parser_snmp_octets = FALSE;
+  parser_trap_alert = FALSE;
   for (temp_int=6;strlen(yytext)> temp_int;temp_int++)
   {
 	if (!isspace(yytext[temp_int]))
@@ -2396,6 +2406,7 @@ void add_object()
 		new_ele->value->data->port = parser_i_port;
 		new_ele->value->data->reverse = parser_reverse;
 		new_ele->value->data->snmp_octets = parser_snmp_octets;
+		new_ele->value->data->trap_alert = parser_trap_alert;
 		new_ele->value->data->contact_when = parser_when;
 		new_ele->value->data->unique_id = gen_unique_id();
 		if (parser_desc == NULL)
@@ -2831,6 +2842,7 @@ void initalize_parser()
 	parser_nologconnects = FALSE;
 	parser_nosubject = FALSE;
 	parser_catch_snmptrap = 0;
+	parser_trap_alert = FALSE;
 	parser_html_refresh = 60;
 	parser_snmp_type = NULL;
 	parser_snmp_low = NULL;
