@@ -9,8 +9,8 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 	int x;
         time_t t; /* used to get the time */
 	/* Increase buffer size to reduce overflow risk */
-	char out[4096];
-	char tmp[1024];
+	char out[LARGE_TEMPBUF_SIZE];
+	char tmp[TEMPBUF_SIZE];
 	float value;
 	float tmp1;
 	float tmp2;
@@ -65,7 +65,7 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 	hp = my_gethostbyname(svc->hostname, -1);
 	if (hp == NULL)
 	{
-		sprintf(out, "translate_string() error with %s", svc->hostname);
+		snprintf(out, sizeof(out), "translate_string() error with %s", svc->hostname);
 		return strdup(out);
 	}
 

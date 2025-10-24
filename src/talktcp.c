@@ -138,6 +138,11 @@ int sendline(int fd, char *buffer)
 	signal(SIGPIPE, handle_sig_pipe); /* set signal handler if there is
 			a problem */
 	space = MALLOC(strlen(buffer)+3, "sendline-temp buffer"); /* allocate memory for buffer */
+	if (space == NULL) {
+		print_err(1, "talktcp.c: MALLOC failed for sendline buffer");
+		signal(SIGPIPE, SIG_DFL);
+		return -1;
+	}
 	memset(space, 0, strlen(buffer)+3);
 	strncpy(space, buffer, strlen(buffer)); /* copy stuff to temp buffer */
 	strncat(space, "\r\n", 2); /* add end stuff */

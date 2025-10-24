@@ -106,8 +106,8 @@ void	parse_data(char *buff, struct downdata *stuff, int bufflen)
 void	show_data(struct downdata down, int ln)
 {
 	char *data = timedata(down.deathtime);
-	char tempbuff[1024];
-	sprintf(tempbuff, "%-25.24s%-6s%-5d%-6d%-6s%-15s%s\n", down.hostname,
+	char tempbuff[TEMPBUF_SIZE];
+	snprintf(tempbuff, sizeof(tempbuff), "%-25.24s%-6s%-5d%-6d%-6s%-15s%s\n", down.hostname,
                 type_to_name(down.type), down.port, down.downct,
                 yes_no(down.notified), errtostr(down.lastcheck), data);
 #ifdef NICEINTERFACE
@@ -122,11 +122,11 @@ void	show_data(struct downdata down, int ln)
 void	bottom_banner()
 {
 	int maxx, maxy;
-	char tempbuff[1024];
+	char tempbuff[TEMPBUF_SIZE];
 
 	getmaxyx(stdscr, maxy, maxx); /* get the max x, and the max y */
 
-        memset(tempbuff, 0, 1024);
+        memset(tempbuff, 0, sizeof(tempbuff));
         memset(tempbuff, '-', maxx);
 	mvaddstr(maxy-2, 0, tempbuff);
 	mvaddstr(maxy-1, 0, " q = quit   space = refresh   h = help\n");
@@ -137,10 +137,10 @@ void	bottom_banner()
 void	top_banner(char *server)
 {
         time_t t;
-        char nfo[30];
+        char nfo[TIME_STR_SIZE];
 
 #ifdef NICEINTERFACE
-	char tempbuff[1024];
+	char tempbuff[TEMPBUF_SIZE];
 	int maxx, maxy;
 	getmaxyx(stdscr, maxy, maxx);
 #endif
@@ -150,15 +150,15 @@ void	top_banner(char *server)
         strftime(nfo, sizeof(nfo), "%b %d %H:%M:%S %Y", localtime(&t));
 
 #ifdef NICEINTERFACE
-	sprintf(tempbuff, "Server: %-30s%-20s%-20s", server, 
+	snprintf(tempbuff, sizeof(tempbuff), "Server: %-30s%-20s%-20s", server,
 		"     Current Time: ", nfo);
 	mvaddstr(0,0, tempbuff);
-	
-	sprintf(tempbuff, "%-25s%-6s%-5s%-6s%-6s%-15s%s\n", 
-		"Hostname", "Type", "Port", 
+
+	snprintf(tempbuff, sizeof(tempbuff), "%-25s%-6s%-5s%-6s%-6s%-15s%s\n",
+		"Hostname", "Type", "Port",
 		"Count", "Notif", "Stat", "Time Failed");
 	mvaddstr(1,0, tempbuff);
-	memset(tempbuff, 0, 1024);
+	memset(tempbuff, 0, sizeof(tempbuff));
 	memset(tempbuff, '-', maxx);
 	mvaddstr(2,0,tempbuff);
 	mvaddstr(3,0, "");
@@ -256,7 +256,7 @@ void	my_client_sleep(int sleeptime)
 {
         time_t start = time(NULL); /* record start time */
         time_t now = time(NULL); /* time now */
-        char ch = '\0', nfo[30];
+        char ch = '\0', nfo[TIME_STR_SIZE];
         int maxx, maxy;
 
         getmaxyx(stdscr, maxy, maxx); /* get the max x, and the max y */
@@ -308,11 +308,11 @@ void	my_client_sleep(int sleeptime)
 
 int	main(int argc, char **argv)
 {
-	char server[1024]; /* remove server to connect to */
+	char server[SERVER_NAME_SIZE]; /* remote server to connect to */
 	char *temp;
 	int port = SYSMON_PORTNUM; /* remote port number */
 #ifdef NICEINTERFACE
-	char tempbuf[1024];
+	char tempbuf[TEMPBUF_SIZE];
 #endif /* NICEINTERFACE */
 
 	myname = argv[0]; /* save myname */
@@ -356,8 +356,8 @@ int	main(int argc, char **argv)
 
 	clear();
 	refresh();
-	sprintf(tempbuf, 
-		"Connecting to server %s and getting inital data...\n", 
+	snprintf(tempbuf, sizeof(tempbuf),
+		"Connecting to server %s and getting inital data...\n",
 		server);
 	mvaddstr(0,0, tempbuf);
 

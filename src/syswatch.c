@@ -445,6 +445,10 @@ void stop_it(time_t now)
 void setup_client_listen(int listenport)
 {
 	clienthead = MALLOC(sizeof(struct clientstatus), "clienthead");
+	if (clienthead == NULL) {
+		print_err(1, "syswatch.c: MALLOC failed for clienthead");
+		exit(1);
+	}
 
 	/* listen on port PORTNUM */
 	if (listenport == 0)
@@ -519,6 +523,10 @@ void queue_check(struct hostinfo *entry, unsigned char *unique_name)
 	}
 	entry->warnlog = 0; /* reset warnings for long time btw checks */
 	newentry = MALLOC(sizeof(struct monitorent), "new entry - monitorent in queue_check");
+	if (newentry == NULL) {
+		print_err(1, "syswatch.c: MALLOC failed for queue entry");
+		return;
+	}
 
 	newentry->checkent = entry;
 	newentry->unique_name = unique_name; /* DO NOT FREE */
@@ -767,6 +775,10 @@ int queue_checks_qsort_way(time_t now)
 	/* allocate some space for all the objects */
 	alloc_size = ((sizeof(struct graph_elements*) * (elements_to_monitor+1)));
 	queue_list = MALLOC(alloc_size, "queue_list");
+	if (queue_list == NULL) {
+		print_err(1, "syswatch.c: MALLOC failed for queue_list");
+		return 60;
+	}
 	for (curr = 0; curr < elements_to_monitor ; curr++)
 	{
 		queue_list[curr] = NULL;
@@ -1832,6 +1844,10 @@ int main(int argc, char **argv)
 	set_defaults();
 
 	ident_hash = MALLOC(0xffff, "ident_hash");
+	if (ident_hash == NULL) {
+		fprintf(stderr, "FATAL: Cannot allocate memory for ident_hash\n");
+		exit(1);
+	}
 	boottime = time(NULL);
 
 	myname = argv[0];
