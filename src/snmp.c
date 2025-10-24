@@ -36,6 +36,9 @@ struct snmpdata {
 
 int snmp_debug = 0;
 
+/* Utility function defined in radius.c, used for hex-dumping buffers */
+void print_in_hex(unsigned char *message, int msgsize);
+
 void process_snmp_trap(int skt)
 {
 	/* Read the packet off the socket, read the src, process

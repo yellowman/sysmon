@@ -549,7 +549,8 @@ extern bool badconfig;
 extern struct graph_elements *configed_root;
 extern struct all_elements_list *parser_head;
 extern bool do_syslog;
-extern int yylex( void );
+/* The flex scanner uses a custom entry point name */
+extern int sysmon_conf_yylex(void);
 extern FILE *yyin, *yyout;
 
 #ifdef HAVE_LIBPTHREAD

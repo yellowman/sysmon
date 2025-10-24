@@ -4,6 +4,9 @@
 
 extern char *parser_root;
 
+/* Forward declaration for flex-generated scanner entry point */
+int sysmon_conf_yylex(void);
+
 struct set_type {
 	unsigned char *name;
 	unsigned char *value;

@@ -680,13 +680,18 @@ void walk_queue_checks(struct graph_elements *here, time_t now)
 
 /*
  * time comparison function for qsort
+ *
+ * qsort expects a comparator with the signature:
+ *   int compar(const void *a, const void *b)
+ * where a and b are pointers to the elements in the array (here pointers to
+ * struct graph_elements*). We must cast accordingly and then dereference.
  */
-int q_time_cmp(void **arg_a, void **arg_b)
+int q_time_cmp(const void *arg_a, const void *arg_b)
 {
-        struct graph_elements *sort_a, *sort_b;
+        const struct graph_elements *sort_a, *sort_b;
 
-        sort_a = *arg_a;
-        sort_b = *arg_b;
+        sort_a = *(const struct graph_elements * const *)arg_a;
+        sort_b = *(const struct graph_elements * const *)arg_b;
 
 	/* if they're both null, then they're equal */
 	if ((sort_a == NULL) && (sort_b == NULL))
