@@ -1,6 +1,7 @@
 /* The long-awaited radius check */
 
 #include "config.h"
+#include "strl.h"
 
 /* our local structure that we deal with */
 struct radius_data {
@@ -372,7 +373,7 @@ void send_radius_packet(int filedes, struct monitorent *here, int seq)
 	packetindex++;
 	packet[packetindex] = 8;
 	packetindex++;
-	strcpy(packet+packetindex, "sysmon");
+	strlcpy((char*)(packet+packetindex), "sysmon", 1024 - packetindex);
 	packetindex += 6;
 
 	packet[packetindex] = 61;

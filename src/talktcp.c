@@ -1,5 +1,6 @@
 /* $Id: talktcp.c,v 1.12 2006/09/16 02:21:26 jared Exp $ */
 #include "config.h"
+#include "strl.h"
 
 extern struct clientstatus *clienthead;
 
@@ -139,8 +140,8 @@ int sendline(int fd, char *buffer)
 			a problem */
 	space = MALLOC(strlen(buffer)+3, "sendline-temp buffer"); /* allocate memory for buffer */
 	memset(space, 0, strlen(buffer)+3);
-	strncpy(space, buffer, strlen(buffer)); /* copy stuff to temp buffer */
-	strncat(space, "\r\n", 2); /* add end stuff */
+	strlcpy(space, buffer, strlen(buffer)+3); /* copy stuff to temp buffer */
+	strlcat(space, "\r\n", strlen(buffer)+3); /* add end stuff */
 	val = write(fd, space, strlen(space)/* - test - jared +1 */);
 	if (val == -1)
 	{
@@ -291,7 +292,7 @@ int getline_tcp(int fd, char *buffer)
 		{
                         return 0;
 		}
-                strncat(buffer, &buf, 1);
+                strlcat(buffer, &buf, sizeof(buffer));
 		if (strlen(buffer) > 200)
 		{
 			return 0;

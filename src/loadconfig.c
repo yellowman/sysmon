@@ -1,6 +1,7 @@
 /* $Id: loadconfig.c,v 1.120 2006/09/22 19:43:45 jared Exp $ */
 
 #include "config.h"
+#include "strl.h"
 
 extern char *parser_root;
 
@@ -158,7 +159,7 @@ unsigned char *do_set_replace(unsigned char *string)
 				x = (y-1);
 			}
 		} else {
-			strncat(new_string, string+x, 1);
+			strlcat((char*)new_string, string+x, sizeof(new_string));
 		}
 	}
 	if (repl != NULL)

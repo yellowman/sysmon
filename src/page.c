@@ -1,5 +1,6 @@
 /* $Id: page.c,v 1.59 2006/09/22 19:43:45 jared Exp $ */
 #include "config.h"
+#include "strl.h"
 
 /*
  *
@@ -166,7 +167,7 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
                                         break;
                         }
                 } else {
-                        strncat(out, str+x, 1);
+                        strlcat(out, str+x, sizeof(out));
 		}
         }
 

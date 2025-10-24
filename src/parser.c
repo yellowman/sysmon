@@ -4925,3 +4925,8 @@ void use_logging_now()
 	}
 }
 
+int yywrap(void)
+{
+	return 1;
+}
+

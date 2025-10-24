@@ -1,5 +1,6 @@
 /* $Id: syswatch.c,v 1.197 2014/07/09 16:29:39 jared Exp $ */
 #include "config.h"
+#include "strl.h"
 
 /* Normal global vars */
 unsigned char *ident_hash = NULL;
@@ -273,10 +274,10 @@ void cmdline(int argc, char **argv, char *conf_file, int *listenport)
 				case 'f':
 					if (x+1 == argc)
 						usage();
-					strcpy(conf_file,argv[x]+2);
+					strlcpy(conf_file,argv[x]+2, sizeof(conf_file));
 					if (strlen(conf_file) == 0)
 					{
-						strcpy(conf_file,argv[x+1]);
+						strlcpy(conf_file,argv[x+1], sizeof(conf_file));
 						x++;
 					}
 					break;
@@ -681,12 +682,12 @@ void walk_queue_checks(struct graph_elements *here, time_t now)
 /*
  * time comparison function for qsort
  */
-int q_time_cmp(void **arg_a, void **arg_b)
+int q_time_cmp(const void *arg_a, const void *arg_b)
 {
         struct graph_elements *sort_a, *sort_b;
 
-        sort_a = *arg_a;
-        sort_b = *arg_b;
+        sort_a = *(struct graph_elements **)arg_a;
+        sort_b = *(struct graph_elements **)arg_b;
 
 	/* if they're both null, then they're equal */
 	if ((sort_a == NULL) && (sort_b == NULL))
@@ -1885,7 +1886,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	strcpy(configfile, CFILE);
+	strlcpy(configfile, CFILE, sizeof(configfile));
 
 	if (argc > 1)
 	{

@@ -1,5 +1,6 @@
 /* $Id: srvclient.c,v 1.68 2014/07/09 16:38:46 jared Exp $ */
 #include "config.h"
+#include "strl.h"
 
 extern int snmp_debug;
 
@@ -824,7 +825,7 @@ void	setup_client()
 	thisclient->filedes = msgsock; /* save accept()'ed fd */
 	thisclient->un = NULL; /* no username yet */
 	thisclient->ip = MALLOC(20, "thisclient_ip");
-	strcpy(thisclient->ip, inet_ntoa(remote.sin_addr)); /* save source ip */
+	strlcpy(thisclient->ip, inet_ntoa(remote.sin_addr), 20); /* save source ip */
 	thisclient->authlvl = 0; /* no auth yet */
 	thisclient->xml = FALSE;
 	thisclient->outage_log = FALSE;

@@ -1,6 +1,7 @@
 /* $Id: client.c,v 1.27 2003/05/18 03:00:07 jared Exp $ */
 
 #include "config.h"
+#include "strl.h"
 
 /* pre-defines */
 char *myname;
@@ -70,12 +71,12 @@ void	parse_data(char *buff, struct downdata *stuff, int bufflen)
 
 			memset(space,0,sizeof(space));
 
-			strncat(space, buff+start, (end - start));
+			strlcat(space, buff+start, sizeof(space));
 
 			switch(field)
 			{
 				case 1:
-					strcpy(stuff->hostname, space);
+					strlcpy(stuff->hostname, space, sizeof(stuff->hostname));
 					break;
 				case 2:
 					stuff->type = atoi(space);
@@ -144,7 +145,7 @@ void	top_banner(char *server)
 #endif
 
         time (&t); /* get the time */
-        strcpy(nfo,ctime(&t)+4); /* convert it to a string, copy to buffer */
+        strlcpy(nfo,ctime(&t)+4, sizeof(nfo)); /* convert it to a string, copy to buffer */
 
 #ifdef NICEINTERFACE
 	sprintf(tempbuff, "Server: %-30s%-20s%-20s", server, 
@@ -285,7 +286,7 @@ void	my_client_sleep(int sleeptime)
 		of one second */
 
                 time(&now);
-		strcpy(nfo, ctime(&now)+4); /* convert it to a string */
+		strlcpy(nfo, ctime(&now)+4, sizeof(nfo)); /* convert it to a string */
 		doupdate();
 		refresh();
 		mvaddstr(0, 58, nfo);
@@ -316,15 +317,15 @@ int	main(int argc, char **argv)
 	temp = getenv("SYSMON_HOST");
 	if (temp != NULL)
 	{
-		strcpy(server, temp);
+		strlcpy(server, temp, sizeof(server));
 	} 
 	switch(argc)
 	{
 		case 2:
-			strcpy(server, argv[1]);
+			strlcpy(server, argv[1], sizeof(server));
 			break;
 		case 3:
-			strcpy(server, argv[1]);
+			strlcpy(server, argv[1], sizeof(server));
 			port = atoi(argv[2]);
 			break;
 		default:

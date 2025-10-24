@@ -50,6 +50,14 @@
 #include <sys/wait.h>
 #include <strings.h>
 
+/* strlcpy and strlcat implementations for systems that don't have them */
+#ifndef HAVE_STRLCPY
+size_t strlcpy(char *dst, const char *src, size_t size);
+#endif
+#ifndef HAVE_STRLCAT
+size_t strlcat(char *dst, const char *src, size_t size);
+#endif
+
 #ifdef HAVE_LIBWRAP
 #ifdef HAVE_TCPD_H
 #include <tcpd.h>
@@ -550,6 +558,9 @@ extern struct graph_elements *configed_root;
 extern struct all_elements_list *parser_head;
 extern bool do_syslog;
 extern int yylex( void );
+extern int sysmon_conf_yylex( void );
+extern void print_in_hex(unsigned char *message, int msgsize);
+extern int yywrap(void);
 extern FILE *yyin, *yyout;
 
 #ifdef HAVE_LIBPTHREAD
