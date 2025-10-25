@@ -79,14 +79,20 @@ type DaemonInfo struct {
 
 // HostStatus represents the status of a monitored host
 type HostStatus struct {
-	Hostname      string        `json:"hostname"`
-	IPv4Address   string        `json:"ipv4_address,omitempty"`
-	IPv6Address   string        `json:"ipv6_address,omitempty"`
-	OverallStatus string        `json:"overall_status"`
-	StatusColor   string        `json:"status_color"`
-	Contact       string        `json:"contact,omitempty"`
-	Paused        bool          `json:"paused"`
-	Checks        []CheckResult `json:"checks"`
+	Hostname       string        `json:"hostname"`
+	Description    string        `json:"description,omitempty"` // Notes/description from config
+	IPv4Address    string        `json:"ipv4_address,omitempty"`
+	IPv6Address    string        `json:"ipv6_address,omitempty"`
+	OverallStatus  string        `json:"overall_status"`
+	StatusColor    string        `json:"status_color"`
+	Contact        string        `json:"contact,omitempty"`
+	Paused         bool          `json:"paused"`
+	DownCount      int64         `json:"down_count"`          // Consecutive down count
+	UpCount        int64         `json:"up_count"`            // Consecutive up count
+	TotalDown      int64         `json:"total_down"`          // Total times down
+	TotalChecked   int64         `json:"total_checked"`       // Total checks performed
+	LastChangeTime *time.Time    `json:"last_change_time,omitempty"` // When status last changed
+	Checks         []CheckResult `json:"checks"`
 }
 
 // CheckResult represents a check result
