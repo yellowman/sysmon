@@ -88,7 +88,7 @@
 #endif /* HAVE_UCD_SNMP_VERSION_H */
 
 
-#define SYSM_VERS	"v0.93"
+#define SYSM_VERS	"v0.94"
 #ifdef _PATH_VARRUN
 #define PIDFILE		_PATH_VARRUN "sysmond.pid"
 #else
