@@ -14,9 +14,9 @@ import (
 func Parse(content []byte) (*models.Config, error) {
 	config := &models.Config{
 		Global: models.GlobalSettings{
-			ClientPort:   3333, // defaults
-			SNMPTrapPort: 162,
-			CheckInterval: 300,
+			ClientPort:    1345, // sysmon default TCP port (SYSMON_PORTNUM)
+			SNMPTrapPort:  162,  // SNMP trap default
+			CheckInterval: 300,  // 5 minutes default
 		},
 		Hosts:    []models.Host{},
 		Contacts: []models.Contact{},

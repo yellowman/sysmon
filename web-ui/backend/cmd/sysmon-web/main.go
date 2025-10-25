@@ -17,7 +17,7 @@ func main() {
 	// Command line flags
 	socketPath := flag.String("socket", "/var/run/sysmon-web.sock", "FastCGI socket path")
 	configPath := flag.String("config", "/etc/sysmon.conf", "Sysmon config file path")
-	sysmonAddr := flag.String("sysmon", "localhost:3333", "Sysmon daemon address")
+	sysmonAddr := flag.String("sysmon", "localhost:1345", "Sysmon daemon address (default port 1345)")
 	auditLog := flag.String("audit", "/var/log/sysmon-web-audit.log", "Audit log path")
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
 	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")

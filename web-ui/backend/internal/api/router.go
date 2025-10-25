@@ -56,12 +56,31 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/monitoring/traps/", r.handleMonitoringTrapsBySource)
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
+	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
+	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
+	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
+	r.mux.HandleFunc("/api/auth/test", r.handleAuthTest)
+
+	// XML passthrough endpoints (comprehensive data)
+	r.mux.HandleFunc("/api/xml/objects", r.handleXMLObjects)
+	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
+
+	// Admin/debug endpoints
+	r.mux.HandleFunc("/api/admin/version", r.handleAdminVersion)
+	r.mux.HandleFunc("/api/admin/debug", r.handleAdminDebug)
+	r.mux.HandleFunc("/api/admin/snmpd", r.handleAdminSNMPDebug)
+	r.mux.HandleFunc("/api/admin/expiredns", r.handleAdminExpireDNS)
+	r.mux.HandleFunc("/api/admin/printq", r.handleAdminPrintQ)
+	r.mux.HandleFunc("/api/admin/nfd", r.handleAdminNFD)
+	r.mux.HandleFunc("/api/admin/killit", r.handleAdminKillit)
 
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
 	r.mux.HandleFunc("/hosts.html", r.handleHostsPage)
+	r.mux.HandleFunc("/host-detail.html", r.handleHostDetailPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
+	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 
 	// Serve static files (CSS, JS)
 	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
@@ -361,6 +380,370 @@ func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request)
 	r.sendJSON(w, stats)
 }
 
+func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/ack/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Get auth key from header or body
+	authKey := r.getAuthKey(req)
+
+	err := r.monitoring.AckHost(hostname, authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to acknowledge host: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"status":   "success",
+		"message":  fmt.Sprintf("Host %s acknowledged", hostname),
+		"hostname": hostname,
+	})
+}
+
+func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/update/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Parse JSON body for note and optional auth key
+	var body struct {
+		Note    string `json:"note"`
+		AuthKey string `json:"auth_key,omitempty"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "Note is required")
+		return
+	}
+
+	// Use auth key from body if provided, otherwise from header
+	authKey := body.AuthKey
+	if authKey == "" {
+		authKey = req.Header.Get("X-Auth-Key")
+	}
+
+	err := r.monitoring.UpdateHostStatus(hostname, body.Note, authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to update host: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"status":   "success",
+		"message":  fmt.Sprintf("Host %s updated", hostname),
+		"hostname": hostname,
+		"note":     body.Note,
+	})
+}
+
+func (r *Router) handleMonitoringTrace(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/trace/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Get auth key from header
+	authKey := r.getAuthKey(req)
+
+	enabled, err := r.monitoring.ToggleTrace(hostname, authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to toggle trace: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"status":   "success",
+		"hostname": hostname,
+		"tracing_enabled": enabled,
+		"message":  fmt.Sprintf("Tracing %s for %s", map[bool]string{true: "enabled", false: "disabled"}[enabled], hostname),
+	})
+}
+
+func (r *Router) handleAuthTest(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	// Get auth key from header first
+	authKey := req.Header.Get("X-Auth-Key")
+
+	// If no header, try to parse from body (but don't fail if body is empty)
+	if authKey == "" && req.Body != nil {
+		var body struct {
+			AuthKey string `json:"auth_key"`
+		}
+		// Ignore decode errors - body might be empty, which is OK if header is set
+		json.NewDecoder(req.Body).Decode(&body)
+		authKey = body.AuthKey
+	}
+
+	if authKey == "" {
+		r.sendError(w, http.StatusBadRequest, "Auth key required in X-Auth-Key header or JSON body")
+		return
+	}
+
+	valid, err := r.monitoring.TestAuth(authKey)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to test auth: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"valid": valid,
+		"message": map[bool]string{
+			true:  "Authentication successful",
+			false: "Invalid auth key",
+		}[valid],
+	})
+}
+
+// Admin handlers
+func (r *Router) handleAdminVersion(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	version, err := r.monitoring.GetVersion(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get version: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"version": version,
+	})
+}
+
+func (r *Router) handleAdminDebug(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.ToggleDebug(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to toggle debug: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+	})
+}
+
+func (r *Router) handleAdminSNMPDebug(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.ToggleSNMPDebug(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to toggle SNMP debug: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+	})
+}
+
+func (r *Router) handleAdminExpireDNS(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.ExpireDNS(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to expire DNS: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+	})
+}
+
+func (r *Router) handleAdminPrintQ(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.PrintQueue(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to print queue: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"output": response,
+	})
+}
+
+func (r *Router) handleAdminNFD(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.GetNextFD(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get FD info: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"info": response,
+	})
+}
+
+func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.KillDaemon(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to shutdown daemon: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+		"message":  "Daemon shutdown initiated",
+	})
+}
+
+// XML Passthrough Handlers - Return raw XML with comprehensive data
+
+func (r *Router) handleXMLObjects(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Get raw XML from sysmon with all enhanced fields
+	xmlData, err := r.monitoring.GetObjectsXML()
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get objects XML: %v", err))
+		return
+	}
+
+	// Return raw XML with proper Content-Type
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(xmlData))
+}
+
+func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Extract hostname from URL path
+	path := strings.TrimPrefix(req.URL.Path, "/api/xml/object/")
+	hostname := strings.TrimSpace(path)
+
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Get raw XML for single object
+	xmlData, err := r.monitoring.GetObjectXML(hostname)
+	if err != nil {
+		if strings.Contains(err.Error(), "object not found") {
+			r.sendError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get object XML: %v", err))
+		return
+	}
+
+	// Return raw XML with proper Content-Type
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(xmlData))
+}
+
 // Helper functions
 func (r *Router) sendJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -395,11 +778,16 @@ func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 	return user, ip
 }
 
+func (r *Router) getAuthKey(req *http.Request) string {
+	// Get auth key from X-Auth-Key header
+	return req.Header.Get("X-Auth-Key")
+}
+
 func (r *Router) addCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User, X-Auth-Key")
 
 		if req.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
