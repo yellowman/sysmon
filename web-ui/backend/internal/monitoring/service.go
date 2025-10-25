@@ -679,3 +679,153 @@ func (s *Service) sendSimpleCommand(command string, authKey string) (string, err
 
 	return strings.TrimSpace(response), nil
 }
+
+// GetObjectsXML returns raw XML for all monitored objects
+// This returns the comprehensive XML output from enhanced send_object_xml()
+func (s *Service) GetObjectsXML() (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", s.sysmonAddr, err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Read welcome banner
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	// Enable XML mode
+	_, err = conn.Write([]byte("MODE xml\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send MODE xml command: %w", err)
+	}
+
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read MODE xml response: %w", err)
+	}
+	if !strings.Contains(response, "333") {
+		return "", fmt.Errorf("MODE xml failed: %s", response)
+	}
+
+	// Get list of objects with STAT
+	_, err = conn.Write([]byte("STAT\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send STAT command: %w", err)
+	}
+
+	// Read object names from STAT response
+	objectNames := []string{}
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("error reading STAT response: %w", err)
+		}
+
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "333") {
+			break
+		}
+
+		// Parse object name from first field
+		fields := strings.Split(line, ":")
+		if len(fields) > 0 && fields[0] != "" {
+			objectNames = append(objectNames, fields[0])
+		}
+	}
+
+	// Build complete XML document with all objects
+	var xmlOutput strings.Builder
+	xmlOutput.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+	xmlOutput.WriteString("<SysmonStatus>\n")
+
+	// Get XML for each object
+	for _, objName := range objectNames {
+		// Send SHOWOBJ command
+		_, err = conn.Write([]byte(fmt.Sprintf("SHOWOBJ %s\n", objName)))
+		if err != nil {
+			return "", fmt.Errorf("failed to send SHOWOBJ command: %w", err)
+		}
+
+		// Read multi-line XML response until we see </ObjectStatus>
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
+			}
+
+			xmlOutput.WriteString(line)
+
+			if strings.Contains(line, "</ObjectStatus>") {
+				break
+			}
+		}
+	}
+
+	xmlOutput.WriteString("</SysmonStatus>\n")
+
+	return xmlOutput.String(), nil
+}
+
+// GetObjectXML returns raw XML for a single monitored object
+func (s *Service) GetObjectXML(hostname string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Read welcome banner
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	// Enable XML mode
+	_, err = conn.Write([]byte("MODE xml\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send MODE xml command: %w", err)
+	}
+
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read MODE xml response: %w", err)
+	}
+	if !strings.Contains(response, "333") {
+		return "", fmt.Errorf("MODE xml failed: %s", response)
+	}
+
+	// Send SHOWOBJ command
+	_, err = conn.Write([]byte(fmt.Sprintf("SHOWOBJ %s\n", hostname)))
+	if err != nil {
+		return "", fmt.Errorf("failed to send SHOWOBJ command: %w", err)
+	}
+
+	// Read multi-line XML response
+	var xmlOutput strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
+		}
+
+		xmlOutput.WriteString(line)
+
+		if strings.Contains(line, "</ObjectStatus>") {
+			break
+		}
+
+		// Check for error responses
+		if strings.Contains(line, "403") {
+			return "", fmt.Errorf("object not found or MODE xml not enabled")
+		}
+	}
+
+	return xmlOutput.String(), nil
+}

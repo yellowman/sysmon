@@ -349,6 +349,200 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		do_send_xml(fd, fh, buffer);
 	}
 
+	/* ===== PHASE 1: Extended Configuration Fields ===== */
+
+	/* SNMP Extended Configuration */
+	if (obj->data->type == SYSM_TYPE_SNMP) {
+		if (obj->data->snmp_oid_sec != NULL) {
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
+				XML_SNMP_OID_SEC, obj->data->snmp_oid_sec, XML_SNMP_OID_SEC);
+			do_send_xml(fd, fh, buffer);
+		}
+		if (obj->data->snmp_up_msg != NULL) {
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
+				XML_SNMP_UP_MSG, obj->data->snmp_up_msg, XML_SNMP_UP_MSG);
+			do_send_xml(fd, fh, buffer);
+		}
+		if (obj->data->snmp_down_msg != NULL) {
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
+				XML_SNMP_DOWN_MSG, obj->data->snmp_down_msg, XML_SNMP_DOWN_MSG);
+			do_send_xml(fd, fh, buffer);
+		}
+	}
+
+	/* DNS Configuration */
+	if (obj->data->type == SYSM_TYPE_DNS) {
+		if (obj->data->dns_query != NULL) {
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
+				XML_DNS_QUERY, obj->data->dns_query, XML_DNS_QUERY);
+			do_send_xml(fd, fh, buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+				XML_DNS_REQ_AA, obj->data->dns_aa, XML_DNS_REQ_AA);
+			do_send_xml(fd, fh, buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+				XML_DNS_RECURSION, obj->data->dns_recursion, XML_DNS_RECURSION);
+			do_send_xml(fd, fh, buffer);
+		}
+	}
+
+	/* Per-Object Custom Page Message */
+	if (obj->data->pmesg != NULL) {
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
+			XML_PAGE_MESSAGE, obj->data->pmesg, XML_PAGE_MESSAGE);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* Packet Loss Extended Configuration */
+	if (obj->data->pktloss_history_hours > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_PKTLOSS_HIST_HRS, obj->data->pktloss_history_hours,
+			XML_PKTLOSS_HIST_HRS);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	if (obj->data->pktloss_last_check > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
+			XML_PKTLOSS_LAST_CHK, obj->data->pktloss_last_check,
+			XML_PKTLOSS_LAST_CHK);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* RTT Samples Configuration */
+	if (obj->data->rtt_samples > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_SAMPLES, obj->data->rtt_samples, XML_RTT_SAMPLES);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* Next Scheduled Queue Time */
+	if (obj->data->next_queuetime > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
+			XML_NEXT_QUEUE_TIME, obj->data->next_queuetime, XML_NEXT_QUEUE_TIME);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* Debug & Diagnostic State */
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+		XML_TRACE_ENABLED, obj->data->trace, XML_TRACE_ENABLED);
+	do_send_xml(fd, fh, buffer);
+
+	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+		XML_ACKED, obj->data->acked, XML_ACKED);
+	do_send_xml(fd, fh, buffer);
+
+	/* ===== PHASE 2: Runtime Check State ===== */
+
+	/* Find this object in the queue to get runtime state */
+	{
+		extern struct monitorent *queuehead;
+		struct monitorent *qent = queuehead;
+		struct monitorent *found_qent = NULL;
+
+		while (qent != NULL) {
+			if (qent->checkent == obj->data) {
+				found_qent = qent;
+				break;
+			}
+			qent = qent->next;
+		}
+
+		if (found_qent != NULL) {
+			/* Object is currently in queue - add runtime state */
+
+			snprintf(buffer, sizeof(buffer), "<%s>%ld.%06ld</%s>",
+				XML_CHECK_QUEUED_AT,
+				(long)found_qent->queueat.tv_sec,
+				(long)found_qent->queueat.tv_usec,
+				XML_CHECK_QUEUED_AT);
+			do_send_xml(fd, fh, buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%ld.%06ld</%s>",
+				XML_CHECK_LAST_SERV,
+				(long)found_qent->lastserv.tv_sec,
+				(long)found_qent->lastserv.tv_usec,
+				XML_CHECK_LAST_SERV);
+			do_send_xml(fd, fh, buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+				XML_CHECK_FD, found_qent->filedes, XML_CHECK_FD);
+			do_send_xml(fd, fh, buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+				XML_CHECK_STARTED, found_qent->started, XML_CHECK_STARTED);
+			do_send_xml(fd, fh, buffer);
+
+			if (found_qent->retval != -1) {
+				snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
+					XML_CHECK_RETVAL, found_qent->retval, XML_CHECK_RETVAL);
+				do_send_xml(fd, fh, buffer);
+			}
+
+			if (found_qent->wakeup_count > 0) {
+				snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+					XML_CHECK_WAKEUP_CNT, found_qent->wakeup_count,
+					XML_CHECK_WAKEUP_CNT);
+				do_send_xml(fd, fh, buffer);
+
+				snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
+					XML_CHECK_WAKEUP_TIME, found_qent->last_wakeup_time,
+					XML_CHECK_WAKEUP_TIME);
+				do_send_xml(fd, fh, buffer);
+			}
+
+			/* ===== PHASE 3: Packet Loss Historical Data ===== */
+
+			/* Add packet loss history for PKTLOSS checks */
+			if (obj->data->type == SYSM_TYPE_PKTLOSS && found_qent->monitordata != NULL) {
+				struct pktloss_data *pld = (struct pktloss_data *)found_qent->monitordata;
+
+				/* Running totals */
+				snprintf(buffer, sizeof(buffer), "<%s>%llu</%s>",
+					XML_PKTLOSS_TOTAL_SENT, pld->total_sent, XML_PKTLOSS_TOTAL_SENT);
+				do_send_xml(fd, fh, buffer);
+
+				snprintf(buffer, sizeof(buffer), "<%s>%llu</%s>",
+					XML_PKTLOSS_TOTAL_RECV, pld->total_received, XML_PKTLOSS_TOTAL_RECV);
+				do_send_xml(fd, fh, buffer);
+
+				snprintf(buffer, sizeof(buffer), "<%s>%llu</%s>",
+					XML_PKTLOSS_TOTAL_LOST, pld->total_lost, XML_PKTLOSS_TOTAL_LOST);
+				do_send_xml(fd, fh, buffer);
+
+				snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+					XML_PKTLOSS_HIST_SAMP, pld->history_count, XML_PKTLOSS_HIST_SAMP);
+				do_send_xml(fd, fh, buffer);
+
+				/* History array - output last 24 hours of samples */
+				if (pld->history_count > 0) {
+					unsigned int i;
+					unsigned int samples_to_output = pld->history_count;
+					if (samples_to_output > 1440) samples_to_output = 1440; /* Max 24h @ 1min */
+
+					snprintf(buffer, sizeof(buffer), "<%s>", XML_PKTLOSS_HISTORY);
+					do_send_xml(fd, fh, buffer);
+
+					for (i = 0; i < samples_to_output; i++) {
+						/* Calculate actual index in circular buffer */
+						unsigned int idx = (pld->history_head + PKTLOSS_HISTORY_SIZE -
+						                   samples_to_output + i) % PKTLOSS_HISTORY_SIZE;
+
+						struct pktloss_sample *sample = &pld->history[idx];
+
+						snprintf(buffer, sizeof(buffer),
+							"<Sample timestamp=\"%ld\" sent=\"%u\" received=\"%u\" lost=\"%u\"/>",
+							sample->timestamp, sample->sent, sample->received, sample->lost);
+						do_send_xml(fd, fh, buffer);
+					}
+
+					snprintf(buffer, sizeof(buffer), "</%s>", XML_PKTLOSS_HISTORY);
+					do_send_xml(fd, fh, buffer);
+				}
+			}
+		}
+	}
+
 	snprintf(buffer, sizeof(buffer), "</%s>", XML_OBJECT_STATUS);
 	do_send_xml(fd, fh, buffer);
 }
