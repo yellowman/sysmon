@@ -70,7 +70,8 @@ router.example.com ping "main router" $oncall
 
 queuetime include showupalso errorsto maxqueued replyto noheartbeat
 pageinterval logging dnslog dnsexpire statusfile statustempdir nosubject
-numfailures html refresh pidfile output drop_privileges disable_icmp trap_port
+numfailures minnumfailures flaptime html refresh pidfile output drop_privileges
+disable_icmp trap_port
 
 .SS queuetime
 The ``config queuetime'' directive is used to specify the number of
@@ -198,6 +199,23 @@ specifies the number of times that a site must be monitored as
 down before a message is sent to the contact address.  The default is
 4.
 
+.SS minnumfailures
+The ``config minnumfailures'' directive takes an integer argument and
+specifies the minimum number of consecutive failures required before a
+host appears in the status file as down. This reduces false alarms from
+transient network issues. A host will only show as down when both
+numfailures and minnumfailures thresholds are met. The default is 1.
+Example: config minnumfailures 2;
+
+.SS flaptime
+The ``config flaptime'' directive takes an integer argument in minutes
+and specifies how long to keep a host marked as "up" (green) after it
+recovers from a down state. This prevents the visual "flapping" effect
+where hosts rapidly alternate between up and down in the status display.
+During the flap time period, the host appears stable even if subsequent
+checks fail, reducing alert fatigue. The default is 0 (disabled).
+Example: config flaptime 5;
+
 .SS sleeptime
 The ``config sleeptime'' option is now obsolete.  See the queuetime
 configuration option.
@@ -307,6 +325,15 @@ a specific host object. Used to link SNMP trap alerts with the
 corresponding monitored host. Allows trap-triggered state changes to
 affect the associated host's status.
 Example: matched_host "router1";
+
+.SS pageinterval
+The ``pageinterval'' directive allows per-object override of the global
+page interval setting. This is an integer representing the number of
+minutes between reminder alerts for a down host. Critical hosts can be
+configured with shorter intervals for more frequent alerts, while less
+important hosts can have longer intervals. If not specified, the global
+pageinterval setting is used.
+Example: pageinterval 30;
 
 .SH EXAMPLES
 Here are some examples, which should give you an idea of how each option
