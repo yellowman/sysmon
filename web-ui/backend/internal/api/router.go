@@ -61,6 +61,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
 	r.mux.HandleFunc("/api/auth/test", r.handleAuthTest)
 
+	// XML passthrough endpoints (comprehensive data)
+	r.mux.HandleFunc("/api/xml/objects", r.handleXMLObjects)
+	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
+
 	// Admin/debug endpoints
 	r.mux.HandleFunc("/api/admin/version", r.handleAdminVersion)
 	r.mux.HandleFunc("/api/admin/debug", r.handleAdminDebug)
@@ -73,6 +77,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
 	r.mux.HandleFunc("/hosts.html", r.handleHostsPage)
+	r.mux.HandleFunc("/host-detail.html", r.handleHostDetailPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
@@ -684,6 +689,59 @@ func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
 		"response": response,
 		"message":  "Daemon shutdown initiated",
 	})
+}
+
+// XML Passthrough Handlers - Return raw XML with comprehensive data
+
+func (r *Router) handleXMLObjects(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Get raw XML from sysmon with all enhanced fields
+	xmlData, err := r.monitoring.GetObjectsXML()
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get objects XML: %v", err))
+		return
+	}
+
+	// Return raw XML with proper Content-Type
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(xmlData))
+}
+
+func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Extract hostname from URL path
+	path := strings.TrimPrefix(req.URL.Path, "/api/xml/object/")
+	hostname := strings.TrimSpace(path)
+
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Get raw XML for single object
+	xmlData, err := r.monitoring.GetObjectXML(hostname)
+	if err != nil {
+		if strings.Contains(err.Error(), "object not found") {
+			r.sendError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get object XML: %v", err))
+		return
+	}
+
+	// Return raw XML with proper Content-Type
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(xmlData))
 }
 
 // Helper functions

@@ -18,6 +18,7 @@ func InitTemplates(dir string) error {
 	pages := []string{
 		"dashboard.html",
 		"hosts.html",
+		"hosts-detail.html",
 		"traps.html",
 		"config.html",
 		"admin.html",
@@ -60,6 +61,10 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleHostsPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "hosts.html", nil)
+}
+
+func (r *Router) handleHostDetailPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "hosts-detail.html", nil)
 }
 
 func (r *Router) handleTrapsPage(w http.ResponseWriter, req *http.Request) {

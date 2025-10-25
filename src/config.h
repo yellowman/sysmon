@@ -564,6 +564,33 @@ struct bootp_pkt {
 #define XML_AVG_RTT		"ObjectAvgRTT"
 #define XML_JITTER		"ObjectJitter"
 
+/* Extended XML tags for comprehensive monitoring */
+#define XML_SNMP_OID_SEC       "ObjectSNMPOidSecondary"
+#define XML_SNMP_UP_MSG        "ObjectSNMPUpMessage"
+#define XML_SNMP_DOWN_MSG      "ObjectSNMPDownMessage"
+#define XML_DNS_QUERY          "ObjectDNSQuery"
+#define XML_DNS_REQ_AA         "ObjectDNSRequireAA"
+#define XML_DNS_RECURSION      "ObjectDNSRecursion"
+#define XML_PAGE_MESSAGE       "ObjectPageMessage"
+#define XML_PKTLOSS_HIST_HRS   "ObjectPacketLossHistoryHours"
+#define XML_PKTLOSS_LAST_CHK   "ObjectPacketLossLastCheck"
+#define XML_RTT_SAMPLES        "ObjectRTTSamples"
+#define XML_NEXT_QUEUE_TIME    "ObjectNextQueueTime"
+#define XML_TRACE_ENABLED      "ObjectTraceEnabled"
+#define XML_ACKED              "ObjectAcked"
+#define XML_CHECK_QUEUED_AT    "CheckQueuedAt"
+#define XML_CHECK_LAST_SERV    "CheckLastServiced"
+#define XML_CHECK_FD           "CheckFileDescriptor"
+#define XML_CHECK_STARTED      "CheckStarted"
+#define XML_CHECK_RETVAL       "CheckReturnValue"
+#define XML_CHECK_WAKEUP_CNT   "CheckWakeupCount"
+#define XML_CHECK_WAKEUP_TIME  "CheckLastWakeupTime"
+#define XML_PKTLOSS_TOTAL_SENT "PacketLossTotalSent"
+#define XML_PKTLOSS_TOTAL_RECV "PacketLossTotalReceived"
+#define XML_PKTLOSS_TOTAL_LOST "PacketLossTotalLost"
+#define XML_PKTLOSS_HIST_SAMP  "PacketLossHistorySamples"
+#define XML_PKTLOSS_HISTORY    "PacketLossHistory"
+
 
 /* misc defines for any/all external functions */
 extern char *myname; /* my called name when I startup */
