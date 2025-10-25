@@ -2493,6 +2493,9 @@ fi
   fi
 
 
+CPPFLAGS="-I/usr/local/include $CPPFLAGS"
+LDFLAGS="-L/usr/local/lib $LDFLAGS"
+
 
 
 
