@@ -541,6 +541,10 @@ void queue_check(struct hostinfo *entry, unsigned char *unique_name)
 	newentry->fd_state = 0;
 	newentry->checkent->queued = 1;
 
+	/* Initialize wakeup tracking fields (CRITICAL: prevents garbage values) */
+	newentry->wakeup_count = 0;
+	newentry->last_wakeup_time = 0;
+
 	/* insert it at the top of the queue */
 	newentry->next = queuehead;
 	queuehead = newentry;

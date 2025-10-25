@@ -2524,6 +2524,7 @@ void add_object()
 		new_ele->value->data->rtt_threshold = parser_i_rtt_threshold;
 		new_ele->value->data->jitter_threshold = parser_i_jitter_threshold;
 		new_ele->value->data->rtt_samples = parser_i_rtt_samples;
+		new_ele->value->data->max_wakeup_retries = 0;  /* 0 = use DEFAULT_MAX_WAKEUP_RETRIES */
 		new_ele->value->data->contact_when = parser_when;
 		new_ele->value->data->unique_id = gen_unique_id();
 		if (parser_desc == NULL)
