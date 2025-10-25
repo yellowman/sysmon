@@ -73,8 +73,8 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	}
 	defer conn.Close()
 
-	// Set connection timeout
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	// Set connection timeout - keep it short for responsive monitoring UI
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -161,10 +161,12 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 		// Read XML response (multi-line)
 		xmlData := ""
+		readErr := error(nil)
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
-				// Log error and break
+				// Save error for reporting
+				readErr = err
 				fmt.Fprintf(os.Stderr, "Error reading line for %s: %v\n", objName, err)
 				break
 			}
@@ -173,6 +175,26 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			// XML ends with </ObjectStatus>
 			if strings.Contains(line, "</ObjectStatus>") {
 				break
+			}
+		}
+
+		// If read error (timeout, connection closed), return immediately with partial data
+		if readErr != nil {
+			// Capture the failed response
+			capture := ResponseCapture{
+				Command:  fmt.Sprintf("SHOWOBJ %s", objName),
+				Response: xmlData,
+				Parsed:   false,
+				Error:    readErr.Error(),
+			}
+			allResponses = append(allResponses, capture)
+
+			return nil, &XMLParseError{
+				Message:      fmt.Sprintf("Timeout or connection error reading XML for %s: %v", objName, readErr),
+				ObjectName:   objName,
+				RawXML:       xmlData,
+				AllSamples:   debugXMLSamples,
+				AllResponses: allResponses,
 			}
 		}
 
@@ -403,7 +425,7 @@ func (s *Service) AckHost(hostname string, authKey string) error {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -461,7 +483,7 @@ func (s *Service) UpdateHostStatus(hostname string, note string, authKey string)
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -519,7 +541,7 @@ func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -569,7 +591,7 @@ func (s *Service) TestAuth(authKey string) (bool, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -594,7 +616,7 @@ func (s *Service) GetVersion(authKey string) (string, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	if err := readWelcomeBanner(reader); err != nil {
@@ -643,7 +665,7 @@ func (s *Service) PrintQueue(authKey string) (string, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	if err := readWelcomeBanner(reader); err != nil {
@@ -685,7 +707,7 @@ func (s *Service) GetNextFD(authKey string) (string, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	if err := readWelcomeBanner(reader); err != nil {
@@ -722,7 +744,7 @@ func (s *Service) sendSimpleCommand(command string, authKey string) (string, err
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	if err := readWelcomeBanner(reader); err != nil {
@@ -757,7 +779,7 @@ func (s *Service) GetObjectsXML() (string, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner
@@ -852,7 +874,7 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner
