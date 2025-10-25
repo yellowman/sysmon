@@ -61,11 +61,21 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
 	r.mux.HandleFunc("/api/auth/test", r.handleAuthTest)
 
+	// Admin/debug endpoints
+	r.mux.HandleFunc("/api/admin/version", r.handleAdminVersion)
+	r.mux.HandleFunc("/api/admin/debug", r.handleAdminDebug)
+	r.mux.HandleFunc("/api/admin/snmpd", r.handleAdminSNMPDebug)
+	r.mux.HandleFunc("/api/admin/expiredns", r.handleAdminExpireDNS)
+	r.mux.HandleFunc("/api/admin/printq", r.handleAdminPrintQ)
+	r.mux.HandleFunc("/api/admin/nfd", r.handleAdminNFD)
+	r.mux.HandleFunc("/api/admin/killit", r.handleAdminKillit)
+
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
 	r.mux.HandleFunc("/hosts.html", r.handleHostsPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
+	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 
 	// Serve static files (CSS, JS)
 	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
@@ -517,6 +527,162 @@ func (r *Router) handleAuthTest(w http.ResponseWriter, req *http.Request) {
 			true:  "Authentication successful",
 			false: "Invalid auth key",
 		}[valid],
+	})
+}
+
+// Admin handlers
+func (r *Router) handleAdminVersion(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	version, err := r.monitoring.GetVersion(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get version: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"version": version,
+	})
+}
+
+func (r *Router) handleAdminDebug(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.ToggleDebug(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to toggle debug: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+	})
+}
+
+func (r *Router) handleAdminSNMPDebug(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.ToggleSNMPDebug(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to toggle SNMP debug: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+	})
+}
+
+func (r *Router) handleAdminExpireDNS(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.ExpireDNS(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to expire DNS: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+	})
+}
+
+func (r *Router) handleAdminPrintQ(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.PrintQueue(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to print queue: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"output": response,
+	})
+}
+
+func (r *Router) handleAdminNFD(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.GetNextFD(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get FD info: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"info": response,
+	})
+}
+
+func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	authKey := r.getAuthKey(req)
+	response, err := r.monitoring.KillDaemon(authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to shutdown daemon: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"response": response,
+		"message":  "Daemon shutdown initiated",
 	})
 }
 

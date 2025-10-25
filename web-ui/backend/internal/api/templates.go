@@ -20,6 +20,7 @@ func InitTemplates(dir string) error {
 		"hosts.html",
 		"traps.html",
 		"config.html",
+		"admin.html",
 	}
 
 	// Parse each page template along with base template
@@ -67,4 +68,8 @@ func (r *Router) handleTrapsPage(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleConfigPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "config.html", nil)
+}
+
+func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "admin.html", nil)
 }
