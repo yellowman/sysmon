@@ -172,24 +172,28 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		return nil, fmt.Errorf("MODE xml failed: %s", resp.Message)
 	}
 
-	// Step 2: Get list of objects with STAT command
-	_, err = conn.Write([]byte("STAT\n"))
+	// Step 2: Get list of objects with STATO command
+	// CRITICAL: Use STATO (not STAT) because:
+	// - STATO returns unique_name (the object identifier)
+	// - STAT returns hostname:type:port:... where hostname != unique_name
+	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
+	_, err = conn.Write([]byte("STATO\n"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to send STAT command: %w", err)
+		return nil, fmt.Errorf("failed to send STATO command: %w", err)
 	}
 
-	// Read object names from STAT response
+	// Read object names from STATO response
 	objectNames := []string{}
 	for {
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
-			return nil, fmt.Errorf("error reading STAT response: %w", err)
+			return nil, fmt.Errorf("error reading STATO response: %w", err)
 		}
 
 		// Check for response codes
 		if resp.Code != "" {
 			if resp.IsError {
-				return nil, fmt.Errorf("STAT command failed: %s", resp.Message)
+				return nil, fmt.Errorf("STATO command failed: %s", resp.Message)
 			}
 			// Code 333 = end of output
 			if resp.Code == "333" {
@@ -198,18 +202,10 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		}
 
 		// It's a data line (no response code)
-		line := strings.TrimSpace(resp.Message)
-
-		// Parse plain text format from STAT (even in XML mode)
-		// Format: hostname:type:port:lastcheck:downct:contacted:deathtime
-		// OR just: objectname (for STATO command)
-		// NOTE: We only extract the object name (first field) here, as detailed
-		// monitoring data (type, port, status, etc.) is retrieved via SHOWOBJ
-		// XML responses in the next step. The additional STAT fields are thus
-		// redundant and intentionally ignored.
-		fields := strings.Split(line, ":")
-		if len(fields) > 0 && fields[0] != "" {
-			objectNames = append(objectNames, fields[0])
+		// STATO returns just the unique_name (object identifier), one per line
+		objectName := strings.TrimSpace(resp.Message)
+		if objectName != "" {
+			objectNames = append(objectNames, objectName)
 		}
 	}
 
