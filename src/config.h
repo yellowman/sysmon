@@ -377,6 +377,7 @@ struct hostinfo {
 	time_t check_start; /* time of start of check */
 	time_t deathtime; /* time of death ;-) */
 	time_t last_up; /* time it last came back */
+	time_t last_recovery; /* time when host recovered (for flaptime) */
 
         } ;
 
@@ -626,6 +627,8 @@ extern int snmp_trap_fd; /* loadconfig.c + snmp.c + syswatch.c */
 extern bool paused; /* syswatch.c + srvclient.c + textfile.c */
 extern int inactivetime;
 extern int numfailures;
+extern int minnumfailures; /* minimum failures before yellow status */
+extern int flaptime; /* minutes to show green after recovery */
 extern int numqueued; /* num of elements in the queue */
 extern unsigned long queuetime;
 extern int pageinterval;
@@ -667,6 +670,10 @@ extern char *parser_port;
 extern int  parser_i_port;
 extern char *parser_numfailures;
 extern int parser_i_numfailures;
+extern char *parser_minnumfailures;
+extern int parser_i_minnumfailures;
+extern char *parser_flaptime;
+extern int parser_i_flaptime;
 extern char *parser_desc;
 extern char *parser_group;
 extern char *parser_spawn;

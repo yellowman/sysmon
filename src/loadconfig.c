@@ -346,6 +346,7 @@ void	hard_copy(struct hostinfo *old, struct hostinfo *new)
 	new->totalchecked = old->totalchecked;
 	new->totaldown = old->totaldown;
 	new->last_up = old->last_up;
+	new->last_recovery = old->last_recovery;
 	new->acked = old->acked;
 	/* copy over data related to snmp based tests */
 	new->last_snmp_resptime = old->last_snmp_resptime;
@@ -507,6 +508,14 @@ void update_globs_from_parser()
 			maxqueued = (cieling_max_queued-10);
 			print_err(1, "ERROR: reducing maxqueued as necessary based on file descriptors available");
 		}
+	}
+	if (parser_minnumfailures != NULL)
+	{
+		minnumfailures = parser_i_minnumfailures;
+	}
+	if (parser_flaptime != NULL)
+	{
+		flaptime = parser_i_flaptime;
 	}
 	showupalso = parser_showupalso;
 	

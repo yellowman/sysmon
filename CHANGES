@@ -36,6 +36,14 @@ Daemon Improvements:
   * Fixed NULL pointer bug in textfile.c (filename checked before use)
   * Fixed incomplete XML send on connection errors (do_send_xml returns status)
   * Added SEND_OR_ABORT macro for reliable XML transmission
+  * Implemented config minnumfailures directive:
+    - Minimum consecutive failures before host appears in status file
+    - Reduces false alarms from transient failures
+    - Default is 1 (show after first failure)
+  * Implemented config flaptime directive:
+    - Keep host showing as green for N minutes after recovery
+    - Prevents "flapping" appearance in status output
+    - Default is 0 (disabled)
 
 Security and Privilege Dropping:
   * Added statustempdir configuration directive for privilege-dropped daemon
@@ -49,6 +57,8 @@ Documentation:
   * Added setup instructions for privilege dropping
   * Documented all configuration directives with examples
   * Improved man page formatting and clarity
+  * Added minnumfailures and flaptime directive documentation to man page
+  * Converted all markdown documentation to plain ASCII text in docs/
 
 Bug Fixes:
   * Fixed perror() calls behind debug checks to reduce log noise
@@ -74,12 +84,10 @@ Wishlist for Future Versions
 Priority Items:
   * Multiple textfile outputs (by groups, by state)
   * Per-host pageinterval configuration
-  * Configurable flaptime for "recently recovered" state
   * SNMP custom up/down messages
   * SNMP OID comparison and custom error descriptions
   * State persistence across daemon restarts (config savestate)
   * SNMP query aggregation to reduce network overhead
-  * Minimum failure count before yellow/txt file appearance
 
 Nice to Have:
   * Enhanced DNS checks documentation
@@ -92,3 +100,5 @@ Completed:
   * IRC daemon check - DONE (basic ircd check implemented)
   * Documentation - ONGOING (continuous improvements)
   * Paused host data visibility - DONE (visible in web-UI)
+  * Configurable flaptime - DONE (v0.94: config flaptime directive)
+  * Minimum failure count before yellow/txt - DONE (v0.94: config minnumfailures)

@@ -198,6 +198,24 @@ specifies the number of times that a site must be monitored as
 down before a message is sent to the contact address.  The default is
 4.
 
+.SS minnumfailures
+The ``config minnumfailures'' directive takes an integer argument and
+specifies the minimum number of consecutive failures before a host
+appears in the status file (HTML or text) as yellow/down. This is
+useful for filtering out transient failures and reducing false alarms.
+For example, if set to 3, a host must fail at least 3 times in a row
+before appearing in the output. The default is 1 (show after first
+failure). Must be >= 1.
+
+.SS flaptime
+The ``config flaptime'' directive takes an integer argument in minutes
+and controls how long a host continues to display as green/up in the
+status file after recovering from a failure. This prevents the
+"flapping" appearance when a host goes up and down repeatedly. For
+example, if set to 5, a host that recovers will show as green for 5
+minutes even if it goes down again during that window. The default is
+0 (disabled). Set to 0 to disable this feature.
+
 .SS sleeptime
 The ``config sleeptime'' option is now obsolete.  See the queuetime
 configuration option.
