@@ -1644,6 +1644,19 @@ void revoke_root_if_necessary()
 		return;
 	}
 
+	/* CRITICAL: Cannot drop privileges if ICMP is enabled */
+	/* Sending ICMP packets requires CAP_NET_RAW (Linux) or root privileges */
+	if (!disable_icmp)
+	{
+		print_err(0, "revoke_root: ICMP monitoring is enabled - must retain root privileges for ICMP send");
+		print_err(0, "revoke_root: To drop privileges, disable ICMP in config or use --disable-icmp flag");
+		if (debug)
+		{
+			print_err(0, "revoke_root: Future enhancement: Linux capabilities (CAP_NET_RAW) would allow privilege drop");
+		}
+		return;
+	}
+
 	/* Look up the 'nobody' user */
 	pw = getpwnam(drop_user);
 	if (pw == NULL)
