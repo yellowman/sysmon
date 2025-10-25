@@ -7,6 +7,7 @@ type Config struct {
 	Global   GlobalSettings `json:"global"`
 	Hosts    []Host         `json:"hosts"`
 	Contacts []Contact      `json:"contacts"`
+	Spawns   []SpawnCommand `json:"spawns"` // Named spawn commands
 }
 
 // GlobalSettings represents global sysmon settings
@@ -14,9 +15,17 @@ type GlobalSettings struct {
 	ClientPort      int    `json:"client_port"`
 	SNMPTrapPort    int    `json:"snmp_trap_port"`
 	CheckInterval   int    `json:"check_interval"`
+	PageInterval    int    `json:"page_interval,omitempty"`
 	DisableICMP     bool   `json:"disable_icmp"`
 	LogLevel        int    `json:"log_level"`
 	PidFile         string `json:"pid_file,omitempty"`
+	StatusFile      string `json:"status_file,omitempty"`
+}
+
+// SpawnCommand represents a named spawn command definition
+type SpawnCommand struct {
+	Name    string `json:"name"`    // e.g., "pagechris"
+	Command string `json:"command"` // e.g., "blah %s %s %i blah"
 }
 
 // Host represents a monitored host
@@ -24,6 +33,8 @@ type Host struct {
 	ID       string  `json:"id"`
 	Hostname string  `json:"hostname"`
 	Contact  string  `json:"contact,omitempty"`
+	Notes    string  `json:"notes,omitempty"` // Description/notes
+	Spawn    string  `json:"spawn,omitempty"` // Named spawn command to use
 	Paused   bool    `json:"paused"`
 	Checks   []Check `json:"checks"`
 }

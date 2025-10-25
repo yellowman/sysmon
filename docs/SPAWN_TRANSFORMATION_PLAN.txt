@@ -1,0 +1,189 @@
+SPAWN TRANSFORMATION IMPLEMENTATION PLAN
+==========================================
+
+Current Situation
+-----------------
+Currently, spawn commands are specified inline per-object:
+
+  object ping router.example.com {
+    spawn "/usr/local/bin/page.sh %s %s %i";
+    contact admin@example.com;
+  }
+
+Problems with current approach:
+- Command is duplicated across many objects
+- Hard to update commands globally
+- No central management of notification scripts
+- Difficult to test/debug notification commands
+
+
+Proposed Solution
+-----------------
+Two-stage spawn definition:
+
+1. Global spawns block defines named commands:
+
+  spawns {
+    pagechris "/usr/local/bin/sms.sh chris %s %s %i"
+    pageops "/usr/local/bin/email.sh ops@example.com %s %s"
+    slack "/usr/local/bin/slack-notify.sh #alerts %s is %s"
+  }
+
+2. Per-object spawn references the name:
+
+  object ping router.example.com {
+    spawn pagechris;
+    contact admin@example.com;
+  }
+
+
+Implementation Requirements
+----------------------------
+
+### 1. Parser Changes (src/parser.l)
+
+A. Data Structures:
+   - Add hash table or linked list to store spawn command definitions
+   - Structure: { name: string, command: string }
+
+   Example struct:
+   struct spawn_def {
+       char *name;
+       char *command;
+       struct spawn_def *next;
+   };
+
+B. Global spawns {} block parser:
+   - New parser rule for: spawns\ \{
+   - Sub-rule for entries: [a-zA-Z0-9_]+ \"[^\"]+\"
+   - Store in global spawn definitions list
+   - Close with: \}
+
+C. Per-object spawn parser:
+   - Modify existing spawn rule to handle both:
+     - spawn "command";  (old format, backward compatible)
+     - spawn name;       (new format, reference to spawns block)
+   - Look up command from spawn definitions if not quoted
+
+D. Validation:
+   - Check that referenced spawn names exist
+   - Warn if using old spawn "command" format
+   - Error if spawn name not found in spawns block
+
+### 2. Config Handling (src/loadconfig.c)
+
+A. Add spawn_definitions global:
+   - Parse and store spawn definitions from parser
+   - Make available to all objects
+
+B. Object command resolution:
+   - When copying object data, resolve spawn references
+   - If parser_spawn is a name (not quoted), look up command
+   - If parser_spawn is quoted, use directly (backward compat)
+
+
+### 3. Config Generation (web-UI)
+
+A. Parse existing configs:
+   - Identify inline spawn commands
+   - Extract unique commands
+   - Generate spawn names (pageN, notifyN, etc.)
+
+B. Generate new format:
+   - Write spawns {} block first
+   - Convert object spawn "cmd" to spawn name
+
+C. Backward compatibility:
+   - Support reading old format
+   - Optionally convert on save
+
+
+### 4. Testing Requirements
+
+A. Parser tests:
+   - spawns {} block parsing
+   - Name resolution
+   - Backward compatibility
+   - Error cases (missing names, etc.)
+
+B. Migration tests:
+   - Convert old config to new format
+   - Verify same behavior
+   - Test mixed old/new format
+
+C. Runtime tests:
+   - Spawn command execution
+   - Variable substitution (%s, %i, etc.)
+   - Error handling
+
+
+Implementation Steps (Recommended Order)
+-----------------------------------------
+
+1. Add spawn_def structure to config.h
+2. Add spawns {} block parser rule in parser.l
+3. Update spawn parsing to check for names vs commands
+4. Add name lookup function
+5. Test with simple config
+6. Add backward compatibility
+7. Update web-UI to generate new format
+8. Create migration tool for existing configs
+9. Update documentation
+
+
+Example Config Files
+-------------------
+
+OLD FORMAT (still supported):
+----------------------------
+object ping router {
+  spawn "/usr/local/bin/page.sh %s %s %i";
+  contact ops@example.com;
+}
+
+object ping switch {
+  spawn "/usr/local/bin/page.sh %s %s %i";  # Duplicated!
+  contact ops@example.com;
+}
+
+
+NEW FORMAT:
+----------
+spawns {
+  pageops "/usr/local/bin/page.sh %s %s %i"
+  emailops "/usr/local/bin/email.sh ops@example.com %s %s"
+  slack "/usr/local/bin/slack.sh #alerts '%s is %s'"
+}
+
+object ping router {
+  spawn pageops;
+  contact ops@example.com;
+}
+
+object ping switch {
+  spawn pageops;
+  contact ops@example.com;
+}
+
+object ping critical-db {
+  spawn slack;   # Use different notification for critical systems
+  contact dba@example.com;
+}
+
+
+Benefits
+--------
+1. DRY principle - define once, use many
+2. Easy global updates - change in one place
+3. Better testing - test spawn commands separately
+4. Clearer config - see all notification methods at top
+5. Migration path - supports both formats during transition
+
+
+Notes
+-----
+- %s, %i, and other variables still work the same way
+- Spawn command execution unchanged
+- Can mix old and new format during migration
+- Web-UI can auto-convert on first save
+- Consider adding spawn command testing endpoint to admin page
