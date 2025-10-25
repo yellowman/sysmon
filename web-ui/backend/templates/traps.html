@@ -1,0 +1,279 @@
+{{template "base" .}}
+
+{{define "title"}}SNMP Traps{{end}}
+
+{{define "content"}}
+<div x-data="trapsPage()" x-init="init()">
+    <!-- Header with Summary -->
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900 mb-4">
+            <i class="fas fa-exchange-alt mr-2"></i>SNMP Traps
+        </h1>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-600">Total (Last Hour)</div>
+                <div class="text-2xl font-bold text-gray-900" x-text="summary.total_traps_hour || 0"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-600">Unique Sources</div>
+                <div class="text-2xl font-bold text-gray-900" x-text="sources.length"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-600">Critical</div>
+                <div class="text-2xl font-bold text-red-600" x-text="summary.traps_by_severity?.critical || 0"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-600">Warning</div>
+                <div class="text-2xl font-bold text-yellow-600" x-text="summary.traps_by_severity?.warning || 0"></div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="flex space-x-4">
+            <select x-model="filterSource" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                <option value="">All Sources</option>
+                <template x-for="source in sources" :key="source.source_ip">
+                    <option :value="source.source_ip" x-text="source.hostname || source.source_ip"></option>
+                </template>
+            </select>
+            <select x-model="filterSeverity" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                <option value="">All Severities</option>
+                <option value="informational">Informational</option>
+                <option value="warning">Warning</option>
+                <option value="error">Error</option>
+                <option value="critical">Critical</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Traps List -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="divide-y divide-gray-200">
+            <template x-for="trap in filteredTraps" :key="trap.timestamp">
+                <div class="px-6 py-4 hover:bg-gray-50 cursor-pointer" @click="selectedTrap = trap">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <!-- Source Info -->
+                            <div class="flex items-center space-x-3 mb-2">
+                                <i class="fas fa-server text-gray-400"></i>
+                                <span class="font-medium text-gray-900" x-text="trap.source_ip"></span>
+                                <span class="text-sm text-gray-500" x-show="trap.source_hostname" x-text="'(' + trap.source_hostname + ')'"></span>
+                                <span class="text-xs text-gray-400" x-text="formatRelativeTime(trap.timestamp)"></span>
+                            </div>
+
+                            <!-- Decoded Trap Info -->
+                            <div x-show="trap.decoded">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <span :class="{
+                                        'bg-blue-100 text-blue-800': trap.decoded?.severity === 'informational',
+                                        'bg-yellow-100 text-yellow-800': trap.decoded?.severity === 'warning',
+                                        'bg-orange-100 text-orange-800': trap.decoded?.severity === 'error',
+                                        'bg-red-100 text-red-800': trap.decoded?.severity === 'critical'
+                                    }" class="px-2 py-1 rounded text-xs font-medium" x-text="trap.decoded?.trap_name"></span>
+                                    <span class="text-xs text-gray-500" x-text="trap.decoded?.category"></span>
+                                    <span class="text-xs text-gray-500" x-show="trap.decoded?.vendor" x-text="'(' + trap.decoded?.vendor + ')'"></span>
+                                </div>
+                                <p class="text-sm text-gray-700" x-text="trap.decoded?.description"></p>
+                                <div class="mt-1 flex items-center space-x-4 text-xs text-gray-500">
+                                    <span x-show="trap.decoded?.interface">
+                                        <i class="fas fa-ethernet mr-1"></i>
+                                        <span x-text="trap.decoded?.interface"></span>
+                                    </span>
+                                    <span x-show="trap.matched_host">
+                                        <i class="fas fa-link mr-1"></i>
+                                        Matched: <span x-text="trap.matched_host"></span>
+                                    </span>
+                                    <span x-show="trap.alert_sent" class="text-green-600">
+                                        <i class="fas fa-bell mr-1"></i>Alert sent
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Raw Trap Type (if not decoded) -->
+                            <div x-show="!trap.decoded">
+                                <span class="text-sm text-gray-700" x-text="trap.trap_type"></span>
+                            </div>
+                        </div>
+
+                        <button @click.stop="selectedTrap = trap" class="text-blue-600 hover:text-blue-800 text-sm">
+                            Details →
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Empty State -->
+        <div x-show="filteredTraps.length === 0 && !loading" class="px-6 py-12 text-center text-gray-500">
+            <i class="fas fa-inbox text-6xl text-gray-300 mb-4"></i>
+            <p>No traps found</p>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="text-center py-12">
+        <i class="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
+        <p class="mt-4 text-gray-600">Loading traps...</p>
+    </div>
+
+    <!-- Trap Detail Modal -->
+    <div x-show="selectedTrap" x-cloak @click.away="selectedTrap = null"
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div @click.stop class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <template x-if="selectedTrap">
+                <div>
+                    <!-- Modal Header -->
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
+                        <div>
+                            <h2 class="text-xl font-bold text-gray-900">Trap Details</h2>
+                            <p class="text-sm text-gray-500" x-text="new Date(selectedTrap.timestamp).toLocaleString()"></p>
+                        </div>
+                        <button @click="selectedTrap = null" class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times text-2xl"></i>
+                        </button>
+                    </div>
+
+                    <!-- Modal Content -->
+                    <div class="px-6 py-4">
+                        <!-- Source Information -->
+                        <div class="mb-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-2">Source</h3>
+                            <dl class="grid grid-cols-2 gap-2 text-sm">
+                                <div>
+                                    <dt class="text-gray-600">IP Address:</dt>
+                                    <dd class="font-medium" x-text="selectedTrap.source_ip"></dd>
+                                </div>
+                                <div x-show="selectedTrap.source_hostname">
+                                    <dt class="text-gray-600">Hostname:</dt>
+                                    <dd class="font-medium" x-text="selectedTrap.source_hostname"></dd>
+                                </div>
+                            </dl>
+                        </div>
+
+                        <!-- Decoded Information -->
+                        <div x-show="selectedTrap.decoded" class="mb-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-2">Decoded Information</h3>
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <div class="mb-2">
+                                    <span :class="{
+                                        'bg-blue-100 text-blue-800': selectedTrap.decoded?.severity === 'informational',
+                                        'bg-yellow-100 text-yellow-800': selectedTrap.decoded?.severity === 'warning',
+                                        'bg-orange-100 text-orange-800': selectedTrap.decoded?.severity === 'error',
+                                        'bg-red-100 text-red-800': selectedTrap.decoded?.severity === 'critical'
+                                    }" class="px-2 py-1 rounded text-sm font-medium" x-text="selectedTrap.decoded?.trap_name"></span>
+                                </div>
+                                <p class="text-gray-700 mb-2" x-text="selectedTrap.decoded?.description"></p>
+                                <dl class="grid grid-cols-2 gap-2 text-sm">
+                                    <div>
+                                        <dt class="text-gray-600">Category:</dt>
+                                        <dd x-text="selectedTrap.decoded?.category"></dd>
+                                    </div>
+                                    <div>
+                                        <dt class="text-gray-600">Severity:</dt>
+                                        <dd x-text="selectedTrap.decoded?.severity"></dd>
+                                    </div>
+                                    <div x-show="selectedTrap.decoded?.vendor">
+                                        <dt class="text-gray-600">Vendor:</dt>
+                                        <dd x-text="selectedTrap.decoded?.vendor"></dd>
+                                    </div>
+                                    <div x-show="selectedTrap.decoded?.interface">
+                                        <dt class="text-gray-600">Interface:</dt>
+                                        <dd x-text="selectedTrap.decoded?.interface"></dd>
+                                    </div>
+                                </dl>
+                            </div>
+                        </div>
+
+                        <!-- Varbinds -->
+                        <div class="mb-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-2">Variable Bindings</h3>
+                            <div class="space-y-2">
+                                <template x-for="(varbind, index) in selectedTrap.varbinds" :key="index">
+                                    <div class="bg-gray-50 rounded p-3 text-sm">
+                                        <div class="font-mono text-xs text-gray-600 mb-1" x-text="varbind.oid"></div>
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-900" x-text="varbind.value"></span>
+                                            <span class="text-gray-500" x-text="varbind.type"></span>
+                                        </div>
+                                        <div x-show="varbind.description" class="text-xs text-gray-600 mt-1" x-text="varbind.description"></div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Alert Status -->
+                        <div class="border-t border-gray-200 pt-4">
+                            <div class="flex items-center justify-between text-sm">
+                                <div>
+                                    <span class="text-gray-600">Alert Enabled:</span>
+                                    <span :class="selectedTrap.trap_alert_enabled ? 'text-green-600' : 'text-gray-400'"
+                                          x-text="selectedTrap.trap_alert_enabled ? 'Yes' : 'No'"></span>
+                                </div>
+                                <div x-show="selectedTrap.trap_alert_enabled">
+                                    <span class="text-gray-600">Alert Sent:</span>
+                                    <span :class="selectedTrap.alert_sent ? 'text-green-600' : 'text-orange-600'"
+                                          x-text="selectedTrap.alert_sent ? 'Yes' : 'Pending'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+
+<script>
+function trapsPage() {
+    return {
+        loading: true,
+        traps: [],
+        sources: [],
+        summary: {},
+        filterSource: '',
+        filterSeverity: '',
+        selectedTrap: null,
+
+        get filteredTraps() {
+            return this.traps.filter(trap => {
+                const matchesSource = !this.filterSource || trap.source_ip === this.filterSource;
+                const matchesSeverity = !this.filterSeverity || trap.decoded?.severity === this.filterSeverity;
+                return matchesSource && matchesSeverity;
+            });
+        },
+
+        init() {
+            this.fetchTraps();
+            setInterval(() => this.fetchTraps(), 15000);
+        },
+
+        async fetchTraps() {
+            try {
+                const response = await fetch('/api/monitoring/traps');
+                const data = await response.json();
+                this.traps = data.recent_traps || [];
+                this.sources = data.trap_sources || [];
+                this.summary = data.summary || {};
+                this.loading = false;
+            } catch (e) {
+                console.error('Failed to fetch traps:', e);
+                this.loading = false;
+            }
+        },
+
+        formatRelativeTime(timestamp) {
+            const now = new Date();
+            const then = new Date(timestamp);
+            const diff = Math.floor((now - then) / 1000);
+
+            if (diff < 60) return `${diff}s ago`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            return `${Math.floor(diff / 86400)}d ago`;
+        }
+    };
+}
+</script>
+{{end}}

@@ -1,0 +1,148 @@
+.\" Copyright 1999-2001 Jared Mauch
+.\" May be distributed under the GNU General Public License
+.\"
+.TH SYSMOND man "19 Feb 2001" "Version 0.90.12" "System Administration"
+.SH NAME
+sysmond \- System Monitoring Utility
+.SH SYNOPSIS
+.B sysmond
+.RB [ " \-d " ]
+.RB [ " \-f "
+.I config-file
+]
+.RB [ " \-h " ] 
+.RB [ " \-n " ]
+.RB [ " \-p"
+.IB port 
+]
+.RB [ " \-v " ]
+.RB [ " \-q " ]
+.RB [ " reload " ]
+.RB [ " pause " ]
+.RB [ " resume " ]
+.RB [ " stop " ]
+.LP
+.SH DESCRIPTION
+.B Sysmond
+provides ability to monitor many services
+
+The main configuration file
+.I /etc/sysmon.conf
+or an alternative file, given with the 
+.B "\-f"
+option, is read at startup. Any lines that begin with the hash mark
+(``#'') and empty lines are ignored. If an error occurs during parsing
+the whole line is ignored.
+.LP
+.SH OPTIONS
+.TP
+.B "\-d"
+Turns on debug mode. Using this the daemon will not proceed a 
+.BR fork (2)
+to set itself in the background, but opposite to that stay in the
+foreground and write much debug information on the current tty. See the
+DEBUGGING section for more information.
+.TP
+.BI "\-f " "config-file"
+Specify an alternative configuration file instead of
+.IR /etc/sysmon.conf ","
+which is the default.
+.TP
+.BI "\-p " "portnum"
+Specify an alternate port number to run on
+.TP
+.B "\-n"
+Tells sysmond to not send notifications to the contacts listed.
+Primarily used for debugging only
+.TP
+.B "\-t"
+This option will test the configuration file then exit rather than
+starting the monitoring daemon.
+.TP
+.B "\-v"
+Print version and exit.
+.TP
+.B "\-q"
+Quiet mode on stdout/err
+.TP
+.B "reload"
+Send the running sysmond a SIGHUP so it re-reads the config file.
+.TP
+.B "pause"
+Send the running sysmond a SIGUSR2 so it pauses monitoring.
+.TP
+.B "pause"
+Send the running sysmond a SIGUSR2 so it resumes monitoring.
+.TP
+.B "stop"
+Send the running sysmond a SIGTERM so it shuts down. The keywords
+.B shutdown
+and
+.B suicide
+also work.
+.LP
+.SH SIGNALS
+.B Sysmond
+reacts to a set of signals. You may easily send a signal to
+.B sysmond
+using the following:
+.IP
+.nf
+kill -SIGNAL process-id-of-sysmond
+.fi
+.PP
+.TP
+.B SIGHUP
+This lets
+.B sysmond
+perform a re-initialization. All open files are closed, the
+configuration file (default is 
+.IR /etc/sysmon.conf ")"
+will be reread and the
+monitoring is started again.
+.TP
+.B SIGUSR2
+This lets
+.B sysmond
+pause (or unpause) monitoring as desired.  This is useful if you
+will be performing network maintence and do not want to monitor
+the network for a period of time.
+.TP
+.B SIGTERM
+The
+.B sysmond
+process will die.
+.TP
+.LP
+.SH DEBUGGING
+When debugging is turned on using
+.B "\-D"
+option then
+.B sysmond
+will be very verbose by writing much of what it does on stdout. Whenever
+the configuration file is reread and re-parsed you'll see a lot of data,
+corresponding to the internal data structure.
+.SH FILES
+.PD 0
+.TP
+.I /etc/sysmon.conf
+Configuration file for
+.BR sysmond .
+See
+.BR sysmon.conf (man)
+for exact information.
+
+.LP
+.SH SEE ALSO
+.BR sysmon.conf (man)
+
+.LP
+.SH COLLABORATORS
+Sysmon is primarily written by
+.TP
+Jared Mauch
+.TP
+jared@puck.nether.net
+
+.PD
+.zZ
