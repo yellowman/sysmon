@@ -1,9 +1,14 @@
 /* $Id: icmp.c,v 1.64 2014/07/09 16:29:39 jared Exp $ */
 #include "config.h"
 #include <math.h>
+#include "ping-helper.h"
 
 extern struct protoent *icmpproto;
 extern int glob_icmp_fd;
+extern unsigned short int use_ping_helper;  /* From syswatch.c */
+
+/* Forward declarations */
+static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *here);
 
 #define A(bit)          icmp_temp.rcvd_tbl[(bit)>>3]  /*identify byte in array*/
 #define B(bit)          (1 << ((bit) & 0x07))   /* identify bit in byte */
@@ -412,7 +417,7 @@ void	pinger_v4(struct pingdata *localdata, struct monitorent *here)
 	int send_octets, sendtoret;
 	int serrno;
 
-	if (glob_icmp_fd == -1)
+	if (glob_icmp_fd == -1 && !use_ping_helper)
 		return;
 
 	localdata->packetsent++;
@@ -434,8 +439,16 @@ void	pinger_v4(struct pingdata *localdata, struct monitorent *here)
 	/* compute ICMP checksum here */
 	localdata->icp->ICMP_CHECKSUM = in_cksum((u_short *)localdata->icp, send_octets);
 
-	/* send the packet */
-	sendtoret = sendto(glob_icmp_fd, (char *)localdata->outpack, 
+	/* Use ping helper if enabled */
+	if (use_ping_helper) {
+		if (pinger_v4_via_helper(localdata, here) == 0) {
+			gettimeofday(&localdata->lastsentat, NULL);
+		}
+		return;
+	}
+
+	/* send the packet directly (traditional method) */
+	sendtoret = sendto(glob_icmp_fd, (char *)localdata->outpack,
 		send_octets, 0, &localdata->ping_target, sizeof(struct sockaddr));
 	serrno = errno;
 
@@ -457,6 +470,105 @@ void	pinger_v4(struct pingdata *localdata, struct monitorent *here)
 	}
 	/* Track it */
 	gettimeofday(&localdata->lastsentat, NULL);
+}
+
+/*
+ * pinger_v4_via_helper - Send ICMP packet via setuid helper
+ *
+ * This function invokes the sysmon-ping-helper to send ICMP packets.
+ * Used when running unprivileged to avoid needing root/CAP_NET_RAW.
+ */
+static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *here)
+{
+	struct ping_helper_request req;
+	int pipefd[2];
+	pid_t pid;
+	int status;
+	ssize_t written;
+
+	/* Build request for helper */
+	memset(&req, 0, sizeof(req));
+	req.address_family = HELPER_AF_INET;
+	req.protocol = HELPER_PROTO_ICMP;
+	memcpy(&req.dest.v4, &localdata->ping_target, sizeof(req.dest.v4));
+
+	/* Copy ICMP packet */
+	if (ICMP_PACKET_SIZE > MAX_PING_PACKET_SIZE) {
+		print_err(1, "ICMP packet size too large for helper");
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	memcpy(req.packet, localdata->outpack, ICMP_PACKET_SIZE);
+	req.packet_len = ICMP_PACKET_SIZE;
+
+	/* Create pipe for communication */
+	if (pipe(pipefd) < 0) {
+		perror("pinger_v4_via_helper: pipe");
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	/* Fork helper process */
+	pid = fork();
+	if (pid < 0) {
+		perror("pinger_v4_via_helper: fork");
+		close(pipefd[0]);
+		close(pipefd[1]);
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	if (pid == 0) {
+		/* Child process - exec helper */
+		close(pipefd[1]);  /* Close write end */
+
+		/* Redirect stdin to read end of pipe */
+		if (dup2(pipefd[0], STDIN_FILENO) < 0) {
+			perror("dup2");
+			exit(1);
+		}
+		close(pipefd[0]);
+
+		/* Exec the helper */
+		execl(PING_HELPER_PATH, "sysmon-ping-helper", (char *)NULL);
+
+		/* If we get here, exec failed */
+		perror("execl");
+		exit(1);
+	}
+
+	/* Parent process */
+	close(pipefd[0]);  /* Close read end */
+
+	/* Write request to helper */
+	written = write(pipefd[1], &req, sizeof(req));
+	if (written != sizeof(req)) {
+		perror("pinger_v4_via_helper: write");
+		close(pipefd[1]);
+		waitpid(pid, &status, 0);
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+	close(pipefd[1]);
+
+	/* Wait for helper to complete */
+	if (waitpid(pid, &status, 0) < 0) {
+		perror("pinger_v4_via_helper: waitpid");
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	/* Check helper exit status */
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		print_err(1, "ping-helper failed with status %d",
+		          WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	/* Success */
+	return 0;
 }
 
 /*
@@ -1070,6 +1182,17 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 	fromlen = sizeof(from);
 	recv_len = recvfrom(glob_icmp_fd, recv_buf, sizeof(recv_buf), MSG_DONTWAIT,
 	                    (struct sockaddr *)&from, &fromlen);
+
+	if (recv_len < 0) {
+		/* Distinguish between "no data yet" (EAGAIN) and actual errors */
+		if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			print_err(1, "service_test_rtt: recvfrom error for %s: %s",
+			          here->checkent->hostname, strerror(errno));
+			/* Continue to timeout check - this may be transient */
+		}
+		/* EAGAIN/EWOULDBLOCK is normal for non-blocking socket - fall through to timeout check */
+		goto timeout_check;
+	}
 
 	if (recv_len > 0) {
 		/* Record receive time immediately */
