@@ -58,26 +58,32 @@
             <h2 class="text-lg font-semibold text-gray-900 mb-4">
                 <i class="fas fa-info-circle mr-2"></i>Daemon Information
             </h2>
-            <dl class="space-y-2" x-show="daemon.version">
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">Version:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.version">-</dd>
+            <div x-show="daemon.version">
+                <dl class="space-y-2">
+                    <div class="flex justify-between">
+                        <dt class="text-sm text-gray-600">Version:</dt>
+                        <dd class="text-sm font-medium text-gray-900" x-text="daemon.version">-</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-sm text-gray-600">Uptime:</dt>
+                        <dd class="text-sm font-medium text-gray-900" x-text="formatUptime(daemon.uptime_seconds)">-</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-sm text-gray-600">PID:</dt>
+                        <dd class="text-sm font-medium text-gray-900" x-text="daemon.pid || 'N/A'">-</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-sm text-gray-600">Config File:</dt>
+                        <dd class="text-sm font-medium text-gray-900" x-text="daemon.config_file || 'N/A'">-</dd>
+                    </div>
+                </dl>
+                <div class="mt-4 text-xs text-gray-500">
+                    Last update: <span x-text="daemon.current_time ? new Date(daemon.current_time).toLocaleString() : 'Loading...'"></span>
                 </div>
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">Uptime:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="formatUptime(daemon.uptime_seconds)">-</dd>
-                </div>
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">PID:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.pid">-</dd>
-                </div>
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">Config File:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.config_file">-</dd>
-                </div>
-            </dl>
-            <div class="mt-4 text-xs text-gray-500">
-                Last update: <span x-text="new Date(daemon.current_time).toLocaleString()"></span>
+            </div>
+            <div x-show="!daemon.version" class="text-center py-8 text-gray-500">
+                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                <p class="text-sm">Loading daemon information...</p>
             </div>
         </div>
 
@@ -86,7 +92,9 @@
             <h2 class="text-lg font-semibold text-gray-900 mb-4">
                 <i class="fas fa-chart-pie mr-2"></i>Check Types
             </h2>
-            <canvas id="checkTypesChart" width="400" height="300"></canvas>
+            <div style="position: relative; height: 300px;">
+                <canvas id="checkTypesChart"></canvas>
+            </div>
         </div>
     </div>
 
@@ -371,11 +379,19 @@ function dashboard() {
             const ctx = document.getElementById('checkTypesChart');
             if (!ctx) return;
 
+            // Destroy existing chart if it exists
             if (this.chart) {
                 this.chart.destroy();
+                this.chart = null;
             }
 
             const types = this.stats.checks_by_type || {};
+
+            // Don't create chart if no data
+            if (Object.keys(types).length === 0) {
+                return;
+            }
+
             this.chart = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
@@ -390,10 +406,15 @@ function dashboard() {
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false,
+                    maintainAspectRatio: true,
+                    aspectRatio: 1.5,
                     plugins: {
                         legend: {
-                            position: 'right'
+                            position: 'right',
+                            labels: {
+                                boxWidth: 15,
+                                padding: 10
+                            }
                         }
                     }
                 }
