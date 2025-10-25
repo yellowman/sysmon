@@ -261,6 +261,11 @@ func (s *Service) ValidateConfig(cfg *models.Config) error {
 	return Validate(cfg)
 }
 
+// ReloadSysmon sends SIGHUP to reload the sysmon daemon
+func (s *Service) ReloadSysmon() error {
+	return s.reloadSysmon()
+}
+
 // getCurrentVersion gets the version without parsing
 func (s *Service) getCurrentVersion() (string, error) {
 	content, err := os.ReadFile(s.configPath)

@@ -1281,8 +1281,12 @@ void output_snmp_traps_json(int fd)
         }
         dprintf(fd, "        },\n");
 
-        dprintf(fd, "        \"matched_host\": %s,\n",
-               trap->matched_host ? trap->matched_host->hostname : "null");
+        dprintf(fd, "        \"matched_host\": ");
+        if (trap->matched_host) {
+            dprintf(fd, "\"%s\",\n", trap->matched_host->hostname);
+        } else {
+            dprintf(fd, "null,\n");
+        }
         dprintf(fd, "        \"trap_alert_enabled\": %s,\n",
                trap->matched_host && trap->matched_host->trap_alert ? "true" : "false");
         dprintf(fd, "        \"alert_sent\": %s\n",
@@ -1307,8 +1311,12 @@ void output_snmp_traps_json(int fd)
 
         dprintf(fd, "      {\n");
         dprintf(fd, "        \"source_ip\": \"%s\",\n", source->ip);
-        dprintf(fd, "        \"hostname\": %s,\n",
-               source->hostname ? source->hostname : "null");
+        dprintf(fd, "        \"hostname\": ");
+        if (source->hostname) {
+            dprintf(fd, "\"%s\",\n", source->hostname);
+        } else {
+            dprintf(fd, "null,\n");
+        }
         format_timestamp(timestamp_buf, sizeof(timestamp_buf), &source->first_seen);
         dprintf(fd, "        \"first_seen\": \"%s\",\n", timestamp_buf);
         format_timestamp(timestamp_buf, sizeof(timestamp_buf), &source->last_seen);
