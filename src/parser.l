@@ -25,6 +25,10 @@ int  parser_i_port = 0;
 char *parser_numfailures = NULL;
 int parser_i_numfailures = -1;
 int parser_obj_i_numfailures = -1;
+char *parser_minnumfailures = NULL;
+int parser_i_minnumfailures = -1;
+char *parser_flaptime = NULL;
+int parser_i_flaptime = -1;
 char *parser_desc = NULL;
 char *parser_group = NULL;
 char *parser_dns_query = NULL;
@@ -974,8 +978,7 @@ config\ pageinterval\ [^;]+;          {
     parser_obj_i_pageinterval = -1;
     if (debug)
       print_err(0, "pageinterval : %s/%d ", parser_pageinterval, parser_i_pageinterval);
-  } 
-
+  }
 };
 
 config\ maxqueued\ [^;]+;          {
@@ -1060,7 +1063,87 @@ config\ numfailures\ [^;]+;          {
 	parser_obj_i_numfailures = -1;
   }
   if (debug)
-    print_err(0, "numfailures : %s/%d ", parser_numfailures, parser_i_numfailures); 
+    print_err(0, "numfailures : %s/%d ", parser_numfailures, parser_i_numfailures);
+
+};
+
+config\ minnumfailures\ [^;]+;          {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strrchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_minnumfailures != NULL)
+  {
+        FREE(parser_minnumfailures);
+	parser_i_minnumfailures = -1;
+  }
+  parser_minnumfailures = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_minnumfailures");
+
+  strncpy( parser_minnumfailures, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_minnumfailures[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_minnumfailures = atol(parser_minnumfailures);
+  if (parser_i_minnumfailures < 1)
+  {
+	print_err(1, "Invalid minnumfailures specified in %s line %d (must be >= 1)",
+		current_parsing_filename, line_no);
+	parser_i_minnumfailures = 1;
+  }
+  if (debug)
+    print_err(0, "minnumfailures : %s/%d ", parser_minnumfailures, parser_i_minnumfailures);
+
+};
+
+config\ flaptime\ [^;]+;          {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strrchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_flaptime != NULL)
+  {
+        FREE(parser_flaptime);
+	parser_i_flaptime = -1;
+  }
+  parser_flaptime = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_flaptime");
+
+  strncpy( parser_flaptime, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_flaptime[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_flaptime = atol(parser_flaptime);
+  if (parser_i_flaptime < 0)
+  {
+	print_err(1, "Invalid flaptime specified in %s line %d (must be >= 0)",
+		current_parsing_filename, line_no);
+	parser_i_flaptime = 0;
+  }
+  if (debug)
+    print_err(0, "flaptime : %s/%d ", parser_flaptime, parser_i_flaptime);
 
 };
 
@@ -2769,6 +2852,7 @@ void add_object()
 		new_ele->value->data->check_start = 0;
 		new_ele->value->data->deathtime = 0;
 		new_ele->value->data->last_up = 0;
+		new_ele->value->data->last_recovery = 0;
 		new_ele->value->data->system_uptime = 0;
 
 		if (parser_contact != NULL)
@@ -3130,6 +3214,7 @@ void initalize_parser()
 	parser_include = NULL;
 	parser_queuetime = NULL;
 	parser_obj_i_queuetime = -1;
+	parser_obj_i_pageinterval = -1;
 	parser_obj_i_numfailures = -1;
 	parser_dnsexpire = NULL;
 	parser_dnslog = NULL;

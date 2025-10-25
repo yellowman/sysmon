@@ -173,10 +173,28 @@ void	add_line(FILE *fh, struct hostinfo down, int html, time_t now)
         char *updata = timedata(down.last_up);
         float value, tmp1, tmp2;
         char tmp[1024];
+	int in_flaptime_window = 0;
+
+	/* Check if we're within flaptime window after recovery.
+	 * If flaptime is enabled and the host recovered recently,
+	 * display it as green to prevent flapping appearance. */
+	if (flaptime > 0 && down.last_recovery > 0)
+	{
+		time_t elapsed = now - down.last_recovery;
+		if (elapsed < (flaptime * 60))
+		{
+			in_flaptime_window = 1;
+		}
+	}
 
 	if (html == 1)
 	{
-		if (down.lastcheck != SYSM_OK) 
+		if (in_flaptime_window)
+		{
+			/* Within flaptime window - show as up (green) */
+			fprintf(fh, "<TR class=\"up\">\n");
+		}
+		else if (down.lastcheck != SYSM_OK)
 		{
 			if (!down.contacted)
 			{
@@ -236,7 +254,11 @@ void	dump_to_file_walk_this_way(FILE *fh, struct graph_elements *here,
 	 * is set, then we show all hosts */
 	/* BUG: Need ability to sort */
 
-        if (here->data->lastcheck != 0 ||showupalso)   
+	/* Only display hosts that meet minnumfailures threshold.
+	 * If minnumfailures is set, a host must have failed at least
+	 * that many times before appearing in the output. This prevents
+	 * transient failures from triggering alerts. */
+        if ((here->data->lastcheck != 0 && here->data->downct >= minnumfailures) || showupalso)
         {
 		add_line(fh, *(here->data), html, now);
 		added = 1;

@@ -1154,11 +1154,17 @@ func (s *Service) GetObjectsXML() (string, error) {
 	}
 
 	// Get list of ALL objects with STATAL command
-	// Use STATAL to get both up and down hosts
+	// CRITICAL: Use STATAL (not STATO or STAT) because:
+	// - STATAL returns ALL hosts (both up and down)
+	// - STATO only returns hosts with errors (lastcheck != 0)
+	// - STATAL returns unique_name (the object identifier) like STATO
+	// - STAT returns hostname:type:port:... where hostname != unique_name
+	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
 	_, err = conn.Write([]byte("STATAL\n"))
 	if err != nil {
 		return "", fmt.Errorf("failed to send STATAL command: %w", err)
 	}
+	s.sessionLog.Log("STATAL", "getting object list (all hosts)", false, "")
 
 	// Read object names from STATAL response
 	// STATAL returns just unique_name, one per line (like STATO but for all hosts)
@@ -1176,6 +1182,7 @@ func (s *Service) GetObjectsXML() (string, error) {
 		}
 
 		// STATAL returns unique_name directly (no parsing needed)
+		// This is exactly what SHOWOBJ expects
 		if line != "" {
 			objectNames = append(objectNames, line)
 		}

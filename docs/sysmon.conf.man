@@ -124,10 +124,24 @@ once on startup.
 
 .SS pageinterval
 The ``config pageinterval'' directive allows you to configure a reminder
-interval that a host is still down.  This is an integer representing 
+interval that a host is still down.  This is an integer representing
 the number of minutes since the last e-mail message to a contact
 about the outage.  Once that timer has been reached, another message is
 sent.  This is useful for people who sleep through their pagers.
+
+The pageinterval can be configured globally (affecting all hosts) or
+per-object. When specified inside an object definition, it overrides
+the global setting for that specific host. This allows critical hosts
+to have more frequent re-page intervals while less important hosts can
+have longer intervals. Example:
+.nf
+  config pageinterval 60;  # Global: re-page every 60 minutes
+
+  object criticaldb ping mydb.example.com {
+    config pageinterval 15;  # Override: re-page every 15 minutes
+    contact oncall@example.com;
+  }
+.fi
 
 .SS logging 
 The ``config logging'' directive allows you to specify a syslog facility
@@ -201,19 +215,25 @@ down before a message is sent to the contact address.  The default is
 
 .SS minnumfailures
 The ``config minnumfailures'' directive takes an integer argument and
-specifies the minimum number of consecutive failures required before a
-host appears in the status file as down. This reduces false alarms from
-transient network issues. A host will only show as down when both
-numfailures and minnumfailures thresholds are met. The default is 1.
+specifies the minimum number of consecutive failures before a host
+appears in the status file (HTML or text) as yellow/down. This is
+useful for filtering out transient failures and reducing false alarms.
+For example, if set to 3, a host must fail at least 3 times in a row
+before appearing in the output. A host will only show as down when both
+numfailures and minnumfailures thresholds are met. The default is 1
+(show after first failure). Must be >= 1.
 Example: config minnumfailures 2;
 
 .SS flaptime
 The ``config flaptime'' directive takes an integer argument in minutes
-and specifies how long to keep a host marked as "up" (green) after it
-recovers from a down state. This prevents the visual "flapping" effect
-where hosts rapidly alternate between up and down in the status display.
-During the flap time period, the host appears stable even if subsequent
-checks fail, reducing alert fatigue. The default is 0 (disabled).
+and controls how long a host continues to display as green/up in the
+status file after recovering from a failure. This prevents the visual
+"flapping" appearance when a host goes up and down repeatedly. For
+example, if set to 5, a host that recovers will show as green for 5
+minutes even if it goes down again during that window. During the flap
+time period, the host appears stable even if subsequent checks fail,
+reducing alert fatigue. The default is 0 (disabled). Set to 0 to
+disable this feature.
 Example: config flaptime 5;
 
 .SS sleeptime
@@ -228,14 +248,6 @@ Refresh pseudo-header of the HTML status page.
 Supply a string which may contain formatting codes from strftime(3)
 (default "%x %X"), or the shorthand words "ISO" ("%F %T") or "DEC"
 ("%T %d-%b-%Y").
-
-.SS output
-The ``config output json'' directive enables JSON output mode. Sysmond
-writes monitoring data in JSON format to the specified file path. The
-JSON output includes detailed information about all monitored objects,
-their states, SNMP trap alerts, packet loss statistics, RTT/jitter
-measurements, and wakeup check results. Updated whenever state changes occur.
-Example: config output json "/var/log/sysmon/status.json";
 
 .SS drop_privileges
 The ``config drop_privileges'' directive enables privilege dropping for
