@@ -423,15 +423,21 @@ void service_test_pingv6(struct monitorent *here)
                         here->checkent->hostname, localstruct->ntransmitted);
         }
 
+        /* After sending all pings, wait longer before declaring unpingable.
+         * Use 2x ping6_packet_delay (2 seconds default) to allow for moderate
+         * latency while keeping checks responsive. The original 1-second timeout
+         * was causing false negatives for hosts with >1s RTT.
+         */
         if ((localstruct->ntransmitted >= here->checkent->send_pings) &&
-                (mydifftime(localstruct->lastsentat, right_now) >= ping6_packet_delay))
+                (mydifftime(localstruct->lastsentat, right_now) >= (ping6_packet_delay * 2)))
         {
                 /* if so, do the return thang */
                 if (debug)
                 {
-                        print_err(1, "pingv6.c: %s unpingable after %d attempts",
+                        print_err(1, "pingv6.c: %s unpingable after %d attempts (waited %.1fs after last ping)",
                                 here->checkent->hostname,
-                                localstruct->ntransmitted);
+                                localstruct->ntransmitted,
+                                mydifftime(localstruct->lastsentat, right_now));
                 }
                 here->retval = SYSM_UNPINGABLE; /* It's not pingable */
                 FREE(localstruct->packet); /* Free our packet */
