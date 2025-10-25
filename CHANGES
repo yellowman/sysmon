@@ -44,6 +44,12 @@ Daemon Improvements:
     - Keep host showing as green for N minutes after recovery
     - Prevents "flapping" appearance in status output
     - Default is 0 (disabled)
+  * Implemented per-object pageinterval configuration:
+    - Allow different hosts to have different re-page intervals
+    - Critical hosts can have shorter intervals (e.g., 15 minutes)
+    - Less critical hosts can have longer intervals (e.g., 60 minutes)
+    - Uses global pageinterval if not specified per-object
+    - Syntax: config pageinterval <minutes>; inside object definition
 
 Security and Privilege Dropping:
   * Added statustempdir configuration directive for privilege-dropped daemon
@@ -83,7 +89,6 @@ Wishlist for Future Versions
 
 Priority Items:
   * Multiple textfile outputs (by groups, by state)
-  * Per-host pageinterval configuration
   * SNMP custom up/down messages
   * SNMP OID comparison and custom error descriptions
   * State persistence across daemon restarts (config savestate)
@@ -102,3 +107,4 @@ Completed:
   * Paused host data visibility - DONE (visible in web-UI)
   * Configurable flaptime - DONE (v0.94: config flaptime directive)
   * Minimum failure count before yellow/txt - DONE (v0.94: config minnumfailures)
+  * Per-host pageinterval - DONE (v0.94: per-object pageinterval override)

@@ -123,10 +123,24 @@ once on startup.
 
 .SS pageinterval
 The ``config pageinterval'' directive allows you to configure a reminder
-interval that a host is still down.  This is an integer representing 
+interval that a host is still down.  This is an integer representing
 the number of minutes since the last e-mail message to a contact
 about the outage.  Once that timer has been reached, another message is
 sent.  This is useful for people who sleep through their pagers.
+
+The pageinterval can be configured globally (affecting all hosts) or
+per-object. When specified inside an object definition, it overrides
+the global setting for that specific host. This allows critical hosts
+to have more frequent re-page intervals while less important hosts can
+have longer intervals. Example:
+.nf
+  config pageinterval 60;  # Global: re-page every 60 minutes
+
+  object criticaldb ping mydb.example.com {
+    config pageinterval 15;  # Override: re-page every 15 minutes
+    contact oncall@example.com;
+  }
+.fi
 
 .SS logging 
 The ``config logging'' directive allows you to specify a syslog facility

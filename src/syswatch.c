@@ -1931,7 +1931,11 @@ void walk_periodic_page_checks(struct graph_elements *here, time_t now)
 		return;
 	here->visit = TRUE;
 	/* Do the check and page */
-	if (((now - here->data->lastcontacted) > (pageinterval*60)) &&
+	/* Use per-object pageinterval if set (-1 means use global) */
+	int effective_pageinterval = (here->data->pageinterval == -1) ?
+		pageinterval : here->data->pageinterval;
+
+	if (((now - here->data->lastcontacted) > (effective_pageinterval*60)) &&
 		(here->data->contacted))
 	{
 		page_someone(here->data, SYSM_CONTACT_DOWN, now);
