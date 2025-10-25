@@ -18,7 +18,7 @@ Architecture
   - Frontend: HTML templates with Alpine.js and Tailwind CSS
   - API: RESTful JSON API for monitoring data
   - Config Management: File-based with optimistic locking (SHA256 versioning)
-  - Monitoring: Direct JSON output from sysmon daemon
+  - Monitoring: Direct XML output from sysmon daemon via MODE xml
 
 Prerequisites
 
@@ -215,11 +215,9 @@ All configuration changes are logged with:
   - IP address
   - Details/comment
 
-JSON Output from Sysmon
+Sysmon Protocol
 
-The web UI requires sysmon to support JSON output mode. When connected to the sysmon daemon client port, send json\n command to receive structured JSON instead of text output.
-
-See SYSMON_JSON_OUTPUT_DESIGN.md for the complete JSON schema.
+The web UI communicates with sysmon daemon using the XML mode protocol. After connecting to the daemon's client port, it sends MODE xml to enable structured XML output, then uses commands like STATO, SHOWOBJ, and UPD to retrieve monitoring data.
 
 Browser Compatibility
 
