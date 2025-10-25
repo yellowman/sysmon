@@ -1166,7 +1166,7 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 	char recv_buf[512];
 	int recv_len;
 	struct ip *ip_hdr;
-	struct icmphdr *icmp_hdr;
+	struct ICMPHDR *icmp_hdr;
 	int ip_hdr_len;
 	double rtt_ms;
 	double elapsed_since_send;
@@ -1219,7 +1219,7 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		}
 
 		/* Validate enough space for ICMP header */
-		if (recv_len < ip_hdr_len + (int)sizeof(struct icmphdr)) {
+		if (recv_len < ip_hdr_len + (int)sizeof(struct ICMPHDR)) {
 			if (debug) {
 				print_err(1, "service_test_rtt: Packet too small for ICMP header (recv_len=%d, ip_hdr_len=%d)",
 					recv_len, ip_hdr_len);
@@ -1228,11 +1228,11 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		}
 
 		/* Parse ICMP header */
-		icmp_hdr = (struct icmphdr *)(recv_buf + ip_hdr_len);
+		icmp_hdr = (struct ICMPHDR *)(recv_buf + ip_hdr_len);
 
 		/* Check if this is our ICMP echo reply */
-		if (icmp_hdr->type == ICMP_ECHOREPLY &&
-		    icmp_hdr->un.echo.id == ping->ident) {
+		if (icmp_hdr->ICMP_TYPE == ICMP_ECHOREPLY &&
+		    icmp_hdr->ICMP_ECHO_ID == ping->ident) {
 
 			/* Calculate RTT */
 			rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, &recv_time);
