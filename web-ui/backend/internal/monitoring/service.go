@@ -19,14 +19,23 @@ type Service struct {
 
 // XMLParseError represents an XML parsing error with debug data
 type XMLParseError struct {
-	Message     string
-	ObjectName  string
-	RawXML      string
-	AllSamples  []map[string]string
+	Message      string
+	ObjectName   string
+	RawXML       string
+	AllSamples   []map[string]string
+	AllResponses []ResponseCapture // Capture ALL protocol responses
 }
 
 func (e *XMLParseError) Error() string {
 	return e.Message
+}
+
+// ResponseCapture captures a single protocol response
+type ResponseCapture struct {
+	Command  string `json:"command"`
+	Response string `json:"response"`
+	Parsed   bool   `json:"parsed"`
+	Error    string `json:"error,omitempty"`
 }
 
 // NewService creates a new monitoring service
@@ -134,6 +143,14 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	hostsUp := 0
 	hostsDown := 0
 	debugXMLSamples := []map[string]string{} // Collect first few XML samples for debugging
+	allResponses := []ResponseCapture{}       // Capture ALL protocol responses
+
+	// Capture MODE xml response
+	allResponses = append(allResponses, ResponseCapture{
+		Command:  "MODE xml",
+		Response: response,
+		Parsed:   strings.Contains(response, "333"),
+	})
 
 	for _, objName := range objectNames {
 		// Send SHOWOBJ command
@@ -169,13 +186,27 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 		// Parse XML
 		var xmlObj XMLObjectStatus
-		if err := xml.Unmarshal([]byte(xmlData), &xmlObj); err != nil {
-			// On first parse error, return error with debug data
+		parseErr := xml.Unmarshal([]byte(xmlData), &xmlObj)
+
+		// Capture this response
+		capture := ResponseCapture{
+			Command:  fmt.Sprintf("SHOWOBJ %s", objName),
+			Response: xmlData,
+			Parsed:   parseErr == nil,
+		}
+		if parseErr != nil {
+			capture.Error = parseErr.Error()
+		}
+		allResponses = append(allResponses, capture)
+
+		// If parse failed, return error with ALL captured data
+		if parseErr != nil {
 			return nil, &XMLParseError{
-				Message:     fmt.Sprintf("Failed to parse XML for object %s: %v", objName, err),
-				ObjectName:  objName,
-				RawXML:      xmlData,
-				AllSamples:  debugXMLSamples,
+				Message:      fmt.Sprintf("Failed to parse XML for object %s: %v", objName, parseErr),
+				ObjectName:   objName,
+				RawXML:       xmlData,
+				AllSamples:   debugXMLSamples,
+				AllResponses: allResponses,
 			}
 		}
 
