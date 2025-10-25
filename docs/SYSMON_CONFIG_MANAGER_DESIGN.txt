@@ -1,137 +1,137 @@
-# Sysmon Config Manager - Design Document
+Sysmon Config Manager - Design Document
 
-## Overview
+Overview
 
 A modern web-based configuration management system for sysmon, built with Go backend and React frontend, deployed via FastCGI for seamless integration with existing web servers.
 
-## Architecture
+Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Web Browser                            │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │         React Frontend (Tailwind CSS)                │  │
-│  │  - Dashboard  - Hosts  - Checks  - Alerts           │  │
-│  └──────────────────────────────────────────────────────┘  │
-└───────────────────────┬─────────────────────────────────────┘
-                        │ HTTPS/REST API
-                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Nginx/Apache (Reverse Proxy)                │
-│                    ┌──────────────┐                         │
-│                    │  FastCGI     │                         │
-│                    │  Socket      │                         │
-│                    └──────┬───────┘                         │
-└───────────────────────────┼─────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Go Application (sysmon-webui)                  │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              HTTP/FastCGI Server                   │    │
-│  ├────────────────────────────────────────────────────┤    │
-│  │  REST API Handlers                                 │    │
-│  │  - /api/hosts      - /api/checks                   │    │
-│  │  - /api/contacts   - /api/services                 │    │
-│  │  - /api/config     - /api/reload                   │    │
-│  ├────────────────────────────────────────────────────┤    │
-│  │  Config Parser/Generator                           │    │
-│  │  - Parse sysmon.conf (lex/yacc based)              │    │
-│  │  - Generate sysmon.conf (templating)               │    │
-│  │  - Validation (syntax, semantics)                  │    │
-│  ├────────────────────────────────────────────────────┤    │
-│  │  Business Logic                                    │    │
-│  │  - CRUD operations for all config entities        │    │
-│  │  - Config diff/history                             │    │
-│  │  - Validation rules                                │    │
-│  ├────────────────────────────────────────────────────┤    │
-│  │  Sysmon Integration                                │    │
-│  │  - Config reload (SIGHUP)                          │    │
-│  │  - Status monitoring (via sysmon client)           │    │
-│  │  - Log tailing                                     │    │
-│  └────────────────────────────────────────────────────┘    │
-└─────────────────┬────────────────────────┬──────────────────┘
-                  │
-                  ▼
-    ┌──────────────────────────────────────┐
-    │  /etc/sysmon.conf                    │
-    │  (single source of truth)            │
-    │                                      │
-    │  /etc/sysmon.conf.backup.TIMESTAMP   │
-    │  (automatic backups on every change) │
-    │                                      │
-    │  /var/log/sysmon-webui/audit.log     │
-    │  (change audit trail)                │
-    └──────────────────────────────────────┘
-                  │
-                  ▼
-    ┌──────────────────────────────────────┐
-    │        sysmond daemon                │
-    │  (receives SIGHUP to reload config)  │
-    └──────────────────────────────────────┘
-```
+`
++-------------------------------------------------------------+
+|                      Web Browser                            |
+|  +------------------------------------------------------+  |
+|  |         React Frontend (Tailwind CSS)                |  |
+|  |  - Dashboard  - Hosts  - Checks  - Alerts           |  |
+|  +------------------------------------------------------+  |
++-----------------------+-------------------------------------+
+                        | HTTPS/REST API
+                        ?
++-------------------------------------------------------------+
+|                 Nginx/Apache (Reverse Proxy)                |
+|                    +--------------+                         |
+|                    |  FastCGI     |                         |
+|                    |  Socket      |                         |
+|                    +------+-------+                         |
++---------------------------+---------------------------------+
+                            |
+                            ?
++-------------------------------------------------------------+
+|              Go Application (sysmon-webui)                  |
+|  +----------------------------------------------------+    |
+|  |              HTTP/FastCGI Server                   |    |
+|  +----------------------------------------------------+    |
+|  |  REST API Handlers                                 |    |
+|  |  - /api/hosts      - /api/checks                   |    |
+|  |  - /api/contacts   - /api/services                 |    |
+|  |  - /api/config     - /api/reload                   |    |
+|  +----------------------------------------------------+    |
+|  |  Config Parser/Generator                           |    |
+|  |  - Parse sysmon.conf (lex/yacc based)              |    |
+|  |  - Generate sysmon.conf (templating)               |    |
+|  |  - Validation (syntax, semantics)                  |    |
+|  +----------------------------------------------------+    |
+|  |  Business Logic                                    |    |
+|  |  - CRUD operations for all config entities        |    |
+|  |  - Config diff/history                             |    |
+|  |  - Validation rules                                |    |
+|  +----------------------------------------------------+    |
+|  |  Sysmon Integration                                |    |
+|  |  - Config reload (SIGHUP)                          |    |
+|  |  - Status monitoring (via sysmon client)           |    |
+|  |  - Log tailing                                     |    |
+|  +----------------------------------------------------+    |
++-----------------+------------------------+------------------+
+                  |
+                  ?
+    +--------------------------------------+
+    |  /etc/sysmon.conf                    |
+    |  (single source of truth)            |
+    |                                      |
+    |  /etc/sysmon.conf.backup.TIMESTAMP   |
+    |  (automatic backups on every change) |
+    |                                      |
+    |  /var/log/sysmon-webui/audit.log     |
+    |  (change audit trail)                |
+    +--------------------------------------+
+                  |
+                  ?
+    +--------------------------------------+
+    |        sysmond daemon                |
+    |  (receives SIGHUP to reload config)  |
+    +--------------------------------------+
+`
 
-## Technology Stack
+Technology Stack
 
-### Backend (Go)
-- **Framework**: `net/http` + `net/http/fcgi` for FastCGI
-- **Router**: `chi` - lightweight, idiomatic router
-- **Config Parser**: Custom parser (reuse sysmon's parser.l concepts) or `goparsify`
-- **Storage**: File-based only - read/write `/etc/sysmon.conf` directly
-- **Validation**: `go-playground/validator/v10`
-- **Logging**: `zerolog`
-- **Process Control**: `os/signal` for SIGHUP to sysmond
-- **File Locking**: `syscall.Flock` for safe concurrent access
+Backend (Go)
+  - Framework: net/http + net/http/fcgi for FastCGI
+  - Router: chi - lightweight, idiomatic router
+  - Config Parser: Custom parser (reuse sysmon's parser.l concepts) or goparsify
+  - Storage: File-based only - read/write /etc/sysmon.conf directly
+  - Validation: go-playground/validator/v10
+  - Logging: zerolog
+  - Process Control: os/signal for SIGHUP to sysmond
+  - File Locking: syscall.Flock for safe concurrent access
 
-### Frontend (React)
-- **Framework**: React 18 with TypeScript
-- **Styling**: Tailwind CSS 3
-- **UI Components**:
-  - `shadcn/ui` (Radix UI primitives + Tailwind)
-  - `lucide-react` for icons
-- **State Management**:
-  - `TanStack Query` (React Query) for server state
-  - `zustand` for client state
-- **Forms**: `react-hook-form` + `zod` validation
-- **Routing**: `react-router-dom`
-- **HTTP Client**: `axios` with interceptors
-- **Build**: Vite
+Frontend (React)
+  - Framework: React 18 with TypeScript
+  - Styling: Tailwind CSS 3
+  - UI Components:
+  - shadcn/ui (Radix UI primitives + Tailwind)
+  - lucide-react for icons
+  - State Management:
+  - TanStack Query (React Query) for server state
+  - zustand for client state
+  - Forms: react-hook-form + zod validation
+  - Routing: react-router-dom
+  - HTTP Client: axios with interceptors
+  - Build: Vite
 
-### DevOps
-- **Deployment**: Systemd service + FastCGI socket
-- **Web Server**: Nginx (FastCGI proxy)
-- **Build**: Makefile + `go build`
-- **Assets**: Embedded via `embed` package (Go 1.16+)
+DevOps
+  - Deployment: Systemd service + FastCGI socket
+  - Web Server: Nginx (FastCGI proxy)
+  - Build: Makefile + go build
+  - Assets: Embedded via embed package (Go 1.16+)
 
-## Data Models
+Data Models
 
-### Core Entities
+Core Entities
 
-```go
+`go
 // Host represents a monitored host/device
 type Host struct {
-    ID                string    `json:"id" db:"id"`
-    Hostname          string    `json:"hostname" validate:"required,fqdn|ipv4"`
-    Description       string    `json:"description"`
-    Contact           string    `json:"contact" validate:"required"`
-    MaxWakeupRetries  int       `json:"max_wakeup_retries"`
-    TrapAlert         bool      `json:"trap_alert"`
-    Checks            []Check   `json:"checks"`
-    CreatedAt         time.Time `json:"created_at"`
-    UpdatedAt         time.Time `json:"updated_at"`
+    ID                string    json:"id" db:"id"
+    Hostname          string    json:"hostname" validate:"required,fqdn|ipv4"
+    Description       string    json:"description"
+    Contact           string    json:"contact" validate:"required"
+    MaxWakeupRetries  int       json:"max_wakeup_retries"
+    TrapAlert         bool      json:"trap_alert"
+    Checks            []Check   json:"checks"
+    CreatedAt         time.Time json:"created_at"
+    UpdatedAt         time.Time json:"updated_at"
 }
 
 // Check represents a monitoring check
 type Check struct {
-    ID              string            `json:"id" db:"id"`
-    HostID          string            `json:"host_id" db:"host_id"`
-    Type            CheckType         `json:"type" validate:"required"`
-    Interval        int               `json:"interval" validate:"required,min=1"`
-    Timeout         int               `json:"timeout" validate:"required,min=1"`
-    Params          map[string]any    `json:"params"`
-    Enabled         bool              `json:"enabled"`
-    CreatedAt       time.Time         `json:"created_at"`
-    UpdatedAt       time.Time         `json:"updated_at"`
+    ID              string            json:"id" db:"id"
+    HostID          string            json:"host_id" db:"host_id"
+    Type            CheckType         json:"type" validate:"required"
+    Interval        int               json:"interval" validate:"required,min=1"
+    Timeout         int               json:"timeout" validate:"required,min=1"
+    Params          map[string]any    json:"params"
+    Enabled         bool              json:"enabled"
+    CreatedAt       time.Time         json:"created_at"
+    UpdatedAt       time.Time         json:"updated_at"
 }
 
 type CheckType string
@@ -152,66 +152,66 @@ const (
 
 // Contact represents an alert contact
 type Contact struct {
-    ID          string    `json:"id" db:"id"`
-    Name        string    `json:"name" validate:"required"`
-    Email       string    `json:"email" validate:"required,email"`
-    Phone       string    `json:"phone"`
-    Pager       string    `json:"pager"`
-    Method      string    `json:"method" validate:"required,oneof=email sms page"`
-    Enabled     bool      `json:"enabled"`
-    CreatedAt   time.Time `json:"created_at"`
-    UpdatedAt   time.Time `json:"updated_at"`
+    ID          string    json:"id" db:"id"
+    Name        string    json:"name" validate:"required"
+    Email       string    json:"email" validate:"required,email"
+    Phone       string    json:"phone"
+    Pager       string    json:"pager"
+    Method      string    json:"method" validate:"required,oneof=email sms page"
+    Enabled     bool      json:"enabled"
+    CreatedAt   time.Time json:"created_at"
+    UpdatedAt   time.Time json:"updated_at"
 }
 
 // GlobalConfig represents global sysmon settings
 type GlobalConfig struct {
-    LogFacility      string `json:"log_facility"`
-    StatusInterval   int    `json:"status_interval"`
-    KillAfter        int    `json:"kill_after"`
-    WarnAfter        int    `json:"warn_after"`
-    MaxCheckInterval int    `json:"max_check_interval"`
-    DisableICMP      bool   `json:"disable_icmp"`
-    SNMPTrapPort     int    `json:"snmp_trap_port"`
+    LogFacility      string json:"log_facility"
+    StatusInterval   int    json:"status_interval"
+    KillAfter        int    json:"kill_after"
+    WarnAfter        int    json:"warn_after"
+    MaxCheckInterval int    json:"max_check_interval"
+    DisableICMP      bool   json:"disable_icmp"
+    SNMPTrapPort     int    json:"snmp_trap_port"
 }
 
 // ConfigSnapshot represents the current config state with version
 type ConfigSnapshot struct {
-    Version     string       `json:"version"`      // SHA256 hash of content
-    ModifiedAt  time.Time    `json:"modified_at"`  // File mtime
-    Global      GlobalConfig `json:"global"`
-    Hosts       []Host       `json:"hosts"`
-    Contacts    []Contact    `json:"contacts"`
+    Version     string       json:"version"      // SHA256 hash of content
+    ModifiedAt  time.Time    json:"modified_at"  // File mtime
+    Global      GlobalConfig json:"global"
+    Hosts       []Host       json:"hosts"
+    Contacts    []Contact    json:"contacts"
 }
 
 // ConfigUpdate represents a config update request with optimistic locking
 type ConfigUpdate struct {
-    Version     string       `json:"version" validate:"required"` // Must match current version
-    Comment     string       `json:"comment"`                     // Optional change description
-    Global      GlobalConfig `json:"global"`
-    Hosts       []Host       `json:"hosts"`
-    Contacts    []Contact    `json:"contacts"`
+    Version     string       json:"version" validate:"required" // Must match current version
+    Comment     string       json:"comment"                     // Optional change description
+    Global      GlobalConfig json:"global"
+    Hosts       []Host       json:"hosts"
+    Contacts    []Contact    json:"contacts"
 }
 
 // VersionConflict represents a version mismatch error
 type VersionConflict struct {
-    ExpectedVersion string          `json:"expected_version"`
-    ActualVersion   string          `json:"actual_version"`
-    CurrentConfig   *ConfigSnapshot `json:"current_config"`
-    Message         string          `json:"message"`
+    ExpectedVersion string          json:"expected_version"
+    ActualVersion   string          json:"actual_version"
+    CurrentConfig   *ConfigSnapshot json:"current_config"
+    Message         string          json:"message"
 }
-```
+`
 
-## REST API Design
+REST API Design
 
-### Authentication
-```
+Authentication
+`
 POST   /api/auth/login
 POST   /api/auth/logout
 GET    /api/auth/me
-```
+`
 
-### Hosts
-```
+Hosts
+`
 GET    /api/hosts                    # List all hosts
 GET    /api/hosts/:id                # Get single host
 POST   /api/hosts                    # Create host
@@ -219,57 +219,57 @@ PUT    /api/hosts/:id                # Update host
 DELETE /api/hosts/:id                # Delete host
 GET    /api/hosts/:id/checks         # Get host's checks
 GET    /api/hosts/:id/status         # Get live status from sysmon
-```
+`
 
-### Checks
-```
+Checks
+`
 GET    /api/checks                   # List all checks
 GET    /api/checks/:id               # Get single check
 POST   /api/checks                   # Create check
 PUT    /api/checks/:id               # Update check
 DELETE /api/checks/:id               # Delete check
 POST   /api/checks/:id/test          # Test check manually
-```
+`
 
-### Contacts
-```
+Contacts
+`
 GET    /api/contacts                 # List all contacts
 GET    /api/contacts/:id             # Get single contact
 POST   /api/contacts                 # Create contact
 PUT    /api/contacts/:id             # Update contact
 DELETE /api/contacts/:id             # Delete contact
 POST   /api/contacts/:id/test        # Send test alert
-```
+`
 
-### Configuration
-```
+Configuration
+`
 GET    /api/config                   # Get config snapshot with version
 PUT    /api/config                   # Update config (with version check)
 POST   /api/config/validate          # Validate config without saving
 POST   /api/config/reload            # Reload sysmon (SIGHUP)
 GET    /api/config/raw               # Get raw sysmon.conf with version
 PUT    /api/config/raw               # Update raw config (with version check)
-```
+`
 
-**Optimistic Locking Flow:**
-```
+Optimistic Locking Flow:
+`
 1. GET /api/config -> Returns { version: "abc123", ... }
 2. User edits config in UI
 3. PUT /api/config with { version: "abc123", ... }
 4. Server checks if version matches current file
-   - Match: Apply changes, return new version
-   - Mismatch: Return 409 Conflict with current config
-```
+  - Match: Apply changes, return new version
+  - Mismatch: Return 409 Conflict with current config
+`
 
-### Config Backups
-```
+Config Backups
+`
 GET    /api/backups                  # List backup files
 GET    /api/backups/:timestamp       # Get specific backup
 POST   /api/backups/:timestamp/restore  # Restore from backup
-```
+`
 
-### Live Monitoring (Query Sysmon Daemon via JSON)
-```
+Live Monitoring (Query Sysmon Daemon via JSON)
+`
 GET    /api/monitoring/status        # Get complete sysmon status (JSON from daemon)
 GET    /api/monitoring/hosts         # Get all hosts status
 GET    /api/monitoring/host/:name    # Get specific host status with all checks
@@ -277,20 +277,20 @@ GET    /api/monitoring/alerts        # Get active alerts
 GET    /api/monitoring/traps         # Get recent SNMP traps
 GET    /api/monitoring/traps/:source # Get traps from specific source
 GET    /api/monitoring/stats         # Get statistics (uptime, check counts, etc)
-```
+`
 
-**Note:** These endpoints query the live sysmon daemon via JSON output mode, NOT the config file.
+Note: These endpoints query the live sysmon daemon via JSON output mode, NOT the config file.
 
-### Audit
-```
+Audit
+`
 GET    /api/audit                    # Get recent audit log entries (from file)
-```
+`
 
-## Config Parser/Generator
+Config Parser/Generator
 
-### Parser Strategy
+Parser Strategy
 
-```go
+`go
 package parser
 
 // Parser reads sysmon.conf and converts to internal models
@@ -299,7 +299,7 @@ type Parser struct {
 }
 
 // Parse parses the config file
-func (p *Parser) Parse(filename string) (*Config, error) {
+func (p Parser) Parse(filename string) (Config, error) {
     // Read file
     // Tokenize (similar to parser.l logic)
     // Build AST
@@ -314,11 +314,11 @@ type Config struct {
     Hosts    []Host
     Contacts []Contact
 }
-```
+`
 
-### Generator Strategy
+Generator Strategy
 
-```go
+`go
 package generator
 
 // Generator writes internal models to sysmon.conf format
@@ -327,20 +327,20 @@ type Generator struct {
 }
 
 // Generate creates sysmon.conf from internal models
-func (g *Generator) Generate(config *Config) (string, error) {
+func (g Generator) Generate(config Config) (string, error) {
     // Use text/template with sysmon.conf template
     // Generate hosts, contacts, checks
     // Format consistently
     return configText, nil
 }
-```
+`
 
-### Template Example
+Template Example
 
-```go
+`go
 const configTemplate = `
-# Sysmon Configuration
-# Generated by sysmon-webui on {{ .Timestamp }}
+Sysmon Configuration
+Generated by sysmon-webui on {{ .Timestamp }}
 
 {{ if .Global.LogFacility }}
 log_facility {{ .Global.LogFacility }}
@@ -377,72 +377,72 @@ host {{ .Hostname }} {
 }
 {{ end }}
 `
-```
+`
 
-## Frontend Architecture
+Frontend Architecture
 
-### Component Structure
+Component Structure
 
-```
+`
 src/
-├── components/
-│   ├── layout/
-│   │   ├── Sidebar.tsx
-│   │   ├── Header.tsx
-│   │   └── Layout.tsx
-│   ├── hosts/
-│   │   ├── HostList.tsx
-│   │   ├── HostCard.tsx
-│   │   ├── HostForm.tsx
-│   │   └── HostDetails.tsx
-│   ├── checks/
-│   │   ├── CheckList.tsx
-│   │   ├── CheckForm.tsx
-│   │   ├── CheckTypeSelector.tsx
-│   │   └── CheckStatus.tsx
-│   ├── contacts/
-│   │   ├── ContactList.tsx
-│   │   ├── ContactForm.tsx
-│   │   └── ContactCard.tsx
-│   ├── config/
-│   │   ├── GlobalConfig.tsx
-│   │   ├── ConfigEditor.tsx (Monaco editor for raw config)
-│   │   └── ConfigDiff.tsx
-│   ├── dashboard/
-│   │   ├── Dashboard.tsx
-│   │   ├── StatusOverview.tsx
-│   │   ├── AlertsWidget.tsx
-│   │   └── HealthChart.tsx
-│   └── common/
-│       ├── Button.tsx
-│       ├── Input.tsx
-│       ├── Select.tsx
-│       ├── Modal.tsx
-│       ├── Table.tsx
-│       └── Toast.tsx
-├── pages/
-│   ├── DashboardPage.tsx
-│   ├── HostsPage.tsx
-│   ├── ChecksPage.tsx
-│   ├── ContactsPage.tsx
-│   ├── ConfigPage.tsx
-│   └── AuditPage.tsx
-├── hooks/
-│   ├── useHosts.ts
-│   ├── useChecks.ts
-│   ├── useContacts.ts
-│   └── useConfig.ts
-├── services/
-│   └── api.ts
-├── types/
-│   └── index.ts
-└── App.tsx
-```
++-- components/
+|   +-- layout/
+|   |   +-- Sidebar.tsx
+|   |   +-- Header.tsx
+|   |   +-- Layout.tsx
+|   +-- hosts/
+|   |   +-- HostList.tsx
+|   |   +-- HostCard.tsx
+|   |   +-- HostForm.tsx
+|   |   +-- HostDetails.tsx
+|   +-- checks/
+|   |   +-- CheckList.tsx
+|   |   +-- CheckForm.tsx
+|   |   +-- CheckTypeSelector.tsx
+|   |   +-- CheckStatus.tsx
+|   +-- contacts/
+|   |   +-- ContactList.tsx
+|   |   +-- ContactForm.tsx
+|   |   +-- ContactCard.tsx
+|   +-- config/
+|   |   +-- GlobalConfig.tsx
+|   |   +-- ConfigEditor.tsx (Monaco editor for raw config)
+|   |   +-- ConfigDiff.tsx
+|   +-- dashboard/
+|   |   +-- Dashboard.tsx
+|   |   +-- StatusOverview.tsx
+|   |   +-- AlertsWidget.tsx
+|   |   +-- HealthChart.tsx
+|   +-- common/
+|       +-- Button.tsx
+|       +-- Input.tsx
+|       +-- Select.tsx
+|       +-- Modal.tsx
+|       +-- Table.tsx
+|       +-- Toast.tsx
++-- pages/
+|   +-- DashboardPage.tsx
+|   +-- HostsPage.tsx
+|   +-- ChecksPage.tsx
+|   +-- ContactsPage.tsx
+|   +-- ConfigPage.tsx
+|   +-- AuditPage.tsx
++-- hooks/
+|   +-- useHosts.ts
+|   +-- useChecks.ts
+|   +-- useContacts.ts
+|   +-- useConfig.ts
++-- services/
+|   +-- api.ts
++-- types/
+|   +-- index.ts
++-- App.tsx
+`
 
-### Key React Components
+Key React Components
 
-#### Dashboard
-```tsx
+Dashboard
+`tsx
 // Dashboard with status overview
 export function Dashboard() {
   const { data: status } = useQuery(['status'], api.getStatus)
@@ -469,10 +469,10 @@ export function Dashboard() {
     </div>
   )
 }
-```
+`
 
-#### Host Management
-```tsx
+Host Management
+`tsx
 // Host list with add/edit/delete
 export function HostList() {
   const { data: hosts, isLoading } = useHosts()
@@ -511,10 +511,10 @@ export function HostList() {
     </div>
   )
 }
-```
+`
 
-#### Check Configuration
-```tsx
+Check Configuration
+`tsx
 // Check form with type-specific fields
 export function CheckForm({ hostId, check, onSuccess }) {
   const { register, handleSubmit, watch } = useForm()
@@ -555,7 +555,7 @@ export function CheckForm({ hostId, check, onSuccess }) {
         {...register('timeout', { required: true, min: 1 })}
       />
 
-      {/* Type-specific fields */}
+      {/ Type-specific fields /}
       {checkType === 'tcp' && (
         <Input
           label="Port"
@@ -624,10 +624,10 @@ export function CheckForm({ hostId, check, onSuccess }) {
     </form>
   )
 }
-```
+`
 
-#### Config Editor (Raw Mode)
-```tsx
+Config Editor (Raw Mode)
+`tsx
 // Raw config editor with Monaco
 import Editor from '@monaco-editor/react'
 
@@ -642,7 +642,7 @@ export function ConfigEditor() {
     if (result.valid) {
       toast.success('Configuration is valid')
     } else {
-      toast.error(`Validation errors: ${result.errors.join(', ')}`)
+      toast.error(Validation errors: ${result.errors.join(', ')})
     }
   }
 
@@ -681,13 +681,13 @@ export function ConfigEditor() {
     </div>
   )
 }
-```
+`
 
-## Backend Implementation Details
+Backend Implementation Details
 
-### Main Application Structure
+Main Application Structure
 
-```go
+`go
 package main
 
 import (
@@ -761,11 +761,11 @@ func main() {
     log.Println("FastCGI server listening on /var/run/sysmon-webui.sock")
     fcgi.Serve(listener, r)
 }
-```
+`
 
-### Config Service (Core Logic)
+Config Service (Core Logic)
 
-```go
+`go
 package service
 
 import (
@@ -784,7 +784,7 @@ type ConfigService struct {
 }
 
 // GetConfig reads config and returns snapshot with version
-func (s *ConfigService) GetConfig() (*ConfigSnapshot, error) {
+func (s ConfigService) GetConfig() (ConfigSnapshot, error) {
     s.mu.RLock()
     defer s.mu.RUnlock()
 
@@ -820,7 +820,7 @@ func (s *ConfigService) GetConfig() (*ConfigSnapshot, error) {
 }
 
 // UpdateConfig updates config with optimistic locking
-func (s *ConfigService) UpdateConfig(update *ConfigUpdate, user string, ip string) (*ConfigSnapshot, error) {
+func (s ConfigService) UpdateConfig(update ConfigUpdate, user string, ip string) (*ConfigSnapshot, error) {
     s.mu.Lock()
     defer s.mu.Unlock()
 
@@ -967,13 +967,13 @@ func (s *ConfigService) logAudit(action, user, ip, comment string) {
 
     f.WriteString(entry)
 }
-```
+`
 
-### Live Monitoring Service (JSON from Sysmon Daemon)
+Live Monitoring Service (JSON from Sysmon Daemon)
 
 The web UI connects to the sysmon daemon and requests JSON output, eliminating fragile text parsing.
 
-```go
+`go
 package service
 
 import (
@@ -991,50 +991,50 @@ type StatusService struct {
 
 // Status represents the pretty-formatted sysmon status
 type Status struct {
-    Uptime        string        `json:"uptime"`
-    TotalHosts    int           `json:"total_hosts"`
-    HealthyHosts  int           `json:"healthy_hosts"`
-    FailingHosts  int           `json:"failing_hosts"`
-    TotalChecks   int           `json:"total_checks"`
-    ActiveAlerts  int           `json:"active_alerts"`
-    Hosts         []HostStatus  `json:"hosts"`
-    Summary       StatusSummary `json:"summary"`
+    Uptime        string        json:"uptime"
+    TotalHosts    int           json:"total_hosts"
+    HealthyHosts  int           json:"healthy_hosts"
+    FailingHosts  int           json:"failing_hosts"
+    TotalChecks   int           json:"total_checks"
+    ActiveAlerts  int           json:"active_alerts"
+    Hosts         []HostStatus  json:"hosts"
+    Summary       StatusSummary json:"summary"
 }
 
 type HostStatus struct {
-    Hostname     string        `json:"hostname"`
-    Status       string        `json:"status"`        // "OK", "WARNING", "CRITICAL", "UNKNOWN"
-    StatusColor  string        `json:"status_color"`  // "green", "yellow", "red", "gray"
-    LastCheck    time.Time     `json:"last_check"`
-    Response     string        `json:"response"`      // e.g., "12.3ms", "200 OK", etc.
-    Checks       []CheckStatus `json:"checks"`
-    Contact      string        `json:"contact"`
+    Hostname     string        json:"hostname"
+    Status       string        json:"status"        // "OK", "WARNING", "CRITICAL", "UNKNOWN"
+    StatusColor  string        json:"status_color"  // "green", "yellow", "red", "gray"
+    LastCheck    time.Time     json:"last_check"
+    Response     string        json:"response"      // e.g., "12.3ms", "200 OK", etc.
+    Checks       []CheckStatus json:"checks"
+    Contact      string        json:"contact"
 }
 
 type CheckStatus struct {
-    Type         string    `json:"type"`          // "ping", "tcp", "http", etc.
-    Status       string    `json:"status"`
-    StatusColor  string    `json:"status_color"`
-    Duration     string    `json:"duration"`
-    Message      string    `json:"message"`
-    LastRun      time.Time `json:"last_run"`
+    Type         string    json:"type"          // "ping", "tcp", "http", etc.
+    Status       string    json:"status"
+    StatusColor  string    json:"status_color"
+    Duration     string    json:"duration"
+    Message      string    json:"message"
+    LastRun      time.Time json:"last_run"
 }
 
 type StatusSummary struct {
-    ByType    map[string]int `json:"by_type"`     // Count by check type
-    ByStatus  map[string]int `json:"by_status"`   // Count by status
-    RecentChanges []StatusChange `json:"recent_changes"`
+    ByType    map[string]int json:"by_type"     // Count by check type
+    ByStatus  map[string]int json:"by_status"   // Count by status
+    RecentChanges []StatusChange json:"recent_changes"
 }
 
 type StatusChange struct {
-    Hostname  string    `json:"hostname"`
-    From      string    `json:"from"`
-    To        string    `json:"to"`
-    Timestamp time.Time `json:"timestamp"`
+    Hostname  string    json:"hostname"
+    From      string    json:"from"
+    To        string    json:"to"
+    Timestamp time.Time json:"timestamp"
 }
 
 // GetMonitoringStatus connects to sysmon and requests JSON output
-func (s *StatusService) GetMonitoringStatus() (*SysmonStatus, error) {
+func (s StatusService) GetMonitoringStatus() (SysmonStatus, error) {
     // Connect to sysmon client port
     conn, err := net.DialTimeout("tcp", s.sysmonHost, 5*time.Second)
     if err != nil {
@@ -1059,105 +1059,105 @@ func (s *StatusService) GetMonitoringStatus() (*SysmonStatus, error) {
 // SysmonStatus mirrors the JSON output from sysmon daemon
 // See SYSMON_JSON_OUTPUT_DESIGN.md for complete schema
 type SysmonStatus struct {
-    Daemon      DaemonInfo       `json:"daemon"`
-    Hosts       []HostStatus     `json:"hosts"`
-    Statistics  Stats            `json:"statistics"`
-    SNMPTraps   *TrapInfo        `json:"snmp_traps,omitempty"`
+    Daemon      DaemonInfo       json:"daemon"
+    Hosts       []HostStatus     json:"hosts"
+    Statistics  Stats            json:"statistics"
+    SNMPTraps   *TrapInfo        json:"snmp_traps,omitempty"
 }
 
 type DaemonInfo struct {
-    Version        string    `json:"version"`
-    Uptime         int64     `json:"uptime_seconds"`
-    StartTime      time.Time `json:"start_time"`
-    CurrentTime    time.Time `json:"current_time"`
-    PID            int       `json:"pid"`
-    ConfigFile     string    `json:"config_file"`
-    ConfigLoadTime time.Time `json:"config_load_time"`
+    Version        string    json:"version"
+    Uptime         int64     json:"uptime_seconds"
+    StartTime      time.Time json:"start_time"
+    CurrentTime    time.Time json:"current_time"
+    PID            int       json:"pid"
+    ConfigFile     string    json:"config_file"
+    ConfigLoadTime time.Time json:"config_load_time"
 }
 
 type HostStatus struct {
-    Hostname       string       `json:"hostname"`
-    IPv4Address    string       `json:"ipv4_address,omitempty"`
-    IPv6Address    string       `json:"ipv6_address,omitempty"`
-    OverallStatus  string       `json:"overall_status"`
-    StatusColor    string       `json:"status_color"`
-    Contact        string       `json:"contact,omitempty"`
-    Paused         bool         `json:"paused"`
-    Checks         []CheckResult `json:"checks"`
+    Hostname       string       json:"hostname"
+    IPv4Address    string       json:"ipv4_address,omitempty"
+    IPv6Address    string       json:"ipv6_address,omitempty"
+    OverallStatus  string       json:"overall_status"
+    StatusColor    string       json:"status_color"
+    Contact        string       json:"contact,omitempty"
+    Paused         bool         json:"paused"
+    Checks         []CheckResult json:"checks"
 }
 
 type CheckResult struct {
-    Type          string      `json:"type"`
-    Port          int         `json:"port,omitempty"`
-    Status        string      `json:"status"`
-    LastCheckTime time.Time   `json:"last_check_time"`
-    NextCheckTime time.Time   `json:"next_check_time"`
-    CheckInterval int         `json:"check_interval_seconds"`
-    ResponseTime  float64     `json:"response_time_ms,omitempty"`
-    StatusMessage string      `json:"status_message,omitempty"`
-    Result        interface{} `json:"result,omitempty"` // Type-specific result data
+    Type          string      json:"type"
+    Port          int         json:"port,omitempty"
+    Status        string      json:"status"
+    LastCheckTime time.Time   json:"last_check_time"
+    NextCheckTime time.Time   json:"next_check_time"
+    CheckInterval int         json:"check_interval_seconds"
+    ResponseTime  float64     json:"response_time_ms,omitempty"
+    StatusMessage string      json:"status_message,omitempty"
+    Result        interface{} json:"result,omitempty" // Type-specific result data
 }
 
 type Stats struct {
-    TotalHosts      int            `json:"total_hosts"`
-    HealthyHosts    int            `json:"healthy_hosts"`
-    WarningHosts    int            `json:"warning_hosts"`
-    CriticalHosts   int            `json:"critical_hosts"`
-    TotalChecks     int            `json:"total_checks"`
-    ChecksByType    map[string]int `json:"checks_by_type"`
-    ChecksByStatus  map[string]int `json:"checks_by_status"`
+    TotalHosts      int            json:"total_hosts"
+    HealthyHosts    int            json:"healthy_hosts"
+    WarningHosts    int            json:"warning_hosts"
+    CriticalHosts   int            json:"critical_hosts"
+    TotalChecks     int            json:"total_checks"
+    ChecksByType    map[string]int json:"checks_by_type"
+    ChecksByStatus  map[string]int json:"checks_by_status"
 }
 
 type TrapInfo struct {
-    RecentTraps  []Trap            `json:"recent_traps"`
-    TrapSources  []TrapSource      `json:"trap_sources"`
-    Summary      TrapSummary       `json:"summary"`
+    RecentTraps  []Trap            json:"recent_traps"
+    TrapSources  []TrapSource      json:"trap_sources"
+    Summary      TrapSummary       json:"summary"
 }
 
 type Trap struct {
-    SourceIP       string      `json:"source_ip"`
-    SourceHostname string      `json:"source_hostname,omitempty"`
-    Timestamp      time.Time   `json:"timestamp"`
-    TrapType       string      `json:"trap_type"`
-    Varbinds       []Varbind   `json:"varbinds"`
-    Decoded        *TrapDecode `json:"decoded,omitempty"`
-    MatchedHost    string      `json:"matched_host,omitempty"`
-    AlertEnabled   bool        `json:"trap_alert_enabled"`
-    AlertSent      bool        `json:"alert_sent"`
+    SourceIP       string      json:"source_ip"
+    SourceHostname string      json:"source_hostname,omitempty"
+    Timestamp      time.Time   json:"timestamp"
+    TrapType       string      json:"trap_type"
+    Varbinds       []Varbind   json:"varbinds"
+    Decoded        *TrapDecode json:"decoded,omitempty"
+    MatchedHost    string      json:"matched_host,omitempty"
+    AlertEnabled   bool        json:"trap_alert_enabled"
+    AlertSent      bool        json:"alert_sent"
 }
 
 type Varbind struct {
-    OID         string      `json:"oid"`
-    Type        string      `json:"type"`
-    Value       string      `json:"value"`
-    Description string      `json:"description,omitempty"`
+    OID         string      json:"oid"
+    Type        string      json:"type"
+    Value       string      json:"value"
+    Description string      json:"description,omitempty"
 }
 
 type TrapDecode struct {
-    TrapName       string `json:"trap_name"`
-    Description    string `json:"description"`
-    Severity       string `json:"severity"`
-    Category       string `json:"category"`
-    Vendor         string `json:"vendor,omitempty"`
-    Interface      string `json:"interface,omitempty"`
-    InterfaceIndex int    `json:"interface_index,omitempty"`
+    TrapName       string json:"trap_name"
+    Description    string json:"description"
+    Severity       string json:"severity"
+    Category       string json:"category"
+    Vendor         string json:"vendor,omitempty"
+    Interface      string json:"interface,omitempty"
+    InterfaceIndex int    json:"interface_index,omitempty"
 }
 
 type TrapSource struct {
-    SourceIP   string `json:"source_ip"`
-    Hostname   string `json:"hostname,omitempty"`
-    TrapCount  int    `json:"trap_count"`
-    LastTrap   time.Time `json:"last_trap"`
+    SourceIP   string json:"source_ip"
+    Hostname   string json:"hostname,omitempty"
+    TrapCount  int    json:"trap_count"
+    LastTrap   time.Time json:"last_trap"
 }
 
 type TrapSummary struct {
-    TotalTraps    int            `json:"total_traps_hour"`
-    TrapsByType   map[string]int `json:"traps_by_type"`
-    TrapsBySeverity map[string]int `json:"traps_by_severity"`
+    TotalTraps    int            json:"total_traps_hour"
+    TrapsByType   map[string]int json:"traps_by_type"
+    TrapsBySeverity map[string]int json:"traps_by_severity"
 }
 
 // GetDetailedHostStatus gets detailed status for a specific host
-func (s *StatusService) GetDetailedHostStatus(hostname string) (*HostStatus, error) {
+func (s StatusService) GetDetailedHostStatus(hostname string) (HostStatus, error) {
     // Get full status from sysmon
     status, err := s.GetMonitoringStatus()
     if err != nil {
@@ -1195,11 +1195,11 @@ func (s *StatusService) GetTrapsBySource(sourceIP string) ([]Trap, error) {
 
     return filtered, nil
 }
-```
+`
 
-**API Response Example:**
+API Response Example:
 
-```json
+`json
 {
   "uptime": "7 days, 3 hours",
   "total_hosts": 25,
@@ -1266,39 +1266,39 @@ func (s *StatusService) GetTrapsBySource(sourceIP string) ([]Trap, error) {
     }
   }
 }
-```
+`
 
-## Sysmon Socket Communication
+Sysmon Socket Communication
 
-The web UI talks to the same sysmon daemon socket that the CLI uses (typically `localhost:3355`). This provides real-time monitoring data.
+The web UI talks to the same sysmon daemon socket that the CLI uses (typically localhost:3355). This provides real-time monitoring data.
 
-**Communication Protocol:**
+Communication Protocol:
 
-```
+`
 Client -> Server:  "status\n"
 Server -> Client:  <text output with host statuses>
 
 Client -> Server:  "status hostname.example.com\n"
 Server -> Client:  <detailed status for specific host>
-```
+`
 
 The Go application parses this text output and transforms it into structured JSON for the frontend, providing:
 
-- Color-coded status indicators (green/yellow/red)
-- Sortable/filterable tables
-- Real-time updates via polling or WebSockets
-- Historical trend visualization (optional)
+  - Color-coded status indicators (green/yellow/red)
+  - Sortable/filterable tables
+  - Real-time updates via polling or WebSockets
+  - Historical trend visualization (optional)
 
-**Why This Approach Works:**
+Why This Approach Works:
 
-1. **No daemon modifications needed** - Uses existing sysmon client protocol
-2. **Real-time data** - Always shows current status from daemon
-3. **Reliable** - If sysmon is down, the web UI shows a clear error
-4. **Simple** - No need for separate monitoring data storage
+1. No daemon modifications needed - Uses existing sysmon client protocol
+2. Real-time data - Always shows current status from daemon
+3. Reliable - If sysmon is down, the web UI shows a clear error
+4. Simple - No need for separate monitoring data storage
 
-## Nginx Configuration
+Nginx Configuration
 
-```nginx
+`nginx
 server {
     listen 80;
     server_name sysmon.example.com;
@@ -1329,12 +1329,12 @@ server {
         proxy_set_header Connection "upgrade";
     }
 }
-```
+`
 
-## Systemd Service
+Systemd Service
 
-```ini
-# /etc/systemd/system/sysmon-webui.service
+`ini
+/etc/systemd/system/sysmon-webui.service
 [Unit]
 Description=Sysmon Web UI
 After=network.target sysmond.service
@@ -1348,7 +1348,7 @@ ExecStart=/usr/local/bin/sysmon-webui
 Restart=always
 RestartSec=5
 
-# Security hardening
+Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -1357,20 +1357,20 @@ ReadWritePaths=/var/run /var/lib/sysmon-webui /etc/sysmon.conf
 
 [Install]
 WantedBy=multi-user.target
-```
+`
 
-## Security Considerations
+Security Considerations
 
-### Authentication
-1. **Session-based auth** with secure cookies
-2. **RBAC** (Role-Based Access Control):
-   - Admin: Full access
-   - Operator: View + modify checks
-   - Viewer: Read-only
-3. **API tokens** for programmatic access
+Authentication
+1. Session-based auth with secure cookies
+2. RBAC (Role-Based Access Control):
+  - Admin: Full access
+  - Operator: View + modify checks
+  - Viewer: Read-only
+3. API tokens for programmatic access
 
-### Authorization
-```go
+Authorization
+`go
 // Middleware for role checking
 func RequireRole(role string) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
@@ -1384,25 +1384,25 @@ func RequireRole(role string) func(http.Handler) http.Handler {
         })
     }
 }
-```
+`
 
-### Input Validation
-1. **Strict validation** of all inputs
-2. **Sanitization** of hostnames, IPs, commands
-3. **Config validation** before applying
-4. **Test mode** - validate without applying
+Input Validation
+1. Strict validation of all inputs
+2. Sanitization of hostnames, IPs, commands
+3. Config validation before applying
+4. Test mode - validate without applying
 
-### Audit Trail
-1. **Log all changes** to audit_log table
-2. **Include user, IP, timestamp**
-3. **Store before/after state**
+Audit Trail
+1. Log all changes to audit_log table
+2. Include user, IP, timestamp
+3. Store before/after state
 
-## Deployment
+Deployment
 
-### Build Process
+Build Process
 
-```makefile
-# Makefile
+`makefile
+Makefile
 .PHONY: build frontend backend install
 
 all: build
@@ -1417,7 +1417,7 @@ build: frontend backend
 	# Embed frontend into Go binary
 	cd backend && \
 	go build -ldflags "-X main.Version=$(VERSION)" \
-	         -o ../sysmon-webui \
+  - o ../sysmon-webui \
 	         cmd/server/main.go
 
 install: build
@@ -1429,52 +1429,52 @@ install: build
 
 clean:
 	rm -rf frontend/dist backend/sysmon-webui sysmon-webui
-```
+`
 
-### Directory Structure
+Directory Structure
 
-```
+`
 sysmon-webui/
-├── backend/
-│   ├── cmd/
-│   │   └── server/
-│   │       └── main.go
-│   ├── internal/
-│   │   ├── api/          # HTTP handlers
-│   │   ├── service/      # Business logic
-│   │   ├── parser/       # Config parser
-│   │   ├── generator/    # Config generator
-│   │   ├── db/           # Database access
-│   │   └── models/       # Data models
-│   ├── pkg/
-│   │   └── client/       # Sysmon client
-│   ├── go.mod
-│   └── go.sum
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   ├── types/
-│   │   └── App.tsx
-│   ├── public/
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── tailwind.config.js
-│   └── vite.config.ts
-├── systemd/
-│   └── sysmon-webui.service
-├── nginx/
-│   └── sysmon-webui.conf
-├── Makefile
-└── README.md
-```
++-- backend/
+|   +-- cmd/
+|   |   +-- server/
+|   |       +-- main.go
+|   +-- internal/
+|   |   +-- api/          # HTTP handlers
+|   |   +-- service/      # Business logic
+|   |   +-- parser/       # Config parser
+|   |   +-- generator/    # Config generator
+|   |   +-- db/           # Database access
+|   |   +-- models/       # Data models
+|   +-- pkg/
+|   |   +-- client/       # Sysmon client
+|   +-- go.mod
+|   +-- go.sum
++-- frontend/
+|   +-- src/
+|   |   +-- components/
+|   |   +-- pages/
+|   |   +-- hooks/
+|   |   +-- services/
+|   |   +-- types/
+|   |   +-- App.tsx
+|   +-- public/
+|   +-- package.json
+|   +-- tsconfig.json
+|   +-- tailwind.config.js
+|   +-- vite.config.ts
++-- systemd/
+|   +-- sysmon-webui.service
++-- nginx/
+|   +-- sysmon-webui.conf
++-- Makefile
++-- README.md
+`
 
-## Testing Strategy
+Testing Strategy
 
-### Backend Tests
-```go
+Backend Tests
+`go
 // Unit tests
 func TestConfigParser(t *testing.T) {
     parser := parser.New()
@@ -1487,10 +1487,10 @@ func TestConfigParser(t *testing.T) {
 func TestConfigReload(t *testing.T) {
     // Test full config save + reload cycle
 }
-```
+`
 
-### Frontend Tests
-```tsx
+Frontend Tests
+`tsx
 // Component tests with React Testing Library
 describe('HostForm', () => {
   it('validates required fields', async () => {
@@ -1501,82 +1501,82 @@ describe('HostForm', () => {
     })
   })
 })
-```
+`
 
-### E2E Tests
-- **Playwright** for end-to-end testing
-- Test critical flows: create host, add check, save config, reload
+E2E Tests
+  - Playwright for end-to-end testing
+  - Test critical flows: create host, add check, save config, reload
 
-## Future Enhancements
+Future Enhancements
 
-1. **Real-time updates** via WebSockets
-2. **Graphing** with Chart.js/Recharts for historical data
-3. **Alerting dashboard** with real-time alert stream
-4. **Multi-tenancy** support
-5. **Config templates** for common setups
-6. **Import/export** configs
-7. **Bulk operations** (add multiple hosts from CSV)
-8. **Mobile app** (React Native)
-9. **Notifications** via push/email when config changes
-10. **Integration tests** with actual sysmon daemon
+1. Real-time updates via WebSockets
+2. Graphing with Chart.js/Recharts for historical data
+3. Alerting dashboard with real-time alert stream
+4. Multi-tenancy support
+5. Config templates for common setups
+6. Import/export configs
+7. Bulk operations (add multiple hosts from CSV)
+8. Mobile app (React Native)
+9. Notifications via push/email when config changes
+10. Integration tests with actual sysmon daemon
 
-## Performance Optimizations
+Performance Optimizations
 
-1. **Caching**: Redis for status data
-2. **Pagination**: Large host lists
-3. **Debouncing**: Config validation
-4. **Lazy loading**: Frontend routes
-5. **Compression**: Gzip responses
-6. **CDN**: Static assets
+1. Caching: Redis for status data
+2. Pagination: Large host lists
+3. Debouncing: Config validation
+4. Lazy loading: Frontend routes
+5. Compression: Gzip responses
+6. CDN: Static assets
 
-## Monitoring
+Monitoring
 
-1. **Prometheus metrics** endpoint
-2. **Health checks** endpoint
-3. **Log aggregation** (syslog/journald)
-4. **Error tracking** (Sentry)
+1. Prometheus metrics endpoint
+2. Health checks endpoint
+3. Log aggregation (syslog/journald)
+4. Error tracking (Sentry)
 
-## Administrator Experience (UX First)
+Administrator Experience (UX First)
 
-This design prioritizes **simplicity for administrators**, not simplicity of code. The goal is to make sysmon configuration accessible to anyone, not just those who can hand-edit config files.
+This design prioritizes simplicity for administrators, not simplicity of code. The goal is to make sysmon configuration accessible to anyone, not just those who can hand-edit config files.
 
-### Key Administrator Benefits
+Key Administrator Benefits
 
-**1. Visual Configuration Management**
-- No need to remember sysmon config syntax
-- Point-and-click interface for adding hosts and checks
-- Type-specific forms that only show relevant fields
-- Instant validation with clear error messages
+1. Visual Configuration Management
+  - No need to remember sysmon config syntax
+  - Point-and-click interface for adding hosts and checks
+  - Type-specific forms that only show relevant fields
+  - Instant validation with clear error messages
 
-**2. Safety and Confidence**
-- **Validation before saving** - Catch errors before they break production
-- **Automatic backups** - Every change creates a timestamped backup
-- **Optimistic locking** - Prevents conflicting simultaneous changes
-- **Test mode** - Validate without applying changes
+2. Safety and Confidence
+  - Validation before saving - Catch errors before they break production
+  - Automatic backups - Every change creates a timestamped backup
+  - Optimistic locking - Prevents conflicting simultaneous changes
+  - Test mode - Validate without applying changes
 
-**3. Visual Status Dashboard**
-- Color-coded status at a glance (green/yellow/red)
-- Real-time monitoring data from sysmon daemon
-- Sortable, filterable tables
-- Quick identification of problems
-- Drill-down into specific hosts/checks
+3. Visual Status Dashboard
+  - Color-coded status at a glance (green/yellow/red)
+  - Real-time monitoring data from sysmon daemon
+  - Sortable, filterable tables
+  - Quick identification of problems
+  - Drill-down into specific hosts/checks
 
-**4. Change Management**
-- **Audit trail** - Every change logged with who/when/what
-- **Config history** - View and restore previous versions
-- **Diff view** - See exactly what changed between versions
-- **Rollback** - Restore previous working configuration with one click
+4. Change Management
+  - Audit trail - Every change logged with who/when/what
+  - Config history - View and restore previous versions
+  - Diff view - See exactly what changed between versions
+  - Rollback - Restore previous working configuration with one click
 
-**5. No Learning Curve for New Administrators**
-- Intuitive UI - if you can use a website, you can use this
-- No need to SSH into server
-- No need to learn sysmon config syntax
-- No need to manually reload sysmon
+5. No Learning Curve for New Administrators
+  - Intuitive UI - if you can use a website, you can use this
+  - No need to SSH into server
+  - No need to learn sysmon config syntax
+  - No need to manually reload sysmon
 
-### Example Administrator Workflows
+Example Administrator Workflows
 
-**Adding a New Host (Without Web UI):**
-```
+Adding a New Host (Without Web UI):
+`
 1. SSH into server
 2. vi /etc/sysmon.conf
 3. Remember syntax: host hostname { contact ... }
@@ -1587,88 +1587,88 @@ This design prioritizes **simplicity for administrators**, not simplicity of cod
 8. Find sysmon PID: ps aux | grep sysmond
 9. Send SIGHUP: kill -HUP <pid>
 10. Check logs: tail -f /var/log/syslog
-```
+`
 
-**Adding a New Host (With Web UI):**
-```
+Adding a New Host (With Web UI):
+`
 1. Open web browser
 2. Click "Add Host"
 3. Fill in form (hostname, contact, description)
-4. Click "Add Check" → Select type → Fill in fields
+4. Click "Add Check" -> Select type -> Fill in fields
 5. Click "Save"
 6. System automatically validates, backs up, saves, and reloads
 7. See instant feedback if there are any issues
-```
+`
 
-**Viewing Status (Without Web UI):**
-```
+Viewing Status (Without Web UI):
+`
 1. SSH into server
 2. sysmon
 3. Read text output
 4. grep/scroll to find specific host
 5. Manually parse status codes
-```
+`
 
-**Viewing Status (With Web UI):**
-```
+Viewing Status (With Web UI):
+`
 1. Open dashboard
 2. See color-coded status grid
 3. Sort by status to see failures first
 4. Click host for details
 5. See visual check results
-```
+`
 
-## Summary
+Summary
 
 This design provides a complete, modern web interface for sysmon configuration management with:
 
-✅ **Administrator-Friendly** - Point-and-click instead of config file editing
-✅ **Safe** - Validation, backups, optimistic locking prevent mistakes
-✅ **No Database** - Single source of truth is /etc/sysmon.conf
-✅ **File-Based** - Simple architecture, no database to maintain
-✅ **Optimistic Locking** - Prevents conflicting simultaneous edits
-✅ **Clean architecture** - Well-organized Go backend, modern React frontend
-✅ **Type-safe** - Go + TypeScript prevent runtime errors
-✅ **Modern UI** - React + Tailwind CSS for beautiful, responsive interface
-✅ **FastCGI deployment** - Efficient, production-ready, integrates with Nginx/Apache
-✅ **Config versioning** - Track changes via timestamped backup files
-✅ **Audit trail** - Log file tracks who changed what and when
-✅ **Live reload** - SIGHUP to sysmon automatically
-✅ **Validation** - Prevent bad configs before applying
-✅ **Real-time Status** - Pretty display of sysmon daemon output
-✅ **Responsive** - Works on desktop, tablet, and mobile
-✅ **Secure** - Authentication, authorization, input validation
+? Administrator-Friendly - Point-and-click instead of config file editing
+? Safe - Validation, backups, optimistic locking prevent mistakes
+? No Database - Single source of truth is /etc/sysmon.conf
+? File-Based - Simple architecture, no database to maintain
+? Optimistic Locking - Prevents conflicting simultaneous edits
+? Clean architecture - Well-organized Go backend, modern React frontend
+? Type-safe - Go + TypeScript prevent runtime errors
+? Modern UI - React + Tailwind CSS for beautiful, responsive interface
+? FastCGI deployment - Efficient, production-ready, integrates with Nginx/Apache
+? Config versioning - Track changes via timestamped backup files
+? Audit trail - Log file tracks who changed what and when
+? Live reload - SIGHUP to sysmon automatically
+? Validation - Prevent bad configs before applying
+? Real-time Status - Pretty display of sysmon daemon output
+? Responsive - Works on desktop, tablet, and mobile
+? Secure - Authentication, authorization, input validation
 
-### Technical Simplicity
+Technical Simplicity
 
-**Backend:**
-- Single Go binary (includes embedded frontend)
-- No database to install or maintain
-- Reads/writes one file: `/etc/sysmon.conf`
-- Backups automatically created on every change
-- Talks to existing sysmon daemon socket
+Backend:
+  - Single Go binary (includes embedded frontend)
+  - No database to install or maintain
+  - Reads/writes one file: /etc/sysmon.conf
+  - Backups automatically created on every change
+  - Talks to existing sysmon daemon socket
 
-**Frontend:**
-- Modern React SPA
-- Embedded in Go binary (no separate deployment)
-- Tailwind CSS for beautiful UI without custom CSS
-- Real-time updates via API polling
+Frontend:
+  - Modern React SPA
+  - Embedded in Go binary (no separate deployment)
+  - Tailwind CSS for beautiful UI without custom CSS
+  - Real-time updates via API polling
 
-**Deployment:**
-- Single systemd service
-- FastCGI socket for Nginx/Apache
-- No migrations, no database schema updates
-- Updates via simple binary replacement
+Deployment:
+  - Single systemd service
+  - FastCGI socket for Nginx/Apache
+  - No migrations, no database schema updates
+  - Updates via simple binary replacement
 
-### Administrator Simplicity
+Administrator Simplicity
 
-- **No config file editing** - Visual forms instead
-- **No syntax to remember** - UI guides you
-- **No manual validation** - Automatic before save
-- **No manual backups** - Automatic on every change
-- **No manual reload** - Automatic SIGHUP
-- **No grep/awk to parse status** - Visual dashboard instead
-- **No SSH required** - Web interface from anywhere
-- **No fear of breaking production** - Validation + backups + rollback
+  - No config file editing - Visual forms instead
+  - No syntax to remember - UI guides you
+  - No manual validation - Automatic before save
+  - No manual backups - Automatic on every change
+  - No manual reload - Automatic SIGHUP
+  - No grep/awk to parse status - Visual dashboard instead
+  - No SSH required - Web interface from anywhere
+  - No fear of breaking production - Validation + backups + rollback
 
-The system is designed to be maintainable, extensible, and production-ready while providing an **excellent user experience** for administrators managing complex sysmon configurations. The code may be complex, but the **administrator experience is simple**.
+The system is designed to be maintainable, extensible, and production-ready while providing an excellent user experience for administrators managing complex sysmon configurations. The code may be complex, but the administrator experience is simple.

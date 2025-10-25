@@ -1,78 +1,78 @@
-# Sysmon JSON Output Mode - Design Document
+Sysmon JSON Output Mode - Design Document
 
-## Overview
+Overview
 
 Add a JSON output mode to sysmon that dumps the complete current monitoring state in a structured format. This enables the web UI (and other tools) to consume sysmon data without fragile text parsing.
 
-## Goals
+Goals
 
-1. **Complete State Export** - All monitoring data in one JSON response
-2. **Backwards Compatible** - Keep existing text output for CLI users
-3. **Efficient** - Minimal overhead, reuse existing data structures
-4. **Extensible** - Easy to add new fields without breaking clients
-5. **Real-time** - Reflect current state from the monitoring queue
+1. Complete State Export - All monitoring data in one JSON response
+2. Backwards Compatible - Keep existing text output for CLI users
+3. Efficient - Minimal overhead, reuse existing data structures
+4. Extensible - Easy to add new fields without breaking clients
+5. Real-time - Reflect current state from the monitoring queue
 
-## Command Protocol
+Command Protocol
 
-### Text Output (Existing - Keep for CLI)
-```
+Text Output (Existing - Keep for CLI)
+`
 Client: "status\n"
 Server: <text output>
-```
+`
 
-### JSON Output (New)
-```
+JSON Output (New)
+`
 Client: "status --json\n"
 Server: <JSON output>
-```
+`
 
 or
 
-```
+`
 Client: "json\n"
 Server: <JSON output>
-```
+`
 
-## Supported Test Types
+Supported Test Types
 
-The JSON output includes results for **all** sysmon test types:
+The JSON output includes results for all sysmon test types:
 
-### Network Tests
-- **PING** - ICMP echo request/reply (IPv4)
-- **PINGv6** - ICMP echo request/reply (IPv6)
-- **TCP** - TCP port connectivity
-- **UDP** - UDP response check
-- **RTT** - Round-trip time and jitter measurement
-- **UDP_RTT** - UDP-based RTT measurement
-- **Packet Loss** - Packet loss monitoring with history
+Network Tests
+  - PING - ICMP echo request/reply (IPv4)
+  - PINGv6 - ICMP echo request/reply (IPv6)
+  - TCP - TCP port connectivity
+  - UDP - UDP response check
+  - RTT - Round-trip time and jitter measurement
+  - UDP_RTT - UDP-based RTT measurement
+  - Packet Loss - Packet loss monitoring with history
 
-### Application Protocol Tests
-- **HTTP** - HTTP web server check
-- **HTTPS** - HTTPS web server check (with SSL cert monitoring)
-- **SMTP** - SMTP mail server check
-- **POP3** - POP3 mail server check
-- **IMAP** - IMAP mail server check
-- **NNTP** - NNTP news server check
-- **DNS** - DNS server resolution check
-- **SSH** - SSH server check (banner grab)
-- **IRC** - IRC server connectivity
-- **RADIUS** - RADIUS authentication check
+Application Protocol Tests
+  - HTTP - HTTP web server check
+  - HTTPS - HTTPS web server check (with SSL cert monitoring)
+  - SMTP - SMTP mail server check
+  - POP3 - POP3 mail server check
+  - IMAP - IMAP mail server check
+  - NNTP - NNTP news server check
+  - DNS - DNS server resolution check
+  - SSH - SSH server check (banner grab)
+  - IRC - IRC server connectivity
+  - RADIUS - RADIUS authentication check
 
-### Management Protocol Tests
-- **SNMP** - SNMP OID query with value checks
-- **SYSMON** - Monitor another sysmon daemon
+Management Protocol Tests
+  - SNMP - SNMP OID query with value checks
+  - SYSMON - Monitor another sysmon daemon
 
-### Legacy/Specialized Tests
-- **BOOTP** - BOOTP/DHCP server check
-- **X500** - UMich X500 directory check
+Legacy/Specialized Tests
+  - BOOTP - BOOTP/DHCP server check
+  - X500 - UMich X500 directory check
 
 Each test type has its own result format with type-specific metrics.
 
-## JSON Output Format
+JSON Output Format
 
-### Top-Level Structure
+Top-Level Structure
 
-```json
+`json
 {
   "version": "1.0",
   "timestamp": "2025-01-25T10:30:00Z",
@@ -440,56 +440,56 @@ Each test type has its own result format with type-specific metrics.
     "avg_check_time_ms": 2701.6
   }
 }
-```
+`
 
-### Type-Specific Result Formats
+Type-Specific Result Formats
 
-**PING:**
-```json
+PING:
+`json
 {
   "rtt_ms": 12.3,
   "packet_loss": 0
 }
-```
+`
 
-**TCP:**
-```json
+TCP:
+`json
 {
   "connected": true,
   "connection_time_ms": 5.2
 }
-```
+`
 
-**HTTP/HTTPS:**
-```json
+HTTP/HTTPS:
+`json
 {
   "status_code": 200,
   "response_time_ms": 234.5,
   "content_length": 4567,
   "ssl_days_remaining": 89  // HTTPS only
 }
-```
+`
 
-**SMTP:**
-```json
+SMTP:
+`json
 {
   "smtp_code": 220,
   "response_time_ms": 123.4,
   "message": "smtp.example.com ESMTP"
 }
-```
+`
 
-**POP3/IMAP:**
-```json
+POP3/IMAP:
+`json
 {
   "response_code": "+OK",
   "response_time_ms": 98.7,
   "message": "POP3 ready"
 }
-```
+`
 
-**DNS:**
-```json
+DNS:
+`json
 {
   "query": "example.com",
   "query_type": "A",
@@ -500,19 +500,19 @@ Each test type has its own result format with type-specific metrics.
   ],
   "authoritative": true
 }
-```
+`
 
-**SNMP:**
-```json
+SNMP:
+`json
 {
   "oid": ".1.3.6.1.2.1.2.2.1.10.1",
   "value": 1234567890,
   "type": "counter64"
 }
-```
+`
 
-**RTT/Jitter:**
-```json
+RTT/Jitter:
+`json
 {
   "rtt_min_ms": 7.2,
   "rtt_avg_ms": 8.5,
@@ -520,74 +520,74 @@ Each test type has its own result format with type-specific metrics.
   "jitter_ms": 2.1,
   "samples": 10
 }
-```
+`
 
-**UDP:**
-```json
+UDP:
+`json
 {
   "response_received": true,
   "response_time_ms": 23.4,
   "response_data": "..."
 }
-```
+`
 
-**NNTP:**
-```json
+NNTP:
+`json
 {
   "nntp_code": 200,
   "response_time_ms": 145.6,
   "message": "NNTP server ready"
 }
-```
+`
 
-**RADIUS:**
-```json
+RADIUS:
+`json
 {
   "access_accepted": true,
   "response_time_ms": 78.9,
   "radius_code": 2
 }
-```
+`
 
-**SSH:**
-```json
+SSH:
+`json
 {
   "ssh_version": "SSH-2.0-OpenSSH_8.2p1",
   "response_time_ms": 234.5,
   "banner": "Ubuntu-4ubuntu0.5"
 }
-```
+`
 
-**IRC:**
-```json
+IRC:
+`json
 {
   "connected": true,
   "response_time_ms": 123.4,
   "server_name": "irc.example.com"
 }
-```
+`
 
-**SYSMON (self-monitoring):**
-```json
+SYSMON (self-monitoring):
+`json
 {
   "response_time_ms": 5.2,
   "remote_uptime_seconds": 86400,
   "remote_hosts": 25,
   "remote_version": "v0.93"
 }
-```
+`
 
-**BOOTP:**
-```json
+BOOTP:
+`json
 {
   "response_received": true,
   "response_time_ms": 234.5,
   "offered_ip": "192.0.2.100"
 }
-```
+`
 
-**Packet Loss (with history):**
-```json
+Packet Loss (with history):
+`json
 {
   "current_loss_pct": 5.0,
   "threshold_pct": 10.0,
@@ -596,31 +596,31 @@ Each test type has its own result format with type-specific metrics.
   "total_packets": 100,
   "history": [0, 0, 5, 0, 0]  // Recent loss percentages
 }
-```
+`
 
-**UDP RTT:**
-```json
+UDP RTT:
+`json
 {
   "rtt_ms": 15.3,
   "response_received": true
 }
-```
+`
 
-## Implementation in Sysmon
+Implementation in Sysmon
 
-### Location in Code
+Location in Code
 
-Add JSON output to the existing client handler in `src/srvclient.c` (or `src/client.c` depending on file organization).
+Add JSON output to the existing client handler in src/srvclient.c (or src/client.c depending on file organization).
 
-### New Function
+New Function
 
-```c
+`c
 /*
- * output_status_json - Output monitoring status in JSON format
- *
- * Walks the monitoring queue and outputs a complete JSON representation
- * of the current monitoring state.
- */
+  - output_status_json - Output monitoring status in JSON format
+  - 
+  - Walks the monitoring queue and outputs a complete JSON representation
+  - of the current monitoring state.
+  - /
 void output_status_json(int fd)
 {
     struct monitorent *walker;
@@ -635,7 +635,7 @@ void output_status_json(int fd)
     time(&now);
     gettimeofday(&now_tv, NULL);
 
-    /* Format timestamps */
+    / Format timestamps /
     strftime(timestamp_buf, sizeof(timestamp_buf),
              "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
     strftime(started_buf, sizeof(started_buf),
@@ -643,12 +643,12 @@ void output_status_json(int fd)
     strftime(config_loaded_buf, sizeof(config_loaded_buf),
              "%Y-%m-%dT%H:%M:%SZ", gmtime(&config_load_time));
 
-    /* Write JSON header */
+    / Write JSON header /
     dprintf(fd, "{\n");
     dprintf(fd, "  \"version\": \"1.0\",\n");
     dprintf(fd, "  \"timestamp\": \"%s\",\n", timestamp_buf);
 
-    /* Daemon info */
+    / Daemon info /
     dprintf(fd, "  \"daemon\": {\n");
     dprintf(fd, "    \"pid\": %d,\n", getpid());
     dprintf(fd, "    \"uptime_seconds\": %ld,\n", now - boottime);
@@ -658,10 +658,10 @@ void output_status_json(int fd)
     dprintf(fd, "    \"config_loaded_at\": \"%s\"\n", config_loaded_buf);
     dprintf(fd, "  },\n");
 
-    /* Summary statistics */
+    / Summary statistics /
     output_summary_json(fd);
 
-    /* Hosts array */
+    / Hosts array /
     dprintf(fd, "  \"hosts\": [\n");
 
     first_host = 1;
@@ -679,10 +679,10 @@ void output_status_json(int fd)
 
     dprintf(fd, "\n  ],\n");
 
-    /* Active alerts */
+    / Active alerts /
     output_alerts_json(fd);
 
-    /* Queue stats */
+    / Queue stats /
     dprintf(fd, "  \"queue\": {\n");
     dprintf(fd, "    \"size\": %d,\n", numqueued);
     dprintf(fd, "    \"pending\": %d,\n", count_pending_checks());
@@ -692,7 +692,7 @@ void output_status_json(int fd)
     dprintf(fd, "    \"warn_after\": %d\n", warnafter);
     dprintf(fd, "  },\n");
 
-    /* Stats */
+    / Stats /
     dprintf(fd, "  \"stats\": {\n");
     dprintf(fd, "    \"checks_completed\": %lu,\n", total_checks_completed);
     dprintf(fd, "    \"checks_failed\": %lu,\n", total_checks_failed);
@@ -703,8 +703,8 @@ void output_status_json(int fd)
 }
 
 /*
- * output_host_json - Output single host in JSON format
- */
+  - output_host_json - Output single host in JSON format
+  - /
 void output_host_json(int fd, struct monitorent *mon)
 {
     struct hostinfo *host = mon->checkent;
@@ -713,11 +713,11 @@ void output_host_json(int fd, struct monitorent *mon)
     const char *status_str;
     int first_check;
 
-    /* Format timestamps */
+    / Format timestamps /
     format_timestamp(last_check_buf, sizeof(last_check_buf), &mon->lastserv);
     format_next_check(next_check_buf, sizeof(next_check_buf), mon);
 
-    /* Determine host status from check results */
+    / Determine host status from check results /
     status_str = get_host_status_string(mon);
 
     dprintf(fd, "    {\n");
@@ -728,12 +728,12 @@ void output_host_json(int fd, struct monitorent *mon)
     dprintf(fd, "      \"last_check\": \"%s\",\n", last_check_buf);
     dprintf(fd, "      \"next_check\": \"%s\",\n", next_check_buf);
 
-    /* Checks array */
+    / Checks array /
     dprintf(fd, "      \"checks\": [\n");
 
     first_check = 1;
 
-    /* Output each check based on type */
+    / Output each check based on type /
     if (host->pingtype == SYSM_PING) {
         if (!first_check) dprintf(fd, ",\n");
         output_check_json(fd, mon, "ping");
@@ -753,11 +753,11 @@ void output_host_json(int fd, struct monitorent *mon)
         first_check = 0;
     }
 
-    /* ... other check types ... */
+    / ... other check types ... /
 
     dprintf(fd, "\n      ],\n");
 
-    /* Metadata */
+    / Metadata /
     dprintf(fd, "      \"metadata\": {\n");
     if (host->description) {
         dprintf(fd, "        \"description\": \"%s\",\n", host->description);
@@ -772,9 +772,9 @@ void output_host_json(int fd, struct monitorent *mon)
 }
 
 /*
- * output_check_json - Output single check in JSON format
- */
-void output_check_json(int fd, struct monitorent *mon, const char *check_type)
+  - output_check_json - Output single check in JSON format
+  - /
+void output_check_json(int fd, struct monitorent mon, const char check_type)
 {
     struct hostinfo *host = mon->checkent;
     char last_run_buf[64];
@@ -787,7 +787,7 @@ void output_check_json(int fd, struct monitorent *mon, const char *check_type)
 
     status_str = get_check_status_string(mon);
 
-    /* Calculate check duration */
+    / Calculate check duration /
     if (mon->checkent->lastchecktime > 0) {
         duration_ms = mon->checkent->lastchecktime * 1000.0;
     }
@@ -795,7 +795,7 @@ void output_check_json(int fd, struct monitorent *mon, const char *check_type)
     dprintf(fd, "        {\n");
     dprintf(fd, "          \"id\": \"%s", check_type);
 
-    /* Add port to ID if applicable */
+    / Add port to ID if applicable /
     if (strcmp(check_type, "tcp") == 0) {
         dprintf(fd, "-%d", host->tcpport);
     } else if (strcmp(check_type, "http") == 0 || strcmp(check_type, "https") == 0) {
@@ -808,7 +808,7 @@ void output_check_json(int fd, struct monitorent *mon, const char *check_type)
     dprintf(fd, "          \"interval\": %d,\n", host->queuetime);
     dprintf(fd, "          \"timeout\": %d,\n", host->timeout);
 
-    /* Type-specific fields */
+    / Type-specific fields /
     if (strcmp(check_type, "tcp") == 0) {
         dprintf(fd, "          \"port\": %d,\n", host->tcpport);
     } else if (strcmp(check_type, "http") == 0 || strcmp(check_type, "https") == 0) {
@@ -833,7 +833,7 @@ void output_check_json(int fd, struct monitorent *mon, const char *check_type)
     dprintf(fd, "          \"next_run\": \"%s\",\n", next_run_buf);
     dprintf(fd, "          \"duration_ms\": %.1f", duration_ms);
 
-    /* Result or error */
+    / Result or error /
     if (mon->retval == SYSM_OK) {
         dprintf(fd, ",\n");
         output_check_result_json(fd, mon, check_type);
@@ -849,9 +849,9 @@ void output_check_json(int fd, struct monitorent *mon, const char *check_type)
 }
 
 /*
- * output_check_result_json - Output check result based on type
- */
-void output_check_result_json(int fd, struct monitorent *mon, const char *check_type)
+  - output_check_result_json - Output check result based on type
+  - /
+void output_check_result_json(int fd, struct monitorent mon, const char check_type)
 {
     struct pingdata *ping;
     struct rtt_data *rtt;
@@ -887,7 +887,7 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
             dprintf(fd, "            \"samples\": %u,\n", pktloss->total_samples);
             dprintf(fd, "            \"lost_packets\": %u,\n", pktloss->lost);
             dprintf(fd, "            \"total_packets\": %u\n", pktloss->total);
-            /* Could add history array if available */
+            / Could add history array if available /
         }
 
     } else if (strcmp(check_type, "http") == 0 || strcmp(check_type, "https") == 0) {
@@ -915,7 +915,7 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         dprintf(fd, "\n");
 
     } else if (strcmp(check_type, "smtp") == 0) {
-        dprintf(fd, "            \"smtp_code\": 220,\n");  /* From check data */
+        dprintf(fd, "            \"smtp_code\": 220,\n");  / From check data /
         dprintf(fd, "            \"response_time_ms\": %.1f,\n",
                mon->checkent->lastchecktime * 1000.0);
         dprintf(fd, "            \"message\": \"ESMTP ready\"\n");
@@ -934,12 +934,12 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         dprintf(fd, "            \"message\": \"NNTP server ready\"\n");
 
     } else if (strcmp(check_type, "dns") == 0) {
-        /* Extract DNS query results */
+        / Extract DNS query results /
         dprintf(fd, "            \"query\": \"%s\",\n", mon->checkent->dns_query);
         dprintf(fd, "            \"query_type\": \"A\",\n");
         dprintf(fd, "            \"response_time_ms\": %.1f,\n",
                mon->checkent->lastchecktime * 1000.0);
-        dprintf(fd, "            \"answers\": [],\n");  /* Would need to extract actual answers */
+        dprintf(fd, "            \"answers\": [],\n");  / Would need to extract actual answers /
         dprintf(fd, "            \"authoritative\": true\n");
 
     } else if (strcmp(check_type, "snmp") == 0) {
@@ -951,7 +951,7 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         }
 
     } else if (strcmp(check_type, "ssh") == 0) {
-        /* Extract SSH banner */
+        / Extract SSH banner /
         dprintf(fd, "            \"ssh_version\": \"SSH-2.0-OpenSSH_8.2p1\",\n");
         dprintf(fd, "            \"response_time_ms\": %.1f,\n",
                mon->checkent->lastchecktime * 1000.0);
@@ -961,7 +961,7 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         dprintf(fd, "            \"access_accepted\": true,\n");
         dprintf(fd, "            \"response_time_ms\": %.1f,\n",
                mon->checkent->lastchecktime * 1000.0);
-        dprintf(fd, "            \"radius_code\": 2\n");  /* Access-Accept */
+        dprintf(fd, "            \"radius_code\": 2\n");  / Access-Accept /
 
     } else if (strcmp(check_type, "irc") == 0) {
         dprintf(fd, "            \"connected\": true,\n");
@@ -970,7 +970,7 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         dprintf(fd, "            \"server_name\": \"%s\"\n", mon->checkent->hostname);
 
     } else if (strcmp(check_type, "sysmon") == 0) {
-        /* Monitoring another sysmon daemon */
+        / Monitoring another sysmon daemon /
         dprintf(fd, "            \"response_time_ms\": %.1f,\n",
                mon->checkent->lastchecktime * 1000.0);
         dprintf(fd, "            \"remote_uptime_seconds\": 86400,\n");
@@ -989,7 +989,7 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         dprintf(fd, "            \"response_received\": true\n");
 
     } else {
-        /* Generic/unknown check type */
+        / Generic/unknown check type /
         dprintf(fd, "            \"response_time_ms\": %.1f\n",
                mon->checkent->lastchecktime * 1000.0);
     }
@@ -998,8 +998,8 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
 }
 
 /*
- * output_summary_json - Output summary statistics
- */
+  - output_summary_json - Output summary statistics
+  - /
 void output_summary_json(int fd)
 {
     int total_hosts = 0;
@@ -1009,13 +1009,13 @@ void output_summary_json(int fd)
     int checks_ok = 0, checks_warn = 0, checks_crit = 0;
     struct monitorent *walker;
 
-    /* Count everything */
+    / Count everything /
     for (walker = queuehead; walker != NULL; walker = walker->next) {
         if (walker->checkent == NULL) continue;
 
         total_hosts++;
 
-        /* Determine host status */
+        / Determine host status /
         if (walker->retval == SYSM_OK) {
             hosts_ok++;
         } else if (walker->retval == SYSM_WARNING) {
@@ -1024,7 +1024,7 @@ void output_summary_json(int fd)
             hosts_crit++;
         }
 
-        /* Count check types */
+        / Count check types /
         if (walker->checkent->pingtype == SYSM_PING) {
             checks_ping++;
             total_checks++;
@@ -1041,7 +1041,7 @@ void output_summary_json(int fd)
             total_checks++;
         }
 
-        /* ... count other types ... */
+        / ... count other types ... /
     }
 
     dprintf(fd, "  \"summary\": {\n");
@@ -1071,8 +1071,8 @@ void output_summary_json(int fd)
 }
 
 /*
- * decode_snmp_trap - Decode SNMP trap into human-readable format
- */
+  - decode_snmp_trap - Decode SNMP trap into human-readable format
+  - /
 struct trap_decode {
     char trap_name[128];
     char description[512];
@@ -1090,34 +1090,34 @@ struct trap_decode *decode_snmp_trap(int generic_trap, int specific_trap,
     struct trap_decode *decoded = malloc(sizeof(struct trap_decode));
     memset(decoded, 0, sizeof(struct trap_decode));
 
-    /* Standard SNMP generic traps */
+    / Standard SNMP generic traps /
     switch (generic_trap) {
-        case 0:  /* coldStart */
+        case 0:  / coldStart /
             strcpy(decoded->trap_name, "Cold Start");
             strcpy(decoded->description, "Device has been powered on or rebooted");
             strcpy(decoded->severity, "informational");
             strcpy(decoded->category, "system");
             break;
 
-        case 1:  /* warmStart */
+        case 1:  / warmStart /
             strcpy(decoded->trap_name, "Warm Start");
             strcpy(decoded->description, "Device configuration reloaded without power cycle");
             strcpy(decoded->severity, "informational");
             strcpy(decoded->category, "system");
             break;
 
-        case 2:  /* linkDown */
+        case 2:  / linkDown /
             strcpy(decoded->trap_name, "Link Down");
             strcpy(decoded->severity, "warning");
             strcpy(decoded->category, "network");
 
-            /* Extract interface information from varbinds */
+            / Extract interface information from varbinds /
             for (int i = 0; i < num_varbinds; i++) {
-                /* ifIndex */
+                / ifIndex /
                 if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.1.")) {
                     decoded->interface_index = atoi(varbinds[i].value);
                 }
-                /* ifDescr */
+                / ifDescr /
                 if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.2.")) {
                     strncpy(decoded->interface, varbinds[i].value, sizeof(decoded->interface)-1);
                 }
@@ -1128,12 +1128,12 @@ struct trap_decode *decode_snmp_trap(int generic_trap, int specific_trap,
                     decoded->interface, decoded->interface_index);
             break;
 
-        case 3:  /* linkUp */
+        case 3:  / linkUp /
             strcpy(decoded->trap_name, "Link Up");
             strcpy(decoded->severity, "informational");
             strcpy(decoded->category, "network");
 
-            /* Extract interface information */
+            / Extract interface information /
             for (int i = 0; i < num_varbinds; i++) {
                 if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.1.")) {
                     decoded->interface_index = atoi(varbinds[i].value);
@@ -1148,46 +1148,46 @@ struct trap_decode *decode_snmp_trap(int generic_trap, int specific_trap,
                     decoded->interface, decoded->interface_index);
             break;
 
-        case 4:  /* authenticationFailure */
+        case 4:  / authenticationFailure /
             strcpy(decoded->trap_name, "Authentication Failure");
             strcpy(decoded->description, "SNMP authentication failed - invalid community string");
             strcpy(decoded->severity, "warning");
             strcpy(decoded->category, "security");
             break;
 
-        case 5:  /* egpNeighborLoss */
+        case 5:  / egpNeighborLoss /
             strcpy(decoded->trap_name, "EGP Neighbor Loss");
             strcpy(decoded->description, "EGP neighbor connectivity lost");
             strcpy(decoded->severity, "critical");
             strcpy(decoded->category, "routing");
             break;
 
-        case 6:  /* enterpriseSpecific */
+        case 6:  / enterpriseSpecific /
             strcpy(decoded->trap_name, "Enterprise Specific");
 
-            /* Decode based on enterprise OID */
+            / Decode based on enterprise OID /
             if (strstr(enterprise_oid, ".1.3.6.1.4.1.9")) {
-                /* Cisco */
+                / Cisco /
                 strcpy(decoded->vendor, "Cisco");
                 decode_cisco_trap(specific_trap, varbinds, num_varbinds, decoded);
 
             } else if (strstr(enterprise_oid, ".1.3.6.1.4.1.2021")) {
-                /* Net-SNMP */
+                / Net-SNMP /
                 strcpy(decoded->vendor, "Net-SNMP");
                 decode_netsnmp_trap(specific_trap, varbinds, num_varbinds, decoded);
 
             } else if (strstr(enterprise_oid, ".1.3.6.1.4.1.2636")) {
-                /* Juniper */
+                / Juniper /
                 strcpy(decoded->vendor, "Juniper");
                 decode_juniper_trap(specific_trap, varbinds, num_varbinds, decoded);
 
             } else if (strstr(enterprise_oid, ".1.3.6.1.4.1.6876")) {
-                /* VMware */
+                / VMware /
                 strcpy(decoded->vendor, "VMware");
                 decode_vmware_trap(specific_trap, varbinds, num_varbinds, decoded);
 
             } else {
-                /* Unknown vendor */
+                / Unknown vendor /
                 snprintf(decoded->description, sizeof(decoded->description),
                         "Enterprise-specific trap %d from %s",
                         specific_trap, enterprise_oid);
@@ -1208,8 +1208,8 @@ struct trap_decode *decode_snmp_trap(int generic_trap, int specific_trap,
 }
 
 /*
- * output_snmp_traps_json - Output SNMP trap history and statistics
- */
+  - output_snmp_traps_json - Output SNMP trap history and statistics
+  - /
 void output_snmp_traps_json(int fd)
 {
     struct trap_history *trap;
@@ -1219,7 +1219,7 @@ void output_snmp_traps_json(int fd)
 
     dprintf(fd, "  \"snmp_traps\": {\n");
 
-    /* Recent traps */
+    / Recent traps /
     dprintf(fd, "    \"recent_traps\": [\n");
 
     first_trap = 1;
@@ -1231,7 +1231,7 @@ void output_snmp_traps_json(int fd)
 
         format_timestamp(timestamp_buf, sizeof(timestamp_buf), &trap->received_at);
 
-        /* Decode trap */
+        / Decode trap /
         struct trap_decode *decoded = decode_snmp_trap(trap->generic_trap,
                                                        trap->specific_trap,
                                                        trap->enterprise_oid,
@@ -1255,7 +1255,7 @@ void output_snmp_traps_json(int fd)
         dprintf(fd, "        \"uptime_ticks\": %lu,\n", trap->uptime_ticks);
         dprintf(fd, "        \"community\": \"%s\",\n", trap->community);
 
-        /* Varbinds */
+        / Varbinds /
         dprintf(fd, "        \"varbinds\": [\n");
         for (int i = 0; i < trap->num_varbinds; i++) {
             dprintf(fd, "          {\n");
@@ -1266,7 +1266,7 @@ void output_snmp_traps_json(int fd)
         }
         dprintf(fd, "        ],\n");
 
-        /* Decoded information */
+        / Decoded information /
         dprintf(fd, "        \"decoded\": {\n");
         dprintf(fd, "          \"trap_name\": \"%s\",\n", decoded->trap_name);
         dprintf(fd, "          \"description\": \"%s\",\n", decoded->description);
@@ -1299,7 +1299,7 @@ void output_snmp_traps_json(int fd)
 
     dprintf(fd, "\n    ],\n");
 
-    /* Trap sources summary */
+    / Trap sources summary /
     dprintf(fd, "    \"trap_sources\": [\n");
 
     first_source = 1;
@@ -1329,7 +1329,7 @@ void output_snmp_traps_json(int fd)
 
     dprintf(fd, "\n    ],\n");
 
-    /* Summary statistics */
+    / Summary statistics /
     dprintf(fd, "    \"summary\": {\n");
     dprintf(fd, "      \"total_traps_received\": %lu,\n", total_traps_received);
     dprintf(fd, "      \"traps_last_hour\": %d,\n", count_recent_traps(3600));
@@ -1341,8 +1341,8 @@ void output_snmp_traps_json(int fd)
 }
 
 /*
- * output_alerts_json - Output active alerts
- */
+  - output_alerts_json - Output active alerts
+  - /
 void output_alerts_json(int fd)
 {
     struct monitorent *walker;
@@ -1354,7 +1354,7 @@ void output_alerts_json(int fd)
 
     for (walker = queuehead; walker != NULL; walker = walker->next) {
         if (walker->checkent == NULL) continue;
-        if (walker->retval == SYSM_OK) continue;  /* Only failures */
+        if (walker->retval == SYSM_OK) continue;  / Only failures /
 
         if (!first_alert) {
             dprintf(fd, ",\n");
@@ -1384,13 +1384,13 @@ void output_alerts_json(int fd)
 
     dprintf(fd, "\n  ],\n");
 }
-```
+`
 
-### Integration with Existing Client Handler
+Integration with Existing Client Handler
 
-In `src/srvclient.c` (or similar), update the command handler:
+In src/srvclient.c (or similar), update the command handler:
 
-```c
+`c
 void handle_client_command(int client_fd, char *command)
 {
     char *cmd = strtok(command, " \n");
@@ -1399,7 +1399,7 @@ void handle_client_command(int client_fd, char *command)
         return;
     }
 
-    /* Check for JSON flag */
+    / Check for JSON flag /
     char *flag = strtok(NULL, " \n");
     int json_output = 0;
 
@@ -1411,10 +1411,10 @@ void handle_client_command(int client_fd, char *command)
         if (json_output) {
             output_status_json(client_fd);
         } else {
-            output_status_text(client_fd);  /* Existing function */
+            output_status_text(client_fd);  / Existing function /
         }
     } else if (strcmp(cmd, "json") == 0) {
-        /* Shorthand for "status --json" */
+        / Shorthand for "status --json" /
         output_status_json(client_fd);
     } else if (strcmp(cmd, "help") == 0) {
         dprintf(client_fd, "Commands:\n");
@@ -1423,15 +1423,15 @@ void handle_client_command(int client_fd, char *command)
         dprintf(client_fd, "  json            - Show status (JSON format)\n");
         dprintf(client_fd, "  quit            - Close connection\n");
     }
-    /* ... other commands ... */
+    / ... other commands ... /
 }
-```
+`
 
-## Updated Web UI Design
+Updated Web UI Design
 
-### Go Backend - Simplified Status Service
+Go Backend - Simplified Status Service
 
-```go
+`go
 package service
 
 import (
@@ -1447,92 +1447,92 @@ type StatusService struct {
 
 // SysmonStatus represents the JSON response from sysmon
 type SysmonStatus struct {
-    Version   string         `json:"version"`
-    Timestamp time.Time      `json:"timestamp"`
-    Daemon    DaemonInfo     `json:"daemon"`
-    Summary   StatusSummary  `json:"summary"`
-    Hosts     []HostStatus   `json:"hosts"`
-    Alerts    []Alert        `json:"alerts"`
-    Queue     QueueStats     `json:"queue"`
-    Stats     GlobalStats    `json:"stats"`
+    Version   string         json:"version"
+    Timestamp time.Time      json:"timestamp"
+    Daemon    DaemonInfo     json:"daemon"
+    Summary   StatusSummary  json:"summary"
+    Hosts     []HostStatus   json:"hosts"
+    Alerts    []Alert        json:"alerts"
+    Queue     QueueStats     json:"queue"
+    Stats     GlobalStats    json:"stats"
 }
 
 type DaemonInfo struct {
-    PID            int       `json:"pid"`
-    UptimeSeconds  int64     `json:"uptime_seconds"`
-    UptimeHuman    string    `json:"uptime_human"`
-    StartedAt      time.Time `json:"started_at"`
-    ConfigFile     string    `json:"config_file"`
-    ConfigLoadedAt time.Time `json:"config_loaded_at"`
+    PID            int       json:"pid"
+    UptimeSeconds  int64     json:"uptime_seconds"
+    UptimeHuman    string    json:"uptime_human"
+    StartedAt      time.Time json:"started_at"
+    ConfigFile     string    json:"config_file"
+    ConfigLoadedAt time.Time json:"config_loaded_at"
 }
 
 type StatusSummary struct {
-    TotalHosts     int            `json:"total_hosts"`
-    TotalChecks    int            `json:"total_checks"`
-    HostsByStatus  map[string]int `json:"hosts_by_status"`
-    ChecksByType   map[string]int `json:"checks_by_type"`
-    ChecksByStatus map[string]int `json:"checks_by_status"`
+    TotalHosts     int            json:"total_hosts"
+    TotalChecks    int            json:"total_checks"
+    HostsByStatus  map[string]int json:"hosts_by_status"
+    ChecksByType   map[string]int json:"checks_by_type"
+    ChecksByStatus map[string]int json:"checks_by_status"
 }
 
 type HostStatus struct {
-    Hostname  string        `json:"hostname"`
-    Contact   string        `json:"contact"`
-    Status    string        `json:"status"`
-    LastCheck time.Time     `json:"last_check"`
-    NextCheck time.Time     `json:"next_check"`
-    Checks    []CheckStatus `json:"checks"`
-    Metadata  HostMetadata  `json:"metadata"`
+    Hostname  string        json:"hostname"
+    Contact   string        json:"contact"
+    Status    string        json:"status"
+    LastCheck time.Time     json:"last_check"
+    NextCheck time.Time     json:"next_check"
+    Checks    []CheckStatus json:"checks"
+    Metadata  HostMetadata  json:"metadata"
 }
 
 type CheckStatus struct {
-    ID         string                 `json:"id"`
-    Type       string                 `json:"type"`
-    Status     string                 `json:"status"`
-    Interval   int                    `json:"interval"`
-    Timeout    int                    `json:"timeout"`
-    Port       int                    `json:"port,omitempty"`
-    URL        string                 `json:"url,omitempty"`
-    LastRun    time.Time              `json:"last_run"`
-    NextRun    time.Time              `json:"next_run"`
-    DurationMs float64                `json:"duration_ms"`
-    Error      string                 `json:"error,omitempty"`
-    Result     map[string]interface{} `json:"result"`
+    ID         string                 json:"id"
+    Type       string                 json:"type"
+    Status     string                 json:"status"
+    Interval   int                    json:"interval"
+    Timeout    int                    json:"timeout"
+    Port       int                    json:"port,omitempty"
+    URL        string                 json:"url,omitempty"
+    LastRun    time.Time              json:"last_run"
+    NextRun    time.Time              json:"next_run"
+    DurationMs float64                json:"duration_ms"
+    Error      string                 json:"error,omitempty"
+    Result     map[string]interface{} json:"result"
 }
 
 type HostMetadata struct {
-    Description      string `json:"description,omitempty"`
-    TrapAlert        bool   `json:"trap_alert"`
-    MaxWakeupRetries int    `json:"max_wakeup_retries,omitempty"`
+    Description      string json:"description,omitempty"
+    TrapAlert        bool   json:"trap_alert"
+    MaxWakeupRetries int    json:"max_wakeup_retries,omitempty"
 }
 
 type Alert struct {
-    Hostname            string    `json:"hostname"`
-    Check               string    `json:"check"`
-    Status              string    `json:"status"`
-    Message             string    `json:"message,omitempty"`
-    FirstFailure        time.Time `json:"first_failure"`
-    ConsecutiveFailures int       `json:"consecutive_failures"`
-    LastNotified        time.Time `json:"last_notified"`
-    Contact             string    `json:"contact"`
+    Hostname            string    json:"hostname"
+    Check               string    json:"check"
+    Status              string    json:"status"
+    Message             string    json:"message,omitempty"
+    FirstFailure        time.Time json:"first_failure"
+    ConsecutiveFailures int       json:"consecutive_failures"
+    LastNotified        time.Time json:"last_notified"
+    Contact             string    json:"contact"
 }
 
 type QueueStats struct {
-    Size             int `json:"size"`
-    Pending          int `json:"pending"`
-    Running          int `json:"running"`
-    MaxCheckInterval int `json:"max_check_interval"`
-    KillAfter        int `json:"kill_after"`
-    WarnAfter        int `json:"warn_after"`
+    Size             int json:"size"
+    Pending          int json:"pending"
+    Running          int json:"running"
+    MaxCheckInterval int json:"max_check_interval"
+    KillAfter        int json:"kill_after"
+    WarnAfter        int json:"warn_after"
 }
 
 type GlobalStats struct {
-    ChecksCompleted uint64  `json:"checks_completed"`
-    ChecksFailed    uint64  `json:"checks_failed"`
-    ChecksTimedOut  uint64  `json:"checks_timed_out"`
+    ChecksCompleted uint64  json:"checks_completed"
+    ChecksFailed    uint64  json:"checks_failed"
+    ChecksTimedOut  uint64  json:"checks_timed_out"
 }
 
 // GetStatus gets JSON status from sysmon daemon
-func (s *StatusService) GetStatus() (*SysmonStatus, error) {
+func (s StatusService) GetStatus() (SysmonStatus, error) {
     // Connect to sysmon client port
     conn, err := net.DialTimeout("tcp", s.sysmonHost, 5*time.Second)
     if err != nil {
@@ -1560,7 +1560,7 @@ func (s *StatusService) GetStatus() (*SysmonStatus, error) {
 }
 
 // addColorCoding adds status_color fields for frontend display
-func (s *StatusService) addColorCoding(status *SysmonStatus) {
+func (s StatusService) addColorCoding(status SysmonStatus) {
     for i := range status.Hosts {
         host := &status.Hosts[i]
 
@@ -1593,60 +1593,60 @@ func (s *StatusService) addColorCoding(status *SysmonStatus) {
         }
     }
 }
-```
+`
 
-**Much Simpler!** No text parsing, just deserialize JSON.
+Much Simpler! No text parsing, just deserialize JSON.
 
-## Benefits of JSON Output
+Benefits of JSON Output
 
-1. **Structured Data** - No fragile text parsing
-2. **Type Safety** - Direct deserialization into Go structs
-3. **Extensible** - Add new fields without breaking clients
-4. **Complete State** - All monitoring data in one response
-5. **Performance** - No regex parsing, direct JSON decode
-6. **Maintainable** - Changes to sysmon output format are explicit
-7. **Multiple Consumers** - Any tool can consume JSON (not just web UI)
-8. **Backwards Compatible** - Keep text output for CLI users
+1. Structured Data - No fragile text parsing
+2. Type Safety - Direct deserialization into Go structs
+3. Extensible - Add new fields without breaking clients
+4. Complete State - All monitoring data in one response
+5. Performance - No regex parsing, direct JSON decode
+6. Maintainable - Changes to sysmon output format are explicit
+7. Multiple Consumers - Any tool can consume JSON (not just web UI)
+8. Backwards Compatible - Keep text output for CLI users
 
-## CLI Compatibility
+CLI Compatibility
 
 The text output remains default for CLI users:
 
-```bash
+`bash
 $ sysmon                          # Text output (existing)
 $ sysmon --json                   # JSON output (new)
 $ echo "status" | nc localhost 3355         # Text (existing)
 $ echo "json" | nc localhost 3355           # JSON (new)
-```
+`
 
-## Testing the JSON Output
+Testing the JSON Output
 
-```bash
-# Connect to sysmon and request JSON
+`bash
+Connect to sysmon and request JSON
 $ echo "json" | nc localhost 3355 | jq .
 
-# Pretty-print just the summary
+Pretty-print just the summary
 $ echo "json" | nc localhost 3355 | jq .summary
 
-# Get all failing hosts
+Get all failing hosts
 $ echo "json" | nc localhost 3355 | jq '.hosts[] | select(.status != "ok")'
 
-# Count checks by type
+Count checks by type
 $ echo "json" | nc localhost 3355 | jq '.summary.checks_by_type'
-```
+`
 
-## Migration Path
+Migration Path
 
-1. **Phase 1** - Add JSON output to sysmon (this design)
-2. **Phase 2** - Update web UI to use JSON instead of text parsing
-3. **Phase 3** - Keep both outputs indefinitely (backwards compatibility)
+1. Phase 1 - Add JSON output to sysmon (this design)
+2. Phase 2 - Update web UI to use JSON instead of text parsing
+3. Phase 3 - Keep both outputs indefinitely (backwards compatibility)
 
-## Web UI Features for SNMP Trap Visualization
+Web UI Features for SNMP Trap Visualization
 
 With the rich trap data exposed, the web UI can provide:
 
-### Trap Dashboard
-```tsx
+Trap Dashboard
+`tsx
 <TrapDashboard>
   <TrapSummaryCards>
     <Card title="Traps Today" value={traps_last_24h} />
@@ -1655,7 +1655,7 @@ With the rich trap data exposed, the web UI can provide:
   </TrapSummaryCards>
 
   <TrapTimeline>
-    {/* Real-time trap stream with color-coded severity */}
+    {/ Real-time trap stream with color-coded severity /}
     {recent_traps.map(trap => (
       <TrapEvent
         time={trap.timestamp}
@@ -1668,7 +1668,7 @@ With the rich trap data exposed, the web UI can provide:
   </TrapTimeline>
 
   <TrapSourcesTable>
-    {/* Devices sending traps */}
+    {/ Devices sending traps /}
     {trap_sources.map(source => (
       <SourceRow
         ip={source.source_ip}
@@ -1680,10 +1680,10 @@ With the rich trap data exposed, the web UI can provide:
     ))}
   </TrapSourcesTable>
 </TrapDashboard>
-```
+`
 
-### Trap Detail View
-```tsx
+Trap Detail View
+`tsx
 <TrapDetailModal trap={selectedTrap}>
   <TrapHeader>
     <SeverityBadge severity={trap.decoded.severity} />
@@ -1726,10 +1726,10 @@ With the rich trap data exposed, the web UI can provide:
     </Code>
   </RawDataSection>
 </TrapDetailModal>
-```
+`
 
-### Network Map with Trap Indicators
-```tsx
+Network Map with Trap Indicators
+`tsx
 <NetworkMap>
   {hosts.map(host => (
     <HostNode
@@ -1738,52 +1738,52 @@ With the rich trap data exposed, the web UI can provide:
       recentTraps={getTrapsForHost(host)}
       trapBadge={host.recent_trap_count > 0}
     >
-      {/* Show trap indicator on network map */}
+      {/ Show trap indicator on network map /}
       {host.recent_trap_count > 0 && (
         <TrapBadge count={host.recent_trap_count} />
       )}
     </HostNode>
   ))}
 </NetworkMap>
-```
+`
 
-### Trap Analytics
-```tsx
+Trap Analytics
+`tsx
 <TrapAnalytics>
   <TrapTypePieChart data={trap_types} />
   <TrapTimelineGraph data={traps_over_time} />
   <TopTrapSourcesChart data={trap_sources} />
   <SeverityDistribution data={traps_by_severity} />
 </TrapAnalytics>
-```
+`
 
-### Decoded Trap Messages
+Decoded Trap Messages
 
 The decode_snmp_trap() function translates raw SNMP data into:
 
-**Generic Traps:**
-- coldStart → "Device has been powered on or rebooted"
-- warmStart → "Configuration reloaded without power cycle"
-- linkDown → "Network interface GigabitEthernet0/1 is down"
-- linkUp → "Network interface GigabitEthernet0/1 is up"
-- authenticationFailure → "SNMP authentication failed"
+Generic Traps:
+  - coldStart -> "Device has been powered on or rebooted"
+  - warmStart -> "Configuration reloaded without power cycle"
+  - linkDown -> "Network interface GigabitEthernet0/1 is down"
+  - linkUp -> "Network interface GigabitEthernet0/1 is up"
+  - authenticationFailure -> "SNMP authentication failed"
 
-**Enterprise-Specific Traps:**
-- Cisco: BGP peer down, configuration change, etc.
-- Juniper: Chassis alarms, interface errors, etc.
-- Net-SNMP: CPU load, disk full, process monitoring
-- VMware: VM power state, host connectivity, etc.
+Enterprise-Specific Traps:
+  - Cisco: BGP peer down, configuration change, etc.
+  - Juniper: Chassis alarms, interface errors, etc.
+  - Net-SNMP: CPU load, disk full, process monitoring
+  - VMware: VM power state, host connectivity, etc.
 
-### Alert Integration
+Alert Integration
 
 Traps trigger alerts when:
-1. Source IP matches a configured host with `trap_alert` enabled
+1. Source IP matches a configured host with trap_alert enabled
 2. Alert sent to host's primary contact
 3. Trap logged to audit trail
 4. Web UI shows trap in alerts widget
 
-### Filtering and Search
-```tsx
+Filtering and Search
+`tsx
 <TrapFilter>
   <Select label="Severity" options={['all', 'critical', 'warning', 'info']} />
   <Select label="Category" options={['all', 'network', 'system', 'security']} />
@@ -1791,18 +1791,18 @@ Traps trigger alerts when:
   <DateRange label="Time Range" />
   <SearchBox placeholder="Search trap descriptions..." />
 </TrapFilter>
-```
+`
 
-## Summary
+Summary
 
 Adding JSON output mode to sysmon provides:
 
-✅ **Complete state dump** - All monitoring data in one structured response
-✅ **No text parsing** - Web UI just deserializes JSON
-✅ **Backwards compatible** - Text output remains for CLI users
-✅ **Extensible** - Easy to add new fields
-✅ **Multiple consumers** - Any tool can use JSON output
-✅ **Maintainable** - Changes explicit, not hidden in text format
-✅ **Type safe** - Direct mapping to Go/TypeScript structs
+? Complete state dump - All monitoring data in one structured response
+? No text parsing - Web UI just deserializes JSON
+? Backwards compatible - Text output remains for CLI users
+? Extensible - Easy to add new fields
+? Multiple consumers - Any tool can use JSON output
+? Maintainable - Changes explicit, not hidden in text format
+? Type safe - Direct mapping to Go/TypeScript structs
 
 The implementation is straightforward - walk the existing monitoring queue and output structured JSON instead of formatted text. The web UI becomes much simpler since it doesn't need text parsing logic.
