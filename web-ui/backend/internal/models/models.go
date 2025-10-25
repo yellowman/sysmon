@@ -12,14 +12,57 @@ type Config struct {
 
 // GlobalSettings represents global sysmon settings
 type GlobalSettings struct {
-	ClientPort      int    `json:"client_port"`
-	SNMPTrapPort    int    `json:"snmp_trap_port"`
-	CheckInterval   int    `json:"check_interval"`
-	PageInterval    int    `json:"page_interval,omitempty"`
-	DisableICMP     bool   `json:"disable_icmp"`
-	LogLevel        int    `json:"log_level"`
-	PidFile         string `json:"pid_file,omitempty"`
-	StatusFile      string `json:"status_file,omitempty"`
+	// Core settings
+	CheckInterval int `json:"checkinterval,omitempty"` // queuetime - seconds between checks (default 60)
+	NumFailures   int `json:"numfailures,omitempty"`   // number of failures before alert (default 4)
+
+	// Wishlist features
+	MinNumFailures int `json:"minnumfailures,omitempty"` // minimum failures threshold
+	FlapTime       int `json:"flaptime,omitempty"`       // flap detection time in seconds
+
+	// Ports
+	ClientPort   int `json:"clientport,omitempty"`   // TCP port for sysmon client (default 1345)
+	SNMPTrapPort int `json:"trapport,omitempty"`     // UDP port for SNMP traps (default 162)
+
+	// Alert settings
+	PageInterval int    `json:"pageinterval,omitempty"` // reminder interval in minutes
+	Sender       string `json:"sender,omitempty"`       // email sender address
+	From         string `json:"from,omitempty"`         // email from address
+	Subject      string `json:"subject,omitempty"`      // email subject line
+	ReplyTo      string `json:"replyto,omitempty"`      // reply-to header
+	ErrorsTo     string `json:"errorsto,omitempty"`     // errors-to header
+	NoSubject    bool   `json:"nosubject,omitempty"`    // disable subject line
+	PMsg         string `json:"pmesg,omitempty"`        // page message format
+
+	// HTML/Display settings
+	UpColor      string `json:"upcolor,omitempty"`      // color for up status
+	DownColor    string `json:"downcolor,omitempty"`    // color for down status
+	RecentColor  string `json:"recentcolor,omitempty"`  // color for recent changes
+	HTMLRefresh  int    `json:"htmlrefresh,omitempty"`  // HTML refresh interval in seconds
+	DateFormat   string `json:"dateformat,omitempty"`   // date format string
+	ShowUpAlso   bool   `json:"showupalso,omitempty"`   // show up hosts in status
+
+	// Files and logging
+	StatusFile     string `json:"statusfile,omitempty"`     // path to status file
+	StatusFileType string `json:"statusfiletype,omitempty"` // "html" or "text"
+	StatusTempDir  string `json:"statustempdir,omitempty"`  // temp directory for status files
+	PidFile        string `json:"pidfile,omitempty"`        // PID file path
+	Logging        string `json:"logging,omitempty"`        // syslog facility
+	OutputJSON     string `json:"outputjson,omitempty"`     // JSON output file path
+
+	// DNS settings
+	DNSLog    int `json:"dnslog,omitempty"`    // DNS logging interval in seconds
+	DNSExpire int `json:"dnsexpire,omitempty"` // DNS cache TTL in seconds
+
+	// System settings
+	MaxQueued       int    `json:"maxqueued,omitempty"`       // max simultaneous checks
+	DropPrivileges  bool   `json:"dropprivileges,omitempty"`  // drop privileges after init
+	DisableICMP     bool   `json:"disableicmp,omitempty"`     // disable all ICMP checks
+	NoHeartbeat     bool   `json:"noheartbeat,omitempty"`     // disable registration packet
+	NoLogConnects   bool   `json:"nologconnects,omitempty"`   // don't log client connections
+
+	// Include paths
+	Includes []string `json:"includes,omitempty"` // included config files
 }
 
 // SpawnCommand represents a named spawn command definition
@@ -28,15 +71,48 @@ type SpawnCommand struct {
 	Command string `json:"command"` // e.g., "blah %s %s %i blah"
 }
 
-// Host represents a monitored host
+// Host represents a monitored host (object in sysmon.conf)
 type Host struct {
-	ID       string  `json:"id"`
-	Hostname string  `json:"hostname"`
-	Contact  string  `json:"contact,omitempty"`
-	Notes    string  `json:"notes,omitempty"` // Description/notes
-	Spawn    string  `json:"spawn,omitempty"` // Named spawn command to use
-	Paused   bool    `json:"paused"`
-	Checks   []Check `json:"checks"`
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`                      // IP address
+	Contact  string `json:"contact,omitempty"`       // contact email
+	Notes    string `json:"notes,omitempty"`         // Description/notes
+	Paused   bool   `json:"paused"`                  // pause monitoring
+
+	// Alert settings
+	Spawn         string `json:"spawn,omitempty"`          // Named spawn command to use
+	CustomSpawn   string `json:"customspawn,omitempty"`    // Direct spawn command (for backward compat)
+	PageInterval  int    `json:"pageinterval,omitempty"`   // per-host page interval override
+	ContactOn     string `json:"contacton,omitempty"`      // when to contact (up/down/both)
+
+	// Check configuration
+	Type string `json:"type,omitempty"`           // Main check type (icmp, tcp, http, etc.)
+	Port int    `json:"port,omitempty"`           // Port for TCP/UDP checks
+
+	// Packet loss and ping settings
+	MinPings             int     `json:"minpings,omitempty"`             // min successful pings required
+	SendPings            int     `json:"sendpings,omitempty"`            // number of pings to send
+	PacketLossThreshold  float64 `json:"packetlossthreshold,omitempty"`  // packet loss % threshold
+	RTTThreshold         int     `json:"rttthreshold,omitempty"`         // RTT threshold in ms
+	JitterThreshold      int     `json:"jitterthreshold,omitempty"`      // jitter threshold in ms
+	RTTSamples           int     `json:"rttsamples,omitempty"`           // number of RTT samples
+
+	// Wake-on-LAN settings
+	WakeupCheck         bool `json:"wakeupcheck,omitempty"`         // enable wakeup monitoring
+	WakeupRetries       int  `json:"wakeupretries,omitempty"`       // number of wakeup attempts
+	WakeupCheckInterval int  `json:"wakeupcheckinterval,omitempty"` // time between wakeup attempts
+
+	// SNMP trap settings
+	TrapAlert   bool   `json:"trapalert,omitempty"`   // enable SNMP trap monitoring
+	MatchedHost string `json:"matchedhost,omitempty"` // associated host for trap matching
+
+	// Advanced settings
+	Reverse      bool   `json:"reverse,omitempty"`      // reverse logic (alert when UP)
+	SNMPOctets   bool   `json:"snmpoctets,omitempty"`   // SNMP octet counter mode
+	Dependencies string `json:"dependencies,omitempty"` // dependency string
+
+	Checks []Check `json:"checks,omitempty"` // Multiple check types
 }
 
 // Check represents a monitoring check
