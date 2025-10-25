@@ -1,0 +1,68 @@
+You can extract various information via the following method from sysmon:
+
+telnet <sysmon-host> 1345
+AUTH <configured-auth-key>
+MODE xml
+SHOWOBJ <Object-Name>
+
+other notes:
+
+Outage history is written to a file in the following format:
+
+<SysmonOutageHistory>
+  <Object>object-name</Object>
+  <ObjectType>object-type</Object>
+</SysmonOutageHistory>
+
+
+sysmon status information is written in this format but may not
+contain all items based on authentication level or interface/interaction
+
+<SysmonStatus>
+<ObjectStatus>
+ <Object>Unique_Name</Object>
+ <HostName>Hostname</HostName>
+ <ObjectType>tcp</ObjectType>
+ <ObjectPort>80</ObjectPort>
+ <ObjectMessage>Hostname port 80 hosed %d %s %w</ObjectMessage>
+ <ObjectContact>Contact@Host</ObjectContact>
+ <SNMPCommunity>public</SNMPCommunity>
+ <SNMPoid>.1.3.6</SNMPoid>
+ <SNMPType>low</SNMPType>
+ <SNMPLowThresh>1</SNMPLowThresh>
+ <SNMPHighThresh>3</SNMPHighThresh>
+ <SNMPExactThresh>2</SNMPExactThresh>
+ <SNMPObjectSysUpTime>12345</SNMPObjectSysUpTime>
+ <ObjectLastcheckState>0</ObjectLastcheckState>
+ <ObjectAuthUsername>jared</ObjectAuthUsername>
+ <ObjectAuthPassword>elit3</ObjectAuthPassword>
+ <ObjectHeader>X-Sysmon-Broken</ObjectHeader>
+ <ObjectHeaderValue>snmp 80</ObjectHeaderValue>
+ <ObjectRadiusSecret>secret</ObjectRadiusSecret>
+ <ObjectMessageID>last@messageID</ObjectMessageID>
+ <ObjectUniqueID>sysmon_unique_id</ObjectUniqueID>
+ <ObjectURL>/index.html</ObjectURL>
+ <ObjectURLText>Operating_since_1992</ObjectURLText>
+ <ObjectExecCmd>/sbin/shutdown -h now</ObjectExecCmd>
+ <ObjectTotalChecked>8675309</ObjectTotalChecked>
+ <ObjectTotalDown>31337</ObjectTotalDown>
+ <ObjectDownCt>31338</ObjectDownCt>
+ <ObjectUpCt>31339</ObjectUpCt>
+ <ObjectMaxDown>3</ObjectMaxDown>
+ <ObjectQueueInterval>45</ObjectQueueInterval>
+ <ObjectSendPings>3</ObjectSendPings>
+ <ObjectMinPings>1</ObjectMinPings>
+ <ObjectReversed>0</ObjectReversed>
+ <ObjectContacted>1</ObjectContacted>
+ <ObjectContactedAt>time_t</ObjectContactedAt>
+ <ObjectContactOnUp>1</ObjectContactOnUp>
+ <ObjectQueued>bool</ObjectQueued>
+ <ObjectInAddr>ulong</ObjectInAddr>
+ <ObjectLastChecked>time_t</ObjectLastChecked>
+ <ObjectCheckStarted>time_t</ObjectCheckStarted>
+ <ObjectOutageTime>time_t</ObjectOutageTime>
+ <ObjectLastUptime>time_t</ObjectLastUptime>
+</ObjectStatus>
+
+ 
+

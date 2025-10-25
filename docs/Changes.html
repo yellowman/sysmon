@@ -1,0 +1,869 @@
+<HTML>
+<HEAD>
+<TITLE>Sysmon Changes Page</TITLE>
+</HEAD>
+<BODY BGCOLOR="#ffffff" TEXT="#000000">
+<H1>Bug fixes, new features, etc..</H1>
+<hr>
+   <strong>Changes for 0.93</strong> (09-Jul-2014) - Been awhile<ul>
+     <li> proper qsort crash fix
+     <li> fix excessive logging when no IPv6 is available
+     <li> add ability to ack objects
+     <li> add ability to attach notes to objects
+     <li> add ability for object to have a group
+     <li> fix textfile display to properly account for deps
+     <li> reduce excessive cpu usage watching wall clock
+     <li> hrmph, qsort fix maybe?
+     <li> stab at fix for timing issue with needssleep() (should reduce cpu usage)
+</ul>
+   <strong>Changes for 0.92.2</strong> (11-Oct-2005) - Second Chance<ul>
+     <li> fix crash with qsort
+</ul>
+   <strong>Changes for 0.92.1</strong> (07-Oct-2005) - Happy Birthday!<ul>
+     <li> fix for crash/coredump with DNS check
+     <li> Darwin/OSX 10.4.x build cleanups
+     <li> reduce calls to time()
+     <li> new queuer for objects (may not work on all systems)
+     <li> numerous cleanups
+     <li> some excess noise reduced in logs
+     <li> add some checkpointing of icmp packets and timing
+     <li> minor dependency builder fixes
+     <li> allow sets to work in the root = object declaration
+</ul>
+   <strong>Changes for 0.92</strong> (05-Oct-2004)<ul>
+     <li> fix bug where numfailures would get out of sync with some objects
+     <li> cleanup some very verbose logging
+     <li> rename yylex sysmon_conf_yylex
+     <li> cleanup unused variable in icmp check
+     <li> cleanup of some "MODE xml" SHOWOBJ output
+     <li> changed stale/killed check to only log once/second
+     <li> many warnings cleaned up -Wall
+     <li> pingv6 check implemented, tested (MacOS 10.3, linux, freebsd)
+     <li> fix segfault if no description configured
+     <li> change icmp hold queue size calculation
+     <li> autodetect max number of checks that can be done at once
+     <li> add MODE outagelog to tcp/1345 sysmon service
+     <li> add pragma no-cache to html file
+     <li> fix for snmp based checks and SIGHUP state
+     <li> dns check fix for double free()
+     <li> FreeBSD malloc/abort() recursive fix
+     <li> more SNMP build cleanup
+     <li> queue based off of next_queuetime instead of doing math each time around
+     <li> NETSNMP_CALLBACK_OP_RECEIVED_MESSAGE vs RECEIVED_MESSAGE compile issues
+</ul>
+
+   <strong>Changes for 0.91.20</strong> (09-Oct-2003)<ul>
+     <li> crude 32-bit vs 64-bit counter hack code
+     <li> fix net-snmp compile dependency, if you get error about
+       RECEIVED_MESSAGE in snmp.c when compiling, update your
+       net-snmp version, they now use NETSNMP_CALLBACK_OP_RECEIVED_MESSAGE
+     <li> fix autodetection of openssl, need to search /usr/local/ssl
+     <li> fix autodetection of snmp support
+       (redhat users, you need: net-snmp-devel and openssl-devel installed)
+     <li> snmp-rate, snmp-octets support, snmp fixes
+     <li> oh wait, need to parse config for pause, resume and stop to get
+       alternate pidfile path
+     <li> clean up gethostname calls to reduce cpu
+     <li> don't log more than once if not queued in a long time
+     <li> make snmp be more graceful when it encounters an error instead of
+       creating a core file
+</ul>
+
+<strong>Changes for 0.91.19</strong> (17-May-2003)<ul>
+     <li> print out if snmp support was detected/used
+     <li> remove spurious logging for objects without a contact
+     <li> log hostname being queried when gethostbyname() takes more than 1 sec
+     <li> no need to parse config to send pause, resume, or stop
+     <li> fix some parser memory suckage and information spillage btw objs
+     <li> statuschanged needs to be reset to false after textfile write
+     <li> minor code audits w/ rats
+     <li> remove unused buffer in clientstruct
+     <li> autodetect gethostbyname2
+     <li> force numfailures = 1 when doing snmp_type_reboot/sysuptime query
+</ul>
+
+<strong>Changes for 0.91.18</strong><ul>
+     <li> fix sighup semantics for snmp queries, two queries to same host
+       could cause data mixup when sighup is caught
+     <li> fix coredump related to snmp queries
+     <li> increase snmp reliabiltiy
+     <li> fix parser for snmp-high, snmp-low, snmp-exact to make them consistent
+     <li> add localized debugging to snmp subsystem
+     <li> fix signedness in parser for snmp-high snmp-low and snmp-exact
+     <li> include strings.h in config.h to quiet -Wall
+     <li> remove unused variables in srvclient.c/do_client_http
+     <li> fix some information leakage btw objects in parser
+</ul>
+
+<strong>Changes for 0.91.17</strong><ul>
+     <li> bugfix for memory leak when lots of sighups are sent to process
+</ul>
+
+<strong>   Changes for 0.91.16 (beta release)</strong><ul>
+     <li> pop3 fix
+     <li> basic ssh support from Patrik Henningsson
+</ul>
+
+<strong>   Changes for 0.91.15 (beta release)</strong><ul>
+     <li> fix some poor parser semantics that would cause objects to
+       improperly inherit previous object values
+     <li> add dns query -- type dns; dns-query "example.com";
+     <li> fix noheartbeat typecast and code
+     <li> minor changes on html page and how we display our version
+     <li> add config savestate "/path/to/file";
+     <li> catch some signals more to provide a bit more coredump
+       info if necessary
+     <li> fix 'make register'
+     <li> fix 'CONF'
+</ul>
+
+<strong>Changes for 0.91.14</strong> (17-Oct-2002)<ul>
+     <li> update copyright and license information for net-snmp and ssl req
+     <li> add SHOWOBJ and MODE xml
+</ul>
+
+<strong>Changes for 0.91.13</strong> (01-Oct-2002)<ul>
+     <li> print filename in errors
+     <li> start to add xml cli hook
+     <li> add -l command line option (no syslog)
+     <li> fix initalization of upct variable
+     <li> fix problem with queueinterval
+</ul>
+
+<strong>Changes for 0.91.12</strong><ul>
+     <li> fix issue with spawn
+     <li> add per-object queue timing
+     <li> add warning if hostname contains a space
+</ul>
+
+<strong>Changes for 0.91.11</strong><ul>
+	<li> fix for icmp loss/checksum bug
+</ul>
+
+<strong>Changes for 0.91.10</strong><ul>
+     <li> fix log_orphans() and loadconfig() to work as intended
+     <li> integrate Leon patches into cvs
+     <li> clean up a few very minor bugs
+</ul>
+
+<strong>Changes for 0.91.9L (Leon Brooks &lt;leon@cyberknights.com.au&gt;)</strong><ul>
+	<li> add config and code for notify on down/up only or both
+	<li> count up-cycles as well as down-cycles
+	<li> add formatting codes for up count, last recovery, service state
+	<li> add up-count in status pages
+	<li> add config for HTML refresh meta-header
+	<li> tidy the resulting HTML output (eg consistent case in tags)
+	<li> make memory debugging work for strdup() too
+	<li> add config for PID file (/etc/ lives in readonly land here)
+	<li> convert some random numbers to symbols (e.g. SYSM_OK, TRUE)
+	<li> add commandline keywords pause/unpause stop/shutdown/suicide
+	<li> document new and existing commandline options
+	<li> collapse disparate signalling functions into one
+	<li> make signal flag variable names consistent
+	<li> collapse no-contact-address code in page_someone()
+	<li> canonicalise existing X-Sysmon-unique-ID mail header
+	<li> add X-SysMon-Host, X-SysMon-Uptime mail headers
+	<li> add config for date (config date "%x %X";) use strftime codes
+	<li> add date "format" shorthand ISO="%F %T" and DEC="%d-%b-%Y %T"
+	<li> reformat some diagnostics to be much more informative
+	<li> update man pages a bit
+	<li> update the HTML documentation
+	<li> formalise a stray entity in the Changes.html file
+	<li> make sysmond tell about all of its options
+</ul>
+
+<strong>Changes for 0.91.9</strong><ul>
+        <li> add new translation feature %c - count
+        <li> fix debugging
+        <li> client tty fix
+        <li> lots of mini patches from john heasley
+        <li> more radius fixes from john heasley
+        <li> config converter by steve neighorn and john heasley
+        <li> radius fix
+        <li> fix some snmp bugs and parser related snmp issues
+</ul>
+<strong>Changes for 0.91.8</strong><ul>
+        <li> some basic snmp support
+        <li> fix memory leak in parser
+        <li> fix some excess config parsing time
+        <li> add some warnings that can help diagnose config file problems
+</ul>
+<strong> Changes for 0.91.7</strong><ul>
+        <li> fix bug whereby pings would not be sent
+</ul>
+<strong>Changes for 0.91.6</strong><ul>
+        <li> fix some warnlog+killafter stuff
+        <li> change ipv6 support for non-autodetect
+        <li> warn if no flex
+        <li> warn if no yywrap found
+        <li> fix for saddr, daddr on FreeBSD &amp; Solaris
+</ul>
+<strong>Changes for 0.91.5</strong><ul>
+        <li> fix parser to make it a bit more tolerant of irrelevant
+          whitespace
+        <li> disable auto-utilization of ipv6
+        <li> fix bug related to icmp rework that caused it to never count
+          icmp replies (in my lab at least)
+        <li> fix some icmp.c vs icmpv6/pingv6.c semantics in error messages
+        <li> add some of the hooks for customizing number of pings to send
+                and receive
+        <li> ability to disable listenport - set it to 0 on cli
+</ul>
+<strong>Changes for 0.91.4</strong><ul>
+        <li> fix for build issue
+        <li> fix segfault when configuring custom colors.
+</ul>
+<strong>Changes for 0.91.3</strong><ul>
+        <li> division by zero coredump thanks to Bengt Gördén
+        <li> lots of IPv6 voodoo started to add ipv6 ping test.
+        <li> fix solaris lex issue
+        <li> make ./configure detect IPv6
+        <li> fix some getuid/geteuid semantics that would cause pid file
+          to not be written
+</ul>
+<strong>Changes for 0.91.2</strong><ul>
+        <li> change holdqueue managment stuff
+        <li> change default maxqueued from 100 -> 75
+        <li> some tweaking of the ping test
+        <li> add some logging if there are a lot of objects and we can't
+          queue new checks after some time.
+        <li> fix bug with pmesg where we would core if one wasn't
+          configured in /etc/sysmon.conf
+        <li> make sensitivity a per-host configuration option
+        <li> make paused data visible in html file
+        <li> warn if more than one configured root
+</ul>
+<strong>Changes for 0.91.1</strong><ul>
+        <li> fix for root = statement to be more tolerant
+        <li> warn for multiple configured roots
+        <li> fix for uninitalized variable
+        <li> fix for percentage uptime to be correct
+        <li> fix for improper variable casting
+        <li> fix for sysmon check not detecting non-responsive daemons
+</ul>
+<strong>Changes for 0.91</strong><ul>
+        <li> prototype some snmp-trap stuff
+        <li> log unknown client messages
+        <li> fix port number handling of checks that don't use ports (ping)
+        <li> fix for embedded \n in parser causing line_number info to be wrong
+</ul>
+<strong>Changes for 0.90.13</strong><ul>
+        <li> fix more parser issues
+</ul>
+<strong>Changes for 0.90.12</strong><ul>
+        <li> fix some problems w/ crashes in invalid config files
+</ul>
+<strong>Changes for 0.90.11</strong><ul>
+        <li> fix parser bug that would cause us to not compile
+</ul>
+<strong>Changes for 0.90.10</strong><ul>
+        <li> fix bug in smtp check that would cause it to be killed
+        <li> fix bug in parser with missing quotes
+        <li> fix bug when we catch sighup
+        <li> fix bug in dnscache code that would cause us to core
+        <li> fix some parsing issues that would cause us to core dump
+        <li> insure that port number is set to zero
+        <li> make us portable to real lex instead of just flex
+        <li> fix multi-line imap banner (heas)
+        <li> fix casting issues (heas)
+        <li> fix comment handling (heas)
+</ul>
+<strong>Changes for 0.90.9</strong><ul>
+        <li> fixed portability
+        <li> fix http check
+        <li> fix only one object in config file case
+        <li> fix some more memory handling, and make MALLOC() not
+          memset memory to zero anymore
+</ul>
+<strong>Changes for 0.90.8</strong><ul>
+        <li> fix some memory leaks and improper accesses
+        <li> fix typo in parser.l that would cause properly formatted
+          objects to not be marked as valid.
+        <li> Fix segfaults in the parser
+        <li> Fix logging bug - Null pointer access in the case of
+          fopen() failing for the file we should be logging to.
+</ul>
+<strong>Changes for 0.90.7</strong><ul>
+        <li> remove a ton of internal timing checks and calls to gettimeofday()
+        <li> if we are initally starting up the daemon, use specified
+          logging immediateley.  Useful when logging to a file
+          instead of via syslog for debugging info that will impact
+          syslogd performance when we can locally optimize it.
+        <li> insist that they specify a radius secret if it's a
+          radius check
+        <li> insist that they specify a username and password for
+          checks that require it
+        <li> fixed parser issue where we would free data before it
+          was supposed to be.
+        <li> added -q command line option to daemon to be quiet when
+          sending sighup from "sysmond reload"
+        <li> last message-id not preserved after sighup
+        <li> fix for http check core dumping when parser should reject
+          object
+        <li> fix for whitespace between object and object name.
+</ul>
+<strong>Changes for 0.90.5</strong><ul>
+        <li> set variable = "value"; now works in 0.90 series
+        <li> we now log "orphan" objects (that have no relationship)
+        <li> fix comment handling
+        <li> fix for a few parser issues
+</ul>
+<strong>Changes for 0.90.4</strong><ul>
+        <li> zero is never greater than zero.  this is a bug.  we fixed
+          comparison issue.
+</ul>
+<strong>Changes for 0.90.3</strong><ul>
+        <li> config logging file /path/to/file
+        <li> fix for stale textfile
+        <li> maxqueued was being ignored
+        <li> improper port number stuff going on caused sighup to not
+          copy the state over
+        <li> if a hostname is not valid, we didn't reject the object
+        <li> fix problem with copy_alerts when we catch sighup
+        <li> fix bug that would cause crash if no contact configured
+        <li> update text output by configure
+</ul>
+<strong>Changes for 0.90</strong><ul>
+        <li> releasing to get the bugs out
+        <li> fix numerous crashes/bugs in 0.89.99
+        <li> generate unique_id
+        <li> fix bug if configed_root = null
+        <li> make install now saves old version as sysmond.old and sysmon.old
+        <li> make install no longer will get Text file busy message
+</ul>
+<strong>Changes for 0.89.99</strong><ul>
+        <li> finished porting all options (Except generic sets) to new
+          parser.  Released to public for testing.
+</ul>
+<strong>Changes for 0.89.3</strong><ul>
+        <li> fix bug in adjacency builder (stupid me, trying to be too smart)
+        <li> rewrite queuer from 0.89->now to fix dep handling
+        <li> remove the pid file when we die
+</ul>
+<strong>Changes for 0.89.2</strong><ul>
+        <li> fix for LinuxPPC under RedHat-6.2
+</ul>
+<strong>Changes for 0.89</strong><ul>
+        <li> added http/host-header support.  thanks to patrice@mac.com for
+          the patch
+        <li> NEW config file format.  Must update, no backwards
+          compatability
+        <li> rewrote the config file parser
+        <li> reworked the internal engine to use a graph
+</ul>
+<strong>Changes for 0.83.2</strong><ul>
+        <li> fix for some excessive logging
+        <li> fix for some minor smtp sanity for possible bug
+        <li> fix for NULL pointer access in dnscache.c
+        <li> compile fix for OpenBSD
+</ul>
+<strong>Changes for 0.83.1</strong><ul>
+	<li> update configuration options in man pages
+	<li> fix build issue related to curses
+</ul>
+<strong>Changes for 0.83</strong><ul>
+        <li> attempt to fix problem with pid file being wrong
+        <li> fix memory leak with icmp ident hash
+        <li> fix memory leak in dns cache code
+        <li> fix in lib.c where we were possibly corrupting the stack
+        <li> fix massive memory leak in page.c where we do not free()
+          strdup()'ed strings
+        <li> fix memory leak in config parser
+        <li> free dns_cache when sysmond is stopped
+        <li> modify internal MALLOC to take a description for memory leak
+          watching
+        <li> fix bug in SMTP check.  If we read 0 bytes from socket, we would
+          not know, and would clobber a pointer because we were messing up
+          some of the memory space.
+        <li> rework some internal FD managment and storage to increase performance
+        <li> sysmond pause added.  Will pause monitoring until you send a
+          unpause signal.
+        <li> fix for pages going out to smartlist mailing lists, and sendmail -f
+        <li> sysmond reload added.  Parses config file and reloads if it
+                works without a problem.
+</ul>
+<strong>Changes for 0.82.3</strong><ul>
+        <li> added "config authkey"
+        <li> fixed divide by zero case in new %r feature
+        <li> fix for numfailures
+        <li> addition of %V to pmesg
+        <li> fix/feature for pmesg to handle \n and \r
+        <li> new feature in pmesg %r for reliability of the site
+        <li> fix for 'pmesg' handling.  would overwrite some of the
+                message depending on order of options.
+        <li> added config header header headerval
+        <li> fixes for radius check
+        <li> misc buffer overflow fixes (increased buffer size that snprintfs
+                dump stuff into.. would discard some data in cases)
+        <li> fixes for nntp and http check to reduce chances of
+                internal-killed messages
+</ul>
+<strong>Changes for 0.82.2</strong><ul>
+        <li> fixes for curses so it should actually work properly now (sorta)
+        <li> MAX in config.h
+        <li> holdqueue fix in icmp.c
+        <li> radius.c fix for typo
+</ul>
+<strong>Changes for 0.82</strong><ul>
+        <li> fixed bug where sysmond would crash if monitoring radius
+                server and got an error from read()
+</ul>
+<strong>Changes for 0.81</strong><ul>
+        <li> added radius
+        <li> added new command line option, -i to disable icmp if not
+                running as root
+        <li> different rand number seeding
+        <li> different randchar calculation
+        <li> added gen_rand_ascii(char,len)
+        <li> loadconfig speed tweaks
+        <li> loadconfig misbalanced braces warnings
+        <li> syswatch element counter stores number now for later use
+        <li> fix problem with too many icmp checks going on at once
+        <li> fixed improper logging with dnscache code
+        <li> [PORT] Apple OS/10 Server port.  Now builds on this OS
+</ul>
+<strong>Changes for 0.80.6</strong><ul>
+        <li> added -w (warnlog) toggle option.  can also do with SIGUSR1
+        <li> rework some more dnscache issues
+        <li> fix possible overflow issue related to dnscache code
+        <li> fix some queueing semantics
+        <li> fix for possible dnscache bug in lib.c (possible precision loss)
+        <li> fix for possible issue with icmp code
+        <li> fix for check of smtp server on NT that returns multi line banner
+        <li> logging cleanups
+        <li> fix for $replacement stuff with spawn
+        <li> fix for -n to cause it to not spawn
+        <li> added %p (port number)
+        <li> icmp.c: rewritten ICMP packet catcher
+        <li> icmp.c: improperly ignoring return value of setsockopt
+        <li> patch for broken dnscache code
+        <li> do'h missing IMAP check code in lib.c when parsing config
+          file
+        <li> added zombie collect function -- should fix zombies
+          with spawn on fail, and some other things.
+        <li> added warn_dnscache_lameness()
+        <li> we printed WARNING: %s not checked in %d seconds when the parents
+          were down, so we could not have checked them.
+        <li> fix for SYSMON_HOST in curses client not being able to be
+          overiden on command line.
+        <li> fixed bug in tcp check that would cause checks to return
+          "Internal-Killed" when they should have been timedout.
+        <li> Added warning message that will appear in logs and on
+          console if something is not checked at 3*queuetime
+        <li> Made update for folks that are checking *really* large
+          networks that weren't being monitored properly.  new
+          config option resulted.  config maxqueued #
+          to increase the number of checks that can be going on
+          at once.
+        <li> updated some of the way stuff is displayed in html file if
+          a site has never been up
+        <li> made it so you can configure http check as http:8080 to check
+          web server on port 8080 instead of port 80
+        <li> added a warning if you do not have a whitespace before { on
+          a config file line to aide in debugging config files
+        <li> fix for a logic issue.  we now only show the host that is down
+          instead of all the "children" that depend on that host in
+          the client, and in the html file.  if you don't like this,
+          let me know and i'll put in a option for it.
+        <li> fix for FreeBSD ncurses so we will compile
+        <li> fix for nonexistant ssh check causing core when folks
+          have attempted to configure it
+</ul>
+<strong>Changes for 0.80.5</strong><ul>
+        <li> adjusted hold queue setting format to help with memory
+          use
+        <li> added "make register"
+        <li> added make register, and e-mail help contact information to
+          configure script
+        <li> adjusted the icmp.c packet size to help with possible memory
+          problems
+        <li> fixed bug in loadconfig.c where we used wrong print format and
+          caused a segfault/core when there was invalid hostname
+        <li> fixed stack clobering feature when we expanded variables set with
+          set varname = "string", and expanded them to somethign *really*
+          much longer than we could handle -- this made debugging
+          complicated as there was a corrupt stack which meant cores were not
+          useful at all
+        <li> added reading env var of SYSMON_HOST in client as for which machine
+          to connect to.
+        <li> fixed a bunch of debugging
+        <li> hacked a fix around possible buffer overflow reading config file
+        <li> Added message-id generation code, so mailers w/ threads
+          can view sysmon messages with threads
+        <li> fix of missing config file name, and line number when there
+          are unknown hosts.
+        <li> fix for zombies if using spawn
+        <li> possible fix for http check sucking up lots of cpu
+        <li> fix for RLIMIT_OFILE in hpux
+        <li> added config replyto user@host
+        <li> fix bug in tcp check that would cause core in rare circumstance
+        <li> changed icmp.c/IHL calculation
+        <li> fix for people whose sizeof(struct timeval) != 8
+        <li> minor fixes of prototypes in (v)snprintf
+        <li> more patches from jhbrown@ai.mit.edu for sysmon to
+          work again on an OSF/1 box
+        <li> fixed another core related to null contact.  patch by 
+          jhbrown@ai.mit.edu
+        <li> fixed sysmon so it wouldn't hold on to socket after its
+          death .. patch by jhbrown@ai.mit.edu
+        <li> added logging of improper smtp banner when this occurs
+        <li> added sysmon check.  Useful for monitoring others sysmonds
+        <li> fixed bug with null contact causing crash/core
+        <li> added "config queuetime 500" where 500 is in seconds
+        <li> fixed bug with icmp check and possibly stopping under a rare
+          circumstance
+        <li> fixed bug with long contact strings.
+        <li> fixed a bug with config showupalso
+        <li> fixed something with config nosubject
+        <li> fixed downct = 1, when statechange, and statechange = UP
+        <li> added %T to do current time hh:mm:ss
+        <li> added config nosubject
+        <li> added set sender = "username@host"
+        <li> adjusted things so errors would be properly printed and syslogged
+        <li> fixed problem with last notified time not being copied
+          when doing sighup, caused dup pages
+        <li> set subject = "%d is %w" etc..
+        <li> fixed printing of messages in pinger unless they're unknown
+        <li> made http a valid check type -- basically an alias to www
+          check
+        <li> fixed problem that would cause http check to say killed-internal
+          when it should not have, and should have reported No Response
+        <li> fixed problem that would make curses client broken
+        <li> made sighup set statuschanged = TRUE
+        <li> made default statuschanged = TRUE
+        <li> fixed some whitespace we were inserting in the html
+          files that could cause funky formatting
+        <li> more movement to print_err for proper logging of errors
+        <li> fixed $variable,otherdata such that it works as one would
+          expect
+        <li> Updated "CONF"
+        <li> Fixed sighup stuff where it was set improperly to TRUE
+          at startup, so it would load teh config file twice
+</ul>
+<strong>Changes for 0.80.4</strong><ul>
+        <li> added set randomvariablename = "random thing" then you can use
+          $randomvariablename throughout your config file
+        <li> changed abort -> ABORT
+        <li> fixed problem with tcp ports not reporting properly and
+          reporting as killed instead of their real error (solaris)
+        <li> fixed problem in umichx500 check
+        <li> fixed problem with killed checks eating up fds and not giving
+          them back
+        <li> moved lots of stuff to print_err
+        <li> created ABORT, so it will log when (and where) it dumps core,
+          need to change all aborts() over
+        <li> added print_err
+        <li> changed dnscache to use timeval instead of time_t
+</ul>
+<strong>Changes for 0.80.3</strong><ul>
+        <li> fixed possible problem in http check w/ down sites
+        <li> colors in html file are now configurable (ex:)
+                set downcolor = "ffffff"
+                set upcolor = "ffffff"
+                set recentcolor = "ffffff"
+        <li> removed some unused code
+        <li> allowed config file changing of PMESG:
+                set pmesg = "whatever you want"
+        <li> added pid file /etc/sysmond.pid -- not written if not root
+        <li> cleaned up some inconsistent code
+        <li> fixed bug with %H and no reverse dns for an ip address (fix your
+          reverse dns people! ;)
+        <li> changed PMESG default
+        <li> changed ping test to use non-blocking socket IO
+        <li> did some work in getline_tcp to help out
+        <li> added %H which does gethostbyaddr in PMESG translations
+        <li> limited the number of checks that can be going on at once
+          properly
+        <li> added set_defaults
+        <li> did some optimization to reduce the number of times we
+          call time()
+        <li> did some more variable initalization to take care of
+          possible memory corruption issues
+        <li> added %I (ip address) and made it part of PMESG on default
+        <li> Spawn on fail now works, will e-mail output of program started
+          to contact instead of outage message.
+        <li> Changed a few things w/ the way curses detection was
+          done, and fixes some brokeness of autoconf in relation to it.
+        <li> Added negation to test type (ie, instead of [type] there is now
+          an optional minus flag you put at the beginning of test.  This
+          says only follow children (in curly braces from that host) if
+          it is down. ex:  puck.nether.net -tcp 80 puck.www e-mail
+        <li> Fixed a NULL pointer assignment in the config parser with
+          included config files
+        <li> Optimized the http check some
+        <li> made it so  you can build dependencies on non-ping lines
+          in your config file
+        <li> did some overhauling of config file parser, still needs
+          major rewrite
+</ul>
+
+
+<strong>Changes for 0.80.2</strong> <ul>
+        <li> Fixed config option "showupalso"
+        <li> Fixed config option "noheartbeat"
+        <li> Changed semantics for how to deal with empty config file
+                (thanks to Lars Kellogg-Stedman for finding these three)
+        <li> Added in patch for port to Unixware
+        <li> Fixed potential core in icmp.c
+        <li> Changed handling of empty config file
+</ul>
+<strong>Changes for 0.80.1</strong><ul>
+        <li> Fixed some PMESG semantics, PR#42, PR#43, thanks to jpike
+          for finding these.
+        <li> Fixed minor quote handing issue which would cause words to be
+          cut off in some cases. PR#44
+</ul>
+<strong>Changes for 0.80</strong><ul>
+        <li> made some parser fixes/upgrades, PR#6
+        <li> made more debugging available via debug
+        <li> fixed bug that would cause 0.78.4.20 to die
+        <li> http check broken in beta versions fixed in 0.78.4.21
+        <li> fixed sigHUP PR#2
+        <li> updated the java client PR#35
+        <li> fixed some talktcp.c issues where connect() would return
+          without an error so quickly, we got confused.  PR#34
+        <li> fixed timing issues in curses client. PR#15
+        <li> added tracking db - http://puck.nether.net/cgi-bin/sysmon.cgi
+        <li> change to make writing of text file info less frequent to avoid
+          lots of disk i/o going on when nothing has changed.
+        <li> fixed a core dump problem if you kill the program as it's loading
+          the config file
+        <li> checks are now done in parallel
+        <li> paging stuff merged into "new" format, fixed some problems with
+          autoconf and the page stuff so it will work well.
+        <li> added config include <filename> PR#20
+        <li> fixed segfault in textfile.c PR#32
+        <li> added config showupalso PR#12
+        <li> added config errorsto user@site option in e-mail page stuff
+        <li> added uptime tracker (telnet to your sysmond and type UPTIME)
+        <li> added debugging toggle option
+        <li> implemented stale check killer - needs more work to be complete.
+        <li> reworked queuer (only in the beta one) to eliminate some bugs
+        <li> Merged in patches from torbjorn@thor.EU.net for using the gnu
+          configure stuff
+        <li> changed some of the paging semantics for unpingable hosts so it
+          will send a description
+</ul>
+<strong> Changes for 0.78.3</strong><ul>
+	<li> Fixed bugs with text file writing so that it doesn't nuke the
+	File when it updates the status file.
+	<li> Merged in patches from <a href="mailto:torbjorn@thor.EU.net">torbjorn@thor.EU.net</a> for lots of
+	things, including authdns, radius and https.  https is not on
+	by default, and needs to be configured by you the user when
+	it is to be used.  These patches will be reworked when the
+	multiple checks at once is implemented to speed up network
+	monitoring
+
+</ul>
+<strong> Changes for 0.78.2</strong><ul>
+	<li> Thanks to Dan at FrontierNet for access to his AIX machine to
+	  port to there.
+	<li> Web page set up for sysmon at <a href="http://puck.nether.net/sysmon/">http://puck.nether.net/sysmon/</a>
+	<li> Made some changes to sighup handling internally
+	<li> Cleanup changes made for handling shutdown
+	<li> Memory leak plugged in config loading of bogus dns names
+</ul>
+<strong> Changes for 0.78.1</strong><ul>
+	<li> Thanks to Ray Davis at Hewlett Packard for access to a hpux machine
+	  to fix the hpux port and make it build with their C compiler
+	<li> bug found in dns caching code which would handle invalid hostnames
+	  improperly, causing core dumps
+</ul>
+<strong>
+Changes for 0.78</strong><ul>
+	<li> "config logging none" to not syslog stuff
+	<li> config noheartbeat to not send heartbeat packet
+	<li> moved most config.h options to config file
+	<li> added some memory leak debugging code
+	<li> multiple clients allowed at once!!! :)
+	<li> fixed a bug where multiple clients at once would cause a double
+	  free() and kill the program
+	<li> periodic re-page option added, config pageinterval 33 where 33 is in
+	  minutes
+</ul>
+<strong> Changes for 0.77</strong><ul>
+	<li> integrated some fixes from those great folks at ebone that keep me
+	  on my toes with the code. (<a href="mailto:Steen.Linden@ebone.net">Steen.Linden@ebone.net</a>)
+	<li> removed the passing of client_socket all about to use a structure
+          that will later be expanded to do the multiple clients at once
+	  stuff.
+	<li> changed sendmail to autodetect its path (<a href="mailto:erik.lawaetz@ebone.net">erik.lawaetz@ebone.net</a>)
+	<li> added config statusfile [text|html] /path/to/file to write out
+	  network status in
+	<li> added dns caching code to reduce nameserver load
+	<li> sighup support complete
+	<li> moved all server<-> client interface to srvclient.c
+	<li> changed config file options for www content checking to allow
+	  specifying real urls and text, not hardcoded stuff
+	<li> took out checkfile program, use sysmond -t (test config) instead
+	<li> heartbeat packet stuff added, will send your hostname and
+	  version on bootup for statistical purposes, never called again
+	  no other data passed on.  You can #undef this in config.h
+	<li> added new config option for syslog to get out of config.h
+	<li> fixed single fd leak when loading config file :/
+	<li> fixed bug in snapshots of syslog not always logging stuff due to
+          leftover #ifdefs
+	<li> added fd leaking watch code so we can tell if we're leaking fd's
+	<li> after getting sighup, immediateley check the network don't sleep,
+	  don't collect $200
+	<li> check for sighup within sleep, and break out if you get one
+	<li> added %d to pmesg declaration that prints downtime in
+	  DD:HH:MM format
+</ul>
+<strong> Changes for 0.76-beta5</strong><ul>
+	<li> cleaned up code to eliminate some uneeded global variable
+	  nastyness
+	<li> framework for sighup support, but not all coded in properly yet.
+	<li> almost inital addition of dprintf, but need to hack it a bit
+	  more for it to be useful
+</ul>
+<strong>
+Changes for 0.76-beta4-2</strong><ul>
+	<li> fixed some udp bugs
+	<li> various cleanups and runtime debugging started to be implemented
+	  properly.. (sorta)
+	<li> syslog cleanup
+	<li> if syslog defined, it logs where client connections come from.
+	  -- do we want rfc1413 (ident) support to be added?  blocking issues
+	  with it.. etc..?
+</ul>
+<strong>
+Changes for 0.76-beta3</strong><ul>
+	<li> config numfailures support fixed
+	<li> curses client fixed (hopefully)
+	<li> fixed a lot of compiler warnings
+	<li> shuffled some code around and reworked status variables
+	<li> comments updated somewhat
+</ul>
+<strong>
+Changes for 0.76-beta2</strong><ul>
+	<li> imap config file options fixed
+	<li> pop3 config file options fixed
+	<li> overlapping internal variable problem fixed
+	<li> bug in non-blocking code that caused possible infinate loops and
+	  slow checks to be performed, and possible bad data to be returned
+	<li> fix in some of the timer code
+	<li> TCP connection timed out sensing code fixed
+</ul>
+<strong>
+Changes for 0.75.7</strong><ul>
+	<li> several changes were done since the last version, not all were
+	  documented.  They are listed here:
+	<li> imap support finished
+	<li> pop3 support finished
+	<li> smtp support finished
+	<li> redundant code elimiated
+	<li> filedescriptor leak found and plugged
+	<li> modularized the code a fair amount more in preparation for 
+	  sending out checks in parallel
+	<li> testpop3 and testimap programs added to the suite, to test the
+	  individual services.  There should be a sysmond -s option soon to
+	  test them internally via command line before adding them to the
+	  config file
+	<li> a few new parts of the data structure added for later expansion to
+	  the parallel checking services.
+</ul>
+<strong>
+Changes for 0.75.5</strong><ul>
+	<li> fixed another little memory leak in the ping() function
+	<li> hacked on making all connections to block as little as possible
+	  at all in this world without threads
+	<li> hacked on icmp.c a lot
+	<li> hacked on talktcp.c a lot
+	<li> made icmp.c not use signals to check for data anymore
+	<li> included "pingtest" utility (basically a ping program)
+</ul>
+<strong>
+Changes for 0.75.4</strong><ul>
+	<li> reduced blocking to an almost minimum under most circumstances
+	<li> added a new error report level for nntp checking, No server
+	  Response
+	<li> made the "block" program take the argument of the hostname to
+          check blocking on instead of it being hardcoded
+	<li> inclusion of JAVA client in distribution
+</ul>
+<strong>
+Changes for 0.75.3</strong><ul>
+	<li> fixed several blocking issues
+	<li> fixed a few more problems with client/server interaction
+	<li> fixed nntp checking so it won't mailbomb folks
+	<li> added block utility to test the blocking of your server
+	<li> several minor fixes to improve security
+</ul>
+<strong>
+Changes for 0.75.2</strong><ul>
+	<li> more client fixes (of course -- the client sucks)
+	<li> fixed some inconsistencies in talking to sockets
+	<li> put in news server monitoring stuff.  Check sample config file
+	  for an example
+	<li> added -d flag (no fork) to daemon (useful for debugging)
+	<li> added -v flag (prints version) to daemon and exits
+	<li> added -p flag (changes listening port number)
+	<li> added signal handling to properly exit if we've gotten something
+	  ugly
+	<li> removed lotsa redundant code
+</ul>
+<strong>
+Changes for 0.75.1</strong><ul>
+	<li> little fixes in client
+	<li> now builds under Solaris x86 properly
+	<li> a bit more documentation in the code
+</ul>
+<strong>
+Changes for 0.75</strong>(YAY, the <strong>FINALLY RELEASED VERSION</strong>)
+	<li> syswatch now forks() and leaves a daemon around unless -d (debug)
+	  is specified on command line
+	<li> client is now in place and can request updates from the syswatch
+	  daemon. (client hostname [portname]
+</ul>
+<strong>
+Changes for 0.74beta5</strong><ul>
+	<li> Fixed code so it would work without NICEINTERFACE defined
+	<li> Did some code cleanups, and more comments
+	<li> Fixed a few problems with portability
+	<li> Tested under NetBSD Alpha
+	<li> Started listening on port 1345 for client connections, but
+	  don't do anything with them yet.
+	<li> mailing list created (<a href="mailto:syswatch@puck.nether.net">syswatch@puck.nether.net</a>)
+</ul>
+<strong>
+Changes for 0.74beta3</strong><ul>
+	<li> fixed bug with ping() with counting icmp echo responses
+	  incorrectly if they came from another ping/monitor process
+	  on the same host.  Reproducable using ping -f to another host
+	  on an ethernet, then running the monitor program.. it would think
+	  everything was down.
+	<li> Noticed code broken if NICEINTERFACE isn't defined
+</ul>
+<strong>
+Changes for 0.74beta2</strong><ul>
+	<li> backed out dns cache code because of bugs
+</ul>
+<strong>
+Changes for 0.74beta1</strong><ul>
+	<li> put in dns cache code to speed up boot time
+</ul>
+<strong>
+Changes for 0.71</strong><ul>
+	<li> Tested under FreeBSD, OSF/1, Sunos4.1.4, Linux, Solaris
+	<li> Fixed ping() memory leak
+</ul>
+<strong>
+Changes for 0.70</strong><ul>
+	<li> ping support fixed
+</ul>
+<strong>
+Changes from 0.65-0.68:</strong><ul>
+	<li> Many smarter things added
+	<li> Can send e-mail to alert you if stuff breaks
+	<li> Code cleanups
+	<li> Created this logfile
+</ul>
+
+<p>
+<hr>
+<a href="index.html">Back to the homepage</a>
+<hr>
+<A HREF="mailto:jared+web@puck.nether.net">jared@puck.nether.net</A>
+</body>
+</html>

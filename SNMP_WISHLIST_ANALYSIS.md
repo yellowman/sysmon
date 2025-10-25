@@ -1,0 +1,295 @@
+# SNMP Wishlist Feature Analysis
+
+## Feature Status Overview
+
+| Feature | Status | Implementation Level | Priority |
+|---------|--------|---------------------|----------|
+| 1. Custom "down" message | 🟡 Partial | Data structure only | Medium |
+| 2. Custom "up" message | 🟡 Partial | Data structure only | Medium |
+| 3. Compare two OIDs | 🟡 Partial | Stub implementation | High |
+| 4. Per-object error descriptions | 🟢 Complete | Fully implemented | N/A |
+| 5. Aggregate queries | 🔴 Not started | Not implemented | Low |
+| 6. SNMP trap handling | 🟡 Partial | Basic stub | Low |
+
+---
+
+## Detailed Feature Analysis
+
+### 1. Custom SNMP "down" Message
+
+**Wishlist Request:**
+> snmp custom "down" message
+
+**Current State:**
+- ✅ Data structure exists: `snmp_down_msg` in `struct hostinfo` (config.h:297)
+- ✅ Parser initializes to NULL (parser.l:2418)
+- ❌ No parser rules to SET the value from config file
+- ❌ Not used in message generation (page.c)
+
+**What's Needed:**
+1. Add parser keyword (e.g., `snmpdown` or `snmp_down_msg`)
+2. Parse quoted string value
+3. Use in message generation when SNMP check fails
+
+**Example Config Syntax:**
+```
+object myserver {
+    ip "192.168.1.1";
+    type snmp;
+    oid "1.3.6.1.2.1.1.3.0";
+    snmptype reboot;
+    snmpdown "Server rebooted - check logs!";
+    contact "admin@example.com";
+};
+```
+
+---
+
+### 2. Custom SNMP "up" Message
+
+**Wishlist Request:**
+> snmp custom "up" message
+
+**Current State:**
+- ✅ Data structure exists: `snmp_up_msg` in `struct hostinfo` (config.h:296)
+- ✅ Parser initializes to NULL (parser.l:2417)
+- ❌ No parser rules to SET the value from config file
+- ❌ Not used in message generation
+
+**What's Needed:**
+1. Add parser keyword (e.g., `snmpup` or `snmp_up_msg`)
+2. Parse quoted string value
+3. Use in message generation when SNMP check recovers
+
+**Example Config Syntax:**
+```
+object myserver {
+    ip "192.168.1.1";
+    type snmp;
+    oid "1.3.6.1.2.1.1.3.0";
+    snmptype reboot;
+    snmpup "Server uptime restored to normal";
+    snmpdown "Server rebooted - check logs!";
+    contact "admin@example.com";
+};
+```
+
+---
+
+### 3. Compare Two SNMP OIDs
+
+**Wishlist Request:**
+> ability to compare two snmp oids w/ each other and alert if equal, not equal, etc..
+
+**Current State:**
+- ✅ Type defined: `SYSM_SNMP_TYPE_COMPARE` = 6 (config.h:245)
+- ✅ Data structure: `snmp_oid_sec` for second OID (config.h:295)
+- ✅ Parser recognizes "compare" type (lib.c:488)
+- ✅ Switch case exists in snmp.c (line 352)
+- ❌ **BUT: Case is EMPTY** - just has `break;` with no implementation
+- ❌ No parser rules to set `snmp_oid_sec` from config
+- ❌ No comparison logic implemented
+- ❌ No comparison operator support (eq, ne, gt, lt, etc.)
+
+**What's Needed:**
+1. Add parser keyword for second OID (e.g., `oid2` or `snmp_oid_sec`)
+2. Add comparison operator field to struct hostinfo
+3. Add parser keyword for operator (e.g., `snmp_compare`)
+4. Implement comparison logic in snmp.c:352
+5. Add new error codes for comparison failures
+
+**Example Config Syntax:**
+```
+object load-balance-check {
+    ip "192.168.1.1";
+    type snmp;
+    community "public";
+    oid "1.3.6.1.2.1.2.2.1.10.1";  # ifInOctets for interface 1
+    oid2 "1.3.6.1.2.1.2.2.1.10.2"; # ifInOctets for interface 2
+    snmptype compare;
+    snmp_compare equal;  # Alert if equal (should be different for load balancing)
+    desc "Check if both interfaces have traffic";
+    contact "netadmin@example.com";
+};
+```
+
+**Comparison Operators Needed:**
+- `equal` / `eq` - Alert if OID1 == OID2
+- `notequal` / `ne` - Alert if OID1 != OID2
+- `greater` / `gt` - Alert if OID1 > OID2
+- `less` / `lt` - Alert if OID1 < OID2
+- `ge` - Alert if OID1 >= OID2
+- `le` - Alert if OID1 <= OID2
+
+**Implementation Complexity:** Medium
+- Need to query two OIDs in sequence
+- Store both results
+- Compare based on operator
+- Return appropriate error code
+
+---
+
+### 4. Per-Object SNMP Error Descriptions
+
+**Wishlist Request:**
+> ability to configure descriptions for snmp errors on a per-object basis
+
+**Current State:**
+- ✅ **ALREADY IMPLEMENTED** via `pmesg` field (config.h:298)
+- ✅ Parser supports `pmesg` keyword (parser.l)
+- ✅ Used in message generation
+
+**Status:** ✅ **COMPLETE** - This feature already exists!
+
+**Example Usage:**
+```
+object myserver {
+    ip "192.168.1.1";
+    type snmp;
+    oid "1.3.6.1.2.1.1.3.0";
+    snmptype high;
+    high 1000;
+    pmesg "CPU temperature critical!";
+    contact "admin@example.com";
+};
+```
+
+---
+
+### 5. Aggregate SNMP Queries
+
+**Wishlist Request:**
+> need to aggregate snmp queries to a single host/ip in one larger snmp message with centralized snmp dispatcher
+
+**Current State:**
+- ❌ Not implemented
+- Current design: One SNMP query per object per check cycle
+- Each object creates its own SNMP session
+
+**What's Needed:**
+This is a **major architectural change** requiring:
+
+1. **Query Aggregation:**
+   - Group all pending SNMP checks by destination IP
+   - Build single SNMP PDU with multiple OID requests
+   - Send one packet instead of N packets
+
+2. **Response Dispatcher:**
+   - Parse multi-OID response
+   - Dispatch results to correct object checks
+   - Handle partial failures
+
+3. **Benefits:**
+   - Reduced network traffic
+   - Lower latency (fewer round trips)
+   - Better SNMP agent performance
+   - Supports rate limiting
+
+4. **Challenges:**
+   - Complex state management
+   - Different community strings per object
+   - Different SNMP versions (v1, v2c, v3)
+   - Error handling when one OID fails
+   - Timing/synchronization issues
+
+**Implementation Complexity:** Very High
+
+**Estimated Effort:** 40-60 hours of development + testing
+
+---
+
+### 6. SNMP Trap Handling
+
+**Wishlist Request:**
+> what to do w/ snmp traps? (by 0.94)
+
+**Current State:**
+- 🟡 Basic trap receiver exists (snmp.c:39-70)
+- ✅ Can receive trap packets
+- ✅ Logs source IP and packet size
+- ✅ Dumps packet in hex
+- ❌ No trap parsing
+- ❌ No trap-to-object mapping
+- ❌ No automatic state updates
+- ❌ No trap-based alerting
+
+**What's Needed:**
+1. Parse SNMP trap PDU structure
+2. Extract trap type and varbinds
+3. Map trap source to monitored objects
+4. Update object state based on trap
+5. Optional: trigger alerts based on trap content
+6. Optional: trap-based recovery (device came back up)
+
+**Use Cases:**
+- Device sends linkDown trap → mark interface as down
+- Device sends coldStart trap → mark as rebooted
+- Device sends custom trap → trigger alert
+
+**Implementation Complexity:** Medium-High
+
+---
+
+## Recommended Implementation Order
+
+### Phase 1: Quick Wins (8-12 hours)
+1. ✅ Custom SNMP down message (parser + usage)
+2. ✅ Custom SNMP up message (parser + usage)
+
+### Phase 2: Medium Complexity (16-24 hours)
+3. ✅ Compare two OIDs (full implementation)
+
+### Phase 3: Complex Features (40-60 hours each)
+4. ⚠️ Aggregate SNMP queries (major refactor)
+5. ⚠️ Full trap handling (parser, dispatcher, state management)
+
+---
+
+## Code Locations
+
+**Data Structures:**
+- `/home/user/sysmon/src/config.h:282-387` - `struct hostinfo`
+- `/home/user/sysmon/src/config.h:240-246` - SNMP type constants
+
+**SNMP Logic:**
+- `/home/user/sysmon/src/snmp.c` - Main SNMP implementation
+- `/home/user/sysmon/src/snmp.c:352` - COMPARE stub (needs implementation)
+
+**Parser:**
+- `/home/user/sysmon/src/parser.l` - Lexer/parser rules
+- `/home/user/sysmon/src/lib.c:460-498` - `name_to_snmp_type()` function
+
+**Message Generation:**
+- `/home/user/sysmon/src/page.c` - Email/alert formatting
+- `/home/user/sysmon/src/lib.c:139-201` - `errtostr()` function
+
+---
+
+## Testing Requirements
+
+For each feature:
+1. Unit tests for parser (config syntax)
+2. Integration tests (actual SNMP queries)
+3. Regression tests (ensure existing features work)
+4. Documentation updates (man pages, examples)
+
+---
+
+## Next Steps
+
+**Option A: Implement Quick Wins**
+- Start with custom up/down messages
+- Low risk, high value
+- ~1-2 days of work
+
+**Option B: Implement OID Compare**
+- Complete the stub implementation
+- Medium complexity
+- ~2-3 days of work
+
+**Option C: Full Feature Set**
+- Implement all wishlist items
+- High effort
+- ~2-3 weeks of work
+
+Which approach would you like to pursue?
