@@ -60,6 +60,9 @@ type GlobalSettings struct {
 	DisableICMP     bool   `json:"disableicmp,omitempty"`     // disable all ICMP checks
 	NoHeartbeat     bool   `json:"noheartbeat,omitempty"`     // disable registration packet
 	NoLogConnects   bool   `json:"nologconnects,omitempty"`   // don't log client connections
+	SNMPTrap        bool   `json:"snmptrap,omitempty"`        // enable SNMP trap monitoring
+	AuthKey         string `json:"authkey,omitempty"`         // authentication key for clients
+	SaveState       string `json:"savestate,omitempty"`       // path to save state XML file
 
 	// Include paths
 	Includes []string `json:"includes,omitempty"` // included config files
@@ -107,9 +110,16 @@ type Host struct {
 	TrapAlert   bool   `json:"trapalert,omitempty"`   // enable SNMP trap monitoring
 	MatchedHost string `json:"matchedhost,omitempty"` // associated host for trap matching
 
+	// SNMP monitoring settings
+	SNMPType   string  `json:"snmptype,omitempty"`   // SNMP check type (high/low/range/exact/rate/uptime)
+	SNMPHigh   int64   `json:"snmphigh,omitempty"`   // upper threshold
+	SNMPLow    int64   `json:"snmplow,omitempty"`    // lower threshold
+	SNMPExact  int64   `json:"snmpexact,omitempty"`  // exact value to match
+	SNMPRate   int64   `json:"snmprate,omitempty"`   // rate per second threshold
+	SNMPOctets bool    `json:"snmpoctets,omitempty"` // convert bytes to bits for rate
+
 	// Advanced settings
 	Reverse      bool   `json:"reverse,omitempty"`      // reverse logic (alert when UP)
-	SNMPOctets   bool   `json:"snmpoctets,omitempty"`   // SNMP octet counter mode
 	Dependencies string `json:"dependencies,omitempty"` // dependency string
 
 	Checks []Check `json:"checks,omitempty"` // Multiple check types
