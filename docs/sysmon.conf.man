@@ -69,8 +69,8 @@ router.example.com ping "main router" $oncall
 .SS Values that can be configured with ``config''
 
 queuetime include showupalso errorsto maxqueued replyto noheartbeat
-pageinterval logging dnslog dnsexpire statusfile nosubject numfailures
-html refresh pidfile output drop_privileges disable_icmp trap_port
+pageinterval logging dnslog dnsexpire statusfile statustempdir nosubject
+numfailures html refresh pidfile output drop_privileges disable_icmp trap_port
 
 .SS queuetime
 The ``config queuetime'' directive is used to specify the number of
@@ -157,6 +157,34 @@ The ``config statusfile'' directive takes two arguments.  The first is the
 specification of the file, be it "text" or "html".  The second argument is
 the path to the file that gets written.  The default is to not write a
 status file.
+
+.SS statustempdir
+The ``config statustempdir'' directive specifies a directory where
+sysmond should write temporary status files before renaming them to
+their final location.  This is particularly useful when sysmond has
+dropped privileges using the ``drop_privileges'' directive, as it
+allows the daemon to write status files to a directory owned by the
+unprivileged user (typically ``nobody'').  The directory must exist
+and be writable by the user sysmond runs as.  If not specified,
+temporary files are created in the same directory as the final status
+file (which requires write permissions on that directory).
+
+Example:
+.IP
+.nf
+config statustempdir /var/run/sysmon;
+.fi
+.LP
+
+After setting this directive, ensure the directory is created and has
+appropriate permissions:
+.IP
+.nf
+mkdir -p /var/run/sysmon
+chown nobody:nobody /var/run/sysmon
+chmod 755 /var/run/sysmon
+.fi
+.LP
 
 .SS nosubject
 The ``config nosubject'' directive specifies that there should be no
