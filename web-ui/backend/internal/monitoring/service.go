@@ -55,6 +55,11 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	reader := bufio.NewReader(conn)
 
+	// Read welcome banner first
+	if err := readWelcomeBanner(reader); err != nil {
+		return nil, err
+	}
+
 	// Step 1: Enable XML mode
 	_, err = conn.Write([]byte("MODE xml\n"))
 	if err != nil {
@@ -273,6 +278,22 @@ func (s *Service) GetAlerts() ([]models.HostStatus, error) {
 	return alerts, nil
 }
 
+// readWelcomeBanner reads and validates the daemon's welcome banner
+// Sysmon sends "111 - v1.0 Ready - Welcome" on connection
+func readWelcomeBanner(reader *bufio.Reader) error {
+	welcome, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read welcome banner: %w", err)
+	}
+
+	welcome = strings.TrimSpace(welcome)
+	if !strings.HasPrefix(welcome, "111") {
+		return fmt.Errorf("unexpected welcome banner: %s", welcome)
+	}
+
+	return nil
+}
+
 // authenticate sends AUTH command to sysmon if authKey is provided
 // Returns error if authentication fails
 func authenticate(conn net.Conn, reader *bufio.Reader, authKey string) error {
@@ -309,6 +330,11 @@ func (s *Service) AckHost(hostname string, authKey string) error {
 
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
+
+	// Read welcome banner first
+	if err := readWelcomeBanner(reader); err != nil {
+		return err
+	}
 
 	// Authenticate if auth key provided
 	if err := authenticate(conn, reader, authKey); err != nil {
@@ -363,6 +389,11 @@ func (s *Service) UpdateHostStatus(hostname string, note string, authKey string)
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
 
+	// Read welcome banner first
+	if err := readWelcomeBanner(reader); err != nil {
+		return err
+	}
+
 	// Authenticate if auth key provided
 	if err := authenticate(conn, reader, authKey); err != nil {
 		return err
@@ -416,6 +447,11 @@ func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
 
+	// Read welcome banner first
+	if err := readWelcomeBanner(reader); err != nil {
+		return false, err
+	}
+
 	// Authenticate if auth key provided (TRACE doesn't require auth, but accept it)
 	if err := authenticate(conn, reader, authKey); err != nil {
 		return false, err
@@ -460,6 +496,11 @@ func (s *Service) TestAuth(authKey string) (bool, error) {
 
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
+
+	// Read welcome banner first
+	if err := readWelcomeBanner(reader); err != nil {
+		return false, err
+	}
 
 	// Try to authenticate
 	err = authenticate(conn, reader, authKey)
