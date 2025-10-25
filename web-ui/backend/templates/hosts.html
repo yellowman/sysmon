@@ -21,55 +21,44 @@
         </div>
     </div>
 
-    <!-- Hosts Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <!-- Hosts Grid - Compact View -->
+    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         <template x-for="host in filteredHosts" :key="host.hostname">
-            <div class="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+            <div class="bg-white rounded shadow hover:shadow-md transition-shadow cursor-pointer"
                  @click="selectHost(host)">
                 <!-- Host Header -->
-                <div class="px-6 py-4 border-b border-gray-200">
+                <div class="px-3 py-2 border-b border-gray-200">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
+                        <div class="flex items-center space-x-2 min-w-0">
                             <div :class="{
                                 'bg-green-500': host.overall_status === 'OK',
                                 'bg-yellow-500': host.overall_status === 'WARNING',
                                 'bg-red-500': host.overall_status === 'CRITICAL',
                                 'bg-gray-400': host.paused
-                            }" class="w-3 h-3 rounded-full"></div>
-                            <h3 class="text-lg font-semibold text-gray-900" x-text="host.hostname"></h3>
+                            }" class="w-2 h-2 rounded-full flex-shrink-0"></div>
+                            <h3 class="text-sm font-semibold text-gray-900 truncate" x-text="host.hostname"></h3>
                         </div>
-                        <i x-show="host.paused" class="fas fa-pause text-gray-400" title="Paused"></i>
+                        <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0" title="Paused"></i>
                     </div>
-                    <div class="mt-1 flex items-center space-x-4 text-sm text-gray-500">
-                        <span x-show="host.ipv4_address">
-                            <i class="fas fa-network-wired mr-1"></i>
-                            <span x-text="host.ipv4_address"></span>
-                        </span>
-                        <span x-show="host.contact">
-                            <i class="fas fa-envelope mr-1"></i>
-                            <span x-text="host.contact"></span>
-                        </span>
-                    </div>
+                    <div class="mt-1 text-xs text-gray-500 truncate" x-show="host.ipv4_address" x-text="host.ipv4_address"></div>
                 </div>
 
                 <!-- Checks List -->
-                <div class="px-6 py-4">
-                    <div class="grid grid-cols-2 gap-2">
-                        <template x-for="check in host.checks.slice(0, 6)" :key="check.type + (check.port || '')">
-                            <div class="flex items-center space-x-2 text-sm">
+                <div class="px-3 py-2">
+                    <div class="space-y-1">
+                        <template x-for="check in host.checks.slice(0, 4)" :key="check.type + (check.port || '')">
+                            <div class="flex items-center space-x-1 text-xs">
                                 <i :class="{
-                                    'fas fa-check-circle text-green-500': check.status === 'OK',
+                                    'fas fa-check text-green-500': check.status === 'OK',
                                     'fas fa-exclamation-triangle text-yellow-500': check.status === 'WARNING',
-                                    'fas fa-times-circle text-red-500': check.status === 'CRITICAL'
-                                }"></i>
-                                <span class="text-gray-700" x-text="check.type + (check.port ? ':' + check.port : '')"></span>
-                                <span class="text-xs text-gray-500" x-show="check.response_time_ms"
-                                      x-text="check.response_time_ms.toFixed(1) + 'ms'"></span>
+                                    'fas fa-times text-red-500': check.status === 'CRITICAL'
+                                }" class="text-xs flex-shrink-0"></i>
+                                <span class="text-gray-700 truncate" x-text="check.type + (check.port ? ':' + check.port : '')"></span>
                             </div>
                         </template>
                     </div>
-                    <div class="mt-2 text-xs text-gray-500" x-show="host.checks.length > 6">
-                        + <span x-text="host.checks.length - 6"></span> more checks
+                    <div class="mt-1 text-xs text-gray-400" x-show="host.checks.length > 4">
+                        +<span x-text="host.checks.length - 4"></span> more
                     </div>
                 </div>
             </div>

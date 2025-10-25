@@ -51,10 +51,9 @@
         </div>
     </div>
 
-    <!-- Daemon Info & Charts -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <!-- Daemon Info -->
-        <div class="bg-white rounded-lg shadow p-6">
+    <!-- Daemon Info -->
+    <div class="mb-8">
+        <div class="bg-white rounded-lg shadow p-6 max-w-md">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">
                 <i class="fas fa-info-circle mr-2"></i>Daemon Information
             </h2>
@@ -68,32 +67,14 @@
                         <dt class="text-sm text-gray-600">Uptime:</dt>
                         <dd class="text-sm font-medium text-gray-900" x-text="formatUptime(daemon.uptime_seconds)">-</dd>
                     </div>
-                    <div class="flex justify-between">
-                        <dt class="text-sm text-gray-600">PID:</dt>
-                        <dd class="text-sm font-medium text-gray-900" x-text="daemon.pid || 'N/A'">-</dd>
-                    </div>
-                    <div class="flex justify-between">
-                        <dt class="text-sm text-gray-600">Config File:</dt>
-                        <dd class="text-sm font-medium text-gray-900" x-text="daemon.config_file || 'N/A'">-</dd>
-                    </div>
                 </dl>
                 <div class="mt-4 text-xs text-gray-500">
                     Last update: <span x-text="daemon.current_time ? new Date(daemon.current_time).toLocaleString() : 'Loading...'"></span>
                 </div>
             </div>
-            <div x-show="!daemon.version" class="text-center py-8 text-gray-500">
-                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
-                <p class="text-sm">Loading daemon information...</p>
-            </div>
-        </div>
-
-        <!-- Check Types Chart -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                <i class="fas fa-chart-pie mr-2"></i>Check Types
-            </h2>
-            <div style="position: relative; height: 300px;">
-                <canvas id="checkTypesChart"></canvas>
+            <div x-show="!daemon.version" class="text-center py-4 text-gray-500">
+                <i class="fas fa-spinner fa-spin text-xl mb-2"></i>
+                <p class="text-sm">Loading...</p>
             </div>
         </div>
     </div>
@@ -312,7 +293,6 @@ function dashboard() {
         stats: {},
         alerts: [],
         traps: [],
-        chart: null,
         updateDialog: {
             show: false,
             hostname: '',
@@ -368,57 +348,10 @@ function dashboard() {
                 }
 
                 this.loading = false;
-                this.updateChart();
             } catch (e) {
                 this.error = e.message;
                 this.loading = false;
             }
-        },
-
-        updateChart() {
-            const ctx = document.getElementById('checkTypesChart');
-            if (!ctx) return;
-
-            // Destroy existing chart if it exists
-            if (this.chart) {
-                this.chart.destroy();
-                this.chart = null;
-            }
-
-            const types = this.stats.checks_by_type || {};
-
-            // Don't create chart if no data
-            if (Object.keys(types).length === 0) {
-                return;
-            }
-
-            this.chart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: Object.keys(types),
-                    datasets: [{
-                        data: Object.values(types),
-                        backgroundColor: [
-                            '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
-                            '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'
-                        ]
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    aspectRatio: 1.5,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                boxWidth: 15,
-                                padding: 10
-                            }
-                        }
-                    }
-                }
-            });
         },
 
         async ackHost(hostname) {
