@@ -107,8 +107,11 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
 	status := &models.SysmonStatus{
-		Hosts:      []models.HostStatus{},
-		Statistics: models.Stats{},
+		Hosts: []models.HostStatus{},
+		Statistics: models.Stats{
+			ChecksByType:   make(map[string]int),
+			ChecksByStatus: make(map[string]int),
+		},
 	}
 
 	hostsUp := 0
@@ -179,6 +182,12 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		}
 		host.Checks = append(host.Checks, check)
 
+		// Increment statistics counters for dashboard charts
+		if xmlObj.ObjectType != "" {
+			status.Statistics.ChecksByType[xmlObj.ObjectType]++
+		}
+		status.Statistics.ChecksByStatus[host.OverallStatus]++
+
 		if xmlObj.ObjectContact != "" {
 			host.Contact = xmlObj.ObjectContact
 		}
@@ -190,9 +199,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	status.Statistics.TotalHosts = len(objectNames)
 	status.Statistics.HealthyHosts = hostsUp
 	status.Statistics.CriticalHosts = hostsDown
-	// WarningHosts is incremented in the loop above
-	status.Statistics.ChecksByType = make(map[string]int)
-	status.Statistics.ChecksByStatus = make(map[string]int)
+	// WarningHosts and ChecksByType/ChecksByStatus are incremented in the loop above
 
 	return status, nil
 }
