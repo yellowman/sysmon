@@ -314,6 +314,41 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LAST_TIME_UP, obj->data->last_up, XML_LAST_TIME_UP);
 	do_send_xml(fd, fh, buffer);
 
+	/* Packet loss tolerance (max packets that can be lost) */
+	if (obj->data->pktloss_tolerance > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_PACKET_LOSS_THRESHOLD,
+			obj->data->pktloss_tolerance, XML_PACKET_LOSS_THRESHOLD);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* RTT threshold */
+	if (obj->data->rtt_threshold > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_RTT_THRESHOLD,
+			obj->data->rtt_threshold, XML_RTT_THRESHOLD);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* Jitter threshold */
+	if (obj->data->jitter_threshold > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_JITTER_THRESHOLD,
+			obj->data->jitter_threshold, XML_JITTER_THRESHOLD);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* Wakeup retries (max times to retry waking stale check) */
+	if (obj->data->max_wakeup_retries > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_WAKEUP_RETRIES,
+			obj->data->max_wakeup_retries, XML_WAKEUP_RETRIES);
+		do_send_xml(fd, fh, buffer);
+	}
+
+	/* Trap alert configuration */
+	if (obj->data->trap_alert) {
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT,
+			1, XML_TRAP_ALERT);
+		do_send_xml(fd, fh, buffer);
+	}
+
 	snprintf(buffer, sizeof(buffer), "</%s>", XML_OBJECT_STATUS);
 	do_send_xml(fd, fh, buffer);
 }
