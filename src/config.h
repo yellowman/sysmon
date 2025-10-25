@@ -552,6 +552,17 @@ struct bootp_pkt {
 #define XML_CHECK_START		"ObjectCheckStarted"
 #define XML_OUTAGE_TIME		"ObjectOutageTime"
 #define XML_LAST_TIME_UP	"ObjectLastTimeUp"
+#define XML_PACKET_LOSS_THRESHOLD	"ObjectPacketLossThreshold"
+#define XML_RTT_THRESHOLD	"ObjectRTTThreshold"
+#define XML_JITTER_THRESHOLD	"ObjectJitterThreshold"
+#define XML_WAKEUP_CHECK	"ObjectWakeupCheck"
+#define XML_WAKEUP_RETRIES	"ObjectWakeupRetries"
+#define XML_WAKEUP_INTERVAL	"ObjectWakeupInterval"
+#define XML_TRAP_ALERT		"ObjectTrapAlert"
+#define XML_MATCHED_HOST	"ObjectMatchedHost"
+#define XML_PACKET_LOSS		"ObjectPacketLoss"
+#define XML_AVG_RTT		"ObjectAvgRTT"
+#define XML_JITTER		"ObjectJitter"
 
 
 /* misc defines for any/all external functions */
