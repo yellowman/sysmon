@@ -1776,6 +1776,23 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			last_t = now_t;
 		}
 
+		/* Process any pending ICMP/ICMPv6 replies BEFORE checking timeouts.
+		 * This prevents a race condition where replies arrive but aren't processed
+		 * before service_test_ping() evaluates timeouts, causing false negatives.
+		 * We call handle_icmp_responses() here using non-blocking reads to drain
+		 * the kernel buffer of any waiting packets.
+		 */
+		if (!disable_icmp && glob_icmp_fd > 0)
+		{
+			handle_icmp_responses();
+		}
+#ifdef HAVE_IPv6
+		if (!disable_icmp && glob_icmpv6_fd > 0)
+		{
+			handle_pingv6_responses();
+		}
+#endif /* HAVE_IPv6 */
+
 		service_checks(now_t); /* do checks that are ready for us */
 
 		needssleep(now_t);     /* if we need a sleep, do it here */
