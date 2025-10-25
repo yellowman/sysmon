@@ -894,7 +894,7 @@ void *STRDUP(char *, char *);
 void FREE(void *);
 short int name_to_type(char *);
 short int name_to_snmp_type(char *);
-void quicksort(char *, size_t, size_t, int (*) ());
+void quicksort(char *, size_t, size_t, int (*)(const void *, const void *));
 /* end lib.c */
 
 #if (defined(HAVE_LIBNCURSES) || defined(HAVE_LIBCURSES))

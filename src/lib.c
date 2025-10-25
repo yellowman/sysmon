@@ -1341,13 +1341,13 @@ static void swapfunc(char *a, char *b, size_t n, int swaptype)
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-static char *med3(char *a, char *b, char *c, int (*cmp) ())
+static char *med3(char *a, char *b, char *c, int (*cmp)(const void *, const void *))
 {   return cmp(a, b) < 0 ?
        (cmp(b, c) < 0 ? b : cmp(a, c) < 0 ? c : a)
      : (cmp(b, c) > 0 ? b : cmp(a, c) > 0 ? c : a);
 }
 
-void quicksort(char *a, size_t n, size_t es, int (*cmp) ())
+void quicksort(char *a, size_t n, size_t es, int (*cmp)(const void *, const void *))
 {
    char *pa, *pb, *pc, *pd, *pl, *pm, *pn, *pv;
    int r, swaptype;
