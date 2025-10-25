@@ -1,0 +1,464 @@
+{{template "base" .}}
+
+{{define "title"}}Host Detail{{end}}
+
+{{define "content"}}
+<style>
+    /* Muted Pastel Colors */
+    .status-ok { background-color: #d1f7d6; color: #0f5132; }
+    .status-warning { background-color: #fff9c4; color: #7d6608; }
+    .status-critical { background-color: #ffcdd2; color: #842029; }
+    .status-unknown { background-color: #e0e0e0; color: #424242; }
+
+    .section-header { background-color: #e3f2fd; }
+    .section-border { border-left: 4px solid #1976d2; }
+
+    /* Smooth transitions */
+    .collapse-enter { max-height: 0; overflow: hidden; }
+    .collapse-enter-active { max-height: 2000px; transition: max-height 0.3s ease-in; }
+    .collapse-exit { max-height: 2000px; }
+    .collapse-exit-active { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+</style>
+
+<div x-data="hostDetail()" x-init="init()">
+    <!-- Back Button -->
+    <div class="mb-6">
+        <a href="/hosts.html" class="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+            <i class="fas fa-arrow-left mr-2"></i>Back to Hosts
+        </a>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="text-center py-12">
+        <i class="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
+        <p class="mt-4 text-gray-600">Loading host details...</p>
+    </div>
+
+    <!-- Error State -->
+    <div x-show="error && !loading" class="bg-red-50 border-2 border-red-200 rounded-xl p-6 text-center">
+        <i class="fas fa-exclamation-circle text-4xl text-red-500 mb-4"></i>
+        <p class="text-red-800 font-medium" x-text="error"></p>
+        <button @click="fetchData()" class="mt-4 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+            Retry
+        </button>
+    </div>
+
+    <!-- Host Details (when loaded) -->
+    <div x-show="!loading && !error && host" class="space-y-6">
+
+        <!-- Main Status Card -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <div class="px-8 py-6 section-header">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <i class="fas fa-server text-4xl text-blue-600"></i>
+                        <div>
+                            <h1 class="text-3xl font-bold text-gray-900" x-text="host.HostName"></h1>
+                            <p class="text-sm text-gray-600"><span x-text="host.ObjectType"></span> check on port <span x-text="host.ObjectPort || 'N/A'"></span></p>
+                        </div>
+                    </div>
+                    <div>
+                        <span :class="{
+                            'status-ok': host.ObjectLastcheckState == 0,
+                            'status-warning': host.ObjectLastcheckState != 0 && host.ObjectContacted == 0,
+                            'status-critical': host.ObjectLastcheckState != 0 && host.ObjectContacted == 1
+                        }" class="px-6 py-3 rounded-xl text-lg font-bold shadow-md">
+                            <span x-show="host.ObjectLastcheckState == 0">OK</span>
+                            <span x-show="host.ObjectLastcheckState != 0 && host.ObjectContacted == 0">WARNING</span>
+                            <span x-show="host.ObjectLastcheckState != 0 && host.ObjectContacted == 1">CRITICAL</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Info Grid -->
+            <div class="px-8 py-6 bg-gray-50 grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-gray-200">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-clock text-blue-500"></i>
+                    <div>
+                        <div class="text-xs text-gray-500">Last Checked</div>
+                        <div class="font-medium" x-text="formatTimestamp(host.ObjectLastChecked)"></div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-envelope text-green-500"></i>
+                    <div>
+                        <div class="text-xs text-gray-500">Contact</div>
+                        <div class="font-medium" x-text="host.ObjectContact || 'None'"></div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-users text-purple-500"></i>
+                    <div>
+                        <div class="text-xs text-gray-500">Group</div>
+                        <div class="font-medium" x-text="host.ObjectGroup || 'None'"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collapsible Sections -->
+
+        <!-- Check Configuration Section -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <button @click="toggleSection('config')"
+                    class="w-full px-8 py-4 section-header flex items-center justify-between hover:bg-blue-50 transition-colors">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-cog text-blue-600 text-xl"></i>
+                    <h2 class="text-xl font-bold text-gray-900">Check Configuration</h2>
+                </div>
+                <i :class="sections.config ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas text-blue-600"></i>
+            </button>
+            <div x-show="sections.config" x-transition class="px-8 py-6 section-border">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <div class="text-sm text-gray-500 mb-1">Queue Interval</div>
+                        <div class="font-medium" x-text="host.ObjectQueueInterval + ' seconds'"></div>
+                    </div>
+                    <div x-show="host.ObjectNextQueueTime">
+                        <div class="text-sm text-gray-500 mb-1">Next Scheduled Check</div>
+                        <div class="font-medium" x-text="formatTimestamp(host.ObjectNextQueueTime)"></div>
+                    </div>
+                    <div x-show="host.ObjectSendPings">
+                        <div class="text-sm text-gray-500 mb-1">Pings to Send</div>
+                        <div class="font-medium" x-text="host.ObjectSendPings"></div>
+                    </div>
+                    <div x-show="host.ObjectMinPings">
+                        <div class="text-sm text-gray-500 mb-1">Minimum Pings Required</div>
+                        <div class="font-medium" x-text="host.ObjectMinPings"></div>
+                    </div>
+                    <div x-show="host.ObjectMessage">
+                        <div class="text-sm text-gray-500 mb-1">Alert Message</div>
+                        <div class="font-medium" x-text="host.ObjectMessage"></div>
+                    </div>
+                    <div x-show="host.ObjectPageMessage">
+                        <div class="text-sm text-gray-500 mb-1">Custom Page Message</div>
+                        <div class="font-medium text-purple-600" x-text="host.ObjectPageMessage"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Section -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <button @click="toggleSection('stats')"
+                    class="w-full px-8 py-4 section-header flex items-center justify-between hover:bg-blue-50 transition-colors">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-chart-bar text-green-600 text-xl"></i>
+                    <h2 class="text-xl font-bold text-gray-900">Statistics</h2>
+                </div>
+                <i :class="sections.stats ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas text-green-600"></i>
+            </button>
+            <div x-show="sections.stats" x-transition class="px-8 py-6 section-border" style="border-left-color: #4caf50;">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div class="text-center p-4 bg-gray-50 rounded-lg">
+                        <div class="text-3xl font-bold text-blue-600" x-text="host.ObjectTotalChecked"></div>
+                        <div class="text-sm text-gray-600 mt-1">Total Checked</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 rounded-lg">
+                        <div class="text-3xl font-bold text-green-600" x-text="host.ObjectUpCt"></div>
+                        <div class="text-sm text-gray-600 mt-1">Consecutive Up</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 rounded-lg">
+                        <div class="text-3xl font-bold text-red-600" x-text="host.ObjectDownCt"></div>
+                        <div class="text-sm text-gray-600 mt-1">Consecutive Down</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 rounded-lg">
+                        <div class="text-3xl font-bold text-orange-600" x-text="host.ObjectTotalDown"></div>
+                        <div class="text-sm text-gray-600 mt-1">Total Down</div>
+                    </div>
+                </div>
+
+                <!-- Uptime Percentage -->
+                <div class="mt-6">
+                    <div class="text-sm text-gray-600 mb-2">Uptime</div>
+                    <div class="w-full bg-gray-200 rounded-full h-6">
+                        <div :style="'width: ' + calculateUptime() + '%'"
+                             class="bg-gradient-to-r from-green-400 to-green-600 h-6 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                            <span x-text="calculateUptime().toFixed(2) + '%'"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Thresholds & Alerts Section -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <button @click="toggleSection('thresholds')"
+                    class="w-full px-8 py-4 section-header flex items-center justify-between hover:bg-blue-50 transition-colors">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-bell text-yellow-600 text-xl"></i>
+                    <h2 class="text-xl font-bold text-gray-900">Thresholds & Alerts</h2>
+                </div>
+                <i :class="sections.thresholds ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas text-yellow-600"></i>
+            </button>
+            <div x-show="sections.thresholds" x-transition class="px-8 py-6 section-border" style="border-left-color: #ff9800;">
+                <div class="space-y-4">
+                    <div class="p-4 bg-yellow-50 rounded-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-medium">Max Failures Before Alert</div>
+                                <div class="text-sm text-gray-600">Consecutive failures needed to trigger contact</div>
+                            </div>
+                            <div class="text-2xl font-bold text-yellow-600" x-text="host.ObjectMaxDown"></div>
+                        </div>
+                    </div>
+
+                    <div x-show="host.ObjectPacketLossThreshold" class="p-4 bg-orange-50 rounded-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-medium">Packet Loss Threshold</div>
+                                <div class="text-sm text-gray-600">Maximum packets that can be lost</div>
+                            </div>
+                            <div class="text-2xl font-bold text-orange-600" x-text="host.ObjectPacketLossThreshold"></div>
+                        </div>
+                    </div>
+
+                    <div x-show="host.ObjectRTTThreshold" class="p-4 bg-red-50 rounded-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-medium">RTT Threshold</div>
+                                <div class="text-sm text-gray-600">Maximum round-trip time in milliseconds</div>
+                            </div>
+                            <div class="text-2xl font-bold text-red-600" x-text="host.ObjectRTTThreshold + ' ms'"></div>
+                        </div>
+                    </div>
+
+                    <div x-show="host.ObjectJitterThreshold" class="p-4 bg-purple-50 rounded-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-medium">Jitter Threshold</div>
+                                <div class="text-sm text-gray-600">Maximum jitter in milliseconds</div>
+                            </div>
+                            <div class="text-2xl font-bold text-purple-600" x-text="host.ObjectJitterThreshold + ' ms'"></div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div class="flex items-center space-x-3">
+                            <i :class="host.ObjectAcked ? 'fas fa-check-circle text-green-500' : 'fas fa-times-circle text-gray-400'" class="text-2xl"></i>
+                            <div>
+                                <div class="font-medium">Alert Acknowledged</div>
+                                <div class="text-sm text-gray-600" x-show="host.ObjectContactedAt" x-text="'Last contacted: ' + formatTimestamp(host.ObjectContactedAt)"></div>
+                            </div>
+                        </div>
+                        <span :class="host.ObjectAcked ? 'status-ok' : 'status-unknown'" class="px-4 py-2 rounded-lg font-medium">
+                            <span x-text="host.ObjectAcked ? 'Yes' : 'No'"></span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Runtime State Section (only if queued) -->
+        <div x-show="host.ObjectQueued || host.CheckQueuedAt" class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <button @click="toggleSection('runtime')"
+                    class="w-full px-8 py-4 section-header flex items-center justify-between hover:bg-blue-50 transition-colors">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-microchip text-indigo-600 text-xl"></i>
+                    <h2 class="text-xl font-bold text-gray-900">Runtime State</h2>
+                    <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-bold">LIVE</span>
+                </div>
+                <i :class="sections.runtime ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas text-indigo-600"></i>
+            </button>
+            <div x-show="sections.runtime" x-transition class="px-8 py-6 section-border" style="border-left-color: #673ab7;">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div x-show="host.CheckQueuedAt" class="p-4 bg-indigo-50 rounded-lg">
+                        <div class="text-sm text-gray-600 mb-1">Queued At</div>
+                        <div class="font-mono font-medium" x-text="formatDetailedTimestamp(host.CheckQueuedAt)"></div>
+                    </div>
+                    <div x-show="host.CheckLastServiced" class="p-4 bg-purple-50 rounded-lg">
+                        <div class="text-sm text-gray-600 mb-1">Last Serviced</div>
+                        <div class="font-mono font-medium" x-text="formatDetailedTimestamp(host.CheckLastServiced)"></div>
+                    </div>
+                    <div x-show="host.CheckFileDescriptor" class="p-4 bg-blue-50 rounded-lg">
+                        <div class="text-sm text-gray-600 mb-1">File Descriptor</div>
+                        <div class="font-mono font-medium" x-text="host.CheckFileDescriptor"></div>
+                    </div>
+                    <div x-show="host.CheckStarted != null" class="p-4 bg-green-50 rounded-lg">
+                        <div class="text-sm text-gray-600 mb-1">Check Started</div>
+                        <div class="font-medium">
+                            <span :class="host.CheckStarted ? 'text-green-600' : 'text-gray-400'" x-text="host.CheckStarted ? 'Yes' : 'No'"></span>
+                        </div>
+                    </div>
+                    <div x-show="host.CheckWakeupCount" class="p-4 bg-orange-50 rounded-lg col-span-2">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-medium text-orange-800">Stale Check Wakeups</div>
+                                <div class="text-sm text-gray-600">Last woken: <span x-text="formatTimestamp(host.CheckLastWakeupTime)"></span></div>
+                            </div>
+                            <div class="text-3xl font-bold text-orange-600" x-text="host.CheckWakeupCount"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug & Advanced Section -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <button @click="toggleSection('debug')"
+                    class="w-full px-8 py-4 bg-gray-100 flex items-center justify-between hover:bg-gray-200 transition-colors">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-bug text-gray-600 text-xl"></i>
+                    <h2 class="text-xl font-bold text-gray-700">Debug & Advanced</h2>
+                </div>
+                <i :class="sections.debug ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas text-gray-600"></i>
+            </button>
+            <div x-show="sections.debug" x-transition class="px-8 py-6 bg-gray-50">
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between p-4 bg-white rounded-lg shadow">
+                        <div class="flex items-center space-x-3">
+                            <i :class="host.ObjectTraceEnabled ? 'fas fa-bug text-blue-500' : 'fas fa-bug text-gray-400'" class="text-2xl"></i>
+                            <div>
+                                <div class="font-medium">Per-Object Tracing</div>
+                                <div class="text-sm text-gray-600">Debug logging for this host</div>
+                            </div>
+                        </div>
+                        <button @click="toggleTrace()"
+                                :class="host.ObjectTraceEnabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 hover:bg-gray-500'"
+                                class="px-4 py-2 text-white rounded-lg transition-colors">
+                            <span x-text="host.ObjectTraceEnabled ? 'Tracing ON' : 'Trace OFF'"></span>
+                        </button>
+                    </div>
+
+                    <div class="p-4 bg-white rounded-lg shadow">
+                        <div class="text-sm text-gray-600 mb-2">Unique Object ID</div>
+                        <div class="font-mono text-xs bg-gray-100 p-3 rounded" x-text="host.ObjectUniqueID"></div>
+                    </div>
+
+                    <div x-show="host.ObjectNotes" class="p-4 bg-white rounded-lg shadow">
+                        <div class="text-sm text-gray-600 mb-2">User Notes</div>
+                        <div class="text-sm" x-text="host.ObjectNotes"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+function hostDetail() {
+    return {
+        loading: true,
+        error: null,
+        host: null,
+        hostname: '',
+        sections: {
+            config: true,
+            stats: false,
+            thresholds: false,
+            runtime: false,
+            debug: false
+        },
+
+        init() {
+            // Get hostname from URL query parameter
+            const params = new URLSearchParams(window.location.search);
+            this.hostname = params.get('host');
+
+            if (!this.hostname) {
+                this.error = 'No hostname specified';
+                this.loading = false;
+                return;
+            }
+
+            this.fetchData();
+        },
+
+        async fetchData() {
+            try {
+                this.loading = true;
+                this.error = null;
+
+                // Fetch XML data for this host
+                const response = await fetch(`/api/xml/object/${encodeURIComponent(this.hostname)}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const xmlText = await response.text();
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+
+                // Parse XML into object
+                this.host = this.parseXML(xmlDoc);
+
+                this.loading = false;
+            } catch (e) {
+                this.error = e.message;
+                this.loading = false;
+            }
+        },
+
+        parseXML(xmlDoc) {
+            const obj = {};
+            const status = xmlDoc.querySelector('ObjectStatus');
+
+            if (!status) {
+                throw new Error('Invalid XML structure');
+            }
+
+            // Parse all child elements
+            Array.from(status.children).forEach(child => {
+                const tagName = child.tagName;
+                let value = child.textContent;
+
+                // Try to parse as number if it looks like one
+                if (!isNaN(value) && value.trim() !== '') {
+                    value = parseFloat(value);
+                }
+
+                obj[tagName] = value;
+            });
+
+            return obj;
+        },
+
+        toggleSection(section) {
+            this.sections[section] = !this.sections[section];
+        },
+
+        calculateUptime() {
+            if (!this.host || !this.host.ObjectTotalChecked || this.host.ObjectTotalChecked == 0) {
+                return 100;
+            }
+            const upChecks = this.host.ObjectTotalChecked - this.host.ObjectTotalDown;
+            return (upChecks / this.host.ObjectTotalChecked) * 100;
+        },
+
+        formatTimestamp(ts) {
+            if (!ts || ts == 0) return 'Never';
+            const date = new Date(ts * 1000);
+            return date.toLocaleString();
+        },
+
+        formatDetailedTimestamp(ts) {
+            if (!ts) return 'N/A';
+            // Handle format "seconds.microseconds"
+            const parts = ts.toString().split('.');
+            const secs = parseInt(parts[0]);
+            const usecs = parts[1] || '0';
+            const date = new Date(secs * 1000);
+            return date.toLocaleString() + '.' + usecs.padEnd(6, '0');
+        },
+
+        async toggleTrace() {
+            try {
+                const result = await apiCall(`/api/monitoring/trace/${this.hostname}`, {
+                    method: 'POST'
+                });
+
+                this.host.ObjectTraceEnabled = result.tracing_enabled ? 1 : 0;
+
+                alert(result.tracing_enabled ?
+                    `Tracing enabled for ${this.hostname}` :
+                    `Tracing disabled for ${this.hostname}`);
+            } catch (e) {
+                alert(`Failed to toggle trace: ${e.message}`);
+            }
+        }
+    };
+}
+</script>
+{{end}}
