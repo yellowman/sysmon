@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"sysmon-web/internal/config"
@@ -73,6 +74,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/admin/printq", r.handleAdminPrintQ)
 	r.mux.HandleFunc("/api/admin/nfd", r.handleAdminNFD)
 	r.mux.HandleFunc("/api/admin/killit", r.handleAdminKillit)
+	r.mux.HandleFunc("/api/admin/session-log", r.handleAdminSessionLog)
+	r.mux.HandleFunc("/api/admin/session-errors", r.handleAdminSessionErrors)
 
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
@@ -698,6 +701,50 @@ func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
 	r.sendJSON(w, map[string]string{
 		"response": response,
 		"message":  "Daemon shutdown initiated",
+	})
+}
+
+func (r *Router) handleAdminSessionLog(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Get limit from query param, default to 100
+	limitStr := req.URL.Query().Get("limit")
+	limit := 100
+	if limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	entries := r.monitoring.GetSessionLog(limit)
+	r.sendJSON(w, map[string]interface{}{
+		"entries": entries,
+		"count":   len(entries),
+	})
+}
+
+func (r *Router) handleAdminSessionErrors(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Get limit from query param, default to 10
+	limitStr := req.URL.Query().Get("limit")
+	limit := 10
+	if limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	errors := r.monitoring.GetSessionErrors(limit)
+	r.sendJSON(w, map[string]interface{}{
+		"errors": errors,
+		"count":  len(errors),
 	})
 }
 
