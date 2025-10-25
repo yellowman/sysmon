@@ -1,4 +1,4 @@
-WISHLIST (Last updated 25-Apr-2006) -- aka TODO
+WISHLIST (Last updated 25-Oct-2025) -- aka TODO
 
 	Version, Features and Dates are all projected.
 
@@ -7,15 +7,14 @@ Future: (Unknown)
 		. by groups?
 		. by state (all, 'down' status..)
 	* pageinterval configurable per host
-	* pings per check configurable.  also configurable per-host.
-		loss+numbers to send (min_pings, send_pings) (half done)
 	* textfile displays objects that are down when the parent is also down
 	* config flaptime <minutes>;
 		display host in html/text file for next <minutes>
 		amount of time as green after host came back up
-	* native dns checks (send packet, do we want recurs, aa checks? need to
-		parse response) - need addl feats, docs
+	* native dns checks - needs additional features and docs
+		(basic dns check exists with dns-query, dns_aa, dns_recursion)
 	* http://example.com:1345/ textfile+auth+object history
+		NOTE: Web UI now available at separate port with FastCGI
 	* snmp custom "down" message
 	* snmp custom "up" message
 	* ability to compare two snmp oids w/ each other and alert if
@@ -25,33 +24,38 @@ Future: (Unknown)
 	* show FILENAME in errors (standardize format?)
 		parser_file_error(char *filename, int lineno, "msg");
 		or replace msg with integer pointing to canned message
-	* documentation
+	* documentation - ONGOING (comprehensive updates completed for v0.94)
 	* need to aggregate snmp queries to a single host/ip in one
 		larger snmp message with centralized snmp dispatcher
-	* what to do w/ snmp traps? (by 0.94)
 	* config savestate /path/to/file (save state for sw upgrades)
 	* snpp notification
 	* make paused data visible in curses client
-	* packetloss check 
-		keep history for 24 hours (configurable glob and per-host)
-		tolerance config for pings lost in a period
-		if total loss, just report as down
-		example: far-away-site pktloss 15 1 2 "far-site" mail@site
-		will send 15 pings every 1 minute, if more than 2 lost, report
-	* rtt check? (use external rtt agent?)
-	* SAA?
-	* ircd check? (connect, send quit, no banner)
-	* documentation
+	* ircd check - DONE (basic ircd check implemented)
 	* config authfile (file-type sysmon|passwd|htpasswd|etc)
 	* curses client fix
-	* revoke root!
-	* make WAKEUP_CHECKS go out and actually do that, instead of just 
-		be killer...  also go out and make us pass better states 
-		around such that wakeup_checks actually only calls checks 
-		every few times, instead of every iteration
-	* config minnumfailures (but before it appears in txt file, ie: 
+	* config minnumfailures (but before it appears in txt file, ie:
 		becomes yellow)
 	* All bugs gone :)
+
+COMPLETED in v0.94 (2025):
+	* pings per check configurable per-host - DONE
+		(min_pings, send_pings fully implemented with packet_loss_threshold)
+	* snmp traps - DONE
+		(trap_alert directive, matched_host support, trap port config)
+	* packetloss check - DONE
+		(packet loss monitoring with history, tolerance, threshold)
+		(pktloss_tolerance, pktloss_history_hours configurable)
+	* rtt check - DONE
+		(RTT threshold monitoring with rtt_threshold directive)
+	* SAA - PARTIALLY DONE
+		(SAA-lite implemented: RTT and jitter monitoring)
+		(rtt_threshold, jitter_threshold, rtt_samples configurable)
+	* revoke root - DONE
+		(privilege dropping with drop_privileges directive)
+		(setuid ping helper for ICMP operations when unprivileged)
+	* wakeup_checks improvements - DONE
+		(proactive wakeup with max_wakeup_retries and throttling)
+		(properly calls checks with retry logic instead of just killing)
 0.93: (Jul, 2006)
 	* better documentation
         * rework queuer to sort by age and queue longest since check
