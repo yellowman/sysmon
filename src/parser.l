@@ -1,4 +1,5 @@
 /* fix solaris lex issues we hope */
+%option noyywrap
 %e 6500
 %p 6500
 %n 6500
@@ -53,6 +54,7 @@ char *parser_header = NULL;
 char *parser_authkey = NULL;
 char *parser_savestate = NULL;
 char *parser_statusfile = NULL;
+char *parser_statustempdir = NULL;
 char *parser_cssfile = NULL;
 char *parser_pidfile = NULL;
 char *parser_logging = NULL;
@@ -325,7 +327,37 @@ config\ statusfile\ text\ [^;]+{WS}*;       {
   parser_statusfile[ parser_pos2 - parser_pos1 ] = '\0';
 
   if (debug)
-    print_err(0, "statusfile : %s", parser_statusfile); 
+    print_err(0, "statusfile : %s", parser_statusfile);
+}
+
+config{WS}statustempdir{WS}[^;]+{WS}*;       {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+  parser_pos1 = strchr(yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+    print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+    break;
+  } else {
+    parser_pos1=parser_pos1+1;
+  }
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+    print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+    break;
+  }
+  if (parser_statustempdir != NULL)
+  {
+    FREE(parser_statustempdir);
+  }
+  parser_statustempdir = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_statustempdir");
+  strncpy( parser_statustempdir, parser_pos1, parser_pos2 - parser_pos1 );
+
+  parser_statustempdir[ parser_pos2 - parser_pos1 ] = '\0';
+
+  if (debug)
+    print_err(0, "statustempdir : %s", parser_statustempdir);
 }
 
 config{WS}cssfile{WS}[^;]+{WS}*;       {
@@ -2863,6 +2895,8 @@ void initalize_parser()
 		FREE(parser_pidfile);
 	if (parser_statusfile != NULL)
 		FREE(parser_statusfile);
+	if (parser_statustempdir != NULL)
+		FREE(parser_statustempdir);
 	if (parser_logging != NULL)
 		FREE(parser_logging);
 	if (parser_page != NULL)
@@ -2939,6 +2973,7 @@ void initalize_parser()
 	parser_authkey = NULL;
 	parser_savestate = NULL;
 	parser_statusfile = NULL;
+	parser_statustempdir = NULL;
 	parser_pidfile = STRDUP (PIDFILE, "default PID file name");
 	parser_logging = NULL;
 	parser_page = NULL;

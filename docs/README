@@ -6,6 +6,13 @@ Installation Notes:
 for improved security. A setuid helper (sysmon-ping-helper) is installed
 to handle ICMP operations when running unprivileged.
 
+	When using "config drop_privileges", you must configure a writable
+directory for status file generation with "config statustempdir". Create
+a directory owned by the dropped-privilege user (nobody/daemon):
+	mkdir -p /var/run/sysmon
+	chown nobody:nobody /var/run/sysmon
+	chmod 755 /var/run/sysmon
+
 	You may need ncurses, net-snmp libraries, and should have gcc for
 compiling this program. For JSON output support, the daemon can write
 monitoring data in JSON format. A web-based configuration manager is

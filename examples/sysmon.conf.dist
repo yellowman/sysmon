@@ -7,6 +7,10 @@ root = "my.default.gateway-obj";
 
 # create a file for web page users
 config statusfile html "/usr/local/htdocs/index.html";
+# Temp directory for building status file (writable by dropped-privilege user)
+# Recommended when using "config drop_privileges" - use a directory owned by
+# the nobody/daemon user (e.g., /var/run/sysmon, /tmp/sysmon)
+config statustempdir "/var/run/sysmon";
 # Log devices that are up/down
 config logging file "/var/log/sysmond.log";
 # Configure an authentication key -- Default is none
