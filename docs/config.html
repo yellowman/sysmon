@@ -205,6 +205,27 @@ security reasons.
 <dd>Password/Authentication key used to restrict access to
 client port.
 
+<dt><font face=courier size=-1><b>config output json "</b><i>path</i><b>";</b></font>
+<dd>Enable JSON output mode. Sysmond will write monitoring data in JSON format
+to the specified file path. The JSON output includes detailed information about
+all monitored objects, their states, SNMP trap alerts, packet loss statistics,
+RTT/jitter measurements, and wakeup check results. Updated on state changes.
+
+<dt><font face=courier size=-1><b>config drop_privileges;</b></font>
+<dd>Drop root privileges after initialization for enhanced security. When enabled,
+sysmond will switch to a non-privileged user after opening raw sockets and binding
+privileged ports. ICMP operations are performed via the setuid sysmon-ping-helper.
+Cannot be used when ICMP monitoring is disabled.
+
+<dt><font face=courier size=-1><b>config disable_icmp;</b></font>
+<dd>Disable all ICMP (ping) monitoring. This prevents the daemon from opening raw
+sockets and allows it to run entirely without privileges. Note that this disables
+all ping and pingv6 tests.
+
+<dt><font face=courier size=-1><b>config trap_port </b><i>integer</i><b>;</b></font> (Default: 162)
+<dd>Specify the UDP port for receiving SNMP trap alerts. Default is 162 (standard
+SNMP trap port). Requires root privileges or cap_net_bind_service to bind ports below 1024.
+
 <dt><font face=courier size=-1><b>include "</b><i>path</i><b>";</b></font>
 <dd>Specify another configuration file to be included at
 this point.
@@ -285,6 +306,52 @@ up, we do not get monitored.
 <dt><font face=courier size=-1><b>username "</b><i>username</i><b>";</b></font>
 <dd>Only valid for pop3, imap and radius check.
 
+<dt><font face=courier size=-1><b>min_pings </b><i>integer</i><b>;</b></font> (Default: 1)
+<dd>Minimum number of successful ping responses required to consider host UP.
+Used for packet loss monitoring. Must be less than or equal to send_pings.
+
+<dt><font face=courier size=-1><b>send_pings </b><i>integer</i><b>;</b></font> (Default: 5)
+<dd>Number of ICMP echo requests to send during each check interval.
+Used for packet loss monitoring. Higher values provide more accurate loss statistics.
+
+<dt><font face=courier size=-1><b>packet_loss_threshold </b><i>percentage</i><b>;</b></font> (Default: 0.0)
+<dd>Packet loss percentage threshold (0.0-100.0). If packet loss exceeds this value,
+an alert is triggered even if the minimum number of pings succeeded. Example: 25.0
+triggers alert when more than 25% of packets are lost.
+
+<dt><font face=courier size=-1><b>rtt_threshold </b><i>milliseconds</i><b>;</b></font>
+<dd>Round-trip time threshold in milliseconds. If average RTT exceeds this value,
+an alert is triggered. Used for latency monitoring. Example: 100 triggers alert
+when average RTT exceeds 100ms.
+
+<dt><font face=courier size=-1><b>jitter_threshold </b><i>milliseconds</i><b>;</b></font>
+<dd>Jitter threshold in milliseconds. Jitter is the variation in RTT between
+consecutive packets. If jitter exceeds this value, an alert is triggered.
+Used for monitoring connection stability. Example: 50 triggers alert when
+jitter exceeds 50ms.
+
+<dt><font face=courier size=-1><b>wakeup_check;</b></font>
+<dd>Enable proactive wakeup monitoring. When enabled, sysmond attempts to wake
+unreachable hosts using Wake-on-LAN before declaring them down. Useful for
+monitoring hosts that may be in power-saving modes.
+
+<dt><font face=courier size=-1><b>wakeup_retries </b><i>integer</i><b>;</b></font> (Default: 3)
+<dd>Number of Wake-on-LAN attempts before declaring host permanently down.
+Only used when wakeup_check is enabled.
+
+<dt><font face=courier size=-1><b>wakeup_check_interval </b><i>seconds</i><b>;</b></font> (Default: 300)
+<dd>Time to wait in seconds between wakeup attempts. Allows time for host to
+complete boot process. Only used when wakeup_check is enabled.
+
+<dt><font face=courier size=-1><b>trap_alert;</b></font>
+<dd>Enable SNMP trap alert monitoring for this object. When enabled, sysmond
+listens for SNMP traps from this host and triggers alerts based on trap
+severity and content. Traps are matched to objects by source IP address.
+
+<dt><font face=courier size=-1><b>matched_host "</b><i>object-name</i><b>";</b></font>
+<dd>Associate this trap monitoring object with a specific host object.
+Used to link SNMP trap alerts with the corresponding monitored host.
+Allows trap-triggered state changes to affect the associated host's status.
 
 
 </dl>
@@ -478,6 +545,64 @@ object cisco-Router-temp {
 };
 </pre></td></tr>
 
+<tr><td valign="top" bgcolor="aaaaaa"><a name="packetLossTest"><b>Packet Loss Monitoring</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object gateway-packetloss {
+        ip "192.168.1.1";
+        type ping;
+        desc "Gateway with packet loss monitoring";
+        min_pings 4;
+        send_pings 5;
+        packet_loss_threshold 20.0;
+        contact "netadmin@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="rttJitterTest"><b>RTT and Jitter Monitoring</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object voip-gateway {
+        ip "10.0.1.100";
+        type ping;
+        desc "VoIP gateway - latency sensitive";
+        rtt_threshold 50;
+        jitter_threshold 10;
+        contact "voip-admin@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="wakeupTest"><b>Wakeup Check (Wake-on-LAN)</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object desktop-workstation {
+        ip "10.0.2.50";
+        type ping;
+        desc "Desktop with power management";
+        wakeup_check;
+        wakeup_retries 3;
+        wakeup_check_interval 300;
+        contact "sysadmin@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="trapAlertTest"><b>SNMP Trap Alert Monitoring</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object router-traps {
+        ip "192.168.1.1";
+        type ping;
+        desc "Router with SNMP trap monitoring";
+        trap_alert;
+        contact "netops@example.com";
+};
+
+# Trap monitoring object linked to router
+object router-trap-receiver {
+        ip "192.168.1.1";
+        type ping;
+        desc "Router SNMP trap receiver";
+        matched_host "router-traps";
+        trap_alert;
+        contact "netops@example.com";
+};
+</pre></td></tr>
 
 </table>
 <a name="example_config_object_option"></a><h3>5. Example Configuration

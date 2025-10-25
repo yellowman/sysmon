@@ -1,5 +1,27 @@
                         Bug fixes, new features, etc..
      _________________________________________________________________
+   Changes for 0.94 (2025)
+     * Add SNMP trap alert monitoring with matched_host support
+     * Add packet loss monitoring (min_pings, send_pings, packet_loss_threshold)
+     * Add RTT (round-trip time) threshold monitoring for latency alerts
+     * Add jitter threshold monitoring for connection stability
+     * Add wakeup checks (Wake-on-LAN) for proactive monitoring
+     * Add privilege dropping for enhanced security (drop_privileges directive)
+     * Add JSON output mode for machine-readable monitoring data
+     * Add web UI configuration manager (FastCGI-based, written in Go)
+     * Add setuid ping helper for unprivileged ICMP operations
+     * Fix infinite loop when ping helper is missing
+     * Fix JSON formatting bugs (unquoted strings in SNMP trap output)
+     * Fix config reload endpoint to actually reload sysmon
+     * Fix compilation errors with portable ICMP macros
+     * Fix security warnings: replace vsprintf() with vsnprintf()
+     * Fix security warnings: replace rand() with random()
+     * Convert MD5 code from K&R C to ANSI C (eliminate 30+ warnings)
+     * Fix quicksort function pointer prototypes (eliminate 8 warnings)
+     * Enhance configure script to search lib64 and multiarch library paths
+     * Update XML output to include new monitoring fields
+     * Update documentation for all new features and configuration options
+
    Changes for 0.93
      * proper qsort crash fix
      * fix excessive logging when no IPv6 is available
@@ -196,7 +218,7 @@
      * fix segfault when configuring custom colors.
 
    Changes for 0.91.3
-     * division by zero coredump thanks to Bengt Gördén
+     * division by zero coredump thanks to Bengt Gï¿½rdï¿½n
      * lots of IPv6 voodoo started to add ipv6 ping test.
      * fix solaris lex issue
      * make ./configure detect IPv6
