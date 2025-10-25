@@ -137,8 +137,13 @@ func (r *Router) handleConfigReload(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Just trigger reload - this is handled in UpdateConfig
-	r.sendJSON(w, map[string]string{"status": "reload triggered"})
+	// Trigger sysmon reload (send SIGHUP)
+	if err := r.config.ReloadSysmon(); err != nil {
+		r.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to reload sysmon: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{"status": "sysmon reloaded successfully"})
 }
 
 func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
