@@ -20,17 +20,34 @@ func main() {
 	sysmonAddr := flag.String("sysmon", "localhost:3333", "Sysmon daemon address")
 	auditLog := flag.String("audit", "/var/log/sysmon-web-audit.log", "Audit log path")
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
-	templateDir := flag.String("templates", "./templates", "Templates directory")
+	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")
 	listen := flag.String("listen", "", "HTTP listen address (for dev mode, leave empty for FastCGI)")
 	flag.Parse()
 
 	// Initialize services
 	log.Println("Initializing sysmon web configuration manager...")
 
+	// Auto-detect template directory if not specified
+	finalTemplateDir := *templateDir
+	if finalTemplateDir == "" {
+		// Try installed location first
+		if _, err := os.Stat("/usr/local/libexec/sysmon-web/templates"); err == nil {
+			finalTemplateDir = "/usr/local/libexec/sysmon-web/templates"
+			log.Printf("Using installed templates at %s", finalTemplateDir)
+		} else if _, err := os.Stat("./templates"); err == nil {
+			// Fall back to development location
+			finalTemplateDir = "./templates"
+			log.Printf("Using development templates at %s", finalTemplateDir)
+		} else {
+			log.Fatal("Could not find templates directory. Use -templates flag to specify location.")
+		}
+	}
+
 	// Load templates
-	if err := api.InitTemplates(*templateDir); err != nil {
+	if err := api.InitTemplates(finalTemplateDir); err != nil {
 		log.Fatalf("Failed to load templates: %v", err)
 	}
+	log.Printf("Templates loaded successfully from %s", finalTemplateDir)
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
