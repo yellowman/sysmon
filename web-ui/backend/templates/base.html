@@ -64,9 +64,23 @@
             <div class="space-y-2">
                 <template x-for="(error, index) in errors" :key="index">
                     <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50">
-                        <div class="text-xs text-gray-500" x-text="error.timestamp"></div>
+                        <div class="flex justify-between items-start">
+                            <div class="text-xs text-gray-500" x-text="error.timestamp"></div>
+                            <span x-show="error.responseCode"
+                                  :class="{
+                                      'bg-red-600': error.responseCode >= 400,
+                                      'bg-yellow-600': error.responseCode >= 300 && error.responseCode < 400,
+                                      'bg-blue-600': error.responseCode < 300
+                                  }"
+                                  class="px-2 py-0.5 rounded text-white text-xs font-mono"
+                                  x-text="error.responseCode"></span>
+                        </div>
                         <div class="text-sm font-medium text-gray-900" x-text="error.command"></div>
                         <div class="text-sm text-red-700 mt-1" x-text="error.error"></div>
+                        <div x-show="error.sysmonResponse" class="mt-2 text-xs font-mono bg-gray-800 text-green-400 p-2 rounded">
+                            <div class="text-gray-400 mb-1">Sysmon Response:</div>
+                            <div x-text="error.sysmonResponse"></div>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -134,7 +148,9 @@
                     this.errors.unshift({
                         timestamp: new Date().toLocaleString(),
                         command: error.command || 'Unknown',
-                        error: error.error || error.message || 'Unknown error'
+                        error: error.error || error.message || 'Unknown error',
+                        responseCode: error.responseCode || error.status,
+                        sysmonResponse: error.sysmonResponse
                     });
 
                     // Keep only last 50 errors
@@ -212,9 +228,14 @@
         }
 
         // Global helper to log protocol errors
-        function logProtocolError(command, error) {
+        function logProtocolError(command, error, responseCode, sysmonResponse) {
             window.dispatchEvent(new CustomEvent('protocol-error', {
-                detail: { command, error }
+                detail: {
+                    command,
+                    error,
+                    responseCode,
+                    sysmonResponse
+                }
             }));
         }
 
@@ -230,9 +251,10 @@
 
             try {
                 const response = await fetch(url, options);
+                const responseCode = response.status;
 
                 // Handle 401 - auth required
-                if (response.status === 401) {
+                if (responseCode === 401) {
                     // Clear invalid key
                     sessionStorage.removeItem('sysmon_auth_key');
 
@@ -246,18 +268,26 @@
                     });
                     window.dispatchEvent(authEvent);
 
+                    // Log with response code
+                    logProtocolError(url, 'Authentication required', responseCode);
                     throw new Error('Authentication required');
                 }
 
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({ message: response.statusText }));
-                    throw new Error(error.message || 'Request failed');
+                    const errorMsg = error.message || 'Request failed';
+
+                    // Log with response code
+                    logProtocolError(url, errorMsg, responseCode);
+                    throw new Error(errorMsg);
                 }
 
                 return await response.json();
             } catch (e) {
-                // Log protocol error
-                logProtocolError(url, e.message);
+                // Log protocol error if not already logged
+                if (!e.logged) {
+                    logProtocolError(url, e.message);
+                }
                 throw e;
             }
         }
