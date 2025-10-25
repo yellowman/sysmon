@@ -45,6 +45,46 @@ func NewService(sysmonAddr string) *Service {
 	}
 }
 
+// SysmonResponse represents a parsed response from sysmon daemon
+type SysmonResponse struct {
+	Code    string // e.g., "333", "403", "444"
+	Message string // Full response line
+	IsError bool   // true if 403 or 444
+}
+
+// readSysmonResponse reads and parses a sysmon response line
+// Returns the parsed response and any read error
+func readSysmonResponse(reader *bufio.Reader) (*SysmonResponse, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := strings.TrimSpace(line)
+
+	// Check if it's a numbered response code (3 digits at start)
+	if len(trimmed) >= 3 {
+		code := trimmed[0:3]
+		// All valid sysmon codes are numeric
+		if code[0] >= '0' && code[0] <= '9' &&
+		   code[1] >= '0' && code[1] <= '9' &&
+		   code[2] >= '0' && code[2] <= '9' {
+			return &SysmonResponse{
+				Code:    code,
+				Message: trimmed,
+				IsError: code == "403" || code == "444",
+			}, nil
+		}
+	}
+
+	// Not a numbered code - it's data (like XML)
+	return &SysmonResponse{
+		Code:    "",
+		Message: line, // Keep full line with newline for XML parsing
+		IsError: false,
+	}, nil
+}
+
 // XMLObjectStatus represents the XML structure from SHOWOBJ command
 // Maps to send_object_xml() output in srvclient.c
 type XMLObjectStatus struct {
@@ -88,13 +128,13 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		return nil, fmt.Errorf("failed to send MODE xml command: %w", err)
 	}
 
-	// Read response: "333 xml enabled"
-	response, err := reader.ReadString('\n')
+	// Read response: expect "333 xml enabled"
+	resp, err := readSysmonResponse(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read MODE xml response: %w", err)
 	}
-	if !strings.Contains(response, "333") {
-		return nil, fmt.Errorf("MODE xml failed: %s", response)
+	if resp.IsError || resp.Code != "333" {
+		return nil, fmt.Errorf("MODE xml failed: %s", resp.Message)
 	}
 
 	// Step 2: Get list of objects with STAT command
@@ -106,17 +146,24 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	// Read object names from STAT response
 	objectNames := []string{}
 	for {
-		line, err := reader.ReadString('\n')
+		resp, err := readSysmonResponse(reader)
 		if err != nil {
 			return nil, fmt.Errorf("error reading STAT response: %w", err)
 		}
 
-		line = strings.TrimSpace(line)
-
-		// End of status output
-		if strings.HasPrefix(line, "333") {
-			break
+		// Check for response codes
+		if resp.Code != "" {
+			if resp.IsError {
+				return nil, fmt.Errorf("STAT command failed: %s", resp.Message)
+			}
+			// Code 333 = end of output
+			if resp.Code == "333" {
+				break
+			}
 		}
+
+		// It's a data line (no response code)
+		line := strings.TrimSpace(resp.Message)
 
 		// Parse plain text format from STAT (even in XML mode)
 		// Format: hostname:type:port:lastcheck:downct:contacted:deathtime
@@ -148,8 +195,8 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	// Capture MODE xml response
 	allResponses = append(allResponses, ResponseCapture{
 		Command:  "MODE xml",
-		Response: response,
-		Parsed:   strings.Contains(response, "333"),
+		Response: resp.Message,
+		Parsed:   resp.Code == "333",
 	})
 
 	for _, objName := range objectNames {
@@ -159,21 +206,66 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			continue // Skip this object
 		}
 
-		// Read XML response (multi-line)
-		xmlData := ""
+		// Read first line using helper to check if it's an error or XML
+		resp, err := readSysmonResponse(reader)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading first line for %s: %v\n", objName, err)
+			// Capture the failed response
+			capture := ResponseCapture{
+				Command:  fmt.Sprintf("SHOWOBJ %s", objName),
+				Response: "",
+				Parsed:   false,
+				Error:    err.Error(),
+			}
+			allResponses = append(allResponses, capture)
+
+			return nil, &XMLParseError{
+				Message:      fmt.Sprintf("Timeout reading response for %s: %v", objName, err),
+				ObjectName:   objName,
+				RawXML:       "",
+				AllSamples:   debugXMLSamples,
+				AllResponses: allResponses,
+			}
+		}
+
+		// Check if response is an error code (403, 444)
+		if resp.IsError {
+			// Daemon returned an error (object not found, permission denied, etc.)
+			fmt.Fprintf(os.Stderr, "Sysmon error for %s: %s\n", objName, resp.Message)
+
+			// Capture the error response
+			capture := ResponseCapture{
+				Command:  fmt.Sprintf("SHOWOBJ %s", objName),
+				Response: resp.Message,
+				Parsed:   false,
+				Error:    resp.Message,
+			}
+			allResponses = append(allResponses, capture)
+
+			// Skip this object and continue with others
+			continue
+		}
+
+		// It's XML - read remaining lines until </ObjectStatus>
+		xmlData := resp.Message
 		readErr := error(nil)
 		for {
 			line, err := reader.ReadString('\n')
+
+			// IMPORTANT: Process line FIRST, even if err != nil
+			// ReadString() can return both data AND error (e.g., EOF) on same call
+			xmlData += line
+
+			// Check for terminator
+			if strings.Contains(line, "</ObjectStatus>") {
+				break // Success! Complete XML received
+			}
+
+			// THEN check for error (after processing line)
 			if err != nil {
 				// Save error for reporting
 				readErr = err
 				fmt.Fprintf(os.Stderr, "Error reading line for %s: %v\n", objName, err)
-				break
-			}
-			xmlData += line
-
-			// XML ends with </ObjectStatus>
-			if strings.Contains(line, "</ObjectStatus>") {
 				break
 			}
 		}
@@ -686,13 +778,18 @@ func (s *Service) PrintQueue(authKey string) (string, error) {
 	var output strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			break // End of output
-		}
+
+		// Process line first (ReadString can return data + error)
 		output.WriteString(line)
-		// Stop if we see end marker or timeout
+
+		// Stop if we see end marker
 		if strings.Contains(line, "333") || strings.Contains(line, "444") {
 			break
+		}
+
+		// Then check error
+		if err != nil {
+			break // End of output
 		}
 	}
 
@@ -846,14 +943,18 @@ func (s *Service) GetObjectsXML() (string, error) {
 		// Read multi-line XML response until we see </ObjectStatus>
 		for {
 			line, err := reader.ReadString('\n')
-			if err != nil {
-				return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
-			}
 
+			// Process line first (ReadString can return data + error)
 			xmlOutput.WriteString(line)
 
+			// Check for terminator
 			if strings.Contains(line, "</ObjectStatus>") {
 				break
+			}
+
+			// Then check error
+			if err != nil {
+				return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
 			}
 		}
 	}
@@ -906,12 +1007,11 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 	var xmlOutput strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
-		}
 
+		// Process line first (ReadString can return data + error)
 		xmlOutput.WriteString(line)
 
+		// Check for terminator
 		if strings.Contains(line, "</ObjectStatus>") {
 			break
 		}
@@ -919,6 +1019,11 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 		// Check for error responses
 		if strings.Contains(line, "403") {
 			return "", fmt.Errorf("object not found or MODE xml not enabled")
+		}
+
+		// Then check error
+		if err != nil {
+			return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
 		}
 	}
 
