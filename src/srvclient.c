@@ -34,11 +34,11 @@ void send_stat_start(struct clientstatus client, struct all_elements_list *head,
 			} else {
 
 			/* down in some fashion */
-			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%d:%ld", 
-			here->value->data->hostname, here->value->data->type, 
+			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%d:%ld",
+			here->value->data->hostname, here->value->data->type,
 			here->value->data->port, here->value->data->lastcheck,
-			here->value->data->downct, 
-			here->value->data->contacted, 
+			here->value->data->downct,
+			here->value->data->contacted,
 			here->value->data->deathtime);
 			}
 
@@ -49,13 +49,55 @@ void send_stat_start(struct clientstatus client, struct all_elements_list *head,
 	return;
 }
 
+/* Send status for ALL hosts (both up and down) - used by STATAL command */
+void send_stat_all(struct clientstatus client, struct all_elements_list *head, int obj)
+{
+	char buff[256];
+	struct all_elements_list *here = NULL;
+
+	if (head == NULL)
+	{
+		return; /* shouldn't happen, just doing sanity checking */
+	}
+
+	for (here = head; here!= NULL;here=here->next)
+	{
+		/* NOTE: No lastcheck filter - return ALL objects */
+		if (obj == 1)
+		{
+			/* Return just unique_name (like STATO) */
+			snprintf(buff, 256, "%s", here->value->unique_name);
+		} else {
+			/* Return detailed format (like STAT) */
+			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%ld:%ld",
+			here->value->data->hostname, here->value->data->type,
+			here->value->data->port, here->value->data->lastcheck,
+			here->value->data->downct,
+			here->value->data->upct,
+			here->value->data->deathtime);
+		}
+
+		/* write it out the socket */
+		sendline(client.filedes, buff);
+	}
+	return;
+}
+
 int	send_stat(struct clientstatus *client, char *buff)
 {
 	int retval;
-	if (strncmp(buff, "STATO", 5) == 0)
+	/* STATAL = return all objects (both up and down) */
+	if (strncmp(buff, "STATAL", 6) == 0)
+	{
+		send_stat_all(*client, currenthead, 1); /* obj=1 means return unique_name only */
+	}
+	/* STATO = return only down objects, unique_name format */
+	else if (strncmp(buff, "STATO", 5) == 0)
 	{
 		send_stat_start(*client, currenthead, 1);
-	} else {
+	}
+	/* STAT = return only down objects, detailed format */
+	else {
 		send_stat_start(*client, currenthead, 0);
 	}
 	if (paused)
