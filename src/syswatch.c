@@ -15,6 +15,7 @@ char *myname; /* myname */
 char *log_file; /* Log file used if facility = -3 */
 u_long addr=0; /* IP Addr to bind to */
 struct all_elements_list *currenthead = NULL; /* master list of objects */
+struct spawn_def *spawn_defs_head = NULL; /* list of spawn command definitions */
 struct graph_elements *configed_root = NULL;
 struct dnscache *dnshead = NULL;
 struct clientstatus *clienthead;

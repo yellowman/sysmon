@@ -384,6 +384,13 @@ struct hostinfo {
 
 /* New structures for monitoring */
 
+/* Spawn command definitions for spawns {} block */
+struct spawn_def {
+	char *name;           /* Spawn command name (e.g., "pagechris") */
+	char *command;        /* Actual command to execute (e.g., "/usr/bin/page.sh %s %i") */
+	struct spawn_def *next;
+};
+
 struct nei_list {
 	unsigned char *nei_name;
 	struct graph_elements *g_element;
@@ -636,6 +643,7 @@ extern struct clientstatus *clienthead;
 extern struct monitorent *queuehead;
 extern struct dnscache *dnshead;
 extern struct all_elements_list *currenthead;
+extern struct spawn_def *spawn_defs_head; /* Head of spawn command definitions list */
 extern struct hostinfo *first;
 extern struct protoent *icmpproto;
 extern unsigned char *ident_hash;
@@ -895,6 +903,11 @@ void clear_visited();
 int parse(char *, struct parsed *);
 void free_parsed(struct parsed *);
 int match_facility(char *);
+
+/* Spawn command management */
+void add_spawn_def(char *name, char *command);
+char *lookup_spawn_command(char *name);
+void free_spawn_defs();
 
 int open_host(char*, int, int*, int);
 int open_sock();
