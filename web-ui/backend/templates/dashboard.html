@@ -320,16 +320,10 @@ function dashboard() {
 
         async ackHost(hostname) {
             try {
-                const response = await fetch(`/api/monitoring/ack/${hostname}`, {
+                const result = await apiCall(`/api/monitoring/ack/${hostname}`, {
                     method: 'POST'
                 });
 
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to acknowledge host');
-                }
-
-                const result = await response.json();
                 this.showNotification(`Host ${hostname} acknowledged successfully`);
 
                 // Refresh data to show updated status
@@ -351,7 +345,7 @@ function dashboard() {
             }
 
             try {
-                const response = await fetch(`/api/monitoring/update/${this.updateDialog.hostname}`, {
+                const result = await apiCall(`/api/monitoring/update/${this.updateDialog.hostname}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -361,12 +355,6 @@ function dashboard() {
                     })
                 });
 
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to update host');
-                }
-
-                const result = await response.json();
                 this.updateDialog.show = false;
                 this.showNotification(`Host ${this.updateDialog.hostname} updated successfully`);
 

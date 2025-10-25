@@ -96,7 +96,7 @@
                 <div>
                     <!-- Modal Header -->
                     <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
-                        <div>
+                        <div class="flex-1">
                             <h2 class="text-2xl font-bold text-gray-900" x-text="selectedHost.hostname"></h2>
                             <div class="mt-1 flex items-center space-x-4 text-sm">
                                 <span :class="{
@@ -110,9 +110,19 @@
                                 </span>
                             </div>
                         </div>
-                        <button @click="selectedHost = null" class="text-gray-400 hover:text-gray-600">
-                            <i class="fas fa-times text-2xl"></i>
-                        </button>
+                        <div class="flex items-center space-x-3">
+                            <!-- TRACE Toggle -->
+                            <button @click="toggleTrace(selectedHost.hostname)"
+                                    :class="selectedHost.tracing ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 hover:bg-gray-500'"
+                                    class="px-3 py-1 text-white text-xs rounded transition-colors"
+                                    :title="selectedHost.tracing ? 'Tracing enabled - click to disable' : 'Tracing disabled - click to enable'">
+                                <i class="fas fa-bug mr-1"></i>
+                                <span x-text="selectedHost.tracing ? 'Tracing ON' : 'Trace OFF'"></span>
+                            </button>
+                            <button @click="selectedHost = null" class="text-gray-400 hover:text-gray-600">
+                                <i class="fas fa-times text-2xl"></i>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Modal Content -->
@@ -203,6 +213,38 @@ function hostsPage() {
 
         selectHost(host) {
             this.selectedHost = host;
+            // Initialize tracing flag if not present
+            if (this.selectedHost.tracing === undefined) {
+                this.selectedHost.tracing = false;
+            }
+        },
+
+        async toggleTrace(hostname) {
+            try {
+                const result = await apiCall(`/api/monitoring/trace/${hostname}`, {
+                    method: 'POST'
+                });
+
+                // Update the tracing flag based on response
+                if (this.selectedHost && this.selectedHost.hostname === hostname) {
+                    this.selectedHost.tracing = result.tracing_enabled;
+                }
+
+                // Also update in the hosts list
+                const hostInList = this.hosts.find(h => h.hostname === hostname);
+                if (hostInList) {
+                    hostInList.tracing = result.tracing_enabled;
+                }
+
+                // Show notification
+                const message = result.tracing_enabled ?
+                    `Tracing enabled for ${hostname}` :
+                    `Tracing disabled for ${hostname}`;
+
+                alert(message);
+            } catch (e) {
+                alert(`Failed to toggle trace: ${e.message}`);
+            }
         },
 
         formatTime(timestamp) {
