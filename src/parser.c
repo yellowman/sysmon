@@ -994,6 +994,7 @@ char *parser_dnsexpire = NULL;
 int parser_i_dnslog;
 char *parser_dnslog = NULL;
 int parser_i_pageinterval;
+int parser_obj_i_pageinterval = -1;
 char *parser_pageinterval = NULL;
 int parser_i_maxqueued;
 char *parser_maxqueued = NULL;
@@ -1023,8 +1024,8 @@ extern struct all_elements_list *parser_head;
 /* end external declarations not found in config.h */
 
 
-#line 1027 "<stdout>"
 #line 1028 "<stdout>"
+#line 1029 "<stdout>"
 
 #define INITIAL 0
 
@@ -1241,10 +1242,10 @@ YY_DECL
 		}
 
 	{
-#line 133 "parser.l"
+#line 134 "parser.l"
 
 
-#line 1248 "<stdout>"
+#line 1249 "<stdout>"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -1304,18 +1305,18 @@ do_action:	/* This label is used only to access EOF actions. */
 case 1:
 /* rule 1 can match eol */
 YY_RULE_SETUP
-#line 135 "parser.l"
+#line 136 "parser.l"
 { if (debug) print_err(1, "ignoring line %d - comments", line_no); line_no++; }	/* Ignore comments */
 	YY_BREAK
 case 2:
 YY_RULE_SETUP
-#line 137 "parser.l"
+#line 138 "parser.l"
 /* ignore whitespace */
 	YY_BREAK
 case 3:
 /* rule 3 can match eol */
 YY_RULE_SETUP
-#line 140 "parser.l"
+#line 141 "parser.l"
 { 
 	if (debug) 
 		print_err(1, "ignoring line %d - newline", line_no); 
@@ -1325,7 +1326,7 @@ YY_RULE_SETUP
 case 4:
 /* rule 4 can match eol */
 YY_RULE_SETUP
-#line 147 "parser.l"
+#line 148 "parser.l"
 {
 
   /* Search for extra newlines that are not being counted */
@@ -1380,7 +1381,7 @@ YY_RULE_SETUP
 case 5:
 /* rule 5 can match eol */
 YY_RULE_SETUP
-#line 198 "parser.l"
+#line 199 "parser.l"
 {
 
   /* Search for extra newlines that are not being counted */
@@ -1414,7 +1415,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 6:
 YY_RULE_SETUP
-#line 229 "parser.l"
+#line 230 "parser.l"
 {
 	if (parser_name == NULL)
 		print_err(1, "Warning, reverse specified when not inside an object %d", line_no);
@@ -1424,7 +1425,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 7:
 YY_RULE_SETUP
-#line 236 "parser.l"
+#line 237 "parser.l"
 {
 	if (parser_name == NULL)
 		print_err(1, "Warning, trap_alert specified when not inside an object at line %d", line_no);
@@ -1435,7 +1436,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 8:
 YY_RULE_SETUP
-#line 244 "parser.l"
+#line 245 "parser.l"
 {
         if (parser_name == NULL)
                 print_err(1, "Warning, snmp-octets specified when not inside an object %d", line_no);
@@ -1445,7 +1446,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 9:
 YY_RULE_SETUP
-#line 252 "parser.l"
+#line 253 "parser.l"
 {
 	parser_catch_snmptrap = TRUE;
 	if (debug)
@@ -1454,28 +1455,28 @@ YY_RULE_SETUP
 	YY_BREAK
 case 10:
 YY_RULE_SETUP
-#line 258 "parser.l"
+#line 259 "parser.l"
 {
 	parser_showupalso = TRUE;
 }
 	YY_BREAK
 case 11:
 YY_RULE_SETUP
-#line 262 "parser.l"
+#line 263 "parser.l"
 {
 	parser_nologconnects = TRUE;
 }
 	YY_BREAK
 case 12:
 YY_RULE_SETUP
-#line 266 "parser.l"
+#line 267 "parser.l"
 {
 	heartbeat = FALSE;
 }
 	YY_BREAK
 case 13:
 YY_RULE_SETUP
-#line 270 "parser.l"
+#line 271 "parser.l"
 {
 	parser_nosubject = TRUE;
 }
@@ -1483,7 +1484,7 @@ YY_RULE_SETUP
 case 14:
 /* rule 14 can match eol */
 YY_RULE_SETUP
-#line 274 "parser.l"
+#line 275 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1518,7 +1519,7 @@ YY_RULE_SETUP
 case 15:
 /* rule 15 can match eol */
 YY_RULE_SETUP
-#line 305 "parser.l"
+#line 306 "parser.l"
 {
   parser_pos1 = strchr( yytext, '"' );
 
@@ -1554,7 +1555,7 @@ YY_RULE_SETUP
 case 16:
 /* rule 16 can match eol */
 YY_RULE_SETUP
-#line 337 "parser.l"
+#line 338 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1588,7 +1589,7 @@ YY_RULE_SETUP
 case 17:
 /* rule 17 can match eol */
 YY_RULE_SETUP
-#line 367 "parser.l"
+#line 368 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1622,7 +1623,7 @@ YY_RULE_SETUP
 case 18:
 /* rule 18 can match eol */
 YY_RULE_SETUP
-#line 397 "parser.l"
+#line 398 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1660,7 +1661,7 @@ YY_RULE_SETUP
 case 19:
 /* rule 19 can match eol */
 YY_RULE_SETUP
-#line 431 "parser.l"
+#line 432 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1704,7 +1705,7 @@ YY_RULE_SETUP
 case 20:
 /* rule 20 can match eol */
 YY_RULE_SETUP
-#line 471 "parser.l"
+#line 472 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1738,7 +1739,7 @@ YY_RULE_SETUP
 case 21:
 /* rule 21 can match eol */
 YY_RULE_SETUP
-#line 501 "parser.l"
+#line 502 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1780,7 +1781,7 @@ YY_RULE_SETUP
 case 22:
 /* rule 22 can match eol */
 YY_RULE_SETUP
-#line 539 "parser.l"
+#line 540 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1825,7 +1826,7 @@ YY_RULE_SETUP
 case 23:
 /* rule 23 can match eol */
 YY_RULE_SETUP
-#line 580 "parser.l"
+#line 581 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1873,7 +1874,7 @@ YY_RULE_SETUP
 case 24:
 /* rule 24 can match eol */
 YY_RULE_SETUP
-#line 624 "parser.l"
+#line 625 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1917,7 +1918,7 @@ YY_RULE_SETUP
 case 25:
 /* rule 25 can match eol */
 YY_RULE_SETUP
-#line 665 "parser.l"
+#line 666 "parser.l"
 {
 
   if (parser_name == NULL)
@@ -1964,7 +1965,7 @@ YY_RULE_SETUP
 case 26:
 /* rule 26 can match eol */
 YY_RULE_SETUP
-#line 708 "parser.l"
+#line 709 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1997,7 +1998,7 @@ YY_RULE_SETUP
 case 27:
 /* rule 27 can match eol */
 YY_RULE_SETUP
-#line 737 "parser.l"
+#line 738 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2049,7 +2050,7 @@ YY_RULE_SETUP
 case 28:
 /* rule 28 can match eol */
 YY_RULE_SETUP
-#line 786 "parser.l"
+#line 787 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2091,7 +2092,7 @@ YY_RULE_SETUP
 case 29:
 /* rule 29 can match eol */
 YY_RULE_SETUP
-#line 825 "parser.l"
+#line 826 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2133,7 +2134,7 @@ YY_RULE_SETUP
 case 30:
 /* rule 30 can match eol */
 YY_RULE_SETUP
-#line 863 "parser.l"
+#line 864 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2162,21 +2163,29 @@ YY_RULE_SETUP
   strncpy( parser_pageinterval, parser_pos1, parser_pos2 - parser_pos1 );
   parser_pageinterval[ parser_pos2 - parser_pos1 ] = '\0';
 
-  parser_i_pageinterval = atol(parser_pageinterval);
-  if (parser_i_pageinterval == -1)
+  /* If we are inside an object, apply this information
+   * only to this object
+   */
+  if (parser_name != NULL)
   {
-	print_err(1, "Invalid pageinterval specified in %s line %d", 
-		current_parsing_filename, line_no);
+        parser_obj_i_pageinterval = atol(parser_pageinterval);
+  } else {
+    parser_i_pageinterval = atol(parser_pageinterval);
+    if (parser_i_pageinterval == -1)
+    {
+          print_err(1, "Invalid pageinterval specified in %s line %d",
+                  current_parsing_filename, line_no);
+    }
+    parser_obj_i_pageinterval = -1;
+    if (debug)
+      print_err(0, "pageinterval : %s/%d ", parser_pageinterval, parser_i_pageinterval);
   }
-  if (debug)
-    print_err(0, "pageinterval : %s/%d ", parser_pageinterval, parser_i_pageinterval); 
-
 };
 	YY_BREAK
 case 31:
 /* rule 31 can match eol */
 YY_RULE_SETUP
-#line 902 "parser.l"
+#line 911 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2218,7 +2227,7 @@ YY_RULE_SETUP
 case 32:
 /* rule 32 can match eol */
 YY_RULE_SETUP
-#line 940 "parser.l"
+#line 949 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2270,7 +2279,7 @@ YY_RULE_SETUP
 case 33:
 /* rule 33 can match eol */
 YY_RULE_SETUP
-#line 988 "parser.l"
+#line 997 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2314,7 +2323,7 @@ YY_RULE_SETUP
 case 34:
 /* rule 34 can match eol */
 YY_RULE_SETUP
-#line 1028 "parser.l"
+#line 1037 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2358,7 +2367,7 @@ YY_RULE_SETUP
 case 35:
 /* rule 35 can match eol */
 YY_RULE_SETUP
-#line 1068 "parser.l"
+#line 1077 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2393,7 +2402,7 @@ YY_RULE_SETUP
 case 36:
 /* rule 36 can match eol */
 YY_RULE_SETUP
-#line 1099 "parser.l"
+#line 1108 "parser.l"
 {
   /* per object pmesg comes after to prevent duplicate match */
   /* Search for extra newlines that are not being counted */
@@ -2429,7 +2438,7 @@ YY_RULE_SETUP
 case 37:
 /* rule 37 can match eol */
 YY_RULE_SETUP
-#line 1131 "parser.l"
+#line 1140 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2464,7 +2473,7 @@ YY_RULE_SETUP
 case 38:
 /* rule 38 can match eol */
 YY_RULE_SETUP
-#line 1162 "parser.l"
+#line 1171 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2499,7 +2508,7 @@ YY_RULE_SETUP
 case 39:
 /* rule 39 can match eol */
 YY_RULE_SETUP
-#line 1193 "parser.l"
+#line 1202 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2534,7 +2543,7 @@ YY_RULE_SETUP
 case 40:
 /* rule 40 can match eol */
 YY_RULE_SETUP
-#line 1225 "parser.l"
+#line 1234 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2569,7 +2578,7 @@ YY_RULE_SETUP
 case 41:
 /* rule 41 can match eol */
 YY_RULE_SETUP
-#line 1257 "parser.l"
+#line 1266 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2604,7 +2613,7 @@ YY_RULE_SETUP
 case 42:
 /* rule 42 can match eol */
 YY_RULE_SETUP
-#line 1288 "parser.l"
+#line 1297 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2639,7 +2648,7 @@ YY_RULE_SETUP
 case 43:
 /* rule 43 can match eol */
 YY_RULE_SETUP
-#line 1319 "parser.l"
+#line 1328 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2674,7 +2683,7 @@ YY_RULE_SETUP
 case 44:
 /* rule 44 can match eol */
 YY_RULE_SETUP
-#line 1350 "parser.l"
+#line 1359 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2709,7 +2718,7 @@ YY_RULE_SETUP
 case 45:
 /* rule 45 can match eol */
 YY_RULE_SETUP
-#line 1381 "parser.l"
+#line 1390 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2744,7 +2753,7 @@ YY_RULE_SETUP
 case 46:
 /* rule 46 can match eol */
 YY_RULE_SETUP
-#line 1412 "parser.l"
+#line 1421 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2779,7 +2788,7 @@ YY_RULE_SETUP
 case 47:
 /* rule 47 can match eol */
 YY_RULE_SETUP
-#line 1444 "parser.l"
+#line 1453 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: port specified when not inside an object at line %d", line_no);
@@ -2824,7 +2833,7 @@ YY_RULE_SETUP
 case 48:
 /* rule 48 can match eol */
 YY_RULE_SETUP
-#line 1485 "parser.l"
+#line 1494 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: rtt_threshold specified when not inside an object at line %d", line_no);
@@ -2862,7 +2871,7 @@ YY_RULE_SETUP
 case 49:
 /* rule 49 can match eol */
 YY_RULE_SETUP
-#line 1519 "parser.l"
+#line 1528 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: jitter_threshold specified when not inside an object at line %d", line_no);
@@ -2900,7 +2909,7 @@ YY_RULE_SETUP
 case 50:
 /* rule 50 can match eol */
 YY_RULE_SETUP
-#line 1553 "parser.l"
+#line 1562 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: rtt_samples specified when not inside an object at line %d", line_no);
@@ -2944,7 +2953,7 @@ YY_RULE_SETUP
 case 51:
 /* rule 51 can match eol */
 YY_RULE_SETUP
-#line 1593 "parser.l"
+#line 1602 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: description specified when not inside an object at line %d", line_no);
@@ -2981,7 +2990,7 @@ YY_RULE_SETUP
 case 52:
 /* rule 52 can match eol */
 YY_RULE_SETUP
-#line 1626 "parser.l"
+#line 1635 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: group specified when not inside an object at line %d", line_no);
@@ -3024,7 +3033,7 @@ YY_RULE_SETUP
 case 53:
 /* rule 53 can match eol */
 YY_RULE_SETUP
-#line 1666 "parser.l"
+#line 1675 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: dns-query specified when not inside an object at line %d", line_no);
@@ -3061,7 +3070,7 @@ YY_RULE_SETUP
 case 54:
 /* rule 54 can match eol */
 YY_RULE_SETUP
-#line 1700 "parser.l"
+#line 1709 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: radius secret specified when not inside an object at line %d", line_no);
@@ -3099,7 +3108,7 @@ YY_RULE_SETUP
 case 55:
 /* rule 55 can match eol */
 YY_RULE_SETUP
-#line 1734 "parser.l"
+#line 1743 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: url specified when not inside an object at line %d", line_no);
@@ -3137,7 +3146,7 @@ YY_RULE_SETUP
 case 56:
 /* rule 56 can match eol */
 YY_RULE_SETUP
-#line 1768 "parser.l"
+#line 1777 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: urltext specified when not inside an object at line %d", line_no);
@@ -3175,7 +3184,7 @@ YY_RULE_SETUP
 case 57:
 /* rule 57 can match eol */
 YY_RULE_SETUP
-#line 1802 "parser.l"
+#line 1811 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: password specified when not inside an object at line %d", line_no);
@@ -3213,7 +3222,7 @@ YY_RULE_SETUP
 case 58:
 /* rule 58 can match eol */
 YY_RULE_SETUP
-#line 1836 "parser.l"
+#line 1845 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: username specified when not inside an object at line %d", line_no);
@@ -3251,7 +3260,7 @@ YY_RULE_SETUP
 case 59:
 /* rule 59 can match eol */
 YY_RULE_SETUP
-#line 1870 "parser.l"
+#line 1879 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: community specified when not inside an object at line %d", line_no);
@@ -3289,7 +3298,7 @@ YY_RULE_SETUP
 case 60:
 /* rule 60 can match eol */
 YY_RULE_SETUP
-#line 1904 "parser.l"
+#line 1913 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: oid specified when not inside an object at line %d", line_no);
@@ -3327,7 +3336,7 @@ YY_RULE_SETUP
 case 61:
 /* rule 61 can match eol */
 YY_RULE_SETUP
-#line 1938 "parser.l"
+#line 1947 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: snmp-type specified when not inside an object at line %d", line_no);
@@ -3371,7 +3380,7 @@ YY_RULE_SETUP
 case 62:
 /* rule 62 can match eol */
 YY_RULE_SETUP
-#line 1978 "parser.l"
+#line 1987 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: snmp_high specified when not inside an object at line %d", line_no);
@@ -3416,7 +3425,7 @@ YY_RULE_SETUP
 case 63:
 /* rule 63 can match eol */
 YY_RULE_SETUP
-#line 2019 "parser.l"
+#line 2028 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: snmp_low specified when not inside an object at line %d", line_no);
@@ -3461,7 +3470,7 @@ YY_RULE_SETUP
 case 64:
 /* rule 64 can match eol */
 YY_RULE_SETUP
-#line 2060 "parser.l"
+#line 2069 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: snmp_rate specified when not inside an object at line %d", line_no);
@@ -3506,7 +3515,7 @@ YY_RULE_SETUP
 case 65:
 /* rule 65 can match eol */
 YY_RULE_SETUP
-#line 2101 "parser.l"
+#line 2110 "parser.l"
 {
   if (parser_name == NULL)
 	print_err(1, "WARNING: snmp_exact specified when not inside an object at line %d", line_no);
@@ -3550,7 +3559,7 @@ YY_RULE_SETUP
 case 66:
 /* rule 66 can match eol */
 YY_RULE_SETUP
-#line 2141 "parser.l"
+#line 2150 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: spawn specified when not inside an object at line %d", line_no);
@@ -3587,7 +3596,7 @@ YY_RULE_SETUP
 case 67:
 /* rule 67 can match eol */
 YY_RULE_SETUP
-#line 2174 "parser.l"
+#line 2183 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: contact_on specified when not inside an object at line %d", line_no);
@@ -3632,7 +3641,7 @@ YY_RULE_SETUP
 case 68:
 /* rule 68 can match eol */
 YY_RULE_SETUP
-#line 2215 "parser.l"
+#line 2224 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: contact specified when not inside an object at line %d", line_no);
@@ -3675,7 +3684,7 @@ YY_RULE_SETUP
 case 69:
 /* rule 69 can match eol */
 YY_RULE_SETUP
-#line 2254 "parser.l"
+#line 2263 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: child specified when not inside an object at line %d", line_no);
@@ -3713,7 +3722,7 @@ YY_RULE_SETUP
 case 70:
 /* rule 70 can match eol */
 YY_RULE_SETUP
-#line 2289 "parser.l"
+#line 2298 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: dep/parent specified when not inside an object at line %d", line_no);
@@ -3755,7 +3764,7 @@ YY_RULE_SETUP
 case 71:
 /* rule 71 can match eol */
 YY_RULE_SETUP
-#line 2328 "parser.l"
+#line 2337 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: page specified when not inside an object at line %d", line_no);
@@ -3797,7 +3806,7 @@ YY_RULE_SETUP
 case 72:
 /* rule 72 can match eol */
 YY_RULE_SETUP
-#line 2366 "parser.l"
+#line 2375 "parser.l"
 {
   if (parser_name == NULL)
         print_err(1, "WARNING: also-notify specified when not inside an object at line %d", line_no);
@@ -3833,7 +3842,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 73:
 YY_RULE_SETUP
-#line 2400 "parser.l"
+#line 2409 "parser.l"
 {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -3846,17 +3855,17 @@ YY_RULE_SETUP
 	YY_BREAK
 case 74:
 YY_RULE_SETUP
-#line 2410 "parser.l"
+#line 2419 "parser.l"
 {
 	print_err(1, "Unknown information %c found in line %s:%d", yytext[0], current_parsing_filename, line_no);
 }
 	YY_BREAK
 case 75:
 YY_RULE_SETUP
-#line 2415 "parser.l"
+#line 2424 "parser.l"
 ECHO;
 	YY_BREAK
-#line 3860 "<stdout>"
+#line 3869 "<stdout>"
 case YY_STATE_EOF(INITIAL):
 	yyterminate();
 
@@ -4861,7 +4870,7 @@ void yyfree (void * ptr )
 
 #define YYTABLES_NAME "yytables"
 
-#line 2415 "parser.l"
+#line 2424 "parser.l"
 
 
 /*
@@ -5147,11 +5156,31 @@ void add_object()
 		}
 		if (debug)
 		{
-			print_err(1, "%s : obj->queuetime = %d / dflt %d", 
+			print_err(1, "%s : obj->queuetime = %d / dflt %d",
 				new_ele->value->unique_name,
 				new_ele->value->data->queuetime, queuetime);
 		}
-	
+
+		/* Set per-object pageinterval or use global default */
+		if (parser_pageinterval != NULL)
+		{
+			if (parser_obj_i_pageinterval != -1)
+			{
+				new_ele->value->data->pageinterval = parser_obj_i_pageinterval;
+			} else {
+				new_ele->value->data->pageinterval = parser_i_pageinterval;
+			}
+		} else {
+			/* Use -1 to indicate "use global pageinterval" */
+			new_ele->value->data->pageinterval = -1;
+		}
+		if (debug)
+		{
+			print_err(1, "%s : obj->pageinterval = %d / global %d",
+				new_ele->value->unique_name,
+				new_ele->value->data->pageinterval, pageinterval);
+		}
+
 		new_ele->value->data->lastcontacted = 0;
 		new_ele->value->data->send_pings = MAX_TRIES;
 		new_ele->value->data->min_pings = MIN_PING_RESP;
@@ -5521,6 +5550,7 @@ void initalize_parser()
 	parser_include = NULL;
 	parser_queuetime = NULL;
 	parser_obj_i_queuetime = -1;
+	parser_obj_i_pageinterval = -1;
 	parser_obj_i_numfailures = -1;
 	parser_dnsexpire = NULL;
 	parser_dnslog = NULL;
