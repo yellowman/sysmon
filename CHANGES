@@ -1,0 +1,125 @@
+SYSMON VERSION 0.94 CHANGELOG
+================================
+
+This release represents a major update with critical bug fixes, new wishlist features,
+and comprehensive web-UI enhancements.
+
+MAJOR IMPROVEMENTS
+==================
+
+Wishlist Features Implemented
+------------------------------
+* config minnumfailures <n>
+  - Sets minimum consecutive failures before host appears in status file
+  - Reduces false alarms from transient network issues
+  - Default is 1 (show after first failure)
+
+* config flaptime <minutes>
+  - Keeps host displaying as green for N minutes after recovery
+  - Prevents "flapping" appearance when hosts go up/down repeatedly
+  - Default is 0 (disabled)
+  - Uses new last_recovery timestamp field in hostinfo struct
+
+* Per-object pageinterval
+  - Allows different hosts to have different re-page intervals
+  - Critical hosts can be paged more frequently
+  - config pageinterval <minutes>; inside object{} blocks
+  - Falls back to global pageinterval when not set
+  - Note: Requires flex to regenerate parser.c for changes to take effect
+
+Web-UI Enhancements (v0.94)
+----------------------------
+* Fixed Critical 403 Errors
+  - Changed from STAT to STATO command (eliminates hostname vs unique_name mismatch)
+  - Fixed GetObjectsXML() to also use STATO instead of STAT
+  - Dramatically improves performance (no wasted SHOWOBJ calls)
+
+* Session Logger
+  - Captures all protocol operations with errors
+  - Maintains circular buffers: last 500 entries, last 100 errors
+  - API endpoints: /api/admin/session-log, /api/admin/session-errors
+  - Replaced all stderr logging with structured logging
+
+* Admin Page Session Log Display
+  - Shows last 5 errors with timestamps, commands, responses
+  - Shows last 50 protocol operations
+  - Auto-refreshes every 5 seconds
+  - Color-coded: blue for success, red for errors
+
+* Dashboard Improvements
+  - Added daemon version and uptime display
+  - Fixed layout shifting bugs
+  - Removed unnecessary UI elements (PID, Config File, check types chart)
+  - Added hover tooltips to stats showing host lists by category
+
+* Dual-View Host Display
+  - Comparison View: Ultra-compact grid showing up to 30+ hosts
+  - Table View: Comprehensive sortable table with detailed stats
+  - Toggle button to switch between views
+  - Both views prominently display hostnames
+  - Hover tooltips with full host details
+
+* Compact UI
+  - Increased grid density (4-5 columns on large screens)
+  - Reduced padding and font sizes throughout
+  - Can now display 15-25 hosts per screen vs 6-9 before
+  - Optimized for quick scanning of entire infrastructure
+
+* Documentation
+  - Added statustempdir to sysmon.conf.man
+  - Removed all JSON mode references (never implemented)
+  - Updated README with correct XML mode documentation
+  - All markdown files converted to plain ASCII text
+
+Daemon Improvements
+-------------------
+* Fixed ICMP race condition causing false negative ping detections
+* Increased ping timeout to 2 seconds for reliability
+* Fixed NULL pointer dereferences in dump_to_file()
+* Reliable XML transmission with error checking
+* Added statustempdir for privilege-dropped operation
+* Proper handling of all response codes (333, 403, 444)
+* Fixed ReadString() EOF handling bugs
+
+TECHNICAL DETAILS
+=================
+
+Parser Changes (requires flex to take effect)
+----------------------------------------------
+* Added parser_i_minnumfailures and parser_minnumfailures variables
+* Added parser_i_flaptime and parser_flaptime variables
+* Added parser_i_pageinterval and parser_obj_i_pageinterval variables
+* Updated object creation to use per-object overrides when set
+* Added validation for negative values and error handling
+
+Struct Changes
+--------------
+* Added last_recovery field to hostinfo struct (for flaptime)
+* Added pageinterval field to hostinfo struct (for per-object intervals)
+* Proper initialization of all new fields
+
+API Endpoints Added
+-------------------
+* GET /api/admin/session-log?limit=N
+* GET /api/admin/session-errors?limit=N
+
+KNOWN ISSUES
+============
+
+* pageinterval feature requires flex to regenerate parser.c
+  - parser.l has been updated with the code
+  - Install flex and run 'make clean && make' to enable
+  - Without flex, only pre-existing features will work
+
+UPGRADE NOTES
+=============
+
+1. The web-UI now shows version 0.94 correctly
+2. All JSON mode references have been removed (never implemented)
+3. Parser changes require flex for regeneration
+4. Session logging replaces stderr output for protocol debugging
+
+CREDITS
+=======
+
+Generated with Claude Code (https://claude.com/claude-code)
