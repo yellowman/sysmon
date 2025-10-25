@@ -1,0 +1,752 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <meta name="GENERATOR" content="Mozilla/4.76 [en] (X11; U; Linux 2.4.0-test10 i686) [Netscape]">
+<title>
+sysmon-0.91.19 Configuration Documentation
+</title>
+</head>
+<body text="#000000" bgcolor="#ffffff" link="#0000ee" vlink="#551a8b" alink="#ff0000">
+<h3>sysmon-0.91.7 Configuration Documentation</h3>
+<p>Sysmon includes a versatile configuration file format.</p>
+<p>Items covered by this document.</p>
+<ol>
+<li><a href="#sysmon_overview">Overview</a>
+<li><a href="#global_config_options">Global Configuration Options</a>
+<li><a href="#object_configuration_options">Object Configuration Options</a>
+<li><a href="#test_type_example">Example Configuration of each test-type</a>
+<li><a href="#example_config_object_option">Example Configuration of each Object
+option</a>
+<li><a href="#replacement_options">Replacement Options that can be used</a>
+</ol>
+
+<a name="sysmon_overview"></a><h3>1. Overview</h3>
+<p>Sysmon now allows a significant number of configuration options, and the easier
+addition of new features.&nbsp; This also allows us to configure sysmon to
+detect parallel paths and outages on them properly, including ring topology
+as well as a number of other things.&nbsp; Take the following example: </p>
+<p><img src="net-example.png" height="234" width="269" ALT="[net-example.png]">
+ </p>
+<p>With this network topology, we can monitor each link properly.&nbsp; Versions
+prior to 0.90 would either report multiple outages, or not have the ability
+to report the outages properly. </p>
+<p> </p>
+<p>The above network topology can be represented in the following network 
+configuration file: </p>
+<pre>
+ 1: root=sysmon-host;
+ 2: 
+ 3: object sysmon-host {
+ 4:     ip "sysmon-host";
+ 5:     type ping;
+ 6:     desc "ping-sysmon-host";
+ 7:     dep "router1";
+ 8: };
+ 9:
+10: object router1 {
+11:     ip "router1.example.com";
+12:     type ping;
+13:     desc "router1";
+14: };
+15: 
+16: object router2 {
+17:     ip "router2.example.com";
+18:     type ping;
+19:     desc "router2";
+20: };
+21: 
+22: object router3 {
+23:     ip "router3.example.com";
+24:     type ping;
+25:     desc "router3";
+26: };
+27: 
+28: object router1-2-link {
+29:     ip "1.2.3.4";
+30:     type ping;
+31:     desc "link-rtr1-to-rtr2";
+32:     dep "router1";
+33:     dep "router2";
+34: };
+35: 
+36: object router2-3 {
+37:     ip "2.3.4.5";
+38:     type ping;
+39:     desc "link-rtr2-to-rtr3";
+40:     dep "router2";
+41:     dep "router3";
+42: };
+43: 
+44: object rtr1-3-link {
+45:     ip "3.4.5.6";
+46:     type ping;
+47:     desc "rtr1-3-link";
+48:     dep "router1";
+49:     dep "router3" 
+50: };
+</pre>
+<p>Now, here, we declare an object, and then configure the locally dependent 
+options. All checks require a description, and a check type, including 
+the <tt>ip</tt> declaration. You can specify either an ip address or a hostname 
+in this field. </p>
+<p>When you create an object, you specify a symbolic name. The name 
+<tt>router1</tt> could just as easily say "swiss-cheese", it's just used internally 
+to look up the dependencies and create the adjancies table. </p>
+<p><big><a name="global_config_options"></a><b>2. Global Configuration Options</b></big>
+ </p>
+<dl>
+
+<dt><font face=courier size=-1><b>config showupalso;</b></font>
+<dd>Make sysmon show the hosts checked as up as well as the ones that are checked as down in the configuration file
+
+<dt><font face=courier size=-1><b>config nologconnects;</b></font>
+<dd>Do not log connect information from the client.
+By default sysmond listens on port 1345 for client connections from the curses,
+python, java, and other clients).
+
+<dt><font face=courier size=-1><b>config noheartbeat;</b></font>
+<dd>Sysmon normally sends a "heartbeat" packet when started
+to our registration server. This includes the hostname, version of
+sysmon, and the operating system you are running on. Sysmon only sends
+this once upon startup. Failure to send this will not affect system
+performance or operation.
+
+<dt><font face=courier size=-1><b>config nosubject;</b></font>
+<dd>Sysmon normally sends a Subject: line in the message to
+the contact specified within an object. Some paging systems have problems
+when a subject is specified, or it does not get passed along properly when
+you have limited characters to be received. Specifying this option
+causes sysmon to omit the subject: line.
+
+<dt><font face=courier size=-1><b>config statusfile [ text | html ] "</b><i>/path/to/file</i><b>";</b></font>
+<dd>Sysmon has the ability to specify a file to dump current
+status to. File type can be either html or text. This file is
+updated whenever there is a state change on an object.
+
+<dt><font face=courier size=-1><b>config logging syslog [ </b><i>facility</i><b> | none ];</b></font>
+<dd>Sysmon logs various information via syslog. You
+can specify what service to log to, or specify "none" for no logging).
+
+<dt><font face=courier size=-1><b>config queuetime [ </b><i>integer </i><b>];</b></font> (Default: 60)
+<dd>This allows you to specify how often an object is queued
+to be checked. This defaults to 60 seconds after the last test is over. 
+
+<dt><font face=courier size=-1><b>config dnsexpire [ </b><i>integer</i> <b>];</b></font> (Default: 900)
+<dd>This allows you to specify how often sysmon's internal 
+dns cache is expired. Default is 15 minutes. Time is specified 
+in seconds.
+
+<dt><font face=courier size=-1><b>config dnslog [ </b><i>integer</i><b> ];</b></font> (Defualt: 600)
+<dd>This allows you to specify how often sysmon logs dnscache
+related data. Default is 10 minutes. Time is specified in seconds. 
+
+<dt><font face=courier size=-1><b>config pageinterval [ </b><i>integer</i><b> ];</b></font>
+<dd>This option allows you to specifiy that sysmon send a
+reminder e-mail/page to you. Default is to not send reminders. 
+Time is specified in minutes.
+
+<dt><font face=courier size=-1><b>config maxqueued [ </b><i>integer</i><b> ];</b></font> (Defualt: 100)
+<dd>This specifies how many tests may be performed at one
+time. Default is 100. Because of file descriptor limits that
+your operating system may have, and the file descriptor intensity of sysmon,
+you may need to increase or decrease this depending on the size of your configuration file.
+
+<dt><font face=courier size=-1><b>config numfailures [ </b><i>integer </i><b>];</b></font> (Default: 4)
+<dd>This specifies how many times a host should be checked
+as "down" before the contact is e-mailed/paged. Default is 4.
+
+<dt><font face=courier size=-1><b><a name="configPmesg">config pmesg</a> " </b><i>string</i><b> ";</b></font>
+<dd>This specifies the format of the text sent in the body
+of the message. See <a href="#replacement_options">replacement options</a> for ways to display information
+about the test. Default is specified in config.h (<font face=courier size=-1>grep PMESG src/config.h</font>). 
+
+<dt><font face=courier size=-1><b>config [ from | sender ] " </b><i>username@example.com</i><b>";</b></font>
+<dd>Allows you to reset who the page/e-mail comes from instead
+of root@localhost. 
+
+<dt><font face=courier size=-1><b><a name="configSubject">config subject</a> "</b><i>string</i><b>";</b></font>
+<dd>This specifies the format of the text sent in the subject
+of the message. See <a href="#replacement_options">replacement options</a> for ways
+to display information about the test. Default is specified in config.h
+grep SUBJECT&nbsp;src/config.h).
+
+<dt><font face=courier size=-1><b>config upcolor "</b><i>string</i><b>";</b></font>
+<dd>This allows you to specify a color as used in HTML tags
+to be used for hosts that are currently UP as displayed in the configured  
+html file.
+
+<dt><font face=courier size=-1><b>config downcolor "</b><i>stringi</i><b>";</b></font>
+<dd>See config upcolor.
+
+<dt><font face=courier size=-1><b>config recentcolor "</b><i>string</i><b>";</b></font>
+<dd>Hosts that are down, but have not reached the count of
+numfailures are this color.&nbsp; See config upcolor. 
+<dt><font face=courier size=-1><b>config replyto "</b><i>user@example.com</i><b>";</b></font>
+<dd>Allows insertion of reply-to: header in e-mail/pages sent. 
+
+<dt><font face=courier size=-1><b>config errorsto "</b><i>user@example.com</i><b>";</b></font>
+<dd>Allows insertion of errors-to: header in e-mail/pages 
+sent.
+
+<dt><font face=courier size=-1><b>config header "</b><i>text</i><b>";</b></font>
+<dd>Allows insertion of header.
+
+<dt><font face=courier size=-1><b>config pidfile "</b><i>path</i><b>";</b></font>
+<dd>Allows the PID file to be written somewhere more sensible than the
+default of /etc/sysmon.pid; /etc/ is readonly on some systems for
+security reasons.
+
+<dt><font face=courier size=-1><b>config html refresh </b><i>seconds</i><b>;</b></font>
+<dd>Allows modification of the HTML status page refresh time (default
+60 seconds).
+
+<dt><font face=courier size=-1><b>config authkey "</b><i>text</i><b>";</b></font>
+<dd>Password/Authentication key used to restrict access to
+client port.
+
+<dt><font face=courier size=-1><b>config output json "</b><i>path</i><b>";</b></font>
+<dd>Enable JSON output mode. Sysmond will write monitoring data in JSON format
+to the specified file path. The JSON output includes detailed information about
+all monitored objects, their states, SNMP trap alerts, packet loss statistics,
+RTT/jitter measurements, and wakeup check results. Updated on state changes.
+
+<dt><font face=courier size=-1><b>config drop_privileges;</b></font>
+<dd>Drop root privileges after initialization for enhanced security. When enabled,
+sysmond will switch to a non-privileged user after opening raw sockets and binding
+privileged ports. ICMP operations are performed via the setuid sysmon-ping-helper.
+Cannot be used when ICMP monitoring is disabled.
+
+<dt><font face=courier size=-1><b>config disable_icmp;</b></font>
+<dd>Disable all ICMP (ping) monitoring. This prevents the daemon from opening raw
+sockets and allows it to run entirely without privileges. Note that this disables
+all ping and pingv6 tests.
+
+<dt><font face=courier size=-1><b>config trap_port </b><i>integer</i><b>;</b></font> (Default: 162)
+<dd>Specify the UDP port for receiving SNMP trap alerts. Default is 162 (standard
+SNMP trap port). Requires root privileges or cap_net_bind_service to bind ports below 1024.
+
+<dt><font face=courier size=-1><b>include "</b><i>path</i><b>";</b></font>
+<dd>Specify another configuration file to be included at
+this point.
+
+<dt><font face=courier size=-1><b>root "</b><i>object-name</i><b>";</b></font>
+<dd>This is a required option. You specify what object
+in your config file is the first dependency in your monitoring, so we know
+where we are within the network to allow us to traverse it properly.
+</dl>
+<a name="object_configuration_options"></a><h3>3. Object Configuration
+Options</h3>
+<p>Once you have declared an object, the following configuration options exist
+within it: </p>
+<dl>
+<dt><font face=courier size=-1><b>also-notify "</b><i>text</i><b>";</b></font>
+<dd>Not implemented yet.
+
+<dt><font face=courier size=-1><b>contact "</b><i>username@example.com</i><b>";</b></font>
+<dd>e-mail address to send up/down messages to.
+
+<dt><font face=courier size=-1><b>contact_on </b><i>down|up|both</i><b>;</b></font>
+<dd>Defines when this event should cause a contact. If down, notification
+is only sent (and programs run) after maxdown iterations of service failure.
+If up, notification happens only after maxdown iterations of service success.
+If both, notification happens after maxdown iterations of failure, and
+instantly on success.
+
+<dt><font face=courier size=-1><b>dep "</b><i>object</i><b>";</b></font>
+<dd>Dependency for this object. If that host is not
+up, we do not get monitored. 
+
+<dt><font face=courier size=-1><b>desc "</b><i>text</i><b>";</b></font>
+<dd>Specify the description of the object
+
+<dt><font face=courier size=-1><b>ip "[</b><i>hostname</i> <b>|</b> <i>ip-address</i> <b> ]";</b></font>
+<dd>An IP&nbsp;address or valid dns-name of the host to be
+monitored.
+
+<dt><font face=courier size=-1><b>page "</b><i>text</i><b>";</b></font>
+<dd>Not implemented yet.
+
+<dt><font face=courier size=-1><b>password "</b><i>password</i><b>";</b></font>
+<dd>Only valid for pop3, imap and radius check.
+
+<dt><font face=courier size=-1><b>port [ </b><i>integer</i><b> ];</b></font>
+<dd>Specify the port type for tcp and udp based checks
+
+<dt><font face=courier size=-1><b>reverse;</b></font>
+<dd>Reverse the meaning of up vs down in monitoring.
+Useful when using to monitor other sysmonds and to take over backup monitoring.
+
+<dt><font face=courier size=-1><b>secret "</b><i>string</i><b>";</b></font>
+<dd>Only valid for radius check.
+
+<dt><font face=courier size=-1><b>spawn "</b><i>path</i><b>";</b></font>
+<dd>Program to execute upon monitoring failure. Can
+also contain <a href="#replacement_options"> replacement options</a> that <a href="#
+configPmesg">PMESG</a> and <a href="#configSubject">SUBJECT</a> can contain.
+up, we do not get monitored.
+
+<dt><font face=courier size="-1"><b>type "[ <a href="#pingTest">ping</a> | <a href="#pingv6Test">pingv6</a> | <a href="#pop3Test">pop3</a> | <a href="#tcpTest">tcp</a> | <a href="#udpTest">udp</a> | <a href="#dnsTest">dns</a> | <a href="#radiusTest">radius</a> | <a href="#nntpTest">nntp</a> | <a href="#smtpTest">smtp</a> | <a href="#imapTest">imap</a> | <a href="#x500Test">x500</a> | <a href="#wwwTest">www</a> | <a href="#sysmonTest">sysmon</a> | <a href="#snmpTest">snmp</a> ]";</b></font>
+<dd>Specify the check type.
+
+<dt><font face=courier size="-1"><b>snmp-type "[ low | high | rate | exact | range | reboot | compare ]";</b></font>
+<dd>SNMP test type (required for snmp based tests)
+
+<dt><font face=courier size="-1"><b>snmp-octets;</b></font>
+<dd>Treat oid queried as octet(byte) counter so you can specify snmp-rate in bps instead of bytes/sec
+
+
+<dt><font face=courier size=-1><b>url "</b><i>string</i><b>";</b></font>
+<dd>URL to be checked. Only valid for http check.
+
+<dt><font face=courier size=-1><b>urltext "</b><i>string-to-search-for</i><b>";</b>
+</font>
+<dd>String to search for within the url requested.
+
+<dt><font face=courier size=-1><b>username "</b><i>username</i><b>";</b></font>
+<dd>Only valid for pop3, imap and radius check.
+
+<dt><font face=courier size=-1><b>min_pings </b><i>integer</i><b>;</b></font> (Default: 1)
+<dd>Minimum number of successful ping responses required to consider host UP.
+Used for packet loss monitoring. Must be less than or equal to send_pings.
+
+<dt><font face=courier size=-1><b>send_pings </b><i>integer</i><b>;</b></font> (Default: 5)
+<dd>Number of ICMP echo requests to send during each check interval.
+Used for packet loss monitoring. Higher values provide more accurate loss statistics.
+
+<dt><font face=courier size=-1><b>packet_loss_threshold </b><i>percentage</i><b>;</b></font> (Default: 0.0)
+<dd>Packet loss percentage threshold (0.0-100.0). If packet loss exceeds this value,
+an alert is triggered even if the minimum number of pings succeeded. Example: 25.0
+triggers alert when more than 25% of packets are lost.
+
+<dt><font face=courier size=-1><b>rtt_threshold </b><i>milliseconds</i><b>;</b></font>
+<dd>Round-trip time threshold in milliseconds. If average RTT exceeds this value,
+an alert is triggered. Used for latency monitoring. Example: 100 triggers alert
+when average RTT exceeds 100ms.
+
+<dt><font face=courier size=-1><b>jitter_threshold </b><i>milliseconds</i><b>;</b></font>
+<dd>Jitter threshold in milliseconds. Jitter is the variation in RTT between
+consecutive packets. If jitter exceeds this value, an alert is triggered.
+Used for monitoring connection stability. Example: 50 triggers alert when
+jitter exceeds 50ms.
+
+<dt><font face=courier size=-1><b>wakeup_check;</b></font>
+<dd>Enable proactive wakeup monitoring. When enabled, sysmond attempts to wake
+unreachable hosts using Wake-on-LAN before declaring them down. Useful for
+monitoring hosts that may be in power-saving modes.
+
+<dt><font face=courier size=-1><b>wakeup_retries </b><i>integer</i><b>;</b></font> (Default: 3)
+<dd>Number of Wake-on-LAN attempts before declaring host permanently down.
+Only used when wakeup_check is enabled.
+
+<dt><font face=courier size=-1><b>wakeup_check_interval </b><i>seconds</i><b>;</b></font> (Default: 300)
+<dd>Time to wait in seconds between wakeup attempts. Allows time for host to
+complete boot process. Only used when wakeup_check is enabled.
+
+<dt><font face=courier size=-1><b>trap_alert;</b></font>
+<dd>Enable SNMP trap alert monitoring for this object. When enabled, sysmond
+listens for SNMP traps from this host and triggers alerts based on trap
+severity and content. Traps are matched to objects by source IP address.
+
+<dt><font face=courier size=-1><b>matched_host "</b><i>object-name</i><b>";</b></font>
+<dd>Associate this trap monitoring object with a specific host object.
+Used to link SNMP trap alerts with the corresponding monitored host.
+Allows trap-triggered state changes to affect the associated host's status.
+
+
+</dl>
+<h3><a name="test_type_example">4. Example Configuration of each
+test-type</a></h3>
+<table border="0" cellpadding="10">
+
+<tr>
+<td valign="top" bgcolor="AAAAAA"><a name="pingTest"><b>Ping</b></a></td>
+<td bgcolor="ffffcc">
+<pre>object gateway {
+    ip "129.250.50.61";
+    type ping;
+    desc "fa-12-0-0.a01.clevoh02.us.ra.nether.net";
+    contact "$jared-pager";
+};</pre></td>
+</tr>
+
+<tr>
+<td valign="top" bgcolor="AAAAAA"><a name="pingv6Test"><b>pingv6</b></a></td>
+<td bgcolor="ffffcc">
+<pre>object v6web {
+    ip "www.v6.ntt.net";
+    type pingv6;
+    desc "www.v6.ntt.net IPv6 Ping";
+    contact "$jared-pager";
+};</pre></td>
+</tr>
+
+<tr>
+<td valign="top" bgcolor="aaaaaa"><a name="pop3Test"><b>pop3</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object pop3-mailserver {
+    ip "198.88.20.7";
+    type pop3;
+    username "ravi";
+    password "moocow";
+    desc "qpopper";
+    contact "admin@example.com";
+};</pre></td>
+</tr>
+
+<tr>
+<td valign="top" bgcolor="aaaaaa"><a name="tcpTest"><b>tcp</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object tcp-shoutcast {
+    ip "198.88.20.7";
+    type tcp;
+    port 8000;
+    desc "shoutcast";
+    contact "admin@example.com";
+};</pre></td>
+</tr>
+
+<tr>
+<td valign="top" bgcolor="aaaaaa"><a name="udpTest"><b>udp</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object udp-named {
+    ip "198.88.20.5";
+    type udp;
+    port 53;
+    desc "named udp port";
+    contact "admin@example.com";
+};</pre></td>
+</tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="dnsTest"><b>dns</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>
+object dns {
+       ip "10.1.161.2";
+       type dns;
+       dns-query "example.com";
+       desc "example.com-dns";
+};
+</pre>
+</td>
+</tr>
+
+
+<tr>
+<td valign="top" bgcolor="aaaaaa"><a name="radiusTest"><b>radius</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object radius-server {
+    ip "198.88.20.7";
+    type radius;
+    secret "private";
+    username "jared";
+    password "noway";
+    desc "radius server";
+    contact "admin@example.com";
+};</pre></td>
+</tr>
+<tr><td valign="top" bgcolor="aaaaaa"><a name="nntpTest"><b>nntp</b></a></td>
+<td bgcolor="ffffcc">
+<pre>object nntp-server {
+    ip "oh.news.verio.net";
+    type nntp;
+    desc "verio-ohio nntp server";
+    contact "admin@example.com,nntp@example.com";
+};</pre></td></tr>
+<tr><td valign="top" bgcolor="aaaaaa"><a name="smtpTest"><b>smtp</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object smtp-server {
+    ip "198.88.20.7";
+    type smtp;
+    desc "sendmail";
+    contact "admin@example.com,postmaster@example.com";
+};</pre></td></tr>
+<tr><td valign="top" bgcolor="aaaaaa"><a name="imapTest"><b>imap</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object imap-server {
+    ip "198.88.20.7";
+    type imap;
+    username "jared";
+    password "noway";
+    desc "imap server";
+    contact "admin@example.com,postmaster@example.com";
+};</pre></td></tr>
+<tr><td valign="top" bgcolor="aaaaaa"><a name="x500Test"><b>x500</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object imap-server {
+    ip "198.88.20.7";
+    type x500;
+    desc "x500 server";
+    contact "admin@example.com";
+};</pre></td></tr>
+<tr><td valign="top" bgcolor="aaaaaa"><a name="wwwTest"><b>www</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object httpd {
+    ip "198.88.20.7";
+    type www;
+    url "/index.html";
+    urltext "DOCTYPE HTML PUBLIC";
+    desc "apache";
+    contact "admin@example.com,webmaster@example.com";
+};</pre></td></tr>
+<tr><td valign="top" bgcolor="aaaaaa"><a name="sysmonTest"><b>sysmon</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object sysmon-server {
+    ip "puck.nether.net";
+    type sysmon;
+    reverse;
+    desc "nether.net sysmon";
+    contact "jared@example.com";
+};</pre></td></tr>
+
+<a name="snmpTest">
+<tr><td valign="top" bgcolor="aaaaaa"><a name="snmpTestReboot"><b>snmp (reboot)</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>
+object c7200-router-reboot {
+        ip "10.2.3.1";
+        type snmp;
+        snmp-type "reboot";
+        desc "c7200";
+        community "public";
+        contact "jared@foo.example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="snmpTestHigh"><b>snmp (high)</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>
+object cisco-Router-temp {
+        ip "10.0.0.1";
+        type snmp;
+        snmp-type "high";
+        oid ".1.3.6.1.4.1.9.9.13.1.3.1.3.1";
+        desc "TEMP ALERT above 28 deg C";
+        snmp-high "28";
+        community "public";
+        contact "admin@example.com";
+        dep "cisco-Router-Ping";
+};
+</pre></td></tr>
+
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="snmpTestRate"><b>snmp (rate)</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object c7200-rate {
+        ip "10.0.0.1";
+        type snmp;
+        snmp-type "rate";
+        oid ".1.3.6.1.2.1.2.2.1.10.18";
+        desc "c7200 ser2/3:0 input bitrate";
+        snmp-rate "256000";
+        snmp-octets;
+        community "public";
+        contact "user@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="packetLossTest"><b>Packet Loss Monitoring</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object gateway-packetloss {
+        ip "192.168.1.1";
+        type ping;
+        desc "Gateway with packet loss monitoring";
+        min_pings 4;
+        send_pings 5;
+        packet_loss_threshold 20.0;
+        contact "netadmin@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="rttJitterTest"><b>RTT and Jitter Monitoring</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object voip-gateway {
+        ip "10.0.1.100";
+        type ping;
+        desc "VoIP gateway - latency sensitive";
+        rtt_threshold 50;
+        jitter_threshold 10;
+        contact "voip-admin@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="wakeupTest"><b>Wakeup Check (Wake-on-LAN)</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object desktop-workstation {
+        ip "10.0.2.50";
+        type ping;
+        desc "Desktop with power management";
+        wakeup_check;
+        wakeup_retries 3;
+        wakeup_check_interval 300;
+        contact "sysadmin@example.com";
+};
+</pre></td></tr>
+
+<tr><td valign="top" bgcolor="aaaaaa"><a name="trapAlertTest"><b>SNMP Trap Alert Monitoring</b></a></td>
+<td bgcolor="#ffffcc">
+<pre>object router-traps {
+        ip "192.168.1.1";
+        type ping;
+        desc "Router with SNMP trap monitoring";
+        trap_alert;
+        contact "netops@example.com";
+};
+
+# Trap monitoring object linked to router
+object router-trap-receiver {
+        ip "192.168.1.1";
+        type ping;
+        desc "Router SNMP trap receiver";
+        matched_host "router-traps";
+        trap_alert;
+        contact "netops@example.com";
+};
+</pre></td></tr>
+
+</table>
+<a name="example_config_object_option"></a><h3>5. Example Configuration
+of each Object Option</h3>
+<table border="0" cellpadding="10">
+<tr>
+<td valign="top" bgcolor="AAAAAA"><a name="configPort"><b>Port</b></a></td>
+<td bgcolor="ffffcc">
+<pre>object tcp-shoutcast {
+    ip "198.88.20.7";
+    type tcp;
+    <b>port 8000;</b>
+    <b>desc "shoutcast";</b>
+    <b>contact "admin@example.com";</b>
+};</pre></td>
+</tr>
+
+</table>
+<a name="replacement_options"></a><h3>6. Replacement Options</h3>
+<table cellpadding="2" cellspacing="2" border="0" width="100%">
+  <tbody>
+    <tr>
+      <td><b>Option</b>
+      </td>
+      <td><b>What it does</b>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%m<br>
+      </td>
+      <td valign="Top">local host name<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%H<br>
+      </td>
+      <td valign="Top">DNS name of host being monitored<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%s<br>
+      </td>
+      <td valign="Top">service<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%p<br>
+      </td>
+      <td valign="Top">port number (numeric)<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%T<br>
+      </td>
+      <td valign="Top">Current Time <font face=courier size="-1" color="#338833">hh:mm:ss</font>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%t<br>
+      </td>
+      <td valign="Top">Current Time <font face=courier size="-1" color="#338833">mm dd hh:mm:ss</font>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%d<br>
+      </td>
+      <td valign="Top">Downtime <font face=courier size="-1" color="#338833">dd:hh:mm</font>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%D<br>
+      </td>
+      <td valign="Top">Downtime with seconds <font face=courier size="-1" color="#338833">dd:hh:mm:ss</font>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%i<br>
+      </td>
+      <td valign="Top">Unique ID for outage<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%I<br>
+      </td>
+      <td valign="Top">IP of host down<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%w<br>
+      </td>
+      <td valign="Top">warning/what<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%u<br>
+      </td>
+      <td valign="Top">error-type converted into string describing it<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%h<br>
+      </td>
+      <td valign="Top">hostname with failure<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%r<br>
+      </td>
+      <td valign="Top">reliability percentage<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%V<br>
+      </td>
+      <td valign="Top">Verbose History (not implemented)<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%c<br>
+      </td>
+      <td valign="Top">Failure iteration count (since last success)<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%C<br>
+      </td>
+      <td valign="Top">Success iteration count (since last failure)<br>
+      </td>
+    </tr>
+    <tr>
+      <td valign="Top">%U<br>
+      </td>
+      <td valign="Top">Service state (as `up' or `down')<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<hr noshade>
+<address>
+  <a href="http://validator.w3.org/check/referer"><img
+     src="http://www.w3.org/Icons/valid-html401" height="31" width="88"
+     align=right border="0" alt="Valid HTML 4.01!"></a>
+   $Id: config.html,v 1.10 2003/12/10 04:39:40 jared Exp $
+</address>
+</body>
+</html>

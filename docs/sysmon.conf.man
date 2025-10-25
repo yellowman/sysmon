@@ -1,0 +1,316 @@
+.\" Copyright 1999-2001 Jared Mauch
+.\" May be distributed under the GNU General Public License
+.\" 
+.TH SYSMON.CONF 5 "21 June 2000" "Version 0.83" "System Administration"
+.SH NAME
+sysmon.conf \- sysmond(man) configuration file
+.SH DESCRIPTION
+The
+.I sysmon.conf
+file is the main configuration file for the
+.BR sysmond (man)
+which monitors systems and services on various machines connected to a
+network.
+
+Every rule consists of at least three fields, and at most nine.
+
+Lines starting with a hash mark (``#'') and empty lines are ignored.
+
+This release of
+.B sysmond
+is able to understand an extended syntax.  A rule may have a replacement
+performed on it, if a variable is declared earlier in the configuration
+file.
+
+.SH GLOBAL SETTINGS
+There are various global settings that
+.BR sysmond 
+can have configured.  Currently there is some
+inconsistency with some of the settings, but we expect to make
+them more standard in a newer version of 
+.BR sysmond .
+
+.SS Values that can be configured with ``set''
+
+pmesg sender from subject upcolor downcolor recentcolor
+
+These variables are configured in the following format
+
+.IP
+.nf
+set pmesg = "value"
+set sender = "value"
+set from = "value"
+set subject = "value"
+set upcolor = "value"
+set downcolor = "value"
+set recentcolor = "value"
+.fi
+.LP
+
+.SS Generic Variables
+The set command allows the creation of generic variables which can
+be automatically replaced further down in a configuration file.  This
+can be used to seperate routers from servers, while still providing
+an easy way to update all the devices being monitored with a new "contact".
+The example that follows, all cases of $oncall will be replaced with
+oncall@example.com
+
+Example:
+.IP
+.nf
+set oncall = "oncall@example.com"
+
+router.example.com ping "main router" $oncall
+
+.fi
+.LP
+
+.SS Values that can be configured with ``config''
+
+queuetime include showupalso errorsto maxqueued replyto noheartbeat
+pageinterval logging dnslog dnsexpire statusfile nosubject numfailures
+html refresh pidfile output drop_privileges disable_icmp trap_port
+
+.SS queuetime
+The ``config queuetime'' directive is used to specify the number of
+seconds between the completion of the last test of the service
+and the start of the next test of the service.  This time is in seconds,
+and the default is 60.
+
+.SS include
+The ``config include'' directive is used to specify the path to another
+file that should be included at that point in the current file.  This
+is useful if you have software that generates some of your configuration
+files, and you wish to have a per-router configuration file, while
+maintaining your current dependencies.  Other uses could be having an
+oncall database that is generated to allow automatic changing of shifts.
+
+.SS showupalso
+The ``config showupalso'' directive allows all hosts (both those as
+being monitored as up and down) and services being monitored to appear in
+the html or text status file that is created by sysmond.  This does
+not affect the display of the curses client.
+
+.SS errorsto
+The ``config errorsto'' directive inserts an Errors-to: header in any
+e-mail that sysmond generates to a contact.  This is useful if the
+address that sysmond is sending from is not a real account, to allow
+bounces or page-not-sent messages to be collected in a central location.
+
+.SS maxqueued
+The ``config maxqueued'' directive takes an integer argument that
+specifies the number of simultaneous checks that may be performed at
+once.  Large networks may experience problems with polling if sysmond
+receives a large number of icmp responses at once because many hosts
+are being pinged at once, or if the operating system or daemon has
+a restricted number of filedescriptors available.  The default is 100.
+
+.SS replyto
+The ``config replyto'' directive inserts a Reply-to: header in any
+e-mail that sysmond generates to a contact.  This is useful to have
+users that reply to a message about an outage reach a support person
+at an organization.
+
+.SS noheartbeat
+The ``config noheartbeat'' directive disables the default behavior of
+sysmond to send a registration packet to our registration server.  This
+information is collected to determine the hardware platforms and
+operating systems being used for monitoring so we can concentrate
+testing and development on these systems.  Disabling this feature will
+cause no adverse affect to monitoring, as the packet is sent blindly
+once on startup.
+
+.SS pageinterval
+The ``config pageinterval'' directive allows you to configure a reminder
+interval that a host is still down.  This is an integer representing 
+the number of minutes since the last e-mail message to a contact
+about the outage.  Once that timer has been reached, another message is
+sent.  This is useful for people who sleep through their pagers.
+
+.SS logging 
+The ``config logging'' directive allows you to specify a syslog facility
+to be logged to.  These options vary slightly from one operating system
+to the next.  Sysmon supports logging to the following facilities:
+.IP
+.nf
+kern user mail daemon auth syslog lpr news uucp cron authpriv
+local0-local7 none
+.fi
+.LP
+The default is daemon.
+
+.SS dnslog
+The ``config dnslog'' directive allows you to configure the logging
+interval of the internal dns cache statistics.  This number is
+an integer representing the number of seconds between logging intervals.
+The default is 900 seconds (15 minutes).
+
+.SS dnsexpire
+The ``config dnsexpire'' directive allows you to configure the internal
+time-to-live of dns entries cached.  This number is an integer representing
+the number of seconds an element should be allowed to stay in the cache.
+The default is 1500 seconds (25 minutes).
+
+.SS statusfile
+The ``config statusfile'' directive takes two arguments.  The first is the
+specification of the file, be it "text" or "html".  The second argument is
+the path to the file that gets written.  The default is to not write a
+status file.
+
+.SS nosubject
+The ``config nosubject'' directive specifies that there should be no
+subject in the messages sent to the contact address.  This is necessary
+to not consume characters for some e-mail to pager gateways such that
+the full message gets delivered.
+
+.SS numfailures
+The ``config numfailures'' directive takes an integer argument and
+specifies the number of times that a site must be monitored as
+down before a message is sent to the contact address.  The default is
+4.
+
+.SS sleeptime
+The ``config sleeptime'' option is now obsolete.  See the queuetime
+configuration option.
+
+.SS html refresh
+Supply an integer argument in seconds (default 60) to put in the
+Refresh pseudo-header of the HTML status page.
+
+.SS date
+Supply a string which may contain formatting codes from strftime(3)
+(default "%x %X"), or the shorthand words "ISO" ("%F %T") or "DEC"
+("%T %d-%b-%Y").
+
+.SS output
+The ``config output json'' directive enables JSON output mode. Sysmond
+writes monitoring data in JSON format to the specified file path. The
+JSON output includes detailed information about all monitored objects,
+their states, SNMP trap alerts, packet loss statistics, RTT/jitter
+measurements, and wakeup check results. Updated whenever state changes occur.
+Example: config output json "/var/log/sysmon/status.json";
+
+.SS drop_privileges
+The ``config drop_privileges'' directive enables privilege dropping for
+enhanced security. When enabled, sysmond switches to a non-privileged
+user after initialization. ICMP operations are performed via the setuid
+sysmon-ping-helper binary. Cannot be used with disable_icmp.
+Example: config drop_privileges;
+
+.SS disable_icmp
+The ``config disable_icmp'' directive disables all ICMP (ping and pingv6)
+monitoring. This prevents the daemon from opening raw sockets and allows
+it to run entirely without privileges. Note that this disables all ping
+and pingv6 tests in the configuration.
+Example: config disable_icmp;
+
+.SS trap_port
+The ``config trap_port'' directive specifies the UDP port for receiving
+SNMP trap alerts. Default is 162 (standard SNMP trap port). Requires
+root privileges or CAP_NET_BIND_SERVICE capability to bind ports below 1024.
+Example: config trap_port 162;
+
+.SH OBJECT OPTIONS
+Once you have declared an object, additional configuration options are
+available beyond those documented in earlier versions:
+
+.SS min_pings
+The ``min_pings'' directive specifies the minimum number of successful
+ping responses required to consider the host UP. Used for packet loss
+monitoring. Must be less than or equal to send_pings. Default is 1.
+Example: min_pings 4;
+
+.SS send_pings
+The ``send_pings'' directive specifies the number of ICMP echo requests
+to send during each check interval. Used for packet loss monitoring.
+Higher values provide more accurate loss statistics. Default is 5.
+Example: send_pings 5;
+
+.SS packet_loss_threshold
+The ``packet_loss_threshold'' directive specifies the packet loss
+percentage threshold (0.0-100.0). If packet loss exceeds this value,
+an alert is triggered even if the minimum number of pings succeeded.
+Default is 0.0 (disabled).
+Example: packet_loss_threshold 25.0;
+
+.SS rtt_threshold
+The ``rtt_threshold'' directive specifies the round-trip time threshold
+in milliseconds. If average RTT exceeds this value, an alert is triggered.
+Used for latency monitoring.
+Example: rtt_threshold 100;
+
+.SS jitter_threshold
+The ``jitter_threshold'' directive specifies the jitter threshold in
+milliseconds. Jitter is the variation in RTT between consecutive packets.
+If jitter exceeds this value, an alert is triggered. Used for monitoring
+connection stability.
+Example: jitter_threshold 50;
+
+.SS wakeup_check
+The ``wakeup_check'' directive enables proactive wakeup monitoring.
+When enabled, sysmond attempts to wake unreachable hosts using
+Wake-on-LAN before declaring them down. Useful for monitoring hosts
+that may be in power-saving modes.
+Example: wakeup_check;
+
+.SS wakeup_retries
+The ``wakeup_retries'' directive specifies the number of Wake-on-LAN
+attempts before declaring the host permanently down. Only used when
+wakeup_check is enabled. Default is 3.
+Example: wakeup_retries 3;
+
+.SS wakeup_check_interval
+The ``wakeup_check_interval'' directive specifies the time to wait in
+seconds between wakeup attempts. Allows time for the host to complete
+the boot process. Only used when wakeup_check is enabled. Default is 300.
+Example: wakeup_check_interval 300;
+
+.SS trap_alert
+The ``trap_alert'' directive enables SNMP trap alert monitoring for this
+object. When enabled, sysmond listens for SNMP traps from this host and
+triggers alerts based on trap severity and content. Traps are matched to
+objects by source IP address.
+Example: trap_alert;
+
+.SS matched_host
+The ``matched_host'' directive associates a trap monitoring object with
+a specific host object. Used to link SNMP trap alerts with the
+corresponding monitored host. Allows trap-triggered state changes to
+affect the associated host's status.
+Example: matched_host "router1";
+
+.SH EXAMPLES
+Here are some examples, which should give you an idea of how each option
+can be configured.
+.IP
+.nf
+# 
+# insert examples here
+#
+.fi
+.LP
+
+.SH FILES
+.PD 0
+.TP
+.I /etc/sysmon.conf
+Configuration file for
+.B sysmond
+
+.SH BUGS
+Insufficent documentation to document the bugs, let alone the features.
+
+.SH SEE ALSO
+.BR sysmond (man)
+
+.LP
+.SH COLLABORATORS
+Sysmon is primarily written by
+.TP
+Jared Mauch
+.TP
+jared@puck.nether.net
+
+.PD
+.zZ

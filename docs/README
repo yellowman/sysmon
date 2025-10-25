@@ -1,0 +1,40 @@
+	System monitor program.
+
+Installation Notes:
+
+	The sysmond daemon can now drop root privileges after initialization
+for improved security. A setuid helper (sysmon-ping-helper) is installed
+to handle ICMP operations when running unprivileged.
+
+	You may need ncurses, net-snmp libraries, and should have gcc for
+compiling this program. For JSON output support, the daemon can write
+monitoring data in JSON format. A web-based configuration manager is
+included in the web-ui/ directory.
+
+	You may need ncurses, and should have gcc for compiling this
+program.  If you can get me accounts on other platforms of machines (not
+root, just accounts), I can port this software to almost everything
+UNIX based (I will not port to vms or nt :).
+
+	I claim nothing, this code will erase your hard disk, crash your
+network and destroy your users and damage your hardware.  It will
+always do this.
+
+New Features (2025):
+	- SNMP trap alert monitoring with matched_host support
+	- Packet loss monitoring (min_pings, send_pings, packet_loss_threshold)
+	- RTT and jitter threshold monitoring (rtt_threshold, jitter_threshold)
+	- Wakeup checks for proactive monitoring (wakeup_check, wakeup_retries)
+	- Privilege dropping for enhanced security (drop_privileges directive)
+	- JSON output mode for machine-readable monitoring data
+	- Web UI configuration manager (FastCGI-based, written in Go)
+	- IPv6 ICMP support via setuid ping helper
+	- Improved error handling and logging
+
+Tested on by author:
+	Linux, SunOS, OSF/1, FreeBSD, Solaris, BSDI, NetBSD & NetBSD Alpha,
+Solaris x86, HP/UX, Apple OS/10 Server (Rhapsody)
+
+Compiles Under but not tested under by author:
+	SCO
+

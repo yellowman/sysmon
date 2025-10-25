@@ -1,0 +1,411 @@
+{{template "base" .}}
+
+{{define "title"}}Dashboard{{end}}
+
+{{define "content"}}
+<div x-data="dashboard()" x-init="init()">
+    <!-- Status Overview Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <!-- Total Hosts -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Total Hosts</p>
+                    <p class="text-3xl font-bold text-gray-900" x-text="stats.total_hosts">-</p>
+                </div>
+                <i class="fas fa-server text-4xl text-blue-500"></i>
+            </div>
+        </div>
+
+        <!-- Healthy Hosts -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Healthy</p>
+                    <p class="text-3xl font-bold text-green-600" x-text="stats.healthy_hosts">-</p>
+                </div>
+                <i class="fas fa-check-circle text-4xl text-green-500"></i>
+            </div>
+        </div>
+
+        <!-- Warning Hosts -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Warnings</p>
+                    <p class="text-3xl font-bold text-yellow-600" x-text="stats.warning_hosts">-</p>
+                </div>
+                <i class="fas fa-exclamation-triangle text-4xl text-yellow-500"></i>
+            </div>
+        </div>
+
+        <!-- Critical Hosts -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Critical</p>
+                    <p class="text-3xl font-bold text-red-600" x-text="stats.critical_hosts">-</p>
+                </div>
+                <i class="fas fa-times-circle text-4xl text-red-500"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Daemon Info & Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <!-- Daemon Info -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-info-circle mr-2"></i>Daemon Information
+            </h2>
+            <dl class="space-y-2" x-show="daemon.version">
+                <div class="flex justify-between">
+                    <dt class="text-sm text-gray-600">Version:</dt>
+                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.version">-</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-sm text-gray-600">Uptime:</dt>
+                    <dd class="text-sm font-medium text-gray-900" x-text="formatUptime(daemon.uptime_seconds)">-</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-sm text-gray-600">PID:</dt>
+                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.pid">-</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-sm text-gray-600">Config File:</dt>
+                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.config_file">-</dd>
+                </div>
+            </dl>
+            <div class="mt-4 text-xs text-gray-500">
+                Last update: <span x-text="new Date(daemon.current_time).toLocaleString()"></span>
+            </div>
+        </div>
+
+        <!-- Check Types Chart -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-chart-pie mr-2"></i>Check Types
+            </h2>
+            <canvas id="checkTypesChart" width="400" height="300"></canvas>
+        </div>
+    </div>
+
+    <!-- Active Alerts -->
+    <div class="bg-white rounded-lg shadow mb-8" x-show="alerts.length > 0">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">
+                <i class="fas fa-bell mr-2 text-red-500"></i>Active Alerts
+            </h2>
+        </div>
+        <div class="divide-y divide-gray-200">
+            <template x-for="alert in alerts" :key="alert.hostname">
+                <div class="px-6 py-4 hover:bg-gray-50">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <span :class="{
+                                'bg-yellow-100 text-yellow-800': alert.overall_status === 'WARNING',
+                                'bg-red-100 text-red-800': alert.overall_status === 'CRITICAL'
+                            }" class="px-2 py-1 rounded text-xs font-medium" x-text="alert.overall_status"></span>
+                            <span class="font-medium text-gray-900" x-text="alert.hostname"></span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-500 mr-2" x-text="alert.contact"></span>
+                            <button @click="ackHost(alert.hostname)"
+                                    class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    title="Acknowledge this alert">
+                                <i class="fas fa-check mr-1"></i>Ack
+                            </button>
+                            <button @click="showUpdateDialog(alert.hostname)"
+                                    class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    title="Update with status note">
+                                <i class="fas fa-edit mr-1"></i>Update
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <template x-for="check in alert.checks" :key="check.type">
+                            <div class="flex items-center space-x-2">
+                                <i :class="{
+                                    'fas fa-check text-green-500': check.status === 'OK',
+                                    'fas fa-exclamation-triangle text-yellow-500': check.status === 'WARNING',
+                                    'fas fa-times text-red-500': check.status === 'CRITICAL'
+                                }"></i>
+                                <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Recent SNMP Traps -->
+    <div class="bg-white rounded-lg shadow" x-show="traps.length > 0">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <div class="flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-gray-900">
+                    <i class="fas fa-exchange-alt mr-2"></i>Recent SNMP Traps
+                </h2>
+                <a href="/traps.html" class="text-sm text-blue-600 hover:text-blue-800">View All →</a>
+            </div>
+        </div>
+        <div class="divide-y divide-gray-200">
+            <template x-for="trap in traps.slice(0, 5)" :key="trap.timestamp">
+                <div class="px-6 py-4 hover:bg-gray-50">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <span class="font-medium text-gray-900" x-text="trap.source_ip"></span>
+                            <span class="text-sm text-gray-500" x-show="trap.source_hostname" x-text="' (' + trap.source_hostname + ')'"></span>
+                        </div>
+                        <span class="text-xs text-gray-500" x-text="formatRelativeTime(trap.timestamp)"></span>
+                    </div>
+                    <div class="mt-1" x-show="trap.decoded">
+                        <span :class="{
+                            'bg-blue-100 text-blue-800': trap.decoded?.severity === 'informational',
+                            'bg-yellow-100 text-yellow-800': trap.decoded?.severity === 'warning',
+                            'bg-red-100 text-red-800': trap.decoded?.severity === 'error' || trap.decoded?.severity === 'critical'
+                        }" class="px-2 py-1 rounded text-xs font-medium mr-2" x-text="trap.decoded?.trap_name"></span>
+                        <span class="text-sm text-gray-700" x-text="trap.decoded?.description"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="text-center py-12">
+        <i class="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
+        <p class="mt-4 text-gray-600">Loading dashboard...</p>
+    </div>
+
+    <!-- Error State -->
+    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+        <i class="fas fa-exclamation-circle text-4xl text-red-500 mb-4"></i>
+        <p class="text-red-800 font-medium" x-text="error"></p>
+        <button @click="fetchData()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+            Retry
+        </button>
+    </div>
+
+    <!-- Update Dialog Modal -->
+    <div x-show="updateDialog.show"
+         @click.away="updateDialog.show = false"
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+         style="display: none;">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-edit mr-2 text-green-600"></i>Update Host Status
+            </h3>
+            <p class="text-sm text-gray-600 mb-4">
+                Add a status note for <span class="font-medium" x-text="updateDialog.hostname"></span>
+            </p>
+            <textarea
+                x-model="updateDialog.note"
+                class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                rows="3"
+                placeholder="Enter status note (e.g., 'Investigating network issue', 'Scheduled maintenance')"></textarea>
+            <div class="mt-4 flex justify-end space-x-2">
+                <button @click="updateDialog.show = false"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+                    Cancel
+                </button>
+                <button @click="updateHost()"
+                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                        :disabled="!updateDialog.note.trim()">
+                    <i class="fas fa-save mr-1"></i>Update
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success Notification -->
+    <div x-show="notification.show"
+         x-transition
+         class="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg shadow-lg p-4 z-50"
+         style="display: none;">
+        <div class="flex items-center">
+            <i class="fas fa-check-circle text-green-600 text-xl mr-3"></i>
+            <p class="text-green-800" x-text="notification.message"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+function dashboard() {
+    return {
+        loading: true,
+        error: null,
+        daemon: {},
+        stats: {},
+        alerts: [],
+        traps: [],
+        chart: null,
+        updateDialog: {
+            show: false,
+            hostname: '',
+            note: ''
+        },
+        notification: {
+            show: false,
+            message: ''
+        },
+
+        init() {
+            this.fetchData();
+            // Auto-refresh every 10 seconds
+            setInterval(() => this.fetchData(), 10000);
+        },
+
+        async fetchData() {
+            try {
+                this.loading = true;
+                this.error = null;
+
+                const response = await fetch('/api/monitoring/status');
+                if (!response.ok) throw new Error('Failed to fetch status');
+
+                const data = await response.json();
+                this.daemon = data.daemon;
+                this.stats = data.statistics;
+
+                // Get alerts
+                const alertsResponse = await fetch('/api/monitoring/alerts');
+                this.alerts = await alertsResponse.json();
+
+                // Get traps
+                if (data.snmp_traps) {
+                    this.traps = data.snmp_traps.recent_traps || [];
+                }
+
+                this.loading = false;
+                this.updateChart();
+            } catch (e) {
+                this.error = e.message;
+                this.loading = false;
+            }
+        },
+
+        updateChart() {
+            const ctx = document.getElementById('checkTypesChart');
+            if (!ctx) return;
+
+            if (this.chart) {
+                this.chart.destroy();
+            }
+
+            const types = this.stats.checks_by_type || {};
+            this.chart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(types),
+                    datasets: [{
+                        data: Object.values(types),
+                        backgroundColor: [
+                            '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
+                            '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        },
+
+        async ackHost(hostname) {
+            try {
+                const response = await fetch(`/api/monitoring/ack/${hostname}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to acknowledge host');
+                }
+
+                const result = await response.json();
+                this.showNotification(`Host ${hostname} acknowledged successfully`);
+
+                // Refresh data to show updated status
+                setTimeout(() => this.fetchData(), 1000);
+            } catch (e) {
+                alert(`Failed to acknowledge host: ${e.message}`);
+            }
+        },
+
+        showUpdateDialog(hostname) {
+            this.updateDialog.hostname = hostname;
+            this.updateDialog.note = '';
+            this.updateDialog.show = true;
+        },
+
+        async updateHost() {
+            if (!this.updateDialog.note.trim()) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/monitoring/update/${this.updateDialog.hostname}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        note: this.updateDialog.note
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to update host');
+                }
+
+                const result = await response.json();
+                this.updateDialog.show = false;
+                this.showNotification(`Host ${this.updateDialog.hostname} updated successfully`);
+
+                // Refresh data to show updated status
+                setTimeout(() => this.fetchData(), 1000);
+            } catch (e) {
+                alert(`Failed to update host: ${e.message}`);
+            }
+        },
+
+        showNotification(message) {
+            this.notification.message = message;
+            this.notification.show = true;
+
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                this.notification.show = false;
+            }, 3000);
+        },
+
+        formatUptime(seconds) {
+            if (!seconds) return '-';
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${days}d ${hours}h ${minutes}m`;
+        },
+
+        formatRelativeTime(timestamp) {
+            const now = new Date();
+            const then = new Date(timestamp);
+            const diff = Math.floor((now - then) / 1000);
+
+            if (diff < 60) return `${diff}s ago`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            return `${Math.floor(diff / 86400)}d ago`;
+        }
+    };
+}
+</script>
+{{end}}

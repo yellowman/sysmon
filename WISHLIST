@@ -1,0 +1,70 @@
+WISHLIST (Last updated 25-Oct-2025) -- aka TODO
+
+	Version, Features and Dates are all projected.
+
+Future: (Unknown)
+	* multiple textfiles
+		. by groups?
+		. by state (all, 'down' status..)
+	* pageinterval configurable per host
+	* textfile displays objects that are down when the parent is also down
+	* config flaptime <minutes>;
+		display host in html/text file for next <minutes>
+		amount of time as green after host came back up
+	* native dns checks - needs additional features and docs
+		(basic dns check exists with dns-query, dns_aa, dns_recursion)
+	* http://example.com:1345/ textfile+auth+object history
+		NOTE: Web UI now available at separate port with FastCGI
+	* snmp custom "down" message
+	* snmp custom "up" message
+	* ability to compare two snmp oids w/ each other and alert if
+		equal, not equal, etc..
+	* ability to configure descriptions for snmp errors on a per-object
+		basis
+	* show FILENAME in errors (standardize format?)
+		parser_file_error(char *filename, int lineno, "msg");
+		or replace msg with integer pointing to canned message
+	* documentation - ONGOING (comprehensive updates completed for v0.94)
+	* need to aggregate snmp queries to a single host/ip in one
+		larger snmp message with centralized snmp dispatcher
+	* config savestate /path/to/file (save state for sw upgrades)
+	* snpp notification
+	* make paused data visible in curses client
+	* ircd check - DONE (basic ircd check implemented)
+	* config authfile (file-type sysmon|passwd|htpasswd|etc)
+	* curses client fix
+	* config minnumfailures (but before it appears in txt file, ie:
+		becomes yellow)
+	* All bugs gone :)
+
+COMPLETED in v0.94 (2025):
+	* pings per check configurable per-host - DONE
+		(min_pings, send_pings fully implemented with packet_loss_threshold)
+	* snmp traps - DONE
+		(trap_alert directive, matched_host support, trap port config)
+	* packetloss check - DONE
+		(packet loss monitoring with history, tolerance, threshold)
+		(pktloss_tolerance, pktloss_history_hours configurable)
+	* rtt check - DONE
+		(RTT threshold monitoring with rtt_threshold directive)
+	* SAA - PARTIALLY DONE
+		(SAA-lite implemented: RTT and jitter monitoring)
+		(rtt_threshold, jitter_threshold, rtt_samples configurable)
+	* revoke root - DONE
+		(privilege dropping with drop_privileges directive)
+		(setuid ping helper for ICMP operations when unprivileged)
+	* wakeup_checks improvements - DONE
+		(proactive wakeup with max_wakeup_retries and throttling)
+		(properly calls checks with retry logic instead of just killing)
+0.93: (Jul, 2006)
+	* better documentation
+        * rework queuer to sort by age and queue longest since check
+                instead of current pseudo-linear+random system
+        * ability to cap queue size based on check-type
+	* log listening port
+        * per-object pmesg (DONE? - needs docs+testing 20030708)
+        * queueinterval configurable per-host
+                (DONE? - needs docs+testing 20030708)
+
+
+
