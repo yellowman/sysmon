@@ -5,8 +5,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net"
-	"os"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"sysmon-web/internal/models"
@@ -15,6 +17,93 @@ import (
 // Service handles monitoring queries to sysmon daemon
 type Service struct {
 	sysmonAddr string
+	sessionLog *SessionLogger
+}
+
+// SessionLogEntry represents a single logged operation
+type SessionLogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Command   string    `json:"command"`
+	Response  string    `json:"response"`
+	IsError   bool      `json:"is_error"`
+	ErrorMsg  string    `json:"error_msg,omitempty"`
+}
+
+// SessionLogger captures all sysmon protocol operations
+type SessionLogger struct {
+	mu           sync.RWMutex
+	entries      []SessionLogEntry
+	errors       []SessionLogEntry
+	maxEntries   int
+	maxErrors    int
+}
+
+// NewSessionLogger creates a new session logger
+func NewSessionLogger(maxEntries, maxErrors int) *SessionLogger {
+	return &SessionLogger{
+		entries:    make([]SessionLogEntry, 0, maxEntries),
+		errors:     make([]SessionLogEntry, 0, maxErrors),
+		maxEntries: maxEntries,
+		maxErrors:  maxErrors,
+	}
+}
+
+// Log adds an entry to the session log
+func (sl *SessionLogger) Log(command, response string, isError bool, errorMsg string) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+
+	entry := SessionLogEntry{
+		Timestamp: time.Now(),
+		Command:   command,
+		Response:  response,
+		IsError:   isError,
+		ErrorMsg:  errorMsg,
+	}
+
+	// Add to main log (circular buffer)
+	sl.entries = append(sl.entries, entry)
+	if len(sl.entries) > sl.maxEntries {
+		sl.entries = sl.entries[len(sl.entries)-sl.maxEntries:]
+	}
+
+	// Add to errors log if it's an error (circular buffer)
+	if isError {
+		sl.errors = append(sl.errors, entry)
+		if len(sl.errors) > sl.maxErrors {
+			sl.errors = sl.errors[len(sl.errors)-sl.maxErrors:]
+		}
+	}
+}
+
+// GetRecentEntries returns the N most recent log entries
+func (sl *SessionLogger) GetRecentEntries(n int) []SessionLogEntry {
+	sl.mu.RLock()
+	defer sl.mu.RUnlock()
+
+	if n <= 0 || n > len(sl.entries) {
+		n = len(sl.entries)
+	}
+
+	// Return last N entries
+	result := make([]SessionLogEntry, n)
+	copy(result, sl.entries[len(sl.entries)-n:])
+	return result
+}
+
+// GetRecentErrors returns the N most recent error entries
+func (sl *SessionLogger) GetRecentErrors(n int) []SessionLogEntry {
+	sl.mu.RLock()
+	defer sl.mu.RUnlock()
+
+	if n <= 0 || n > len(sl.errors) {
+		n = len(sl.errors)
+	}
+
+	// Return last N errors
+	result := make([]SessionLogEntry, n)
+	copy(result, sl.errors[len(sl.errors)-n:])
+	return result
 }
 
 // XMLParseError represents an XML parsing error with debug data
@@ -42,7 +131,18 @@ type ResponseCapture struct {
 func NewService(sysmonAddr string) *Service {
 	return &Service{
 		sysmonAddr: sysmonAddr,
+		sessionLog: NewSessionLogger(500, 100), // Keep last 500 entries, 100 errors
 	}
+}
+
+// GetSessionLog returns recent session log entries
+func (s *Service) GetSessionLog(limit int) []SessionLogEntry {
+	return s.sessionLog.GetRecentEntries(limit)
+}
+
+// GetSessionErrors returns recent error entries
+func (s *Service) GetSessionErrors(limit int) []SessionLogEntry {
+	return s.sessionLog.GetRecentErrors(limit)
 }
 
 // SysmonResponse represents a parsed response from sysmon daemon
@@ -122,6 +222,41 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		return nil, err
 	}
 
+	// Get daemon information before entering XML mode
+	daemonInfo := models.DaemonInfo{
+		CurrentTime: time.Now(),
+	}
+
+	// Get version with VERS command
+	_, err = conn.Write([]byte("VERS\n"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to send VERS command: %w", err)
+	}
+	versResp, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read VERS response: %w", err)
+	}
+	daemonInfo.Version = strings.TrimSpace(versResp)
+	s.sessionLog.Log("VERS", daemonInfo.Version, false, "")
+
+	// Get uptime with UPTIME command
+	_, err = conn.Write([]byte("UPTIME\n"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to send UPTIME command: %w", err)
+	}
+	uptimeResp, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read UPTIME response: %w", err)
+	}
+	uptimeStr := strings.TrimSpace(uptimeResp)
+	s.sessionLog.Log("UPTIME", uptimeStr, false, "")
+
+	// Parse uptime string like "Uptime = 2d 5h 30m 15s" or similar
+	// Extract seconds from the uptime string
+	uptime, startTime := parseUptimeString(uptimeStr, daemonInfo.CurrentTime)
+	daemonInfo.Uptime = uptime
+	daemonInfo.StartTime = startTime
+
 	// Step 1: Enable XML mode
 	_, err = conn.Write([]byte("MODE xml\n"))
 	if err != nil {
@@ -136,25 +271,30 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	if resp.IsError || resp.Code != "333" {
 		return nil, fmt.Errorf("MODE xml failed: %s", resp.Message)
 	}
+	s.sessionLog.Log("MODE xml", resp.Message, false, "")
 
-	// Step 2: Get list of objects with STAT command
-	_, err = conn.Write([]byte("STAT\n"))
+	// Step 2: Get list of objects with STATO command
+	// CRITICAL: Use STATO (not STAT) because:
+	// - STATO returns unique_name (the object identifier)
+	// - STAT returns hostname:type:port:... where hostname != unique_name
+	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
+	_, err = conn.Write([]byte("STATO\n"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to send STAT command: %w", err)
+		return nil, fmt.Errorf("failed to send STATO command: %w", err)
 	}
 
-	// Read object names from STAT response
+	// Read object names from STATO response
 	objectNames := []string{}
 	for {
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
-			return nil, fmt.Errorf("error reading STAT response: %w", err)
+			return nil, fmt.Errorf("error reading STATO response: %w", err)
 		}
 
 		// Check for response codes
 		if resp.Code != "" {
 			if resp.IsError {
-				return nil, fmt.Errorf("STAT command failed: %s", resp.Message)
+				return nil, fmt.Errorf("STATO command failed: %s", resp.Message)
 			}
 			// Code 333 = end of output
 			if resp.Code == "333" {
@@ -163,24 +303,18 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		}
 
 		// It's a data line (no response code)
-		line := strings.TrimSpace(resp.Message)
-
-		// Parse plain text format from STAT (even in XML mode)
-		// Format: hostname:type:port:lastcheck:downct:contacted:deathtime
-		// OR just: objectname (for STATO command)
-		// NOTE: We only extract the object name (first field) here, as detailed
-		// monitoring data (type, port, status, etc.) is retrieved via SHOWOBJ
-		// XML responses in the next step. The additional STAT fields are thus
-		// redundant and intentionally ignored.
-		fields := strings.Split(line, ":")
-		if len(fields) > 0 && fields[0] != "" {
-			objectNames = append(objectNames, fields[0])
+		// STATO returns just the unique_name (object identifier), one per line
+		objectName := strings.TrimSpace(resp.Message)
+		if objectName != "" {
+			objectNames = append(objectNames, objectName)
 		}
 	}
+	s.sessionLog.Log("STATO", fmt.Sprintf("Retrieved %d objects", len(objectNames)), false, "")
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
 	status := &models.SysmonStatus{
-		Hosts: []models.HostStatus{},
+		Daemon: daemonInfo,
+		Hosts:  []models.HostStatus{},
 		Statistics: models.Stats{
 			ChecksByType:   make(map[string]int),
 			ChecksByStatus: make(map[string]int),
@@ -209,7 +343,9 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		// Read first line using helper to check if it's an error or XML
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading first line for %s: %v\n", objName, err)
+			errMsg := fmt.Sprintf("Error reading first line for %s: %v", objName, err)
+			s.sessionLog.Log(fmt.Sprintf("SHOWOBJ %s", objName), "", true, errMsg)
+
 			// Capture the failed response
 			capture := ResponseCapture{
 				Command:  fmt.Sprintf("SHOWOBJ %s", objName),
@@ -231,7 +367,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		// Check if response is an error code (403, 444)
 		if resp.IsError {
 			// Daemon returned an error (object not found, permission denied, etc.)
-			fmt.Fprintf(os.Stderr, "Sysmon error for %s: %s\n", objName, resp.Message)
+			s.sessionLog.Log(fmt.Sprintf("SHOWOBJ %s", objName), resp.Message, true, resp.Message)
 
 			// Capture the error response
 			capture := ResponseCapture{
@@ -265,7 +401,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			if err != nil {
 				// Save error for reporting
 				readErr = err
-				fmt.Fprintf(os.Stderr, "Error reading line for %s: %v\n", objName, err)
+				s.sessionLog.Log(fmt.Sprintf("SHOWOBJ %s", objName), xmlData, true, fmt.Sprintf("Error reading line: %v", err))
 				break
 			}
 		}
@@ -383,6 +519,10 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	// Send QUIT to close connection cleanly
 	conn.Write([]byte("QUIT\n"))
 
+	// Log successful completion
+	s.sessionLog.Log("GetStatus", fmt.Sprintf("Complete: %d total, %d up, %d down, %d warnings",
+		len(objectNames), hostsUp, hostsDown, status.Statistics.WarningHosts), false, "")
+
 	return status, nil
 }
 
@@ -481,6 +621,66 @@ func readWelcomeBanner(reader *bufio.Reader) error {
 	}
 
 	return nil
+}
+
+// parseUptimeString parses the UPTIME response and returns uptime in seconds and start time
+// Expected format: "Uptime = 123456 secs" or similar time format
+func parseUptimeString(uptimeStr string, currentTime time.Time) (int64, time.Time) {
+	// Remove "Uptime = " prefix if present
+	uptimeStr = strings.TrimPrefix(uptimeStr, "Uptime = ")
+	uptimeStr = strings.TrimSpace(uptimeStr)
+
+	// Try to parse various formats
+	// Format 1: "123456 secs" or "123456"
+	if strings.Contains(uptimeStr, "sec") {
+		parts := strings.Fields(uptimeStr)
+		if len(parts) > 0 {
+			if secs, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+				startTime := currentTime.Add(-time.Duration(secs) * time.Second)
+				return secs, startTime
+			}
+		}
+	}
+
+	// Format 2: Try parsing as duration string like "2d 5h 30m"
+	// This is more complex, let's try a simple regex-based approach
+	var totalSeconds int64
+
+	// Parse days
+	if matches := regexp.MustCompile(`(\d+)d`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if days, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += days * 86400
+		}
+	}
+
+	// Parse hours
+	if matches := regexp.MustCompile(`(\d+)h`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if hours, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += hours * 3600
+		}
+	}
+
+	// Parse minutes
+	if matches := regexp.MustCompile(`(\d+)m`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if mins, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += mins * 60
+		}
+	}
+
+	// Parse seconds
+	if matches := regexp.MustCompile(`(\d+)s`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if secs, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += secs
+		}
+	}
+
+	if totalSeconds > 0 {
+		startTime := currentTime.Add(-time.Duration(totalSeconds) * time.Second)
+		return totalSeconds, startTime
+	}
+
+	// Fallback: return 0 if we couldn't parse
+	return 0, currentTime
 }
 
 // authenticate sends AUTH command to sysmon if authKey is provided

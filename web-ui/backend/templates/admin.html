@@ -103,6 +103,69 @@
         </div>
     </div>
 
+    <!-- Recent Errors -->
+    <div x-show="sessionErrors.length > 0" class="bg-red-50 border border-red-200 rounded-lg shadow mb-6">
+        <div class="px-6 py-4 border-b border-red-200 flex justify-between items-center">
+            <h2 class="text-lg font-semibold text-red-900">
+                <i class="fas fa-exclamation-circle mr-2"></i>Recent Protocol Errors
+            </h2>
+            <span class="text-xs text-red-600" x-text="sessionErrors.length + ' error(s)'"></span>
+        </div>
+        <div class="p-6 space-y-3">
+            <template x-for="(error, idx) in sessionErrors" :key="idx">
+                <div class="bg-white border border-red-300 rounded p-3">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="font-mono text-xs font-semibold text-red-700" x-text="error.command"></span>
+                        <span class="text-xs text-gray-500" x-text="new Date(error.timestamp).toLocaleTimeString()"></span>
+                    </div>
+                    <div class="text-xs text-red-600" x-text="error.error_msg"></div>
+                    <div x-show="error.response" class="mt-2 bg-gray-900 text-green-400 p-2 rounded font-mono text-xs overflow-x-auto max-h-24 overflow-y-auto">
+                        <pre x-text="error.response"></pre>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Session Log -->
+    <div class="bg-white rounded-lg shadow mb-6">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <h2 class="text-lg font-semibold text-gray-900">
+                <i class="fas fa-history mr-2"></i>Protocol Session Log
+            </h2>
+            <div class="flex items-center space-x-2">
+                <span class="text-xs text-gray-500" x-text="sessionLog.length + ' entries'"></span>
+                <button @click="loadSessionLog()"
+                        class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+                    <i class="fas fa-sync-alt mr-1"></i>Refresh
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div class="space-y-2 max-h-96 overflow-y-auto">
+                <template x-for="(entry, idx) in sessionLog" :key="idx">
+                    <div class="border-l-4 pl-3 py-2"
+                         :class="entry.is_error ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'">
+                        <div class="flex justify-between items-start">
+                            <span class="font-mono text-xs font-semibold"
+                                  :class="entry.is_error ? 'text-red-700' : 'text-blue-700'"
+                                  x-text="entry.command"></span>
+                            <span class="text-xs text-gray-500" x-text="new Date(entry.timestamp).toLocaleTimeString()"></span>
+                        </div>
+                        <div class="mt-1 text-xs"
+                             :class="entry.is_error ? 'text-red-600' : 'text-gray-700'">
+                            <span x-text="entry.is_error ? entry.error_msg : entry.response"></span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="sessionLog.length === 0" class="text-center text-gray-500 py-8">
+                    <i class="fas fa-inbox text-4xl mb-2"></i>
+                    <p>No session log entries yet</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- DANGER ZONE -->
     <div class="bg-red-50 border-2 border-red-300 rounded-lg p-6">
         <div class="flex items-center mb-4">
@@ -168,10 +231,20 @@ function adminPage() {
         commandOutput: '',
         killitConfirm: false,
         killitText: '',
+        sessionLog: [],
+        sessionErrors: [],
 
         init() {
             this.loadVersion();
             this.loadUptime();
+            this.loadSessionLog();
+            this.loadSessionErrors();
+
+            // Auto-refresh session log every 5 seconds
+            setInterval(() => {
+                this.loadSessionLog();
+                this.loadSessionErrors();
+            }, 5000);
         },
 
         async loadVersion() {
@@ -266,6 +339,24 @@ function adminPage() {
                 this.killitText = '';
             } catch (e) {
                 alert('Failed to shutdown daemon: ' + e.message);
+            }
+        },
+
+        async loadSessionLog() {
+            try {
+                const result = await fetch('/api/admin/session-log?limit=50').then(r => r.json());
+                this.sessionLog = result.entries || [];
+            } catch (e) {
+                console.error('Failed to load session log:', e);
+            }
+        },
+
+        async loadSessionErrors() {
+            try {
+                const result = await fetch('/api/admin/session-errors?limit=5').then(r => r.json());
+                this.sessionErrors = result.errors || [];
+            } catch (e) {
+                console.error('Failed to load session errors:', e);
             }
         }
     };
