@@ -179,10 +179,16 @@
     </div>
 
     <!-- Error State -->
-    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6">
+    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6 relative">
+        <!-- Close button -->
+        <button @click="error = null"
+                class="absolute top-4 right-4 text-gray-500 hover:text-gray-700 text-2xl leading-none p-1"
+                title="Close">
+            <i class="fas fa-times"></i>
+        </button>
         <div class="flex items-start">
             <i class="fas fa-exclamation-circle text-3xl text-red-500 mr-4 flex-shrink-0"></i>
-            <div class="flex-1">
+            <div class="flex-1 pr-8">
                 <p class="text-red-800 font-medium mb-4" x-text="typeof error === 'string' ? error : error?.message"></p>
 
                 <!-- Show XML debug data if available -->
@@ -291,8 +297,12 @@ function dashboard() {
 
         init() {
             this.fetchData();
-            // Auto-refresh every 10 seconds
-            setInterval(() => this.fetchData(), 10000);
+            // Auto-refresh every 10 seconds (but not if there's an error showing)
+            setInterval(() => {
+                if (!this.error) {
+                    this.fetchData();
+                }
+            }, 10000);
         },
 
         async fetchData() {
