@@ -346,15 +346,21 @@ void	service_test_ping(struct monitorent *here, struct timeval *now_timeval)
 			here->checkent->hostname, localstruct->packetsent);
 	}
 
+	/* After sending all pings, wait longer before declaring unpingable.
+	 * Use 2x icmp_packet_delay (2 seconds default) to allow for moderate
+	 * latency while keeping checks responsive. The original 1-second timeout
+	 * was causing false negatives for hosts with >1s RTT.
+	 */
 	if ((localstruct->packetsent >= here->checkent->send_pings) &&
-		(mydifftime(localstruct->lastsentat, here->lastserv) >= icmp_packet_delay))
+		(mydifftime(localstruct->lastsentat, here->lastserv) >= (icmp_packet_delay * 2)))
 	{
 		/* if so, do the return thang */
 		if (debug || here->checkent->trace)
 		{
-			print_err(1, "icmp.c: %s unpingable after %d attempts",
-				here->checkent->hostname, 
-				localstruct->packetsent);
+			print_err(1, "icmp.c: %s unpingable after %d attempts (waited %.1fs after last ping)",
+				here->checkent->hostname,
+				localstruct->packetsent,
+				mydifftime(localstruct->lastsentat, here->lastserv));
 		}
 		here->retval = SYSM_UNPINGABLE; /* It's not pingable */
 		FREE(localstruct->packet); /* Free our packet */
@@ -875,9 +881,12 @@ void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
 		          localstruct->nreceived);
 	}
 
-	/* Check if we've sent all pings */
+	/* Check if we've sent all pings and waited long enough for replies.
+	 * Use 2x icmp_packet_delay (2 seconds default) to allow for moderate
+	 * latency while keeping checks responsive. Prevents false positives.
+	 */
 	if ((localstruct->packetsent >= here->checkent->send_pings) &&
-	    (mydifftime(localstruct->lastsentat, here->lastserv) >= icmp_packet_delay)) {
+	    (mydifftime(localstruct->lastsentat, here->lastserv) >= (icmp_packet_delay * 2))) {
 
 		/* Record this cycle's results */
 		sent = localstruct->packetsent;

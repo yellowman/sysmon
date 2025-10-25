@@ -22,6 +22,13 @@ dump_to_file(char *filename, int html, time_t now)
 
         struct tm *ltm;
 
+	/* Check filename parameter early to prevent null pointer dereference */
+	if (filename == NULL)
+	{
+		print_err(1, "textfile.c:Error! dump_to_file called with filename == NULL\n");
+		return;
+	}
+
         ltm = localtime(&now);
         strftime(updated_at, 127,
 	  parser_dateformat == NULL ? "%x %X" : parser_dateformat, ltm);
@@ -52,12 +59,6 @@ dump_to_file(char *filename, int html, time_t now)
 	{
 		/* Legacy behavior: create temp file in same directory as final file */
 		snprintf(newfname, 511, "%s%d", filename, getpid());
-	}
-	
-	if (filename == NULL)
-	{
-		print_err(1, "textfile.c:Error! dump_to_file called with filename == NULL\n");
-		return;
 	}
 
 	/* Delete anything that might be in our way */
