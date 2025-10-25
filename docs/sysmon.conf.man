@@ -68,10 +68,10 @@ router.example.com ping "main router" $oncall
 
 .SS Values that can be configured with ``config''
 
-queuetime include showupalso errorsto maxqueued replyto noheartbeat
+queuetime include showupalso errorsto maxqueued replyto noheartbeat nologconnects
 pageinterval logging dnslog dnsexpire statusfile statustempdir nosubject
 numfailures minnumfailures flaptime html refresh pidfile output drop_privileges
-disable_icmp trap_port
+disable_icmp trap_port authkey savestate
 
 .SS queuetime
 The ``config queuetime'' directive is used to specify the number of
@@ -256,6 +256,31 @@ The ``config trap_port'' directive specifies the UDP port for receiving
 SNMP trap alerts. Default is 162 (standard SNMP trap port). Requires
 root privileges or CAP_NET_BIND_SERVICE capability to bind ports below 1024.
 Example: config trap_port 162;
+
+.SS nologconnects
+The ``config nologconnects'' directive disables logging of client connections
+to the sysmon daemon. When enabled, connection messages from clients are
+suppressed from the logs, reducing log verbosity in environments with
+frequent client connections or monitoring systems that poll regularly.
+Useful for reducing log noise while maintaining operational logging.
+Example: config nologconnects;
+
+.SS authkey
+The ``config authkey'' directive sets an authentication key required for
+privileged client commands. Clients must send "AUTH <key>" to authenticate
+before performing certain operations. The daemon responds with "333 Good
+Authentication" on success or "444" on failure. This provides basic access
+control for administrative operations via the client protocol.
+Example: config authkey "secret_password_here";
+
+.SS savestate
+The ``config savestate'' directive specifies a file path where sysmond
+will periodically save the complete monitoring state in XML format. This
+is primarily useful for debugging and understanding the internal state of
+all monitored objects. The file contains detailed information about each
+object including check counts, timestamps, and current status. Not required
+for normal operation.
+Example: config savestate "/var/log/sysmon/state.xml";
 
 .SH OBJECT OPTIONS
 Once you have declared an object, additional configuration options are
