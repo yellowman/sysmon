@@ -149,7 +149,8 @@ int sendline(int fd, char *buffer)
 	val = write(fd, space, strlen(space)/* - test - jared +1 */);
 	if (val == -1)
 	{
-		perror("sendline:write");
+		if (debug)
+			perror("sendline:write");
 	}
 	signal(SIGPIPE, SIG_DFL); /* set signal type back to default */
 	FREE(space); /* free the memory */
@@ -275,7 +276,8 @@ int getline_tcp(int fd, char *buffer)
 
                 if (red == -1)
 		{
-			perror("talktcp.c:getline_tcp:read");
+			if (debug)
+				perror("talktcp.c:getline_tcp:read");
                         return -1;
 		}
 
