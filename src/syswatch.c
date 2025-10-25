@@ -1626,10 +1626,71 @@ void write_pid_file()
  */
 void revoke_root_if_necessary()
 {
-	/* getuid() if uid != 0, icmp_enabled = 0 */
-	/* setuid(nobody) */
-	/* seteuid(nobody) */
+	uid_t current_uid;
+	uid_t current_euid;
+	struct passwd *pw;
+	const char *drop_user = "nobody";  /* User to drop privileges to */
 
+	current_uid = getuid();
+	current_euid = geteuid();
+
+	/* If not running as root, nothing to do */
+	if (current_euid != 0)
+	{
+		if (debug)
+		{
+			print_err(0, "revoke_root: Not running as root (euid=%d), no privileges to drop", current_euid);
+		}
+		return;
+	}
+
+	/* Look up the 'nobody' user */
+	pw = getpwnam(drop_user);
+	if (pw == NULL)
+	{
+		/* Try 'daemon' as fallback */
+		drop_user = "daemon";
+		pw = getpwnam(drop_user);
+
+		if (pw == NULL)
+		{
+			print_err(1, "WARNING: Cannot drop root privileges - user '%s' not found", drop_user);
+			return;
+		}
+	}
+
+	if (debug)
+	{
+		print_err(0, "revoke_root: Dropping privileges from root (uid=0) to user '%s' (uid=%d)",
+			drop_user, pw->pw_uid);
+	}
+
+	/* Drop privileges */
+	if (setgid(pw->pw_gid) != 0)
+	{
+		perror("revoke_root: setgid");
+		print_err(1, "WARNING: Failed to drop group privileges to gid=%d", pw->pw_gid);
+		return;
+	}
+
+	if (setuid(pw->pw_uid) != 0)
+	{
+		perror("revoke_root: setuid");
+		print_err(1, "WARNING: Failed to drop user privileges to uid=%d", pw->pw_uid);
+		return;
+	}
+
+	/* Verify privileges were actually dropped */
+	if (geteuid() == 0 || getuid() == 0)
+	{
+		print_err(1, "CRITICAL: Failed to drop root privileges! Still running as root (uid=%d, euid=%d)",
+			getuid(), geteuid());
+		print_err(1, "CRITICAL: This is a security risk. Exiting.");
+		exit(1);
+	}
+
+	print_err(0, "Successfully dropped root privileges to user '%s' (uid=%d, gid=%d)",
+		drop_user, getuid(), getgid());
 }
 
 /*
