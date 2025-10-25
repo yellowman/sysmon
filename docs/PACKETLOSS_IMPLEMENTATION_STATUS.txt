@@ -1,0 +1,256 @@
+Packet Loss Feature - Implementation Status
+
+Completed Components
+
+? Phase 1: Data Structures (config.h)
+
+Type Constants:
+  - SYSM_TYPE_PKTLOSS (22) - New monitoring type
+  - SYSM_PKTLOSS_EXCEED (13) - New error status
+
+Configuration Constants:
+`c
+define PKTLOSS_HISTORY_SIZE     1440  // 24 hours @ 1 minute intervals
+define PKTLOSS_DEFAULT_HISTORY  24    // Default hours to keep
+define PKTLOSS_MAX_HISTORY      168   // Max 7 days (1 week)
+`
+
+Data Structures:
+`c
+struct pktloss_sample {
+    time_t timestamp;
+    unsigned int sent;
+    unsigned int received;
+    unsigned int lost;
+};
+
+struct pktloss_data {
+    struct pktloss_sample history[PKTLOSS_HISTORY_SIZE];
+    unsigned int history_head;
+    unsigned int history_count;
+    unsigned long long total_sent;      // 64-bit for overflow protection
+    unsigned long long total_received;
+    unsigned long long total_lost;
+    struct pingdata *ping;
+};
+`
+
+Host Configuration (struct hostinfo):
+`c
+unsigned int pktloss_tolerance;      // Max lost packets before alert
+unsigned int pktloss_history_hours;  // Hours of history to keep
+time_t pktloss_last_check;           // Last evaluation time
+`
+
+? Phase 2: Core Implementation (icmp.c)
+
+Functions Implemented:
+
+1. pktloss_add_sample() - Add sample to history
+  - Circular buffer management
+  - Overflow protection on totals
+  - Automatic oldest sample overwrite
+
+2. start_test_pktloss() - Initialize monitoring
+  - Allocates pktloss_data structure
+  - Allocates embedded pingdata
+  - Sets up ICMP socket
+  - DNS lookup
+  - Sends initial ping
+  - Full NULL checking and error handling
+
+3. service_test_pktloss() - Periodic monitoring
+  - Sends ICMP packets
+  - Tracks responses
+  - Records history samples
+  - Checks tolerance threshold
+  - Returns appropriate status
+
+4. stop_test_pktloss() - Cleanup
+  - Frees all allocated memory
+  - Proper cleanup order
+
+Security Features:
+  - ? All MALLOC calls have NULL checks
+  - ? Overflow protection on totals (64-bit)
+  - ? Bounds checking on circular buffer
+  - ? No hardcoded sizes (uses macros)
+  - ? memset after allocation
+  - ? Proper cleanup on errors
+
+? Phase 3: Display & Reporting (lib.c)
+
+type_to_name() mapping:
+`c
+case SYSM_TYPE_PKTLOSS:
+    return "pktloss";
+`
+
+errtostr() mapping:
+`c
+case SYSM_PKTLOSS_EXCEED:
+    return "Pkt Loss High";
+`
+
+  - --
+
+Remaining Work
+
+? Phase 4: Integration (syswatch.c)
+
+Need to add switch cases in:
+
+1. queue_checks_qsort_way() - Queue management
+2. service_children_complete_checks() - Check completion
+3. service_children_start_checks() - Check initiation
+4. process_icmp_input() - ICMP reply processing
+
+Required additions:
+`c
+case SYSM_TYPE_PKTLOSS:
+    service_test_pktloss(here, &now_timeval);
+    break;
+
+case SYSM_TYPE_PKTLOSS:
+    start_test_pktloss(here);
+    break;
+
+case SYSM_TYPE_PKTLOSS:
+    stop_test_pktloss(here);
+    break;
+`
+
+? Phase 5: Parser (parser.l / parser.c)
+
+Need to implement config parsing:
+
+`
+Syntax: hostname pktloss send_count interval tolerance "group" contact
+
+Example: far-away-site pktloss 15 1 2 "wan" admin@example.com
+`
+
+Parser actions needed:
+1. Recognize "pktloss" keyword
+2. Parse 5 parameters
+3. Set type = SYSM_TYPE_PKTLOSS
+4. Set send_pings, queuetime, pktloss_tolerance
+5. Set group, contact
+6. Initialize pktloss_history_hours to default
+
+? Phase 6: XML Output (srvclient.c)
+
+Add packet loss statistics to XML output:
+`xml
+<pktloss_sent>15</pktloss_sent>
+<pktloss_received>12</pktloss_received>
+<pktloss_lost>3</pktloss_lost>
+<pktloss_rate>20.0</pktloss_rate>
+<pktloss_tolerance>2</pktloss_tolerance>
+`
+
+  - --
+
+Testing Plan
+
+Unit Tests
+
+1. Circular buffer:
+  - ? Fixed size allocation
+  - ? Fill to capacity
+  - ? Verify oldest overwritten
+  - ? Check boundary conditions
+
+2. Tolerance checking:
+  - ? 0 loss -> SYSM_OK
+  - ? loss <= tolerance -> SYSM_OK
+  - ? loss > tolerance -> SYSM_PKTLOSS_EXCEED
+  - ? 100% loss -> SYSM_UNPINGABLE
+
+3. Memory management:
+  - ? Allocation with NULL checks
+  - ? Proper cleanup in stop_test_pktloss
+  - ? Valgrind verification
+
+Integration Tests
+
+1. Network monitoring:
+  - ? Monitor stable host
+  - ? Simulate packet loss
+  - ? Verify alerts
+
+2. Configuration:
+  - ? Parse valid configs
+  - ? Reject invalid configs
+  - ? Default values
+
+  - --
+
+Current Build Status
+
+Compilation: ? Not yet attempted (parser not complete)
+
+Files Modified:
+  - ? src/config.h - Type definitions, data structures
+  - ? src/icmp.c - Core implementation (~350 lines)
+  - ? src/lib.c - Display mappings
+  - ? src/syswatch.c - Integration needed
+  - ? src/parser.l - Parser needed
+  - ? src/srvclient.c - XML output needed
+
+  - --
+
+Security Checklist
+
+  - ? No hardcoded buffer sizes (all use macros/sizeof)
+  - ? All MALLOC calls have NULL checks
+  - ? Overflow protection on 64-bit counters
+  - ? Bounds checking on array access
+  - ? memset after allocation
+  - ? Proper cleanup on all error paths
+  - ? No sprintf (would use snprintf if needed)
+  - ? No strcpy/strcat (already fixed project-wide)
+
+  - --
+
+Next Steps
+
+1. Add syswatch.c integration (switch cases)
+2. Implement parser (parser.l/parser.c)
+3. Add XML output (srvclient.c)
+4. Test compilation
+5. Run valgrind tests
+6. Integration testing
+7. Documentation
+
+  - --
+
+Design Highlights
+
+Memory Efficient:
+  - 23 KB per monitored host
+  - Circular buffer (no reallocation)
+  - Reuses existing pingdata structure
+
+Secure:
+  - All allocations checked
+  - Overflow protection
+  - Bounds checking
+  - Follows project security standards
+
+Maintainable:
+  - Clear function names
+  - Comprehensive comments
+  - Consistent with existing code
+  - Uses established patterns
+
+Backward Compatible:
+  - New type, doesn't affect existing "ping"
+  - Shared ICMP infrastructure
+  - Optional feature
+
+  - --
+
+Status: Core implementation complete, integration remaining
+Lines of Code: ~400 new lines
+Estimated Remaining: ~200 lines (integration + parser)
