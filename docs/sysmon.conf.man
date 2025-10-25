@@ -71,7 +71,7 @@ router.example.com ping "main router" $oncall
 queuetime include showupalso errorsto maxqueued replyto noheartbeat nologconnects
 pageinterval logging dnslog dnsexpire statusfile statustempdir nosubject
 numfailures minnumfailures flaptime html refresh pidfile output drop_privileges
-disable_icmp trap_port authkey savestate
+disable_icmp trap_port snmp-trap authkey savestate
 
 .SS queuetime
 The ``config queuetime'' directive is used to specify the number of
@@ -257,6 +257,14 @@ SNMP trap alerts. Default is 162 (standard SNMP trap port). Requires
 root privileges or CAP_NET_BIND_SERVICE capability to bind ports below 1024.
 Example: config trap_port 162;
 
+.SS snmp-trap
+The ``config snmp-trap'' directive enables SNMP trap monitoring globally.
+When enabled, sysmond opens a UDP socket on the trap_port (default 162)
+to receive SNMP trap PDUs. Individual objects can then use the trap_alert
+directive to enable trap monitoring for specific hosts. Traps are matched
+to objects by source IP address. Requires trap_port to be configured.
+Example: config snmp-trap;
+
 .SS nologconnects
 The ``config nologconnects'' directive disables logging of client connections
 to the sysmon daemon. When enabled, connection messages from clients are
@@ -350,6 +358,50 @@ a specific host object. Used to link SNMP trap alerts with the
 corresponding monitored host. Allows trap-triggered state changes to
 affect the associated host's status.
 Example: matched_host "router1";
+
+.SS snmp-type
+The ``snmp-type'' directive specifies the type of SNMP check to perform.
+Valid types are: high (alert if value exceeds threshold), low (alert if
+value is below threshold), range (alert if outside range), exact (alert
+if not matching exact value), rate (alert if counter rate exceeds threshold),
+and uptime (monitor system uptime). Must be used with corresponding
+snmp-high, snmp-low, snmp-exact, or snmp-rate directives.
+Example: snmp-type "high";
+
+.SS snmp-high
+The ``snmp-high'' directive sets the upper threshold for SNMP monitoring.
+When snmp-type is "high", alerts are triggered if the polled SNMP value
+exceeds this threshold. When snmp-type is "range", this sets the upper
+bound of the acceptable range. Value is an unsigned integer.
+Example: snmp-high 1000000;
+
+.SS snmp-low
+The ``snmp-low'' directive sets the lower threshold for SNMP monitoring.
+When snmp-type is "low", alerts are triggered if the polled SNMP value
+falls below this threshold. When snmp-type is "range", this sets the lower
+bound of the acceptable range. Value is an unsigned integer.
+Example: snmp-low 100;
+
+.SS snmp-exact
+The ``snmp-exact'' directive specifies the exact value expected from an
+SNMP query. When snmp-type is "exact", alerts are triggered if the polled
+value does not match this exact value. Useful for monitoring specific
+states or counters that should remain constant. Value is an unsigned integer.
+Example: snmp-exact 1;
+
+.SS snmp-rate
+The ``snmp-rate'' directive sets the maximum acceptable rate of change for
+an SNMP counter. When snmp-type is "rate", sysmond calculates the rate of
+change between polls and alerts if it exceeds this threshold. Use with
+snmp-octets to convert bytes/sec to bits/sec. Value is rate per second.
+Example: snmp-rate 100000;
+
+.SS snmp-octets
+The ``snmp-octets'' directive modifies SNMP rate calculations to convert
+from bytes to bits by multiplying by 8. Only affects snmp-type "rate" checks.
+Useful for monitoring network interface bandwidth where counters are in
+bytes but you want to alert on bits per second (e.g., Mbps).
+Example: snmp-octets;
 
 .SS pageinterval
 The ``pageinterval'' directive allows per-object override of the global
