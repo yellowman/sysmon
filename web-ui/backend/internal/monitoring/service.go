@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,6 +124,39 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		return nil, err
 	}
 
+	// Get daemon information before entering XML mode
+	daemonInfo := models.DaemonInfo{
+		CurrentTime: time.Now(),
+	}
+
+	// Get version with VERS command
+	_, err = conn.Write([]byte("VERS\n"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to send VERS command: %w", err)
+	}
+	versResp, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read VERS response: %w", err)
+	}
+	daemonInfo.Version = strings.TrimSpace(versResp)
+
+	// Get uptime with UPTIME command
+	_, err = conn.Write([]byte("UPTIME\n"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to send UPTIME command: %w", err)
+	}
+	uptimeResp, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read UPTIME response: %w", err)
+	}
+	uptimeStr := strings.TrimSpace(uptimeResp)
+
+	// Parse uptime string like "Uptime = 2d 5h 30m 15s" or similar
+	// Extract seconds from the uptime string
+	uptime, startTime := parseUptimeString(uptimeStr, daemonInfo.CurrentTime)
+	daemonInfo.Uptime = uptime
+	daemonInfo.StartTime = startTime
+
 	// Step 1: Enable XML mode
 	_, err = conn.Write([]byte("MODE xml\n"))
 	if err != nil {
@@ -180,7 +215,8 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
 	status := &models.SysmonStatus{
-		Hosts: []models.HostStatus{},
+		Daemon: daemonInfo,
+		Hosts:  []models.HostStatus{},
 		Statistics: models.Stats{
 			ChecksByType:   make(map[string]int),
 			ChecksByStatus: make(map[string]int),
@@ -481,6 +517,66 @@ func readWelcomeBanner(reader *bufio.Reader) error {
 	}
 
 	return nil
+}
+
+// parseUptimeString parses the UPTIME response and returns uptime in seconds and start time
+// Expected format: "Uptime = 123456 secs" or similar time format
+func parseUptimeString(uptimeStr string, currentTime time.Time) (int64, time.Time) {
+	// Remove "Uptime = " prefix if present
+	uptimeStr = strings.TrimPrefix(uptimeStr, "Uptime = ")
+	uptimeStr = strings.TrimSpace(uptimeStr)
+
+	// Try to parse various formats
+	// Format 1: "123456 secs" or "123456"
+	if strings.Contains(uptimeStr, "sec") {
+		parts := strings.Fields(uptimeStr)
+		if len(parts) > 0 {
+			if secs, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+				startTime := currentTime.Add(-time.Duration(secs) * time.Second)
+				return secs, startTime
+			}
+		}
+	}
+
+	// Format 2: Try parsing as duration string like "2d 5h 30m"
+	// This is more complex, let's try a simple regex-based approach
+	var totalSeconds int64
+
+	// Parse days
+	if matches := regexp.MustCompile(`(\d+)d`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if days, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += days * 86400
+		}
+	}
+
+	// Parse hours
+	if matches := regexp.MustCompile(`(\d+)h`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if hours, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += hours * 3600
+		}
+	}
+
+	// Parse minutes
+	if matches := regexp.MustCompile(`(\d+)m`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if mins, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += mins * 60
+		}
+	}
+
+	// Parse seconds
+	if matches := regexp.MustCompile(`(\d+)s`).FindStringSubmatch(uptimeStr); len(matches) > 1 {
+		if secs, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += secs
+		}
+	}
+
+	if totalSeconds > 0 {
+		startTime := currentTime.Add(-time.Duration(totalSeconds) * time.Second)
+		return totalSeconds, startTime
+	}
+
+	// Fallback: return 0 if we couldn't parse
+	return 0, currentTime
 }
 
 // authenticate sends AUTH command to sysmon if authKey is provided
