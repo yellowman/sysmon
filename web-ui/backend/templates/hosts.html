@@ -40,6 +40,7 @@
                         </div>
                         <i x-show="host.paused" class="fas fa-pause text-gray-400" title="Paused"></i>
                     </div>
+                    <div class="mt-1 text-sm text-gray-600" x-show="host.description" x-text="host.description"></div>
                     <div class="mt-1 flex items-center space-x-4 text-sm text-gray-500">
                         <span x-show="host.ipv4_address">
                             <i class="fas fa-network-wired mr-1"></i>
@@ -70,6 +71,25 @@
                     </div>
                     <div class="mt-2 text-xs text-gray-500" x-show="host.checks.length > 6">
                         + <span x-text="host.checks.length - 6"></span> more checks
+                    </div>
+                </div>
+
+                <!-- Stats Footer -->
+                <div class="px-6 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+                    <div class="flex justify-between items-center">
+                        <div class="flex space-x-4">
+                            <span x-show="host.total_checked > 0" :title="'Up: ' + host.up_count + ', Down: ' + host.down_count">
+                                <i class="fas fa-chart-line mr-1"></i>
+                                <span x-text="host.total_checked + ' checks'"></span>
+                                <span x-show="host.total_down > 0" class="text-red-600">
+                                    (<span x-text="((host.total_down / host.total_checked) * 100).toFixed(1)"></span>% down)
+                                </span>
+                            </span>
+                        </div>
+                        <span x-show="host.last_change_time" class="text-gray-500" :title="'Last status change: ' + formatTime(host.last_change_time)">
+                            <i class="fas fa-clock mr-1"></i>
+                            <span x-text="formatTimeAgo(host.last_change_time)"></span>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -127,6 +147,36 @@
 
                     <!-- Modal Content -->
                     <div class="px-6 py-4">
+                        <!-- Host Statistics -->
+                        <div class="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="bg-gray-50 rounded-lg p-3">
+                                <div class="text-xs text-gray-500 uppercase">Total Checks</div>
+                                <div class="text-2xl font-bold text-gray-900" x-text="selectedHost.total_checked || 0"></div>
+                            </div>
+                            <div class="bg-green-50 rounded-lg p-3">
+                                <div class="text-xs text-green-600 uppercase">Up Count</div>
+                                <div class="text-2xl font-bold text-green-600" x-text="selectedHost.up_count || 0"></div>
+                            </div>
+                            <div class="bg-red-50 rounded-lg p-3">
+                                <div class="text-xs text-red-600 uppercase">Down Count</div>
+                                <div class="text-2xl font-bold text-red-600" x-text="selectedHost.down_count || 0"></div>
+                            </div>
+                            <div class="bg-blue-50 rounded-lg p-3">
+                                <div class="text-xs text-blue-600 uppercase">Uptime</div>
+                                <div class="text-2xl font-bold text-blue-600">
+                                    <span x-show="selectedHost.total_checked > 0"
+                                          x-text="(((selectedHost.total_checked - selectedHost.total_down) / selectedHost.total_checked) * 100).toFixed(1) + '%'"></span>
+                                    <span x-show="!selectedHost.total_checked || selectedHost.total_checked === 0">N/A</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div x-show="selectedHost.last_change_time" class="mb-4 text-sm text-gray-600">
+                            <i class="fas fa-clock mr-1"></i>
+                            Last status change: <span x-text="formatTime(selectedHost.last_change_time)"></span>
+                            (<span x-text="formatTimeAgo(selectedHost.last_change_time)"></span>)
+                        </div>
+
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">Check Results</h3>
                         <div class="space-y-3">
                             <template x-for="check in selectedHost.checks" :key="check.type + (check.port || '')">
@@ -249,6 +299,22 @@ function hostsPage() {
 
         formatTime(timestamp) {
             return new Date(timestamp).toLocaleString();
+        },
+
+        formatTimeAgo(timestamp) {
+            if (!timestamp) return '';
+            const now = new Date();
+            const then = new Date(timestamp);
+            const diffMs = now - then;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return then.toLocaleDateString();
         }
     };
 }
