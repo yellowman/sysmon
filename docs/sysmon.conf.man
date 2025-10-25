@@ -229,14 +229,6 @@ Supply a string which may contain formatting codes from strftime(3)
 (default "%x %X"), or the shorthand words "ISO" ("%F %T") or "DEC"
 ("%T %d-%b-%Y").
 
-.SS output
-The ``config output json'' directive enables JSON output mode. Sysmond
-writes monitoring data in JSON format to the specified file path. The
-JSON output includes detailed information about all monitored objects,
-their states, SNMP trap alerts, packet loss statistics, RTT/jitter
-measurements, and wakeup check results. Updated whenever state changes occur.
-Example: config output json "/var/log/sysmon/status.json";
-
 .SS drop_privileges
 The ``config drop_privileges'' directive enables privilege dropping for
 enhanced security. When enabled, sysmond switches to a non-privileged
