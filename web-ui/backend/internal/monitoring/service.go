@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -133,6 +134,8 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
+				// Log error and break
+				fmt.Fprintf(os.Stderr, "Error reading line for %s: %v\n", objName, err)
 				break
 			}
 			xmlData += line
@@ -143,9 +146,15 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			}
 		}
 
+		// Debug: log raw XML for first object
+		if len(status.Hosts) == 0 {
+			fmt.Fprintf(os.Stderr, "DEBUG: First object XML for %s:\n%s\n", objName, xmlData)
+		}
+
 		// Parse XML
 		var xmlObj XMLObjectStatus
 		if err := xml.Unmarshal([]byte(xmlData), &xmlObj); err != nil {
+			fmt.Fprintf(os.Stderr, "XML parse error for %s: %v\nXML data:\n%s\n", objName, err, xmlData)
 			continue // Skip objects with parse errors
 		}
 
@@ -204,6 +213,9 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	status.Statistics.HealthyHosts = hostsUp
 	status.Statistics.CriticalHosts = hostsDown
 	// WarningHosts and ChecksByType/ChecksByStatus are incremented in the loop above
+
+	// Send QUIT to close connection cleanly
+	conn.Write([]byte("QUIT\n"))
 
 	return status, nil
 }
@@ -774,6 +786,9 @@ func (s *Service) GetObjectsXML() (string, error) {
 
 	xmlOutput.WriteString("</SysmonStatus>\n")
 
+	// Send QUIT to close connection cleanly
+	conn.Write([]byte("QUIT\n"))
+
 	return xmlOutput.String(), nil
 }
 
@@ -832,6 +847,9 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 			return "", fmt.Errorf("object not found or MODE xml not enabled")
 		}
 	}
+
+	// Send QUIT to close connection cleanly
+	conn.Write([]byte("QUIT\n"))
 
 	return xmlOutput.String(), nil
 }
