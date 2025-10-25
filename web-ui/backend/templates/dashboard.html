@@ -108,7 +108,19 @@
                             }" class="px-2 py-1 rounded text-xs font-medium" x-text="alert.overall_status"></span>
                             <span class="font-medium text-gray-900" x-text="alert.hostname"></span>
                         </div>
-                        <span class="text-sm text-gray-500" x-text="alert.contact"></span>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-500 mr-2" x-text="alert.contact"></span>
+                            <button @click="ackHost(alert.hostname)"
+                                    class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    title="Acknowledge this alert">
+                                <i class="fas fa-check mr-1"></i>Ack
+                            </button>
+                            <button @click="showUpdateDialog(alert.hostname)"
+                                    class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    title="Update with status note">
+                                <i class="fas fa-edit mr-1"></i>Update
+                            </button>
+                        </div>
                     </div>
                     <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <template x-for="check in alert.checks" :key="check.type">
@@ -174,6 +186,48 @@
             Retry
         </button>
     </div>
+
+    <!-- Update Dialog Modal -->
+    <div x-show="updateDialog.show"
+         @click.away="updateDialog.show = false"
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+         style="display: none;">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-edit mr-2 text-green-600"></i>Update Host Status
+            </h3>
+            <p class="text-sm text-gray-600 mb-4">
+                Add a status note for <span class="font-medium" x-text="updateDialog.hostname"></span>
+            </p>
+            <textarea
+                x-model="updateDialog.note"
+                class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                rows="3"
+                placeholder="Enter status note (e.g., 'Investigating network issue', 'Scheduled maintenance')"></textarea>
+            <div class="mt-4 flex justify-end space-x-2">
+                <button @click="updateDialog.show = false"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+                    Cancel
+                </button>
+                <button @click="updateHost()"
+                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                        :disabled="!updateDialog.note.trim()">
+                    <i class="fas fa-save mr-1"></i>Update
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success Notification -->
+    <div x-show="notification.show"
+         x-transition
+         class="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg shadow-lg p-4 z-50"
+         style="display: none;">
+        <div class="flex items-center">
+            <i class="fas fa-check-circle text-green-600 text-xl mr-3"></i>
+            <p class="text-green-800" x-text="notification.message"></p>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -186,6 +240,15 @@ function dashboard() {
         alerts: [],
         traps: [],
         chart: null,
+        updateDialog: {
+            show: false,
+            hostname: '',
+            note: ''
+        },
+        notification: {
+            show: false,
+            message: ''
+        },
 
         init() {
             this.fetchData();
@@ -253,6 +316,75 @@ function dashboard() {
                     }
                 }
             });
+        },
+
+        async ackHost(hostname) {
+            try {
+                const response = await fetch(`/api/monitoring/ack/${hostname}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to acknowledge host');
+                }
+
+                const result = await response.json();
+                this.showNotification(`Host ${hostname} acknowledged successfully`);
+
+                // Refresh data to show updated status
+                setTimeout(() => this.fetchData(), 1000);
+            } catch (e) {
+                alert(`Failed to acknowledge host: ${e.message}`);
+            }
+        },
+
+        showUpdateDialog(hostname) {
+            this.updateDialog.hostname = hostname;
+            this.updateDialog.note = '';
+            this.updateDialog.show = true;
+        },
+
+        async updateHost() {
+            if (!this.updateDialog.note.trim()) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/monitoring/update/${this.updateDialog.hostname}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        note: this.updateDialog.note
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to update host');
+                }
+
+                const result = await response.json();
+                this.updateDialog.show = false;
+                this.showNotification(`Host ${this.updateDialog.hostname} updated successfully`);
+
+                // Refresh data to show updated status
+                setTimeout(() => this.fetchData(), 1000);
+            } catch (e) {
+                alert(`Failed to update host: ${e.message}`);
+            }
+        },
+
+        showNotification(message) {
+            this.notification.message = message;
+            this.notification.show = true;
+
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                this.notification.show = false;
+            }, 3000);
         },
 
         formatUptime(seconds) {

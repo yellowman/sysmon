@@ -387,7 +387,8 @@ void srv_client_do_trace(struct clientstatus *client, char *buff)
 }
 
 /*
- * FIXME BUG: send the object in xml format
+ * SHOWOBJ <objectname>
+ * Send object status in XML format
  */
 void srv_client_do_showobject(struct clientstatus *client, char *buff)
 {

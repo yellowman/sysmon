@@ -272,3 +272,99 @@ func (s *Service) GetAlerts() ([]models.HostStatus, error) {
 
 	return alerts, nil
 }
+
+// AckHost acknowledges an alert for a specific host
+func (s *Service) AckHost(hostname string) error {
+	// Connect to sysmon daemon
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Enable XML mode
+	_, err = conn.Write([]byte("MODE xml\n"))
+	if err != nil {
+		return fmt.Errorf("failed to send MODE xml: %w", err)
+	}
+
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read MODE xml response: %w", err)
+	}
+	if !strings.Contains(response, "333") {
+		return fmt.Errorf("MODE xml failed: %s", response)
+	}
+
+	// Send ACK command
+	_, err = conn.Write([]byte(fmt.Sprintf("ACK %s\n", hostname)))
+	if err != nil {
+		return fmt.Errorf("failed to send ACK command: %w", err)
+	}
+
+	response, err = reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read ACK response: %w", err)
+	}
+
+	if strings.Contains(response, "333") {
+		return nil
+	} else if strings.Contains(response, "403") {
+		return fmt.Errorf("host not found or permission denied")
+	} else if strings.Contains(response, "444") {
+		return fmt.Errorf("permission denied - authentication required")
+	}
+
+	return fmt.Errorf("ACK failed: %s", response)
+}
+
+// UpdateHostStatus updates a host with a status note
+func (s *Service) UpdateHostStatus(hostname string, note string) error {
+	// Connect to sysmon daemon
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Enable XML mode
+	_, err = conn.Write([]byte("MODE xml\n"))
+	if err != nil {
+		return fmt.Errorf("failed to send MODE xml: %w", err)
+	}
+
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read MODE xml response: %w", err)
+	}
+	if !strings.Contains(response, "333") {
+		return fmt.Errorf("MODE xml failed: %s", response)
+	}
+
+	// Send UPD command with note
+	_, err = conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", hostname, note)))
+	if err != nil {
+		return fmt.Errorf("failed to send UPD command: %w", err)
+	}
+
+	response, err = reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read UPD response: %w", err)
+	}
+
+	if strings.Contains(response, "333") {
+		return nil
+	} else if strings.Contains(response, "403") {
+		return fmt.Errorf("host not found, update error, or permission denied")
+	} else if strings.Contains(response, "444") {
+		return fmt.Errorf("permission denied - authentication required")
+	}
+
+	return fmt.Errorf("UPD failed: %s", response)
+}

@@ -56,6 +56,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/monitoring/traps/", r.handleMonitoringTrapsBySource)
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
+	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
+	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
 
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
@@ -359,6 +361,71 @@ func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request)
 	}
 
 	r.sendJSON(w, stats)
+}
+
+func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/ack/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	err := r.monitoring.AckHost(hostname)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to acknowledge host: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"status":   "success",
+		"message":  fmt.Sprintf("Host %s acknowledged", hostname),
+		"hostname": hostname,
+	})
+}
+
+func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/update/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Parse JSON body for note
+	var body struct {
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "Note is required")
+		return
+	}
+
+	err := r.monitoring.UpdateHostStatus(hostname, body.Note)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to update host: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"status":   "success",
+		"message":  fmt.Sprintf("Host %s updated", hostname),
+		"hostname": hostname,
+		"note":     body.Note,
+	})
 }
 
 // Helper functions
