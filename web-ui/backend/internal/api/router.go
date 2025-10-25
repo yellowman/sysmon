@@ -312,9 +312,10 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 		// Check if it's an XML parse error with debug data
 		if xmlErr, ok := err.(*monitoring.XMLParseError); ok {
 			r.sendErrorWithDetails(w, http.StatusServiceUnavailable, xmlErr.Message, map[string]interface{}{
-				"object_name": xmlErr.ObjectName,
-				"raw_xml":     xmlErr.RawXML,
-				"samples":     xmlErr.AllSamples,
+				"object_name":   xmlErr.ObjectName,
+				"raw_xml":       xmlErr.RawXML,
+				"samples":       xmlErr.AllSamples,
+				"all_responses": xmlErr.AllResponses,
 			})
 			return
 		}
