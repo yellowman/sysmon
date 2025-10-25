@@ -3,3 +3,7 @@ config.log
 config.status
 src/Makefile
 src/defines.h
+src/parser.c
+src/sysmond
+src/sysmon
+src/sysmon-ping-helper

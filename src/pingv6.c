@@ -4,7 +4,12 @@
 
 #ifdef HAVE_IPv6
 
+#include "ping-helper.h"
+
 int debug_pingv6 = 0;
+
+/* External flag from syswatch.c indicating whether to use ping helper */
+extern unsigned short int use_ping_helper;
 
 /* structure that carries all the ipv6 ping related data */
 struct pingv6data {
@@ -38,6 +43,120 @@ unsigned int ping6_packet_delay = 1; /* delay in seconds */
 #define CLR(bit)        (A(bit) &= (~B(bit)))
 #define TST(bit)        (A(bit) & B(bit))
 
+/* Forward declarations */
+static int pinger_v6_via_helper(struct pingv6data *localdata, struct monitorent *here);
+
+/*
+ * pinger_v6_via_helper - Send ICMPv6 packet via setuid helper
+ *
+ * This function invokes the sysmon-ping-helper to send ICMPv6 packets.
+ * Used when running unprivileged to avoid needing root/CAP_NET_RAW.
+ */
+static int pinger_v6_via_helper(struct pingv6data *localdata, struct monitorent *here)
+{
+	struct ping_helper_request req;
+	int pipefd[2];
+	pid_t pid;
+	int status;
+	ssize_t written;
+	int send_octets;
+	struct icmp6_hdr *icmph;
+
+	/* Build ICMPv6 packet (same as pinger_v6) */
+	icmph = (struct icmp6_hdr *)localdata->outpack;
+	icmph->icmp6_type = ICMP6_ECHO_REQUEST;
+	icmph->icmp6_code = 0;
+	icmph->icmp6_cksum = 0;
+	icmph->icmp6_seq = localdata->ntransmitted++;
+	icmph->icmp6_id = localdata->ident;
+
+	send_octets = ICMP_PHDR_LEN + 8;
+	icmph->icmp6_cksum = in_cksum(localdata->outpack, send_octets);
+
+	/* Build request for helper */
+	memset(&req, 0, sizeof(req));
+	req.address_family = HELPER_AF_INET6;
+	req.protocol = HELPER_PROTO_ICMPV6;
+	memcpy(&req.dest.v6, &localdata->ping_target, sizeof(req.dest.v6));
+
+	/* Copy ICMPv6 packet */
+	if (send_octets > MAX_PING_PACKET_SIZE) {
+		print_err(1, "ICMPv6 packet size too large for helper");
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	memcpy(req.packet, localdata->outpack, send_octets);
+	req.packet_len = send_octets;
+
+	/* Create pipe for communication */
+	if (pipe(pipefd) < 0) {
+		perror("pinger_v6_via_helper: pipe");
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	/* Fork helper process */
+	pid = fork();
+	if (pid < 0) {
+		perror("pinger_v6_via_helper: fork");
+		close(pipefd[0]);
+		close(pipefd[1]);
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	if (pid == 0) {
+		/* Child process - exec helper */
+		close(pipefd[1]);  /* Close write end */
+
+		/* Redirect stdin to read end of pipe */
+		if (dup2(pipefd[0], STDIN_FILENO) < 0) {
+			perror("dup2");
+			exit(1);
+		}
+		close(pipefd[0]);
+
+		/* Exec the helper */
+		execl(PING_HELPER_PATH, "sysmon-ping-helper", (char *)NULL);
+
+		/* If we get here, exec failed */
+		perror("execl");
+		exit(1);
+	}
+
+	/* Parent process */
+	close(pipefd[0]);  /* Close read end */
+
+	/* Write request to helper */
+	written = write(pipefd[1], &req, sizeof(req));
+	if (written != sizeof(req)) {
+		perror("pinger_v6_via_helper: write");
+		close(pipefd[1]);
+		waitpid(pid, &status, 0);
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+	close(pipefd[1]);
+
+	/* Wait for helper to complete */
+	if (waitpid(pid, &status, 0) < 0) {
+		perror("pinger_v6_via_helper: waitpid");
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	/* Check helper exit status */
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		print_err(1, "ping-helper failed with status %d",
+		          WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		here->retval = SYSM_ERR;
+		return -1;
+	}
+
+	/* Success */
+	return 0;
+}
 
 /*
  * pinger_v6 --
@@ -55,6 +174,15 @@ void pinger_v6(struct pingv6data *localdata, struct monitorent *here)
         int ret1;
 	int serrno;
 
+	/* Use ping helper if enabled */
+	if (use_ping_helper) {
+		if (pinger_v6_via_helper(localdata, here) == 0) {
+			gettimeofday(&localdata->lastsentat, NULL);
+		}
+		return;
+	}
+
+	/* Traditional direct send (requires root/CAP_NET_RAW) */
         icmph = (struct icmp6_hdr *)localdata->outpack;
         icmph->icmp6_type = ICMP6_ECHO_REQUEST;
         icmph->icmp6_code = 0;
