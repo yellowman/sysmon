@@ -1,0 +1,274 @@
+{{template "base" .}}
+
+{{define "title"}}Admin & Diagnostics{{end}}
+
+{{define "content"}}
+<div x-data="adminPage()" x-init="init()">
+    <!-- Header -->
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">
+            <i class="fas fa-tools mr-2"></i>Admin & Diagnostics
+        </h1>
+        <p class="text-sm text-gray-600 mt-1">
+            System administration and debugging tools (requires authentication)
+        </p>
+    </div>
+
+    <!-- System Information -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Version Info -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-info-circle mr-2"></i>System Information
+            </h2>
+            <div class="space-y-3">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">Daemon Version:</span>
+                    <span class="text-sm font-mono font-medium text-gray-900" x-text="version || 'Loading...'"></span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">Uptime:</span>
+                    <span class="text-sm font-medium text-gray-900" x-text="uptime || 'Loading...'"></span>
+                </div>
+                <button @click="loadVersion()"
+                        class="mt-2 w-full px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                    <i class="fas fa-sync-alt mr-1"></i>Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Debug Controls -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-bug mr-2"></i>Debug Logging
+            </h2>
+            <div class="space-y-3">
+                <button @click="toggleDebug()"
+                        class="w-full px-4 py-3 bg-yellow-600 text-white rounded hover:bg-yellow-700 flex items-center justify-between">
+                    <span><i class="fas fa-toggle-on mr-2"></i>Toggle General Debug</span>
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+                <button @click="toggleSNMPDebug()"
+                        class="w-full px-4 py-3 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center justify-between">
+                    <span><i class="fas fa-network-wired mr-2"></i>Toggle SNMP Debug</span>
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+                <div class="text-xs text-gray-500 mt-2">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    Warning: May generate large log files
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnostic Commands -->
+    <div class="bg-white rounded-lg shadow mb-6">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">
+                <i class="fas fa-wrench mr-2"></i>Diagnostic Commands
+            </h2>
+        </div>
+        <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button @click="expireDNS()"
+                    class="px-4 py-3 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center justify-between">
+                <span><i class="fas fa-sync mr-2"></i>Expire DNS Cache</span>
+                <i class="fas fa-chevron-right"></i>
+            </button>
+            <button @click="printQueue()"
+                    class="px-4 py-3 bg-green-600 text-white rounded hover:bg-green-700 flex items-center justify-between">
+                <span><i class="fas fa-list mr-2"></i>Show Queue Status</span>
+                <i class="fas fa-chevron-right"></i>
+            </button>
+            <button @click="showNextFD()"
+                    class="px-4 py-3 bg-cyan-600 text-white rounded hover:bg-cyan-700 flex items-center justify-between">
+                <span><i class="fas fa-file-alt mr-2"></i>Show FD Info</span>
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Command Output -->
+    <div x-show="commandOutput" class="bg-white rounded-lg shadow mb-6">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <h2 class="text-lg font-semibold text-gray-900">
+                <i class="fas fa-terminal mr-2"></i>Command Output
+            </h2>
+            <button @click="commandOutput = ''"
+                    class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="p-6">
+            <pre class="bg-gray-900 text-green-400 p-4 rounded font-mono text-xs overflow-x-auto" x-text="commandOutput"></pre>
+        </div>
+    </div>
+
+    <!-- DANGER ZONE -->
+    <div class="bg-red-50 border-2 border-red-300 rounded-lg p-6">
+        <div class="flex items-center mb-4">
+            <div class="flex-shrink-0">
+                <i class="fas fa-exclamation-triangle text-3xl text-red-600"></i>
+            </div>
+            <div class="ml-3">
+                <h3 class="text-lg font-bold text-red-900">DANGER ZONE</h3>
+                <p class="text-sm text-red-700">This action cannot be undone</p>
+            </div>
+        </div>
+
+        <div class="bg-white rounded border border-red-300 p-4">
+            <h4 class="font-semibold text-gray-900 mb-2">Shutdown Sysmon Daemon</h4>
+            <p class="text-sm text-gray-600 mb-4">
+                This will gracefully stop the sysmon daemon. You will need to restart it manually via systemd or init script.
+            </p>
+
+            <div x-show="!killitConfirm" class="space-y-2">
+                <button @click="killitConfirm = true"
+                        class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+                    <i class="fas fa-power-off mr-2"></i>Shutdown Daemon
+                </button>
+            </div>
+
+            <div x-show="killitConfirm" class="space-y-3">
+                <div class="bg-yellow-50 border border-yellow-300 rounded p-3">
+                    <p class="text-sm font-medium text-yellow-900">
+                        <i class="fas fa-exclamation-triangle mr-1"></i>
+                        Are you absolutely sure?
+                    </p>
+                    <p class="text-xs text-yellow-700 mt-1">
+                        Type "<span class="font-mono font-bold">SHUTDOWN</span>" below to confirm:
+                    </p>
+                </div>
+
+                <input type="text" x-model="killitText"
+                       class="w-full border border-gray-300 rounded p-2 text-sm font-mono"
+                       placeholder="Type SHUTDOWN">
+
+                <div class="flex space-x-2">
+                    <button @click="killitConfirm = false; killitText = ''"
+                            class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+                        Cancel
+                    </button>
+                    <button @click="killDaemon()"
+                            :disabled="killitText !== 'SHUTDOWN'"
+                            :class="killitText === 'SHUTDOWN' ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-400 cursor-not-allowed'"
+                            class="flex-1 px-4 py-2 text-white rounded">
+                        <i class="fas fa-skull-crossbones mr-2"></i>SHUTDOWN NOW
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function adminPage() {
+    return {
+        version: '',
+        uptime: '',
+        commandOutput: '',
+        killitConfirm: false,
+        killitText: '',
+
+        init() {
+            this.loadVersion();
+            this.loadUptime();
+        },
+
+        async loadVersion() {
+            try {
+                const result = await apiCall('/api/admin/version');
+                this.version = result.version;
+            } catch (e) {
+                this.version = 'Error: ' + e.message;
+            }
+        },
+
+        async loadUptime() {
+            try {
+                const status = await fetch('/api/monitoring/status').then(r => r.json());
+                if (status.daemon && status.daemon.uptime_seconds) {
+                    const seconds = status.daemon.uptime_seconds;
+                    const days = Math.floor(seconds / 86400);
+                    const hours = Math.floor((seconds % 86400) / 3600);
+                    const minutes = Math.floor((seconds % 3600) / 60);
+                    this.uptime = `${days}d ${hours}h ${minutes}m`;
+                }
+            } catch (e) {
+                this.uptime = 'Error loading uptime';
+            }
+        },
+
+        async toggleDebug() {
+            try {
+                const result = await apiCall('/api/admin/debug', { method: 'POST' });
+                this.commandOutput = result.response;
+                alert('Debug logging toggled. Response: ' + result.response);
+            } catch (e) {
+                alert('Failed to toggle debug: ' + e.message);
+            }
+        },
+
+        async toggleSNMPDebug() {
+            try {
+                const result = await apiCall('/api/admin/snmpd', { method: 'POST' });
+                this.commandOutput = result.response;
+                alert('SNMP debug logging toggled. Response: ' + result.response);
+            } catch (e) {
+                alert('Failed to toggle SNMP debug: ' + e.message);
+            }
+        },
+
+        async expireDNS() {
+            if (!confirm('This will force re-resolution of all hostnames. Continue?')) {
+                return;
+            }
+
+            try {
+                const result = await apiCall('/api/admin/expiredns', { method: 'POST' });
+                this.commandOutput = result.response;
+                alert('DNS cache expired successfully');
+            } catch (e) {
+                alert('Failed to expire DNS: ' + e.message);
+            }
+        },
+
+        async printQueue() {
+            try {
+                const result = await apiCall('/api/admin/printq');
+                this.commandOutput = result.output;
+            } catch (e) {
+                alert('Failed to get queue status: ' + e.message);
+            }
+        },
+
+        async showNextFD() {
+            try {
+                const result = await apiCall('/api/admin/nfd');
+                this.commandOutput = result.info;
+            } catch (e) {
+                alert('Failed to get FD info: ' + e.message);
+            }
+        },
+
+        async killDaemon() {
+            if (this.killitText !== 'SHUTDOWN') {
+                alert('You must type SHUTDOWN to confirm');
+                return;
+            }
+
+            try {
+                const result = await apiCall('/api/admin/killit', { method: 'POST' });
+                this.commandOutput = result.response;
+                alert('Daemon shutdown initiated. The web UI will stop working shortly.');
+
+                // Reset confirmation
+                this.killitConfirm = false;
+                this.killitText = '';
+            } catch (e) {
+                alert('Failed to shutdown daemon: ' + e.message);
+            }
+        }
+    };
+}
+</script>
+{{end}}

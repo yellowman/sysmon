@@ -510,3 +510,165 @@ func (s *Service) TestAuth(authKey string) (bool, error) {
 
 	return true, nil // Auth succeeded
 }
+
+// GetVersion gets the sysmon daemon version
+func (s *Service) GetVersion(authKey string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return "", err
+	}
+
+	// Send VERS command
+	_, err = conn.Write([]byte("VERS\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send VERS command: %w", err)
+	}
+
+	// Read version response
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read VERS response: %w", err)
+	}
+
+	return strings.TrimSpace(response), nil
+}
+
+// ToggleDebug toggles general debug logging
+func (s *Service) ToggleDebug(authKey string) (string, error) {
+	return s.sendSimpleCommand("DEBUG", authKey)
+}
+
+// ToggleSNMPDebug toggles SNMP debug logging
+func (s *Service) ToggleSNMPDebug(authKey string) (string, error) {
+	return s.sendSimpleCommand("SNMPD", authKey)
+}
+
+// ExpireDNS expires the DNS cache
+func (s *Service) ExpireDNS(authKey string) (string, error) {
+	return s.sendSimpleCommand("EXPIREDNS", authKey)
+}
+
+// PrintQueue prints the internal queue status
+func (s *Service) PrintQueue(authKey string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return "", err
+	}
+
+	// Send PRINTQ command
+	_, err = conn.Write([]byte("PRINTQ\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send PRINTQ command: %w", err)
+	}
+
+	// Read multi-line response until we get a prompt or timeout
+	var output strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			break // End of output
+		}
+		output.WriteString(line)
+		// Stop if we see end marker or timeout
+		if strings.Contains(line, "333") || strings.Contains(line, "444") {
+			break
+		}
+	}
+
+	return output.String(), nil
+}
+
+// GetNextFD gets next file descriptor info
+func (s *Service) GetNextFD(authKey string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return "", err
+	}
+
+	// Send NFD command
+	_, err = conn.Write([]byte("NFD\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send NFD command: %w", err)
+	}
+
+	// Read two-line response
+	line1, _ := reader.ReadString('\n')
+	line2, _ := reader.ReadString('\n')
+
+	return strings.TrimSpace(line1) + "\n" + strings.TrimSpace(line2), nil
+}
+
+// KillDaemon gracefully shuts down the daemon
+func (s *Service) KillDaemon(authKey string) (string, error) {
+	return s.sendSimpleCommand("KILLIT", authKey)
+}
+
+// sendSimpleCommand sends a command that returns a single line response
+func (s *Service) sendSimpleCommand(command string, authKey string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return "", err
+	}
+
+	// Send command
+	_, err = conn.Write([]byte(command + "\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send %s command: %w", command, err)
+	}
+
+	// Read response
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s response: %w", command, err)
+	}
+
+	return strings.TrimSpace(response), nil
+}
