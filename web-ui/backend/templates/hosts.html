@@ -9,7 +9,7 @@
         <h1 class="text-2xl font-bold text-gray-900">
             <i class="fas fa-server mr-2"></i>Monitored Hosts
         </h1>
-        <div class="flex space-x-4">
+        <div class="flex space-x-4 items-center">
             <input type="text" x-model="searchQuery" placeholder="Search hosts..."
                 class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             <select x-model="filterStatus" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
@@ -18,51 +18,152 @@
                 <option value="WARNING">WARNING</option>
                 <option value="CRITICAL">CRITICAL</option>
             </select>
+            <!-- View Toggle -->
+            <div class="flex border border-gray-300 rounded-lg overflow-hidden">
+                <button @click="viewMode = 'comparison'"
+                        :class="viewMode === 'comparison' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'"
+                        class="px-4 py-2 text-sm font-medium transition-colors">
+                    <i class="fas fa-th mr-1"></i>Comparison
+                </button>
+                <button @click="viewMode = 'table'"
+                        :class="viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'"
+                        class="px-4 py-2 text-sm font-medium border-l border-gray-300 transition-colors">
+                    <i class="fas fa-table mr-1"></i>Table
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Hosts Grid - Compact View -->
-    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+    <!-- Comparison View -->
+    <div x-show="viewMode === 'comparison'" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
         <template x-for="host in filteredHosts" :key="host.hostname">
-            <div class="bg-white rounded shadow hover:shadow-md transition-shadow cursor-pointer"
-                 @click="selectHost(host)">
-                <!-- Host Header -->
-                <div class="px-3 py-2 border-b border-gray-200">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-2 min-w-0">
-                            <div :class="{
-                                'bg-green-500': host.overall_status === 'OK',
-                                'bg-yellow-500': host.overall_status === 'WARNING',
-                                'bg-red-500': host.overall_status === 'CRITICAL',
-                                'bg-gray-400': host.paused
-                            }" class="w-2 h-2 rounded-full flex-shrink-0"></div>
-                            <h3 class="text-sm font-semibold text-gray-900 truncate" x-text="host.hostname"></h3>
+            <div class="relative group">
+                <div class="bg-white rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
+                     :class="{
+                         'border-green-500': host.overall_status === 'OK',
+                         'border-yellow-500': host.overall_status === 'WARNING',
+                         'border-red-500': host.overall_status === 'CRITICAL',
+                         'border-gray-400': host.paused
+                     }"
+                     @click="selectHost(host)">
+                    <!-- Compact Header -->
+                    <div class="px-2 py-1.5">
+                        <div class="flex items-center justify-between mb-1">
+                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="host.hostname" :title="host.hostname"></h3>
+                            <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0"></i>
                         </div>
-                        <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0" title="Paused"></i>
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="text-gray-500 truncate text-[10px]" x-text="host.ipv4_address" :title="host.ipv4_address"></span>
+                            <span class="text-xs font-medium"
+                                  :class="{
+                                      'text-green-600': host.overall_status === 'OK',
+                                      'text-yellow-600': host.overall_status === 'WARNING',
+                                      'text-red-600': host.overall_status === 'CRITICAL'
+                                  }"
+                                  x-text="getCheckSummary(host)"></span>
+                        </div>
                     </div>
-                    <div class="mt-1 text-xs text-gray-500 truncate" x-show="host.ipv4_address" x-text="host.ipv4_address"></div>
                 </div>
 
-                <!-- Checks List -->
-                <div class="px-3 py-2">
-                    <div class="space-y-1">
-                        <template x-for="check in host.checks.slice(0, 4)" :key="check.type + (check.port || '')">
-                            <div class="flex items-center space-x-1 text-xs">
-                                <i :class="{
-                                    'fas fa-check text-green-500': check.status === 'OK',
-                                    'fas fa-exclamation-triangle text-yellow-500': check.status === 'WARNING',
-                                    'fas fa-times text-red-500': check.status === 'CRITICAL'
-                                }" class="text-xs flex-shrink-0"></i>
-                                <span class="text-gray-700 truncate" x-text="check.type + (check.port ? ':' + check.port : '')"></span>
+                <!-- Hover Tooltip -->
+                <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
+                    <div class="font-bold mb-2" x-text="host.hostname"></div>
+                    <div class="space-y-1 text-xs">
+                        <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
+                        <div><span class="text-gray-400">Status:</span>
+                            <span :class="{
+                                'text-green-400': host.overall_status === 'OK',
+                                'text-yellow-400': host.overall_status === 'WARNING',
+                                'text-red-400': host.overall_status === 'CRITICAL'
+                            }" x-text="host.overall_status"></span>
+                        </div>
+                        <div><span class="text-gray-400">Contact:</span> <span x-text="host.contact || 'None'"></span></div>
+                        <div class="border-t border-gray-700 mt-2 pt-2">
+                            <div class="font-semibold mb-1">Checks:</div>
+                            <template x-for="check in host.checks.slice(0, 5)" :key="check.type + check.port">
+                                <div class="flex items-center justify-between">
+                                    <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
+                                    <span :class="{
+                                        'text-green-400': check.status === 'OK',
+                                        'text-yellow-400': check.status === 'WARNING',
+                                        'text-red-400': check.status === 'CRITICAL'
+                                    }" x-text="check.status"></span>
+                                </div>
+                            </template>
+                            <div x-show="host.checks.length > 5" class="text-gray-400 mt-1">
+                                +<span x-text="host.checks.length - 5"></span> more
                             </div>
-                        </template>
-                    </div>
-                    <div class="mt-1 text-xs text-gray-400" x-show="host.checks.length > 4">
-                        +<span x-text="host.checks.length - 4"></span> more
+                        </div>
                     </div>
                 </div>
             </div>
         </template>
+    </div>
+
+    <!-- Table View -->
+    <div x-show="viewMode === 'table'" class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        @click="sortBy('hostname')">
+                        Hostname <i class="fas fa-sort text-xs ml-1"></i>
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        IP Address
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        @click="sortBy('status')">
+                        Status <i class="fas fa-sort text-xs ml-1"></i>
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Checks
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Contact
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Last Check
+                    </th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <template x-for="host in sortedHosts" :key="host.hostname">
+                    <tr class="hover:bg-gray-50 cursor-pointer" @click="selectHost(host)">
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <div class="flex items-center">
+                                <div class="w-2 h-2 rounded-full mr-2"
+                                     :class="{
+                                         'bg-green-500': host.overall_status === 'OK',
+                                         'bg-yellow-500': host.overall_status === 'WARNING',
+                                         'bg-red-500': host.overall_status === 'CRITICAL',
+                                         'bg-gray-400': host.paused
+                                     }"></div>
+                                <span class="text-sm font-medium text-gray-900" x-text="host.hostname"></span>
+                                <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 ml-2"></i>
+                            </div>
+                        </td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500" x-text="host.ipv4_address || '-'"></td>
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            <span class="px-2 py-1 text-xs font-medium rounded"
+                                  :class="{
+                                      'bg-green-100 text-green-800': host.overall_status === 'OK',
+                                      'bg-yellow-100 text-yellow-800': host.overall_status === 'WARNING',
+                                      'bg-red-100 text-red-800': host.overall_status === 'CRITICAL'
+                                  }"
+                                  x-text="host.overall_status"></span>
+                        </td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                            <span x-text="getCheckStats(host)"></span>
+                        </td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500" x-text="host.contact || '-'"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-xs text-gray-500">
+                            <span x-text="getLastCheckTime(host)"></span>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
     </div>
 
     <!-- Empty State -->
@@ -171,6 +272,9 @@ function hostsPage() {
         searchQuery: '',
         filterStatus: '',
         selectedHost: null,
+        viewMode: 'comparison', // 'comparison' or 'table'
+        sortField: 'hostname',
+        sortDirection: 'asc',
 
         get filteredHosts() {
             return this.hosts.filter(host => {
@@ -182,6 +286,30 @@ function hostsPage() {
 
                 return matchesSearch && matchesStatus;
             });
+        },
+
+        get sortedHosts() {
+            const sorted = [...this.filteredHosts];
+            sorted.sort((a, b) => {
+                let aVal, bVal;
+
+                if (this.sortField === 'hostname') {
+                    aVal = a.hostname.toLowerCase();
+                    bVal = b.hostname.toLowerCase();
+                } else if (this.sortField === 'status') {
+                    const statusOrder = { 'CRITICAL': 0, 'WARNING': 1, 'OK': 2 };
+                    aVal = statusOrder[a.overall_status] || 3;
+                    bVal = statusOrder[b.overall_status] || 3;
+                } else {
+                    aVal = a[this.sortField];
+                    bVal = b[this.sortField];
+                }
+
+                if (aVal < bVal) return this.sortDirection === 'asc' ? -1 : 1;
+                if (aVal > bVal) return this.sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+            return sorted;
         },
 
         init() {
@@ -238,6 +366,41 @@ function hostsPage() {
 
         formatTime(timestamp) {
             return new Date(timestamp).toLocaleString();
+        },
+
+        sortBy(field) {
+            if (this.sortField === field) {
+                this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.sortField = field;
+                this.sortDirection = 'asc';
+            }
+        },
+
+        getCheckSummary(host) {
+            const ok = host.checks.filter(c => c.status === 'OK').length;
+            const total = host.checks.length;
+            return `${ok}/${total}`;
+        },
+
+        getCheckStats(host) {
+            const ok = host.checks.filter(c => c.status === 'OK').length;
+            const warning = host.checks.filter(c => c.status === 'WARNING').length;
+            const critical = host.checks.filter(c => c.status === 'CRITICAL').length;
+            return `${ok} OK, ${warning} WARN, ${critical} CRIT`;
+        },
+
+        getLastCheckTime(host) {
+            if (!host.checks || host.checks.length === 0) return 'Never';
+            const times = host.checks.map(c => new Date(c.last_check_time));
+            const latest = new Date(Math.max(...times));
+            const now = new Date();
+            const diff = Math.floor((now - latest) / 1000);
+
+            if (diff < 60) return `${diff}s ago`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            return `${Math.floor(diff / 86400)}d ago`;
         }
     };
 }
