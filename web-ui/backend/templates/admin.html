@@ -79,7 +79,7 @@
                 <span><i class="fas fa-list mr-2"></i>Show Queue Status</span>
                 <i class="fas fa-chevron-right"></i>
             </button>
-            <button @click="showNextFD()"
+            <button x-show="hasAuth" @click="showNextFD()"
                     class="px-4 py-3 bg-cyan-600 text-white rounded hover:bg-cyan-700 flex items-center justify-between">
                 <span><i class="fas fa-file-alt mr-2"></i>Show FD Info</span>
                 <i class="fas fa-chevron-right"></i>
@@ -233,6 +233,10 @@ function adminPage() {
         killitText: '',
         sessionLog: [],
         sessionErrors: [],
+
+        get hasAuth() {
+            return !!getAuthKey();
+        },
 
         init() {
             this.loadVersion();

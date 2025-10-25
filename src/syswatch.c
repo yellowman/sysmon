@@ -54,6 +54,8 @@ bool badconfig = FALSE; /* false = config parsed ok */
 
 /* defaults set in set_defaults */
 int numfailures; /* Number of failures before mailing contact */
+int minnumfailures = 1; /* Minimum failures before yellow status (default 1) */
+int flaptime = 0; /* Minutes to show green after recovery (default 0 = disabled) */
 int inactivetime; /* timeout for client inactivity */
 int globtimeout; /* amount of time it takes to time out internal tests 
 			(in seconds) */
@@ -1277,6 +1279,7 @@ void handle_retval(struct monitorent *handle_this, time_t now)
 		}
 
 		handle_this->checkent->last_up = now;
+		handle_this->checkent->last_recovery = now; /* for flaptime feature */
 
 		/* reset contacted */
 		handle_this->checkent->contacted = FALSE; /* init it */
@@ -1929,7 +1932,11 @@ void walk_periodic_page_checks(struct graph_elements *here, time_t now)
 		return;
 	here->visit = TRUE;
 	/* Do the check and page */
-	if (((now - here->data->lastcontacted) > (pageinterval*60)) &&
+	/* Use per-object pageinterval if set (-1 means use global) */
+	int effective_pageinterval = (here->data->pageinterval == -1) ?
+		pageinterval : here->data->pageinterval;
+
+	if (((now - here->data->lastcontacted) > (effective_pageinterval*60)) &&
 		(here->data->contacted))
 	{
 		page_someone(here->data, SYSM_CONTACT_DOWN, now);
