@@ -1,0 +1,217 @@
+Content-type: text/html
+
+<HTML><HEAD><TITLE>Manpage of SYSMOND</TITLE>
+</HEAD><BODY>
+<H1>SYSMOND</H1>
+Section: System Administration (man)<BR>Updated: 20 June 2000<BR><A HREF="#index">Index</A>
+<A HREF="http://localhost/cgi-bin/man/man2html">Return to Main Contents</A><HR>
+
+<A NAME="lbAB">&nbsp;</A>
+<H2>NAME</H2>
+
+sysmond - System Monitoring Utility
+<A NAME="lbAC">&nbsp;</A>
+<H2>SYNOPSIS</H2>
+
+<B>sysmond</B>
+
+[<B> -d </B>]
+
+[<B> -f </B>
+
+<I>config file</I>
+
+]
+[<B> -h </B>]
+
+[<B> -n </B>]
+
+[<B> -p</B>
+
+<I>port</I>
+
+]
+[<B> -v </B>]
+
+<P>
+
+<A NAME="lbAD">&nbsp;</A>
+<H2>DESCRIPTION</H2>
+
+<B>Sysmond</B>
+
+provides ability to monitor many services
+<P>
+The main configuration file
+<I>/etc/sysmon.conf</I>
+
+or an alternative file, given with the 
+<B>-f</B>
+
+option, is read at startup. Any lines that begin with the hash mark
+(``#'') and empty lines are ignored. If an error occurs during parsing
+the whole line is ignored.
+<P>
+
+<A NAME="lbAE">&nbsp;</A>
+<H2>OPTIONS</H2>
+
+<DL COMPACT>
+<DT><B>-d</B>
+
+<DD>
+Turns on debug mode. Using this the daemon will not proceed a 
+<B><A HREF="http://localhost/cgi-bin/man/man2html?2+fork">fork</A></B>(2)
+
+to set itself in the background, but opposite to that stay in the
+foreground and write much debug information on the current tty. See the
+DEBUGGING section for more information.
+<DT><B>-f </B><I>config file</I>
+
+<DD>
+Specify an alternative configuration file instead of
+<I>/etc/sysmon.conf</I>,
+
+which is the default.
+<DT><B>-p </B><I>portnum</I>
+
+<DD>
+Specify an alternate port number to run on
+<DT><B>-n</B>
+
+<DD>
+Tells sysmond to not send notifications to the contacts listed.
+Primarily used for debugging only
+<DT><B>-t</B>
+
+<DD>
+This option will test the configuration file then exit rather than
+starting the monitoring daemon.
+<DT><B>-v</B>
+
+<DD>
+Print version and exit.
+</DL>
+<P>
+
+<A NAME="lbAF">&nbsp;</A>
+<H2>SIGNALS</H2>
+
+<B>Sysmond</B>
+
+reacts to a set of signals. You may easily send a signal to
+<B>sysmond</B>
+
+using the following:
+<DL COMPACT>
+<DT><DD>
+<PRE>
+kill -SIGNAL process-id-of-sysmond
+</PRE>
+
+</DL>
+<P>
+
+<DL COMPACT>
+<DT><B>SIGHUP</B>
+
+<DD>
+This lets
+<B>sysmond</B>
+
+perform a re-initialization. All open files are closed, the
+configuration file (default is 
+<I>/etc/sysmon.conf</I>)
+
+will be reread and the
+monitoring is started again.
+<DT><B>SIGUSR2</B>
+
+<DD>
+This lets
+<B>sysmond</B>
+
+pause (or unpause) monitoring as desired.  This is useful if you
+will be performing network maintence and do not want to monitor
+the network for a period of time.
+<DT><B>SIGTERM</B>
+
+<DD>
+The
+<B>sysmond</B>
+
+process will die.
+<DT></DL>
+<P>
+
+<DD>
+<A NAME="lbAG">&nbsp;</A>
+<H2>DEBUGGING</H2>
+
+When debugging is turned on using
+<B>-D</B>
+
+option then
+<B>sysmond</B>
+
+will be very verbose by writing much of what it does on stdout. Whenever
+the configuration file is reread and re-parsed you'll see a lot of data,
+corresponding to the internal data structure.
+<A NAME="lbAH">&nbsp;</A>
+<H2>FILES</H2>
+
+
+<DL COMPACT>
+<DT><I>/etc/sysmon.conf</I>
+
+<DD>
+Configuration file for
+<B>sysmond</B>.
+
+See
+<B>sysmon.conf</B>(man)
+
+for exact information.
+<P>
+</DL>
+<P>
+
+<A NAME="lbAI">&nbsp;</A>
+<H2>SEE ALSO</H2>
+
+<B>sysmon.conf</B>(man)
+
+<P>
+<P>
+
+<A NAME="lbAJ">&nbsp;</A>
+<H2>COLLABORATORS</H2>
+
+Sysmon is primarily written by
+<DL COMPACT>
+<DT>Jared Mauch<DD>
+<DT><A HREF="mailto:jared@puck.nether.net">jared@puck.nether.net</A><DD>
+<P>
+
+
+<P>
+</DL>
+
+<HR>
+<A NAME="index">&nbsp;</A><H2>Index</H2>
+<DL>
+<DT><A HREF="#lbAB">NAME</A><DD>
+<DT><A HREF="#lbAC">SYNOPSIS</A><DD>
+<DT><A HREF="#lbAD">DESCRIPTION</A><DD>
+<DT><A HREF="#lbAE">OPTIONS</A><DD>
+<DT><A HREF="#lbAF">SIGNALS</A><DD>
+<DT><A HREF="#lbAG">DEBUGGING</A><DD>
+<DT><A HREF="#lbAH">FILES</A><DD>
+<DT><A HREF="#lbAI">SEE ALSO</A><DD>
+<DT><A HREF="#lbAJ">COLLABORATORS</A><DD>
+</DL>
+<HR>
+This document was created by man2html, using the manual pages.<BR>
+Time: 19:15:31 GMT, September 18, 2000
+</BODY>
+</HTML>

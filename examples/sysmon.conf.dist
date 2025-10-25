@@ -1,0 +1,104 @@
+root = "my.default.gateway-obj";
+;
+;;
+#
+# Comments can look like this
+; or this
+
+# create a file for web page users
+config statusfile html "/usr/local/htdocs/index.html";
+# Log devices that are up/down
+config logging file "/var/log/sysmond.log";
+# Configure an authentication key -- Default is none
+#config authkey "Debug";
+# Set the sender to be sysmon@localhost
+config sender "sysmon";
+# Expire in-process dns cache this often
+config dnsexpire 7200;
+# Do not queue more than this many objects to be checked at once
+config maxqueued 50;
+
+# Not implemented yet
+#config snmp-trap;		# catch snmp-traps
+
+object my.default.gateway-obj {
+	ip "10.1.1.1";
+	type ping;
+	desc "router-eth1-1";
+	dep "router";
+	contact "my-email-address";
+};
+
+object router {
+	ip "router-loopback0";
+	type ping;
+	desc "main router";
+	contact "my-pager-email-address";
+};
+
+object MyHost.net {
+	ip "MyHost.net";
+	type ping;
+	desc "MyHost";
+	dep "my.default.gateway-obj";
+	contact "my-pager-email-address";
+};
+
+object router2.MyNet.net {
+	ip "Router2.MyNet.net";
+	type ping;
+	desc "wr";
+	dep "my.default.gateway-obj";
+	contact "my-email-address";
+};
+
+object Other.Host.org {
+	ip "Other.Host.org";
+	type ping;
+	desc "Other.Host.org";
+	dep "router2.MyNet.net";
+	contact "admin@other.host.org";
+};
+
+object router-eth1-3 {
+	ip "10.2.2.17";
+	type ping;
+	dep "router";
+	desc "router-eth1-3";
+	contact "networkadmin@example.com";
+};
+
+
+object nether.net {
+	ip "nether.net";
+	type ping;
+	desc "nether.net";
+	dep "router-eth1-3";
+	contact "admin@example.com";
+};
+
+object telnet-nether.net {
+	ip "nether.net";
+	type tcp;
+	port 23;
+	dep "nether.net";
+	desc "telnetd-nether.net";
+	contact "admin@example.com";
+};
+
+object smtp-nether.net {
+	ip "nether.net";
+	type smtp;
+	dep "nether.net";
+	desc "smtp-nether.net";
+	contact "admin@example.com";
+};
+
+object router-s2-0-0 {
+	ip "169.254.0.1";
+	type ping;
+	desc "T1 to Upstream";
+	dep "router";
+	contact "admin@mynetwork.com";
+};
+

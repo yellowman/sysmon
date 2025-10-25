@@ -1,0 +1,24 @@
+	System monitor program.
+
+Installation Notes:
+
+	Must be installed suid root to test ping().  Note, ping is suid
+root on all systems.  The code is written to be secure enough to be
+run by anyone (for the most part)
+
+	You may need ncurses, and should have gcc for compiling this
+program.  If you can get me accounts on other platforms of machines (not
+root, just accounts), I can port this software to almost everything 
+UNIX based (I will not port to vms or nt :).
+
+	I claim nothing, this code will erase your hard disk, crash your
+network and destroy your users and damage your hardware.  It will
+always do this.
+
+Tested on by author:
+	Linux, SunOS, OSF/1, FreeBSD, Solaris, BSDI, NetBSD & NetBSD Alpha,
+Solaris x86, HP/UX, Apple OS/10 Server (Rhapsody)
+
+Compiles Under but not tested under by author:
+	SCO
+
