@@ -105,6 +105,11 @@ int line_no;
 char *temp_char;
 char *current_parsing_filename;
 
+/* Spawn command definitions tracking */
+bool parser_in_spawns_block = FALSE;
+char *parser_spawn_name = NULL;
+char *parser_spawn_command = NULL;
+
 /* end parser global variables */
 
 /* Function definitions that are found later in the program */
@@ -570,8 +575,72 @@ root*[^;]+{WS}*;       {
 
   if (debug)
   {
-    print_err(0, "root : %s", parser_root); 
+    print_err(0, "root : %s", parser_root);
   }
+}
+
+spawns{WS}+\{	{
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_in_spawns_block = TRUE;
+
+  if (debug)
+    print_err(0, "spawns {");
+}
+
+[a-zA-Z0-9_]+{WS}+\"[^\"]+\"{WS}*\n	{
+  /* Parse spawn command definition inside spawns {} block */
+  /* Only active when parser_in_spawns_block is TRUE */
+  if (!parser_in_spawns_block)
+  {
+	print_err(1, "spawn definition outside of spawns block at line %d", line_no);
+	break;
+  }
+
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  /* Find the name (everything before the first space) */
+  parser_pos1 = yytext;
+  parser_pos2 = yytext;
+  while (*parser_pos2 && !isspace(*parser_pos2))
+	parser_pos2++;
+
+  if (parser_spawn_name != NULL)
+	FREE(parser_spawn_name);
+  parser_spawn_name = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_spawn_name");
+  strncpy(parser_spawn_name, parser_pos1, parser_pos2 - parser_pos1);
+  parser_spawn_name[parser_pos2 - parser_pos1] = '\0';
+
+  /* Find the command (everything between quotes) */
+  parser_pos1 = strchr(yytext, '"');
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on spawn command at line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1 = parser_pos1 + 1;
+  parser_pos2 = strchr(parser_pos1, '"');
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on spawn command at line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_spawn_command != NULL)
+	FREE(parser_spawn_command);
+  parser_spawn_command = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_spawn_command");
+  strncpy(parser_spawn_command, parser_pos1, parser_pos2 - parser_pos1);
+  parser_spawn_command[parser_pos2 - parser_pos1] = '\0';
+
+  /* Add spawn definition to global list */
+  add_spawn_def(parser_spawn_name, parser_spawn_command);
+
+  if (debug)
+	print_err(0, "spawn def: %s = %s", parser_spawn_name, parser_spawn_command);
+
+  line_no++;
 }
 
 object[^\{]+{WS}+\{	{
@@ -2075,30 +2144,66 @@ spawn\ [^;]+;         {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
 
+  /* Check if this is a quoted command (old format) or a name reference (new format) */
   parser_pos1 = strchr( yytext, '"' );
-  if (parser_pos1 == NULL)
+  if (parser_pos1 != NULL)
   {
-	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
-	break;
-  }
-  parser_pos1=parser_pos1+1;
-  parser_pos2 = strchr( parser_pos1, '"' );
-  if (parser_pos2 == NULL)
-  {
-	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
-	break;
-  }
-  if (parser_spawn != NULL)
-  {
-        FREE(parser_spawn);
-  }
-  parser_spawn = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_spawn");
+	/* Old format: spawn "command"; */
+	parser_pos1=parser_pos1+1;
+	parser_pos2 = strchr( parser_pos1, '"' );
+	if (parser_pos2 == NULL)
+	{
+		print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+		break;
+	}
+	if (parser_spawn != NULL)
+	{
+		FREE(parser_spawn);
+	}
+	parser_spawn = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_spawn");
+	strncpy( parser_spawn, parser_pos1, parser_pos2 - parser_pos1 );
+	parser_spawn[ parser_pos2 - parser_pos1 ] = '\0';
 
-  strncpy( parser_spawn, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_spawn[ parser_pos2 - parser_pos1 ] = '\0';
+	if (debug)
+		print_err(0, "spawn (direct): %s", parser_spawn);
+  }
+  else
+  {
+	/* New format: spawn name; - look up command from spawns block */
+	/* Find the name (skip "spawn " prefix) */
+	parser_pos1 = yytext + 6; /* Skip "spawn " */
+	while (*parser_pos1 && isspace(*parser_pos1))
+		parser_pos1++;
+	parser_pos2 = parser_pos1;
+	while (*parser_pos2 && !isspace(*parser_pos2) && *parser_pos2 != ';')
+		parser_pos2++;
 
-  if (debug)
-    print_err(0, "spawn : %s", parser_spawn); 
+	/* Extract the name */
+	temp_char = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:spawn_name_lookup");
+	strncpy(temp_char, parser_pos1, parser_pos2 - parser_pos1);
+	temp_char[parser_pos2 - parser_pos1] = '\0';
+
+	/* Look up the command */
+	char *spawn_cmd = lookup_spawn_command(temp_char);
+	if (spawn_cmd == NULL)
+	{
+		print_err(1, "ERROR: spawn command '%s' not found in spawns block at line %d in %s",
+			temp_char, line_no, current_parsing_filename);
+		FREE(temp_char);
+		break;
+	}
+
+	if (parser_spawn != NULL)
+	{
+		FREE(parser_spawn);
+	}
+	parser_spawn = STRDUP(spawn_cmd, "parse.l:parser_spawn");
+
+	if (debug)
+		print_err(0, "spawn (from %s): %s", temp_char, parser_spawn);
+
+	FREE(temp_char);
+  }
 }
 
 contact_on\ [^;]+;       {
@@ -2331,9 +2436,20 @@ also-notify\ [^;]+;   {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
 
-  if (debug)
-    print_err(0, "close object: %s", yytext);
-  add_object();
+  if (parser_in_spawns_block)
+  {
+	/* Close spawns block */
+	parser_in_spawns_block = FALSE;
+	if (debug)
+		print_err(0, "close spawns block");
+  }
+  else
+  {
+	/* Close object block */
+	if (debug)
+		print_err(0, "close object: %s", yytext);
+	add_object();
+  }
 
 }
 
