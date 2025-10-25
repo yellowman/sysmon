@@ -603,6 +603,7 @@ extern char *path_savestate;
 extern char *replyto;
 extern char *downcolor, *upcolor, *recentcolor;
 extern char *statusfilename;
+extern char *statustempdirname;
 extern char *cssfilename;
 extern bool quiet;
 extern time_t boottime; /* does a time() when program starts */
@@ -683,6 +684,7 @@ extern char *parser_header;
 extern char *parser_authkey;
 extern char *parser_savestate;
 extern char *parser_statusfile;
+extern char *parser_statustempdir;
 extern char *parser_cssfile;
 extern char *parser_pidfile;
 extern char *parser_logging;

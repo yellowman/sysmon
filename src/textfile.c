@@ -16,24 +16,43 @@ dump_to_file(char *filename, int html, time_t now)
 {
 	FILE *fh; /* filehandle for writing out status */
 	
-	char newfname[128], updated_at[128];
+	char newfname[512], updated_at[128];
+	char *tempdir;
+	char *basename_ptr;
 
         struct tm *ltm;
 
         ltm = localtime(&now);
         strftime(updated_at, 127,
 	  parser_dateformat == NULL ? "%x %X" : parser_dateformat, ltm);
-/*	snprintf(updated_at, 127, 
+/*	snprintf(updated_at, 127,
                 "%d/%d/%d @ %02d:%02d:%02d\n",
-                ltm->tm_mon + 1, 
-                ltm->tm_mday, 
-                ltm->tm_year + 1900, 
+                ltm->tm_mon + 1,
+                ltm->tm_mday,
+                ltm->tm_year + 1900,
                 ltm->tm_hour,
-                ltm->tm_min, 
+                ltm->tm_min,
                 ltm->tm_sec); */
 
 
-	snprintf(newfname, 127, "%s%d",filename, getpid());
+	/* Use statustempdir if configured, otherwise use same dir as final file */
+	if (statustempdirname != NULL && statustempdirname[0] != '\0')
+	{
+		/* Extract basename from filename for temp file */
+		basename_ptr = strrchr(filename, '/');
+		if (basename_ptr != NULL)
+			basename_ptr++;  /* Skip the '/' */
+		else
+			basename_ptr = filename;  /* No path component */
+
+		/* Create temp file in configured temp directory */
+		snprintf(newfname, 511, "%s/%s.%d", statustempdirname, basename_ptr, getpid());
+	}
+	else
+	{
+		/* Legacy behavior: create temp file in same directory as final file */
+		snprintf(newfname, 511, "%s%d", filename, getpid());
+	}
 	
 	if (filename == NULL)
 	{
