@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -533,6 +534,36 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 		status.Hosts = append(status.Hosts, host)
 	}
+
+	// Sort hosts: CRITICAL first, then WARNING, then OK
+	// Within each status level, sort alphabetically by hostname
+	sort.SliceStable(status.Hosts, func(i, j int) bool {
+		hostI := status.Hosts[i]
+		hostJ := status.Hosts[j]
+
+		// Define priority: CRITICAL=0, WARNING=1, OK=2
+		priorityI := 2 // OK
+		if hostI.OverallStatus == "CRITICAL" {
+			priorityI = 0
+		} else if hostI.OverallStatus == "WARNING" {
+			priorityI = 1
+		}
+
+		priorityJ := 2 // OK
+		if hostJ.OverallStatus == "CRITICAL" {
+			priorityJ = 0
+		} else if hostJ.OverallStatus == "WARNING" {
+			priorityJ = 1
+		}
+
+		// Sort by priority first
+		if priorityI != priorityJ {
+			return priorityI < priorityJ
+		}
+
+		// Within same priority, sort alphabetically by hostname
+		return hostI.Hostname < hostJ.Hostname
+	})
 
 	// Fill in statistics
 	status.Statistics.TotalHosts = len(objectNames)
