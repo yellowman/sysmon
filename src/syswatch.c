@@ -2002,7 +2002,7 @@ int main(int argc, char **argv)
 	struct timeval tv;
 
 	gettimeofday(&tv, NULL);
-	srand(tv.tv_sec+tv.tv_usec);
+	srandom((unsigned int)(tv.tv_sec ^ tv.tv_usec ^ getpid()));
 
 	/* setup the global defaults */
 	set_defaults();

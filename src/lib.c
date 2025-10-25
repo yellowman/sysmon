@@ -33,7 +33,7 @@ char randchar()
 {
         int x;
 
-        x = rand() % 124;
+        x = random() % 124;
 
         while (1)
         {
@@ -41,7 +41,7 @@ char randchar()
                 {
                         return x;
                 }
-                x = x + (rand() % 124);
+                x = x + (random() % 124);
                 x = x % 124;
         }
 }
@@ -684,7 +684,7 @@ void print_err (int output, const char *fmt, ...)
 		myPid = getpid ();
 
 	va_start (ap, fmt);
-	vsprintf (buffer, fmt, ap);
+	vsnprintf (buffer, sizeof(buffer), fmt, ap);
 	va_end (ap);
         time (&now);
 	syslogmsg(buffer, now);
