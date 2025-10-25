@@ -1,5 +1,6 @@
 /* $Id: syswatch.c,v 1.197 2014/07/09 16:29:39 jared Exp $ */
 #include "config.h"
+#include "ping-helper.h"
 
 /* Normal global vars */
 unsigned char *ident_hash = NULL;
@@ -36,6 +37,7 @@ unsigned short int warnlog = 1; /* default = on */
 /* Wakeup retry configuration */
 #define DEFAULT_MAX_WAKEUP_RETRIES 3  /* Default max retry attempts for stale checks */
 unsigned short disable_icmp = 0;
+unsigned short int use_ping_helper = 0;  /* Use setuid helper for ICMP/ICMPv6 */
 
 /* command line specified vars & args */
 #define CONFIGFILE_SIZE 256
@@ -1648,17 +1650,16 @@ void revoke_root_if_necessary()
 		return;
 	}
 
-	/* CRITICAL: Cannot drop privileges if ICMP is enabled */
+	/* If ICMP is enabled, we need to use the ping helper for privilege dropping */
 	/* Sending ICMP packets requires CAP_NET_RAW (Linux) or root privileges */
 	if (!disable_icmp)
 	{
-		print_err(0, "revoke_root: ICMP monitoring is enabled - must retain root privileges for ICMP send");
-		print_err(0, "revoke_root: To drop privileges, disable ICMP in config or use --disable-icmp flag");
-		if (debug)
-		{
-			print_err(0, "revoke_root: Future enhancement: Linux capabilities (CAP_NET_RAW) would allow privilege drop");
-		}
-		return;
+		/* Enable ping helper - allows us to drop privileges while still sending ICMP */
+		use_ping_helper = 1;
+		print_err(0, "revoke_root: ICMP monitoring is enabled - using ping helper for privilege drop");
+		print_err(0, "revoke_root: Ping helper will be invoked via: %s", PING_HELPER_PATH);
+
+		/* Continue to drop privileges below */
 	}
 
 	/* Look up the 'nobody' user */
