@@ -1098,18 +1098,23 @@ func (s *Service) GetObjectsXML() (string, error) {
 		return "", fmt.Errorf("MODE xml failed: %s", response)
 	}
 
-	// Get list of objects with STAT
-	_, err = conn.Write([]byte("STAT\n"))
+	// Get list of objects with STATO
+	// CRITICAL: Use STATO (not STAT) because:
+	// - STATO returns unique_name (the object identifier)
+	// - STAT returns hostname:type:port:... where hostname != unique_name
+	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
+	_, err = conn.Write([]byte("STATO\n"))
 	if err != nil {
-		return "", fmt.Errorf("failed to send STAT command: %w", err)
+		return "", fmt.Errorf("failed to send STATO command: %w", err)
 	}
+	s.sessionLog.Log("STATO", "getting object list", false, "")
 
-	// Read object names from STAT response
+	// Read unique_names from STATO response
 	objectNames := []string{}
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return "", fmt.Errorf("error reading STAT response: %w", err)
+			return "", fmt.Errorf("error reading STATO response: %w", err)
 		}
 
 		line = strings.TrimSpace(line)
@@ -1118,12 +1123,10 @@ func (s *Service) GetObjectsXML() (string, error) {
 			break
 		}
 
-		// Parse object name from first field
-		// NOTE: STAT returns colon-delimited data (hostname:type:port:...),
-		// but we only need the object name to query full XML via SHOWOBJ
-		fields := strings.Split(line, ":")
-		if len(fields) > 0 && fields[0] != "" {
-			objectNames = append(objectNames, fields[0])
+		// STATO returns just the unique_name (one per line)
+		// This is exactly what SHOWOBJ expects
+		if line != "" {
+			objectNames = append(objectNames, line)
 		}
 	}
 

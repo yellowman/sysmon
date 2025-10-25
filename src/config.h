@@ -88,7 +88,7 @@
 #endif /* HAVE_UCD_SNMP_VERSION_H */
 
 
-#define SYSM_VERS	"v0.93"
+#define SYSM_VERS	"v0.94"
 #ifdef _PATH_VARRUN
 #define PIDFILE		_PATH_VARRUN "sysmond.pid"
 #else
@@ -340,6 +340,7 @@ struct hostinfo {
 
 	unsigned long queuetime; /* per-object check-interval in seconds */
 	time_t next_queuetime; /* next time object should be queued */
+	int pageinterval; /* per-object page interval in seconds (-1 = use global) */
 
 	unsigned int send_pings; /* number of pings to send to host */
 	unsigned int min_pings; /* min number of pings to require for
@@ -377,6 +378,7 @@ struct hostinfo {
 	time_t check_start; /* time of start of check */
 	time_t deathtime; /* time of death ;-) */
 	time_t last_up; /* time it last came back */
+	time_t last_recovery; /* time when host recovered (for flaptime) */
 
         } ;
 
@@ -626,6 +628,8 @@ extern int snmp_trap_fd; /* loadconfig.c + snmp.c + syswatch.c */
 extern bool paused; /* syswatch.c + srvclient.c + textfile.c */
 extern int inactivetime;
 extern int numfailures;
+extern int minnumfailures; /* minimum failures before yellow status */
+extern int flaptime; /* minutes to show green after recovery */
 extern int numqueued; /* num of elements in the queue */
 extern unsigned long queuetime;
 extern int pageinterval;
@@ -667,6 +671,10 @@ extern char *parser_port;
 extern int  parser_i_port;
 extern char *parser_numfailures;
 extern int parser_i_numfailures;
+extern char *parser_minnumfailures;
+extern int parser_i_minnumfailures;
+extern char *parser_flaptime;
+extern int parser_i_flaptime;
 extern char *parser_desc;
 extern char *parser_group;
 extern char *parser_spawn;
@@ -709,6 +717,7 @@ extern char *parser_dnsexpire;
 extern int parser_i_dnslog;
 extern char *parser_dnslog;
 extern int parser_i_pageinterval;
+extern int parser_obj_i_pageinterval;
 extern char *parser_pageinterval;
 extern int parser_i_maxqueued;
 extern char *parser_maxqueued;
