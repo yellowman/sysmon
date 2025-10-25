@@ -1659,6 +1659,13 @@ void revoke_root_if_necessary()
 		print_err(0, "revoke_root: ICMP monitoring is enabled - using ping helper for privilege drop");
 		print_err(0, "revoke_root: Ping helper will be invoked via: %s", PING_HELPER_PATH);
 
+		/* Check if helper exists and is executable */
+		if (access(PING_HELPER_PATH, X_OK) != 0) {
+			print_err(1, "WARNING: Ping helper not found or not executable at %s", PING_HELPER_PATH);
+			print_err(1, "WARNING: ICMP checks will fail until helper is installed");
+			print_err(1, "WARNING: Run 'make install' in src/ to install helper with setuid permissions");
+		}
+
 		/* Continue to drop privileges below */
 	}
 
