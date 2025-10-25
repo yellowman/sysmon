@@ -434,15 +434,28 @@ struct graph_elements *find_object_by_ip(char *ip_string)
 		return NULL;
 	}
 
-	/* Walk through all configured objects */
+	/*
+	 * PASS 1: Check for direct IP string matches (no DNS)
+	 * This is fast and handles the common case where hostname IS the IP
+	 */
 	for (walker = currenthead; walker != NULL; walker = walker->next) {
 		if (walker->value == NULL || walker->value->data == NULL) {
 			continue;
 		}
 
-		/* First check if hostname is directly the IP address */
+		/* Check if hostname is directly the IP address */
 		if (strcmp((char *)walker->value->data->hostname, ip_string) == 0) {
 			return walker->value;
+		}
+	}
+
+	/*
+	 * PASS 2: DNS resolution (only if pass 1 failed)
+	 * This is slower but necessary for hostname-based configs
+	 */
+	for (walker = currenthead; walker != NULL; walker = walker->next) {
+		if (walker->value == NULL || walker->value->data == NULL) {
+			continue;
 		}
 
 		/* Try to resolve hostname to IP and compare */

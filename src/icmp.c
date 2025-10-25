@@ -1183,6 +1183,17 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 	recv_len = recvfrom(glob_icmp_fd, recv_buf, sizeof(recv_buf), MSG_DONTWAIT,
 	                    (struct sockaddr *)&from, &fromlen);
 
+	if (recv_len < 0) {
+		/* Distinguish between "no data yet" (EAGAIN) and actual errors */
+		if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			print_err(1, "service_test_rtt: recvfrom error for %s: %s",
+			          here->checkent->hostname, strerror(errno));
+			/* Continue to timeout check - this may be transient */
+		}
+		/* EAGAIN/EWOULDBLOCK is normal for non-blocking socket - fall through to timeout check */
+		goto timeout_check;
+	}
+
 	if (recv_len > 0) {
 		/* Record receive time immediately */
 		gettimeofday(&recv_time, NULL);
