@@ -7,7 +7,7 @@
     <!-- Status Overview Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <!-- Total Hosts -->
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-lg shadow p-6 relative group cursor-help">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-600">Total Hosts</p>
@@ -15,10 +15,27 @@
                 </div>
                 <i class="fas fa-server text-4xl text-blue-500"></i>
             </div>
+            <!-- Hover Tooltip -->
+            <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -bottom-2 left-1/2 transform -translate-x-1/2 translate-y-full w-64 max-h-96 overflow-y-auto">
+                <div class="font-semibold mb-2 border-b border-gray-700 pb-1">All Monitored Hosts</div>
+                <div class="space-y-1" x-show="allHosts.length > 0">
+                    <template x-for="host in allHosts" :key="host.hostname">
+                        <div class="text-xs flex items-center gap-1">
+                            <i :class="{
+                                'fas fa-check-circle text-green-400': host.overall_status === 'OK',
+                                'fas fa-exclamation-triangle text-yellow-400': host.overall_status === 'WARNING',
+                                'fas fa-times-circle text-red-400': host.overall_status === 'CRITICAL'
+                            }"></i>
+                            <span x-text="host.hostname"></span>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="allHosts.length === 0" class="text-gray-400">No hosts</div>
+            </div>
         </div>
 
         <!-- Healthy Hosts -->
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-lg shadow p-6 relative group cursor-help">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-600">Healthy</p>
@@ -26,10 +43,23 @@
                 </div>
                 <i class="fas fa-check-circle text-4xl text-green-500"></i>
             </div>
+            <!-- Hover Tooltip -->
+            <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -bottom-2 left-1/2 transform -translate-x-1/2 translate-y-full w-64 max-h-96 overflow-y-auto">
+                <div class="font-semibold mb-2 border-b border-gray-700 pb-1 text-green-400">Healthy Hosts</div>
+                <div class="space-y-1" x-show="healthyHosts.length > 0">
+                    <template x-for="host in healthyHosts" :key="host.hostname">
+                        <div class="text-xs flex items-center gap-1">
+                            <i class="fas fa-check-circle text-green-400"></i>
+                            <span x-text="host.hostname"></span>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="healthyHosts.length === 0" class="text-gray-400">No healthy hosts</div>
+            </div>
         </div>
 
         <!-- Warning Hosts -->
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-lg shadow p-6 relative group cursor-help">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-600">Warnings</p>
@@ -37,10 +67,23 @@
                 </div>
                 <i class="fas fa-exclamation-triangle text-4xl text-yellow-500"></i>
             </div>
+            <!-- Hover Tooltip -->
+            <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -bottom-2 left-1/2 transform -translate-x-1/2 translate-y-full w-64 max-h-96 overflow-y-auto">
+                <div class="font-semibold mb-2 border-b border-gray-700 pb-1 text-yellow-400">Warning Hosts</div>
+                <div class="space-y-1" x-show="warningHosts.length > 0">
+                    <template x-for="host in warningHosts" :key="host.hostname">
+                        <div class="text-xs flex items-center gap-1">
+                            <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                            <span x-text="host.hostname"></span>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="warningHosts.length === 0" class="text-gray-400">No warnings</div>
+            </div>
         </div>
 
         <!-- Critical Hosts -->
-        <div class="bg-white rounded-lg shadow p-6">
+        <div class="bg-white rounded-lg shadow p-6 relative group cursor-help">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-600">Critical</p>
@@ -48,45 +91,47 @@
                 </div>
                 <i class="fas fa-times-circle text-4xl text-red-500"></i>
             </div>
+            <!-- Hover Tooltip -->
+            <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -bottom-2 left-1/2 transform -translate-x-1/2 translate-y-full w-64 max-h-96 overflow-y-auto">
+                <div class="font-semibold mb-2 border-b border-gray-700 pb-1 text-red-400">Critical Hosts</div>
+                <div class="space-y-1" x-show="criticalHosts.length > 0">
+                    <template x-for="host in criticalHosts" :key="host.hostname">
+                        <div class="text-xs flex items-center gap-1">
+                            <i class="fas fa-times-circle text-red-400"></i>
+                            <span x-text="host.hostname"></span>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="criticalHosts.length === 0" class="text-gray-400">No critical hosts</div>
+            </div>
         </div>
     </div>
 
-    <!-- Daemon Info & Charts -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <!-- Daemon Info -->
-        <div class="bg-white rounded-lg shadow p-6">
+    <!-- Daemon Info -->
+    <div class="mb-8">
+        <div class="bg-white rounded-lg shadow p-6 max-w-md">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">
                 <i class="fas fa-info-circle mr-2"></i>Daemon Information
             </h2>
-            <dl class="space-y-2" x-show="daemon.version">
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">Version:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.version">-</dd>
+            <div x-show="daemon.version">
+                <dl class="space-y-2">
+                    <div class="flex justify-between">
+                        <dt class="text-sm text-gray-600">Version:</dt>
+                        <dd class="text-sm font-medium text-gray-900" x-text="daemon.version">-</dd>
+                    </div>
+                    <div class="flex justify-between">
+                        <dt class="text-sm text-gray-600">Uptime:</dt>
+                        <dd class="text-sm font-medium text-gray-900" x-text="formatUptime(daemon.uptime_seconds)">-</dd>
+                    </div>
+                </dl>
+                <div class="mt-4 text-xs text-gray-500">
+                    Last update: <span x-text="daemon.current_time ? new Date(daemon.current_time).toLocaleString() : 'Loading...'"></span>
                 </div>
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">Uptime:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="formatUptime(daemon.uptime_seconds)">-</dd>
-                </div>
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">PID:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.pid">-</dd>
-                </div>
-                <div class="flex justify-between">
-                    <dt class="text-sm text-gray-600">Config File:</dt>
-                    <dd class="text-sm font-medium text-gray-900" x-text="daemon.config_file">-</dd>
-                </div>
-            </dl>
-            <div class="mt-4 text-xs text-gray-500">
-                Last update: <span x-text="new Date(daemon.current_time).toLocaleString()"></span>
             </div>
-        </div>
-
-        <!-- Check Types Chart -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                <i class="fas fa-chart-pie mr-2"></i>Check Types
-            </h2>
-            <canvas id="checkTypesChart" width="400" height="300"></canvas>
+            <div x-show="!daemon.version" class="text-center py-4 text-gray-500">
+                <i class="fas fa-spinner fa-spin text-xl mb-2"></i>
+                <p class="text-sm">Loading...</p>
+            </div>
         </div>
     </div>
 
@@ -304,7 +349,7 @@ function dashboard() {
         stats: {},
         alerts: [],
         traps: [],
-        chart: null,
+        allHosts: [], // All monitored hosts
         updateDialog: {
             show: false,
             hostname: '',
@@ -313,6 +358,19 @@ function dashboard() {
         notification: {
             show: false,
             message: ''
+        },
+
+        // Computed properties for categorized hosts
+        get healthyHosts() {
+            return this.allHosts.filter(h => h.overall_status === 'OK');
+        },
+
+        get warningHosts() {
+            return this.allHosts.filter(h => h.overall_status === 'WARNING');
+        },
+
+        get criticalHosts() {
+            return this.allHosts.filter(h => h.overall_status === 'CRITICAL');
         },
 
         init() {
@@ -350,6 +408,10 @@ function dashboard() {
                 this.daemon = data.daemon;
                 this.stats = data.statistics;
 
+                // Get all hosts for tooltips
+                const hostsResponse = await fetch('/api/monitoring/hosts');
+                this.allHosts = await hostsResponse.json();
+
                 // Get alerts
                 const alertsResponse = await fetch('/api/monitoring/alerts');
                 this.alerts = await alertsResponse.json();
@@ -360,44 +422,10 @@ function dashboard() {
                 }
 
                 this.loading = false;
-                this.updateChart();
             } catch (e) {
                 this.error = e.message;
                 this.loading = false;
             }
-        },
-
-        updateChart() {
-            const ctx = document.getElementById('checkTypesChart');
-            if (!ctx) return;
-
-            if (this.chart) {
-                this.chart.destroy();
-            }
-
-            const types = this.stats.checks_by_type || {};
-            this.chart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: Object.keys(types),
-                    datasets: [{
-                        data: Object.values(types),
-                        backgroundColor: [
-                            '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
-                            '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'
-                        ]
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right'
-                        }
-                    }
-                }
-            });
         },
 
         async ackHost(hostname) {

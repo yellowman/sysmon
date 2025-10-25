@@ -1,0 +1,110 @@
+Sysmon Version History
+======================
+
+Version 0.94 - 2025-01-XX
+-------------------------
+
+Web UI Improvements:
+  * Fixed critical 403 "object not found" errors by switching from STAT to STATO
+    command (hostname vs unique_name mismatch eliminated)
+  * Added daemon information display (version, uptime) to dashboard
+  * Implemented session logger for all sysmon protocol operations
+  * Added session log and error display to admin page with auto-refresh
+  * Created dual-view host display system:
+    - Comparison view: ultra-compact grid showing 30+ hosts
+    - Table view: sortable detailed table with check statistics
+    - Toggle button to switch between views instantly
+  * Made UI extremely compact to show more hosts per screen
+  * Added hover tooltips with full host details in comparison view
+  * Fixed dashboard layout bug (content no longer shifts during refresh)
+  * Reduced all connection timeouts from 30s to 5s for responsive UI
+  * Eliminated all ReadString() error handling bugs (Go idiom fixes)
+  * All views now prominently display hostnames (not just IP addresses)
+
+Protocol and Communication:
+  * Fixed web-UI protocol handling to support all sysmon response codes
+    (333, 403, 444) instead of blindly parsing everything as XML
+  * Added structured response parsing with readSysmonResponse() helper
+  * Implemented proper error detection and recovery for protocol operations
+  * Fixed XML parsing to handle EOF correctly (process line before checking error)
+  * Added QUIT command to cleanly close connections (eliminates connection resets)
+
+Daemon Improvements:
+  * Fixed ICMP race condition where responses processed after timeout checks
+    (reordered event loop to call handle_icmp_responses before service_checks)
+  * Increased ping timeout from 1 second to 2 seconds to reduce false negatives
+  * Fixed NULL pointer bug in textfile.c (filename checked before use)
+  * Fixed incomplete XML send on connection errors (do_send_xml returns status)
+  * Added SEND_OR_ABORT macro for reliable XML transmission
+  * Implemented config minnumfailures directive:
+    - Minimum consecutive failures before host appears in status file
+    - Reduces false alarms from transient failures
+    - Default is 1 (show after first failure)
+  * Implemented config flaptime directive:
+    - Keep host showing as green for N minutes after recovery
+    - Prevents "flapping" appearance in status output
+    - Default is 0 (disabled)
+  * Implemented per-object pageinterval configuration:
+    - Allow different hosts to have different re-page intervals
+    - Critical hosts can have shorter intervals (e.g., 15 minutes)
+    - Less critical hosts can have longer intervals (e.g., 60 minutes)
+    - Uses global pageinterval if not specified per-object
+    - Syntax: config pageinterval <minutes>; inside object definition
+
+Security and Privilege Dropping:
+  * Added statustempdir configuration directive for privilege-dropped daemon
+  * Allows daemon to write status files when running as unprivileged user
+  * Created dedicated temp directory support for status file generation
+  * Documented privilege dropping setup in README and man pages
+
+Documentation:
+  * Added comprehensive sysmon protocol documentation
+  * Updated sysmon.conf.man with statustempdir directive
+  * Added setup instructions for privilege dropping
+  * Documented all configuration directives with examples
+  * Improved man page formatting and clarity
+  * Added minnumfailures and flaptime directive documentation to man page
+  * Converted all markdown documentation to plain ASCII text in docs/
+
+Bug Fixes:
+  * Fixed perror() calls behind debug checks to reduce log noise
+  * Fixed NFD button visibility (only shows when authentication configured)
+  * Eliminated browser console errors for admin endpoints
+  * Fixed Chart.js layout issues causing content to grow/shift
+  * Corrected timeout handling throughout web-UI backend
+
+Performance:
+  * Web-UI now loads hosts quickly without wasted API calls
+  * Eliminated hundreds of failed SHOWOBJ requests
+  * Reduced protocol overhead with proper command usage
+  * Session logging replaces stderr output for better observability
+
+Version 0.93 and Earlier
+------------------------
+
+See docs/README and git history for earlier changes.
+
+Wishlist for Future Versions
+-----------------------------
+
+Priority Items:
+  * Multiple textfile outputs (by groups, by state)
+  * SNMP custom up/down messages
+  * SNMP OID comparison and custom error descriptions
+  * State persistence across daemon restarts (config savestate)
+  * SNMP query aggregation to reduce network overhead
+
+Nice to Have:
+  * Enhanced DNS checks documentation
+  * SNPP notification support
+  * Additional authentication backends (htpasswd, etc.)
+  * Curses client improvements
+
+Completed:
+  * Web UI with authentication - DONE (FastCGI-based web-UI in web-ui/)
+  * IRC daemon check - DONE (basic ircd check implemented)
+  * Documentation - ONGOING (continuous improvements)
+  * Paused host data visibility - DONE (visible in web-UI)
+  * Configurable flaptime - DONE (v0.94: config flaptime directive)
+  * Minimum failure count before yellow/txt - DONE (v0.94: config minnumfailures)
+  * Per-host pageinterval - DONE (v0.94: per-object pageinterval override)
