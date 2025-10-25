@@ -58,6 +58,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
 	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
+	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
+	r.mux.HandleFunc("/api/auth/test", r.handleAuthTest)
 
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
@@ -375,8 +377,15 @@ func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	err := r.monitoring.AckHost(hostname)
+	// Get auth key from header or body
+	authKey := r.getAuthKey(req)
+
+	err := r.monitoring.AckHost(hostname, authKey)
 	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
 		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to acknowledge host: %v", err))
 		return
 	}
@@ -400,9 +409,10 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	// Parse JSON body for note
+	// Parse JSON body for note and optional auth key
 	var body struct {
-		Note string `json:"note"`
+		Note    string `json:"note"`
+		AuthKey string `json:"auth_key,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -414,8 +424,18 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	err := r.monitoring.UpdateHostStatus(hostname, body.Note)
+	// Use auth key from body if provided, otherwise from header
+	authKey := body.AuthKey
+	if authKey == "" {
+		authKey = req.Header.Get("X-Auth-Key")
+	}
+
+	err := r.monitoring.UpdateHostStatus(hostname, body.Note, authKey)
 	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
 		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to update host: %v", err))
 		return
 	}
@@ -425,6 +445,76 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 		"message":  fmt.Sprintf("Host %s updated", hostname),
 		"hostname": hostname,
 		"note":     body.Note,
+	})
+}
+
+func (r *Router) handleMonitoringTrace(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/trace/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Get auth key from header
+	authKey := r.getAuthKey(req)
+
+	enabled, err := r.monitoring.ToggleTrace(hostname, authKey)
+	if err != nil {
+		if strings.Contains(err.Error(), "authentication failed") {
+			r.sendError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to toggle trace: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"status":   "success",
+		"hostname": hostname,
+		"tracing_enabled": enabled,
+		"message":  fmt.Sprintf("Tracing %s for %s", map[bool]string{true: "enabled", false: "disabled"}[enabled], hostname),
+	})
+}
+
+func (r *Router) handleAuthTest(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	// Get auth key from header or body
+	var body struct {
+		AuthKey string `json:"auth_key"`
+	}
+	json.NewDecoder(req.Body).Decode(&body)
+
+	authKey := body.AuthKey
+	if authKey == "" {
+		authKey = req.Header.Get("X-Auth-Key")
+	}
+
+	if authKey == "" {
+		r.sendError(w, http.StatusBadRequest, "Auth key required")
+		return
+	}
+
+	valid, err := r.monitoring.TestAuth(authKey)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to test auth: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"valid": valid,
+		"message": map[bool]string{
+			true:  "Authentication successful",
+			false: "Invalid auth key",
+		}[valid],
 	})
 }
 
@@ -462,11 +552,16 @@ func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 	return user, ip
 }
 
+func (r *Router) getAuthKey(req *http.Request) string {
+	// Get auth key from X-Auth-Key header
+	return req.Header.Get("X-Auth-Key")
+}
+
 func (r *Router) addCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User, X-Auth-Key")
 
 		if req.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)

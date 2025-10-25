@@ -273,8 +273,33 @@ func (s *Service) GetAlerts() ([]models.HostStatus, error) {
 	return alerts, nil
 }
 
+// authenticate sends AUTH command to sysmon if authKey is provided
+// Returns error if authentication fails
+func authenticate(conn net.Conn, reader *bufio.Reader, authKey string) error {
+	if authKey == "" {
+		return nil // No auth key provided, continue without auth
+	}
+
+	// Send AUTH command
+	_, err := conn.Write([]byte(fmt.Sprintf("AUTH %s\n", authKey)))
+	if err != nil {
+		return fmt.Errorf("failed to send AUTH command: %w", err)
+	}
+
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read AUTH response: %w", err)
+	}
+
+	if strings.Contains(response, "333") {
+		return nil // Authentication successful
+	}
+
+	return fmt.Errorf("authentication failed - invalid auth key")
+}
+
 // AckHost acknowledges an alert for a specific host
-func (s *Service) AckHost(hostname string) error {
+func (s *Service) AckHost(hostname string, authKey string) error {
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -284,6 +309,11 @@ func (s *Service) AckHost(hostname string) error {
 
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
+
+	// Authenticate if auth key provided
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return err
+	}
 
 	// Enable XML mode
 	_, err = conn.Write([]byte("MODE xml\n"))
@@ -322,7 +352,7 @@ func (s *Service) AckHost(hostname string) error {
 }
 
 // UpdateHostStatus updates a host with a status note
-func (s *Service) UpdateHostStatus(hostname string, note string) error {
+func (s *Service) UpdateHostStatus(hostname string, note string, authKey string) error {
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -332,6 +362,11 @@ func (s *Service) UpdateHostStatus(hostname string, note string) error {
 
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
+
+	// Authenticate if auth key provided
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return err
+	}
 
 	// Enable XML mode
 	_, err = conn.Write([]byte("MODE xml\n"))
@@ -367,4 +402,70 @@ func (s *Service) UpdateHostStatus(hostname string, note string) error {
 	}
 
 	return fmt.Errorf("UPD failed: %s", response)
+}
+
+// ToggleTrace toggles debug tracing for a specific host
+func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
+	// Connect to sysmon daemon
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return false, fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Authenticate if auth key provided (TRACE doesn't require auth, but accept it)
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return false, err
+	}
+
+	// Send TRACE command
+	_, err = conn.Write([]byte(fmt.Sprintf("TRACE %s\n", hostname)))
+	if err != nil {
+		return false, fmt.Errorf("failed to send TRACE command: %w", err)
+	}
+
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("failed to read TRACE response: %w", err)
+	}
+
+	response = strings.TrimSpace(response)
+
+	if strings.Contains(response, "333 tracing enabled") {
+		return true, nil
+	} else if strings.Contains(response, "333 tracing disabled") {
+		return false, nil
+	} else if strings.Contains(response, "403") {
+		return false, fmt.Errorf("host not found")
+	}
+
+	return false, fmt.Errorf("TRACE failed: %s", response)
+}
+
+// TestAuth tests if an auth key is valid
+func (s *Service) TestAuth(authKey string) (bool, error) {
+	if authKey == "" {
+		return false, fmt.Errorf("auth key is required")
+	}
+
+	// Connect to sysmon daemon
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return false, fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Try to authenticate
+	err = authenticate(conn, reader, authKey)
+	if err != nil {
+		return false, nil // Auth failed but connection worked
+	}
+
+	return true, nil // Auth succeeded
 }
