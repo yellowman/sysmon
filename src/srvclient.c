@@ -105,14 +105,29 @@ int	send_conf(struct clientstatus *client)
 
 /*
  * conditionally send line to either FILE or file(can be socket)
+ * Returns: 0 on success, -1 on error
  */
-void do_send_xml(int fd, FILE *fh, char *buff)
+int do_send_xml(int fd, FILE *fh, char *buff)
 {
-        if (fh == NULL) 
+        if (fh == NULL)
 	{
-		sendline(fd, buff);
+		int ret = sendline(fd, buff);
+		if (ret == -1)
+		{
+			if (debug)
+				print_err(1, "do_send_xml: sendline failed for fd %d", fd);
+			return -1;
+		}
+		return 0;
 	} else {
-		 fprintf(fh, "%s\n", buff);
+		int ret = fprintf(fh, "%s\n", buff);
+		if (ret < 0)
+		{
+			if (debug)
+				print_err(1, "do_send_xml: fprintf failed");
+			return -1;
+		}
+		return 0;
 	}
 }
 
@@ -125,42 +140,49 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 {
 	char buffer[TEMPBUF_SIZE];
 
+	/* Macro to check send errors and abort XML generation if write fails */
+	#define SEND_OR_ABORT(fd, fh, buf) \
+		if (do_send_xml(fd, fh, buf) == -1) { \
+			if (debug) print_err(1, "send_object_xml: aborting due to send error"); \
+			return; \
+		}
+
 	snprintf(buffer, sizeof(buffer), "<%s>", XML_OBJECT_STATUS);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HOSTNAME, obj->data->hostname ,XML_HOSTNAME);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_PORT, obj->data->port, XML_OBJECT_PORT);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_TYPE, type_to_name(obj->data->type), XML_OBJECT_TYPE);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_MESSAGE, obj->data->message, XML_OBJECT_MESSAGE);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	if (obj->data->contact != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_CONTACT, obj->data->contact, XML_OBJECT_CONTACT);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* XML_OBJ_GROUP */
         if (obj->data->group != NULL)
         {
                 snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_GROUP, obj->data->group, XML_OBJECT_GROUP);
-                do_send_xml(fd, fh, buffer);
+                SEND_OR_ABORT(fd, fh, buffer);
         }
 
         /* XML_OBJ_NOTES */
         if (obj->data->notes != NULL)
         {
                 snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_NOTES, obj->data->notes, XML_OBJECT_NOTES);
-                do_send_xml(fd, fh, buffer);
+                SEND_OR_ABORT(fd, fh, buffer);
         }
 
 	if (obj->data->type == SYSM_TYPE_SNMP)
@@ -168,185 +190,185 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		if (obj->data->snmp_community != NULL)
 		{
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_oid != NULL)
 		{
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_TYPE, snmp_type_to_name(obj->data->snmp_test_type), XML_SNMP_TYPE);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LOW, obj->data->snmp_low, XML_SNMP_LOW);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_HIGH, obj->data->snmp_high, XML_SNMP_HIGH);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_EXACT, obj->data->snmp_exact, XML_SNMP_EXACT);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_SysUpTime, obj->data->system_uptime, XML_SNMP_SysUpTime);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_SNMP_OCTETS, obj->data->snmp_octets, XML_SNMP_OCTETS);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_RATE, obj->data->snmp_rate, XML_SNMP_RATE);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LASTRESP, obj->data->last_snmp_resptime, XML_SNMP_LASTRESP);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_STATE, obj->data->lastcheck, XML_OBJECT_STATE);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	if (obj->data->username != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER, obj->data->username , XML_AUTH_USER);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->password != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD, obj->data->password, XML_AUTH_PASSWD);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->hdr != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER, obj->data->hdr, XML_HEADER);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->hdrval != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL, obj->data->hdrval, XML_HEADER_VAL);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
 	if (obj->data->secret != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET, obj->data->secret, XML_RADIUS_SECRET);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->lastmsgid != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_MESSAGE_ID, obj->data->lastmsgid, XML_MESSAGE_ID);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->unique_id != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_UNIQUE_ID, obj->data->unique_id, XML_UNIQUE_ID);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->url != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL, obj->data->url, XML_OBJ_URL);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->url_text != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url, XML_OBJ_URL_TEXT);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
 	if (obj->data->command != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC, obj->data->command, XML_OBJ_EXEC);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_TOT_CHECKED, obj->data->totalchecked, XML_TOT_CHECKED);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_TOT_DOWN, obj->data->totaldown, XML_TOT_DOWN);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_DOWN_CT, obj->data->downct, XML_DOWN_CT);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_UP_CT, obj->data->upct, XML_UP_CT);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_MAX_DOWN, obj->data->max_down, XML_MAX_DOWN);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_QUEUE_INT, obj->data->queuetime, XML_QUEUE_INT);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_SEND_PING, obj->data->send_pings, XML_SEND_PING);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 	
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_MIN_PING, obj->data->min_pings, XML_MIN_PING);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJ_REVERSED, obj->data->reverse, XML_OBJ_REVERSED);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJ_CONTACTED, obj->data->contacted, XML_OBJ_CONTACTED);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_OBJ_CONTACTEDAT, obj->data->lastcontacted, XML_OBJ_CONTACTEDAT);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_CONTACT_UP, obj->data->contact_when, XML_CONTACT_UP);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_QUEUED, obj->data->queued, XML_QUEUED);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LASTCHECK, obj->data->lchecktime, XML_LASTCHECK);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_CHECK_START, obj->data->check_start, XML_CHECK_START);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_OUTAGE_TIME, obj->data->deathtime, XML_OUTAGE_TIME);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LAST_TIME_UP, obj->data->last_up, XML_LAST_TIME_UP);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	/* Packet loss tolerance (max packets that can be lost) */
 	if (obj->data->pktloss_tolerance > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_PACKET_LOSS_THRESHOLD,
 			obj->data->pktloss_tolerance, XML_PACKET_LOSS_THRESHOLD);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* RTT threshold */
 	if (obj->data->rtt_threshold > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_RTT_THRESHOLD,
 			obj->data->rtt_threshold, XML_RTT_THRESHOLD);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* Jitter threshold */
 	if (obj->data->jitter_threshold > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_JITTER_THRESHOLD,
 			obj->data->jitter_threshold, XML_JITTER_THRESHOLD);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* Wakeup retries (max times to retry waking stale check) */
 	if (obj->data->max_wakeup_retries > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>", XML_WAKEUP_RETRIES,
 			obj->data->max_wakeup_retries, XML_WAKEUP_RETRIES);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* Trap alert configuration */
 	if (obj->data->trap_alert) {
 		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT,
 			1, XML_TRAP_ALERT);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* ===== PHASE 1: Extended Configuration Fields ===== */
@@ -356,17 +378,17 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		if (obj->data->snmp_oid_sec != NULL) {
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
 				XML_SNMP_OID_SEC, obj->data->snmp_oid_sec, XML_SNMP_OID_SEC);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_up_msg != NULL) {
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
 				XML_SNMP_UP_MSG, obj->data->snmp_up_msg, XML_SNMP_UP_MSG);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_down_msg != NULL) {
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
 				XML_SNMP_DOWN_MSG, obj->data->snmp_down_msg, XML_SNMP_DOWN_MSG);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 		}
 	}
 
@@ -375,15 +397,15 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		if (obj->data->dns_query != NULL) {
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
 				XML_DNS_QUERY, obj->data->dns_query, XML_DNS_QUERY);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 				XML_DNS_REQ_AA, obj->data->dns_aa, XML_DNS_REQ_AA);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 				XML_DNS_RECURSION, obj->data->dns_recursion, XML_DNS_RECURSION);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 		}
 	}
 
@@ -391,7 +413,7 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	if (obj->data->pmesg != NULL) {
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
 			XML_PAGE_MESSAGE, obj->data->pmesg, XML_PAGE_MESSAGE);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* Packet Loss Extended Configuration */
@@ -399,38 +421,38 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
 			XML_PKTLOSS_HIST_HRS, obj->data->pktloss_history_hours,
 			XML_PKTLOSS_HIST_HRS);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->pktloss_last_check > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
 			XML_PKTLOSS_LAST_CHK, obj->data->pktloss_last_check,
 			XML_PKTLOSS_LAST_CHK);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* RTT Samples Configuration */
 	if (obj->data->rtt_samples > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
 			XML_RTT_SAMPLES, obj->data->rtt_samples, XML_RTT_SAMPLES);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* Next Scheduled Queue Time */
 	if (obj->data->next_queuetime > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
 			XML_NEXT_QUEUE_TIME, obj->data->next_queuetime, XML_NEXT_QUEUE_TIME);
-		do_send_xml(fd, fh, buffer);
+		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* Debug & Diagnostic State */
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 		XML_TRACE_ENABLED, obj->data->trace, XML_TRACE_ENABLED);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 		XML_ACKED, obj->data->acked, XML_ACKED);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
 
 	/* ===== PHASE 2: Runtime Check State ===== */
 
@@ -456,39 +478,39 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 				(long)found_qent->queueat.tv_sec,
 				(long)found_qent->queueat.tv_usec,
 				XML_CHECK_QUEUED_AT);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%ld.%06ld</%s>",
 				XML_CHECK_LAST_SERV,
 				(long)found_qent->lastserv.tv_sec,
 				(long)found_qent->lastserv.tv_usec,
 				XML_CHECK_LAST_SERV);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 				XML_CHECK_FD, found_qent->filedes, XML_CHECK_FD);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 				XML_CHECK_STARTED, found_qent->started, XML_CHECK_STARTED);
-			do_send_xml(fd, fh, buffer);
+			SEND_OR_ABORT(fd, fh, buffer);
 
 			if (found_qent->retval != -1) {
 				snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
 					XML_CHECK_RETVAL, found_qent->retval, XML_CHECK_RETVAL);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 			}
 
 			if (found_qent->wakeup_count > 0) {
 				snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
 					XML_CHECK_WAKEUP_CNT, found_qent->wakeup_count,
 					XML_CHECK_WAKEUP_CNT);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 
 				snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
 					XML_CHECK_WAKEUP_TIME, found_qent->last_wakeup_time,
 					XML_CHECK_WAKEUP_TIME);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 			}
 
 			/* ===== PHASE 3: Packet Loss Historical Data ===== */
@@ -500,19 +522,19 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 				/* Running totals */
 				snprintf(buffer, sizeof(buffer), "<%s>%llu</%s>",
 					XML_PKTLOSS_TOTAL_SENT, pld->total_sent, XML_PKTLOSS_TOTAL_SENT);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 
 				snprintf(buffer, sizeof(buffer), "<%s>%llu</%s>",
 					XML_PKTLOSS_TOTAL_RECV, pld->total_received, XML_PKTLOSS_TOTAL_RECV);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 
 				snprintf(buffer, sizeof(buffer), "<%s>%llu</%s>",
 					XML_PKTLOSS_TOTAL_LOST, pld->total_lost, XML_PKTLOSS_TOTAL_LOST);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 
 				snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
 					XML_PKTLOSS_HIST_SAMP, pld->history_count, XML_PKTLOSS_HIST_SAMP);
-				do_send_xml(fd, fh, buffer);
+				SEND_OR_ABORT(fd, fh, buffer);
 
 				/* History array - output last 24 hours of samples */
 				if (pld->history_count > 0) {
@@ -521,7 +543,7 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 					if (samples_to_output > 1440) samples_to_output = 1440; /* Max 24h @ 1min */
 
 					snprintf(buffer, sizeof(buffer), "<%s>", XML_PKTLOSS_HISTORY);
-					do_send_xml(fd, fh, buffer);
+					SEND_OR_ABORT(fd, fh, buffer);
 
 					for (i = 0; i < samples_to_output; i++) {
 						/* Calculate actual index in circular buffer */
@@ -533,18 +555,20 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 						snprintf(buffer, sizeof(buffer),
 							"<Sample timestamp=\"%ld\" sent=\"%u\" received=\"%u\" lost=\"%u\"/>",
 							sample->timestamp, sample->sent, sample->received, sample->lost);
-						do_send_xml(fd, fh, buffer);
+						SEND_OR_ABORT(fd, fh, buffer);
 					}
 
 					snprintf(buffer, sizeof(buffer), "</%s>", XML_PKTLOSS_HISTORY);
-					do_send_xml(fd, fh, buffer);
+					SEND_OR_ABORT(fd, fh, buffer);
 				}
 			}
 		}
 	}
 
 	snprintf(buffer, sizeof(buffer), "</%s>", XML_OBJECT_STATUS);
-	do_send_xml(fd, fh, buffer);
+	SEND_OR_ABORT(fd, fh, buffer);
+
+	#undef SEND_OR_ABORT
 }
 
 /*
