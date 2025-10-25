@@ -268,13 +268,18 @@ GET    /api/backups/:timestamp       # Get specific backup
 POST   /api/backups/:timestamp/restore  # Restore from backup
 ```
 
-### Monitoring Status
+### Live Monitoring (Query Sysmon Daemon via JSON)
 ```
-GET    /api/status                   # Get sysmon daemon status
-GET    /api/status/hosts             # Get all hosts status
-GET    /api/status/alerts            # Get active alerts
-GET    /api/status/logs              # Get recent logs (tail)
+GET    /api/monitoring/status        # Get complete sysmon status (JSON from daemon)
+GET    /api/monitoring/hosts         # Get all hosts status
+GET    /api/monitoring/host/:name    # Get specific host status with all checks
+GET    /api/monitoring/alerts        # Get active alerts
+GET    /api/monitoring/traps         # Get recent SNMP traps
+GET    /api/monitoring/traps/:source # Get traps from specific source
+GET    /api/monitoring/stats         # Get statistics (uptime, check counts, etc)
 ```
+
+**Note:** These endpoints query the live sysmon daemon via JSON output mode, NOT the config file.
 
 ### Audit
 ```
@@ -828,7 +833,11 @@ func (s *ConfigService) UpdateConfig(update *ConfigUpdate, user string, ip strin
     // 2. Check version match (optimistic locking)
     if update.Version != current {
         // Version conflict - someone else modified the config
-        currentSnapshot, _ := s.GetConfig()
+        currentSnapshot, err := s.GetConfig()
+        if err != nil {
+            // Cannot read current config for conflict resolution
+            return nil, fmt.Errorf("version conflict detected but unable to read current config: %w", err)
+        }
         return nil, &VersionConflictError{
             Expected: update.Version,
             Actual:   current,
@@ -960,9 +969,9 @@ func (s *ConfigService) logAudit(action, user, ip, comment string) {
 }
 ```
 
-### Status Monitoring (Pretty Display)
+### Live Monitoring Service (JSON from Sysmon Daemon)
 
-The web UI provides a rich, formatted display of sysmon status by connecting to the sysmon client and parsing its output into structured JSON.
+The web UI connects to the sysmon daemon and requests JSON output, eliminating fragile text parsing.
 
 ```go
 package service
@@ -1024,8 +1033,8 @@ type StatusChange struct {
     Timestamp time.Time `json:"timestamp"`
 }
 
-// GetPrettyStatus connects to sysmon and returns formatted status
-func (s *StatusService) GetPrettyStatus() (*Status, error) {
+// GetMonitoringStatus connects to sysmon and requests JSON output
+func (s *StatusService) GetMonitoringStatus() (*SysmonStatus, error) {
     // Connect to sysmon client port
     conn, err := net.DialTimeout("tcp", s.sysmonHost, 5*time.Second)
     if err != nil {
@@ -1033,146 +1042,158 @@ func (s *StatusService) GetPrettyStatus() (*Status, error) {
     }
     defer conn.Close()
 
-    // Send status command
-    fmt.Fprintf(conn, "status\n")
+    // Request JSON output mode
+    fmt.Fprintf(conn, "json\n")
+    // Alternative: fmt.Fprintf(conn, "status --json\n")
 
-    // Parse output
-    status := &Status{
-        Hosts: make([]HostStatus, 0),
-        Summary: StatusSummary{
-            ByType:   make(map[string]int),
-            ByStatus: make(map[string]int),
-        },
+    // Read JSON response
+    var status SysmonStatus
+    decoder := json.NewDecoder(conn)
+    if err := decoder.Decode(&status); err != nil {
+        return nil, fmt.Errorf("failed to parse JSON from sysmon: %w", err)
     }
 
-    scanner := bufio.NewScanner(conn)
-    var currentHost *HostStatus
+    return &status, nil
+}
 
-    for scanner.Scan() {
-        line := scanner.Text()
+// SysmonStatus mirrors the JSON output from sysmon daemon
+// See SYSMON_JSON_OUTPUT_DESIGN.md for complete schema
+type SysmonStatus struct {
+    Daemon      DaemonInfo       `json:"daemon"`
+    Hosts       []HostStatus     `json:"hosts"`
+    Statistics  Stats            `json:"statistics"`
+    SNMPTraps   *TrapInfo        `json:"snmp_traps,omitempty"`
+}
 
-        // Parse different line formats from sysmon output
-        if strings.HasPrefix(line, "Uptime:") {
-            status.Uptime = strings.TrimPrefix(line, "Uptime: ")
-        } else if strings.Contains(line, "->") {
-            // Host status line: "hostname -> OK (12.3ms)"
-            currentHost = s.parseHostStatusLine(line)
-            if currentHost != nil {
-                status.Hosts = append(status.Hosts, *currentHost)
-                status.TotalHosts++
-                status.Summary.ByStatus[currentHost.Status]++
+type DaemonInfo struct {
+    Version        string    `json:"version"`
+    Uptime         int64     `json:"uptime_seconds"`
+    StartTime      time.Time `json:"start_time"`
+    CurrentTime    time.Time `json:"current_time"`
+    PID            int       `json:"pid"`
+    ConfigFile     string    `json:"config_file"`
+    ConfigLoadTime time.Time `json:"config_load_time"`
+}
 
-                if currentHost.Status == "OK" {
-                    status.HealthyHosts++
-                } else if currentHost.Status == "CRITICAL" || currentHost.Status == "WARNING" {
-                    status.FailingHosts++
-                }
-            }
-        } else if strings.HasPrefix(line, "  ") && currentHost != nil {
-            // Check detail line: "  tcp:80 -> OK"
-            check := s.parseCheckLine(line)
-            if check != nil {
-                currentHost.Checks = append(currentHost.Checks, *check)
-                status.TotalChecks++
-                status.Summary.ByType[check.Type]++
-            }
+type HostStatus struct {
+    Hostname       string       `json:"hostname"`
+    IPv4Address    string       `json:"ipv4_address,omitempty"`
+    IPv6Address    string       `json:"ipv6_address,omitempty"`
+    OverallStatus  string       `json:"overall_status"`
+    StatusColor    string       `json:"status_color"`
+    Contact        string       `json:"contact,omitempty"`
+    Paused         bool         `json:"paused"`
+    Checks         []CheckResult `json:"checks"`
+}
+
+type CheckResult struct {
+    Type          string      `json:"type"`
+    Port          int         `json:"port,omitempty"`
+    Status        string      `json:"status"`
+    LastCheckTime time.Time   `json:"last_check_time"`
+    NextCheckTime time.Time   `json:"next_check_time"`
+    CheckInterval int         `json:"check_interval_seconds"`
+    ResponseTime  float64     `json:"response_time_ms,omitempty"`
+    StatusMessage string      `json:"status_message,omitempty"`
+    Result        interface{} `json:"result,omitempty"` // Type-specific result data
+}
+
+type Stats struct {
+    TotalHosts      int            `json:"total_hosts"`
+    HealthyHosts    int            `json:"healthy_hosts"`
+    WarningHosts    int            `json:"warning_hosts"`
+    CriticalHosts   int            `json:"critical_hosts"`
+    TotalChecks     int            `json:"total_checks"`
+    ChecksByType    map[string]int `json:"checks_by_type"`
+    ChecksByStatus  map[string]int `json:"checks_by_status"`
+}
+
+type TrapInfo struct {
+    RecentTraps  []Trap            `json:"recent_traps"`
+    TrapSources  []TrapSource      `json:"trap_sources"`
+    Summary      TrapSummary       `json:"summary"`
+}
+
+type Trap struct {
+    SourceIP       string      `json:"source_ip"`
+    SourceHostname string      `json:"source_hostname,omitempty"`
+    Timestamp      time.Time   `json:"timestamp"`
+    TrapType       string      `json:"trap_type"`
+    Varbinds       []Varbind   `json:"varbinds"`
+    Decoded        *TrapDecode `json:"decoded,omitempty"`
+    MatchedHost    string      `json:"matched_host,omitempty"`
+    AlertEnabled   bool        `json:"trap_alert_enabled"`
+    AlertSent      bool        `json:"alert_sent"`
+}
+
+type Varbind struct {
+    OID         string      `json:"oid"`
+    Type        string      `json:"type"`
+    Value       string      `json:"value"`
+    Description string      `json:"description,omitempty"`
+}
+
+type TrapDecode struct {
+    TrapName       string `json:"trap_name"`
+    Description    string `json:"description"`
+    Severity       string `json:"severity"`
+    Category       string `json:"category"`
+    Vendor         string `json:"vendor,omitempty"`
+    Interface      string `json:"interface,omitempty"`
+    InterfaceIndex int    `json:"interface_index,omitempty"`
+}
+
+type TrapSource struct {
+    SourceIP   string `json:"source_ip"`
+    Hostname   string `json:"hostname,omitempty"`
+    TrapCount  int    `json:"trap_count"`
+    LastTrap   time.Time `json:"last_trap"`
+}
+
+type TrapSummary struct {
+    TotalTraps    int            `json:"total_traps_hour"`
+    TrapsByType   map[string]int `json:"traps_by_type"`
+    TrapsBySeverity map[string]int `json:"traps_by_severity"`
+}
+
+// GetDetailedHostStatus gets detailed status for a specific host
+func (s *StatusService) GetDetailedHostStatus(hostname string) (*HostStatus, error) {
+    // Get full status from sysmon
+    status, err := s.GetMonitoringStatus()
+    if err != nil {
+        return nil, fmt.Errorf("failed to get monitoring status: %w", err)
+    }
+
+    // Find the requested host
+    for _, host := range status.Hosts {
+        if host.Hostname == hostname {
+            return &host, nil
         }
     }
 
-    return status, scanner.Err()
+    return nil, fmt.Errorf("host %s not found", hostname)
 }
 
-// parseHostStatusLine parses a line like: "example.com -> OK (12.3ms) [admin@example.com]"
-func (s *StatusService) parseHostStatusLine(line string) *HostStatus {
-    // Regex to extract: hostname, status, response time, contact
-    re := regexp.MustCompile(`^(\S+)\s+->\s+(\w+)\s*(?:\(([^)]+)\))?\s*(?:\[([^\]]+)\])?`)
-    matches := re.FindStringSubmatch(line)
-
-    if len(matches) < 3 {
-        return nil
-    }
-
-    status := &HostStatus{
-        Hostname:  matches[1],
-        Status:    matches[2],
-        LastCheck: time.Now(),
-    }
-
-    if len(matches) > 3 && matches[3] != "" {
-        status.Response = matches[3]
-    }
-
-    if len(matches) > 4 && matches[4] != "" {
-        status.Contact = matches[4]
-    }
-
-    // Assign color based on status
-    switch status.Status {
-    case "OK":
-        status.StatusColor = "green"
-    case "WARNING":
-        status.StatusColor = "yellow"
-    case "CRITICAL", "FAILED", "DOWN":
-        status.StatusColor = "red"
-    default:
-        status.StatusColor = "gray"
-    }
-
-    return status
-}
-
-// parseCheckLine parses a check detail line like: "  http:443 -> OK (234ms)"
-func (s *StatusService) parseCheckLine(line string) *CheckStatus {
-    line = strings.TrimSpace(line)
-
-    // Regex: "type:port -> STATUS (duration)"
-    re := regexp.MustCompile(`^(\w+)(?::(\d+))?\s+->\s+(\w+)\s*(?:\(([^)]+)\))?`)
-    matches := re.FindStringSubmatch(line)
-
-    if len(matches) < 3 {
-        return nil
-    }
-
-    check := &CheckStatus{
-        Type:    matches[1],
-        Status:  matches[3],
-        LastRun: time.Now(),
-    }
-
-    if len(matches) > 4 && matches[4] != "" {
-        check.Duration = matches[4]
-    }
-
-    // Assign color
-    switch check.Status {
-    case "OK":
-        check.StatusColor = "green"
-    case "WARNING":
-        check.StatusColor = "yellow"
-    case "CRITICAL", "FAILED":
-        check.StatusColor = "red"
-    default:
-        check.StatusColor = "gray"
-    }
-
-    return check
-}
-
-// GetDetailedHostStatus gets detailed status for a single host
-func (s *StatusService) GetDetailedHostStatus(hostname string) (*HostStatus, error) {
-    conn, err := net.DialTimeout("tcp", s.sysmonHost, 5*time.Second)
+// GetTrapsBySource gets SNMP traps from a specific source
+func (s *StatusService) GetTrapsBySource(sourceIP string) ([]Trap, error) {
+    status, err := s.GetMonitoringStatus()
     if err != nil {
-        return nil, fmt.Errorf("failed to connect: %w", err)
+        return nil, fmt.Errorf("failed to get monitoring status: %w", err)
     }
-    defer conn.Close()
 
-    // Send detailed status command for specific host
-    fmt.Fprintf(conn, "status %s\n", hostname)
+    if status.SNMPTraps == nil {
+        return []Trap{}, nil
+    }
 
-    // Parse detailed output
-    // ... (similar parsing logic but more detailed)
+    // Filter traps by source IP
+    var filtered []Trap
+    for _, trap := range status.SNMPTraps.RecentTraps {
+        if trap.SourceIP == sourceIP {
+            filtered = append(filtered, trap)
+        }
+    }
 
-    return nil, nil
+    return filtered, nil
 }
 ```
 
