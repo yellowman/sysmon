@@ -8,3 +8,4 @@ src/sysmond
 src/sysmon
 src/sysmon-ping-helper
 web-ui/backend/sysmon-web
+autom4te.cache/

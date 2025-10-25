@@ -485,6 +485,13 @@ static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *h
 	pid_t pid;
 	int status;
 	ssize_t written;
+	static int helper_failed_once = 0;
+
+	/* If helper has already failed, don't keep trying */
+	if (helper_failed_once) {
+		here->retval = SYSM_ERR;
+		return -1;
+	}
 
 	/* Build request for helper */
 	memset(&req, 0, sizeof(req));
@@ -561,8 +568,17 @@ static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *h
 
 	/* Check helper exit status */
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-		print_err(1, "ping-helper failed with status %d",
+		/* First failure - log detailed error and disable helper permanently */
+		print_err(1, "FATAL: Ping helper failed with status %d - helper will be disabled",
 		          WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		print_err(1, "FATAL: ICMP checks will fail - install helper at %s with setuid permissions",
+		          PING_HELPER_PATH);
+		print_err(1, "FATAL: Run 'make install' in src/ directory to install helper properly");
+
+		/* Disable helper globally to prevent spam */
+		use_ping_helper = 0;
+		helper_failed_once = 1;
+
 		here->retval = SYSM_ERR;
 		return -1;
 	}
