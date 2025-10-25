@@ -99,6 +99,10 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		// Parse plain text format from STAT (even in XML mode)
 		// Format: hostname:type:port:lastcheck:downct:contacted:deathtime
 		// OR just: objectname (for STATO command)
+		// NOTE: We only extract the object name (first field) here, as detailed
+		// monitoring data (type, port, status, etc.) is retrieved via SHOWOBJ
+		// XML responses in the next step. The additional STAT fields are thus
+		// redundant and intentionally ignored.
 		fields := strings.Split(line, ":")
 		if len(fields) > 0 && fields[0] != "" {
 			objectNames = append(objectNames, fields[0])
@@ -732,6 +736,8 @@ func (s *Service) GetObjectsXML() (string, error) {
 		}
 
 		// Parse object name from first field
+		// NOTE: STAT returns colon-delimited data (hostname:type:port:...),
+		// but we only need the object name to query full XML via SHOWOBJ
 		fields := strings.Split(line, ":")
 		if len(fields) > 0 && fields[0] != "" {
 			objectNames = append(objectNames, fields[0])
