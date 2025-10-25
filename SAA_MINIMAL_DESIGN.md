@@ -1,0 +1,537 @@
+# Minimal SAA (Service Assurance & Analytics) Design for Sysmon
+
+## Executive Summary
+
+This document proposes a minimal Service Assurance & Analytics (SAA) feature for sysmon that provides core service-level monitoring capabilities while remaining faithful to sysmon's lightweight, single-daemon architecture.
+
+## What is SAA?
+
+**Service Assurance & Analytics** is the discipline and tooling that keeps live services inside their SLOs/SLA boundaries through continuous monitoring, detection, localization, remediation, and reporting.
+
+### Key Terminology
+
+- **SLA** (Service Level Agreement): Contractual promise to customers
+- **SLO** (Service Level Objective): Internal target (e.g., 99.9% monthly availability)
+- **SLI** (Service Level Indicator): The measured metric (e.g., HTTP 200 latency p95)
+
+### Full SAA Stack (Industry Standard)
+
+**Data Inputs:**
+- SNMP/streaming telemetry, IPFIX/NetFlow, syslog/traps
+- OpenTelemetry traces/metrics
+- Config/state diffs, inventory/topology
+- Customer tickets
+- Active probes (ICMP/UDP/TCP, TWAMP, HTTP, DNS, VoIP MOS)
+
+**Core Functions:**
+- Health modeling
+- Anomaly/fault detection
+- Root-cause analysis via topology
+- Impact mapping (which customers/services affected)
+- Runbooks/auto-remediation
+- Ticketing integration
+- SLA/SLO reporting
+- Capacity trending
+
+**Common KPIs (ISP):**
+- Availability, packet loss/latency/jitter, throughput
+- Errors/drops/FEC, CPU/memory
+- BGP/OSPF/ISIS session state, prefix reachability
+- Synthetic page/DNS/MOS tests
+
+**Fixed-Wireless Specific:**
+- RSSI/SNR, MCS/modulation, frame utilization
+- Retransmission %, link margin
+- Interference/noise floor, CBRS grant state
+
+**Fiber/PON Specific:**
+- OLT/ONT state, LOS/LOF
+- Optical power (RX/TX), BER
+- Split ratio load
+
+**Typical Tooling Stack:**
+- Time-series DB (Prometheus/VictoriaMetrics/InfluxDB)
+- Log store (OpenSearch/Splunk)
+- Flow analytics (ClickHouse)
+- Inventory/topology (NetBox)
+- NMS (LibreNMS/Zabbix/OpenNMS)
+- Correlator (rules/ML)
+- Automation (Ansible/PyATS/Batfish)
+- Ticketing (Jira/ServiceNow)
+
+## Minimal SAA for Sysmon
+
+### Philosophy
+
+Sysmon cannot (and should not) replace a full SAA stack. Instead, we propose **focused service-level monitoring** that:
+
+1. **Measures SLIs** directly (not just infrastructure health)
+2. **Tracks SLO compliance** over time
+3. **Aggregates multi-dimensional health** into service scores
+4. **Reports error budgets** and burn rates
+5. **Remains lightweight** (single C daemon, minimal dependencies)
+
+### Proposed Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Service Definition                     │
+│  service "Customer_VPN_A" {                             │
+│    slo_availability 99.9%;  /* Monthly target */        │
+│    slo_window 2592000;      /* 30 days */              │
+│                                                          │
+│    /* Service components */                             │
+│    component ping 10.1.2.3;                            │
+│    component rtt 10.1.2.3 threshold 150;               │
+│    component snmp 10.1.2.4 oid .1.3.6.1... value up;   │
+│    component tcp 10.1.2.5 port 443;                    │
+│                                                          │
+│    /* Weighting (optional) */                           │
+│    weight ping 2;           /* Core connectivity */     │
+│    weight rtt 1;            /* QoE metric */            │
+│  }                                                       │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│              Continuous Measurement                      │
+│  - Poll each component per existing test cycles         │
+│  - Record UP/DOWN state + timestamp                     │
+│  - Calculate service health score                       │
+│  - Track error budget consumption                       │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                  State Tracking                          │
+│  struct service_slo {                                   │
+│    char *name;                                          │
+│    double target_availability;  /* 99.9 = 0.999 */     │
+│    time_t window_seconds;                               │
+│    struct component *components;                        │
+│                                                          │
+│    /* Runtime state */                                  │
+│    circular_buffer *uptime_samples;                     │
+│    double current_availability;                         │
+│    double error_budget_remaining;  /* % */              │
+│    time_t last_outage_start;                            │
+│    int consecutive_failures;                            │
+│  }                                                       │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                 Alerting Logic                           │
+│  1. Service DOWN alert (all critical components fail)   │
+│  2. Service DEGRADED alert (some components fail)       │
+│  3. Error budget burn alert (consuming too fast)        │
+│  4. SLO violation alert (availability < target)         │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Reporting                             │
+│  1. Real-time: Current service health % + error budget  │
+│  2. Periodic: SLO compliance report (daily/weekly)      │
+│  3. CSV export: Timestamp, service, availability, SLI   │
+│  4. Integration: JSON output for external dashboards    │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Core Components
+
+#### 1. Service Definition (Config File)
+
+New config syntax for grouping monitors into logical services:
+
+```
+service {
+    name "Customer_A_VPN";
+    description "VPN service for Customer A across 3 sites";
+
+    /* SLO target */
+    slo_availability 99.9;      /* Percent */
+    slo_window 2592000;         /* Seconds (30 days) */
+
+    /* Component dependencies */
+    component {
+        type ping;
+        target "10.1.2.3";
+        critical true;          /* Service DOWN if this fails */
+    }
+
+    component {
+        type rtt;
+        target "10.1.2.3";
+        rtt_threshold 150;
+        critical false;         /* Service DEGRADED if this fails */
+    }
+
+    component {
+        type snmp;
+        target "10.1.2.4";
+        oid ".1.3.6.1.2.1.2.2.1.8.1";
+        expected "1";           /* Interface up */
+        critical true;
+    }
+
+    /* Error budget alerting */
+    error_budget_burn_rate 10;  /* Alert if consuming 10x normal rate */
+
+    /* Report generation */
+    report_interval 86400;      /* Daily reports */
+    report_file "/var/log/sysmon/slo_reports.csv";
+}
+```
+
+#### 2. Data Structures
+
+```c
+/* Service component (links to existing monitors) */
+struct service_component {
+    enum monitor_type type;             /* ping, rtt, snmp, tcp, etc. */
+    struct graph_elements *monitor;     /* Pointer to actual monitor object */
+    bool is_critical;                   /* Service DOWN if critical component fails */
+    double weight;                      /* For weighted health score (default 1.0) */
+    struct service_component *next;
+};
+
+/* Service SLO definition */
+struct service_slo {
+    char *name;
+    char *description;
+
+    /* SLO parameters */
+    double target_availability;         /* 0.999 for 99.9% */
+    time_t window_seconds;              /* SLO measurement window */
+
+    /* Components */
+    struct service_component *components;
+    int component_count;
+    int critical_component_count;
+
+    /* Runtime state tracking */
+    struct circular_buffer *state_history;  /* UP/DOWN samples over time */
+    double current_availability;            /* Current % availability */
+    double error_budget_remaining;          /* Remaining error budget % */
+    time_t window_start_time;               /* When this window started */
+
+    /* Current outage tracking */
+    bool currently_down;
+    bool currently_degraded;
+    time_t outage_start;
+    int consecutive_failures;
+
+    /* Burn rate detection */
+    double error_budget_burn_rate;          /* Config: alert threshold */
+    double actual_burn_rate;                /* Runtime: current burn rate */
+    time_t last_burn_check;
+
+    /* Reporting */
+    time_t report_interval;
+    char *report_file;
+    time_t last_report_time;
+
+    struct service_slo *next;
+};
+```
+
+#### 3. Core Functions
+
+```c
+/* Service health calculation */
+double calculate_service_health(struct service_slo *svc);
+    /* Returns 0.0-100.0 based on component states and weights */
+
+/* SLO compliance tracking */
+void update_slo_state(struct service_slo *svc, struct timeval *now);
+    /* Called each service cycle, records UP/DOWN, updates availability */
+
+/* Error budget calculation */
+double calculate_error_budget(struct service_slo *svc);
+    /* Returns remaining error budget as percentage */
+    /* Formula: (1 - target) - actual_downtime */
+
+/* Burn rate detection */
+double calculate_burn_rate(struct service_slo *svc);
+    /* Compares recent downtime to expected downtime */
+    /* Alert if consuming error budget faster than sustainable */
+
+/* Alerting */
+void check_service_alerts(struct service_slo *svc);
+    /* Triggers alerts for DOWN/DEGRADED/BURN_RATE/SLO_VIOLATION */
+
+/* Reporting */
+void generate_slo_report(struct service_slo *svc);
+    /* Writes CSV: timestamp,service,availability,error_budget,state */
+```
+
+#### 4. Integration with Existing Monitoring
+
+The key insight: **Don't create new probe mechanisms**. Instead, aggregate existing monitor states:
+
+```c
+void service_test_cycle(struct service_slo *svc, struct timeval *now) {
+    int critical_up = 0;
+    int critical_total = 0;
+    int total_up = 0;
+    int total_components = 0;
+    double health_score = 0.0;
+
+    /* Iterate through all components */
+    for (struct service_component *comp = svc->components; comp != NULL; comp = comp->next) {
+        bool is_up = false;
+
+        /* Check component state (already monitored by existing code) */
+        switch (comp->type) {
+            case SYSM_TYPE_PING:
+            case SYSM_TYPE_PING_LATENCY:
+            case SYSM_TYPE_PKTLOSS:
+                is_up = (comp->monitor->data->err == SYSM_OK);
+                break;
+            case SYSM_TYPE_SNMP:
+                is_up = (comp->monitor->data->err == SYSM_OK);
+                break;
+            /* ... other types ... */
+        }
+
+        if (is_up) {
+            total_up++;
+            health_score += comp->weight;
+            if (comp->is_critical) critical_up++;
+        }
+
+        total_components++;
+        if (comp->is_critical) critical_total++;
+    }
+
+    /* Calculate service state */
+    bool service_up = (critical_up == critical_total);
+    bool service_degraded = service_up && (total_up < total_components);
+
+    /* Update SLO tracking */
+    record_service_state(svc, service_up ? SERVICE_UP : SERVICE_DOWN, now);
+    update_slo_state(svc, now);
+
+    /* Check for alerts */
+    check_service_alerts(svc);
+
+    /* Periodic reporting */
+    if ((now->tv_sec - svc->last_report_time) >= svc->report_interval) {
+        generate_slo_report(svc);
+        svc->last_report_time = now->tv_sec;
+    }
+}
+```
+
+### Implementation Phases
+
+#### Phase 1: Foundation (8-12 hours)
+- [ ] Data structures (service_slo, service_component)
+- [ ] Parser support for service definition syntax
+- [ ] Component linking (connect services to existing monitors)
+- [ ] Basic state tracking (UP/DOWN recording)
+
+#### Phase 2: SLO Calculation (6-8 hours)
+- [ ] Availability calculation over sliding window
+- [ ] Error budget tracking
+- [ ] Health score calculation with weighting
+- [ ] Service state determination (UP/DEGRADED/DOWN)
+
+#### Phase 3: Alerting (4-6 hours)
+- [ ] Service DOWN alerts (all critical components fail)
+- [ ] Service DEGRADED alerts (partial failure)
+- [ ] Error budget burn rate alerts
+- [ ] SLO violation alerts (missed target)
+
+#### Phase 4: Reporting (6-8 hours)
+- [ ] CSV report generation (timestamp, service, availability, budget)
+- [ ] JSON export for external systems
+- [ ] Real-time status queries (new CLI command)
+- [ ] Summary reports (weekly/monthly)
+
+**Total Estimate: 24-34 hours**
+
+### Example Use Cases
+
+#### Use Case 1: ISP Customer VPN Service
+
+```
+service {
+    name "Enterprise_Customer_VPN_123";
+    description "Multi-site VPN for BigCorp Inc.";
+    slo_availability 99.9;
+    slo_window 2592000;  /* 30 days */
+
+    /* Core connectivity check */
+    component {
+        type ping;
+        target "vpn-gw-site1.example.com";
+        critical true;
+    }
+
+    /* Performance SLI */
+    component {
+        type rtt;
+        target "vpn-gw-site1.example.com";
+        rtt_threshold 150;
+        jitter_threshold 30;
+        critical false;  /* Degraded, not DOWN */
+    }
+
+    /* Link utilization */
+    component {
+        type snmp;
+        target "core-rtr-1.example.com";
+        oid ".1.3.6.1.2.1.2.2.1.8.5";  /* Interface status */
+        expected "1";
+        critical true;
+    }
+
+    error_budget_burn_rate 10;
+    report_interval 86400;
+    report_file "/var/log/sysmon/customer_vpn_123.csv";
+}
+```
+
+**Alert Scenarios:**
+- **Service DOWN**: Ping fails to VPN gateway (immediate alert)
+- **Service DEGRADED**: RTT exceeds 150ms or jitter >30ms (alert after 3 consecutive)
+- **Burn Alert**: Consuming error budget at 10x normal rate (predict SLO miss)
+- **SLO Violation**: Availability drops below 99.9% for the 30-day window
+
+**Report Output (CSV):**
+```
+timestamp,service,availability_pct,error_budget_remaining_pct,state,downtime_seconds
+2025-10-24T00:00:00Z,Enterprise_Customer_VPN_123,99.95,50.0,UP,0
+2025-10-24T00:01:00Z,Enterprise_Customer_VPN_123,99.94,40.0,DEGRADED,36
+2025-10-24T00:02:00Z,Enterprise_Customer_VPN_123,99.93,30.0,UP,0
+```
+
+#### Use Case 2: Fixed Wireless CPE Service
+
+```
+service {
+    name "Fixed_Wireless_Sector_3A";
+    description "Sector 3A serving 45 residential customers";
+    slo_availability 99.5;
+    slo_window 2592000;
+
+    /* Customer reachability */
+    component {
+        type ping;
+        target "cpe-sector3a-agg.example.com";
+        critical true;
+    }
+
+    /* QoE metrics */
+    component {
+        type rtt;
+        target "cpe-sector3a-agg.example.com";
+        rtt_threshold 100;
+        jitter_threshold 20;
+        critical false;
+    }
+
+    /* Packet loss (critical for VoIP) */
+    component {
+        type pktloss;
+        target "cpe-sector3a-agg.example.com";
+        pktloss_threshold 1.0;  /* 1% */
+        critical false;
+    }
+
+    /* SNMP: RSSI check */
+    component {
+        type snmp;
+        target "ap-sector3a.example.com";
+        oid ".1.3.6.1.4.1.14988.1.1.1.1.1.4";  /* RSSI */
+        threshold_low -75;  /* Alert if below -75 dBm */
+        critical false;
+    }
+
+    error_budget_burn_rate 5;
+    report_interval 3600;  /* Hourly reports */
+}
+```
+
+### Benefits vs. Full SAA Stack
+
+**What This Provides:**
+- ✅ Service-level availability tracking (not just device UP/DOWN)
+- ✅ SLO compliance measurement and reporting
+- ✅ Error budget visibility and burn rate alerts
+- ✅ Multi-dimensional service health (ping + RTT + SNMP + packet loss)
+- ✅ Lightweight (single daemon, minimal overhead)
+- ✅ Simple configuration (text file, no database required)
+- ✅ CSV export for external analysis/dashboarding
+
+**What This Doesn't Provide (Requires Full SAA Stack):**
+- ❌ Topology-aware root cause analysis
+- ❌ Impact mapping (which customers affected)
+- ❌ Auto-remediation / runbooks
+- ❌ Ticketing integration
+- ❌ Capacity trending / forecasting
+- ❌ Machine learning anomaly detection
+- ❌ NetFlow/IPFIX analytics
+- ❌ Config drift detection
+
+### Integration with External Systems
+
+For users needing full SAA capabilities, sysmon's minimal SAA can feed into larger systems:
+
+```
+┌─────────────┐
+│   sysmon    │  ← Measures SLIs, tracks SLOs, generates CSV/JSON
+└──────┬──────┘
+       │
+       ├─→ CSV export ──→ ClickHouse/Splunk (trend analysis)
+       │
+       ├─→ JSON API ────→ Prometheus (time-series + alerts)
+       │
+       ├─→ Syslog ──────→ OpenSearch (correlation + search)
+       │
+       └─→ SNMP traps ──→ NetBox/LibreNMS (topology context)
+                            │
+                            ▼
+                    ┌───────────────────┐
+                    │  Full SAA Stack   │
+                    │  - Root cause     │
+                    │  - Impact map     │
+                    │  - Ticketing      │
+                    │  - Remediation    │
+                    └───────────────────┘
+```
+
+### Success Criteria
+
+A minimal SAA implementation is successful if it:
+
+1. **Answers the key question**: "Is this service meeting its SLO right now?"
+2. **Provides early warning**: Error budget burn alerts before SLO violation
+3. **Aggregates complexity**: One service health score vs. 10+ individual monitor states
+4. **Enables reporting**: CSV/JSON export for compliance documentation
+5. **Remains simple**: Configuration in 10-20 lines, not 1000
+6. **Low overhead**: <5% CPU/memory increase vs. current sysmon
+
+### Recommended Next Steps
+
+1. **Validate approach**: Review this design with user/team
+2. **Start small**: Implement Phase 1 (data structures + parser)
+3. **Prove value**: Create one real service definition and demonstrate SLO tracking
+4. **Iterate**: Add phases 2-4 based on actual usage patterns
+5. **Document**: Create example configs for common ISP/WISP scenarios
+
+### Open Questions
+
+1. **State persistence**: Should SLO state survive sysmon restarts? (Write to disk periodically?)
+2. **Historical data**: How long to retain state_history? (Memory vs. disk trade-off)
+3. **Component failure semantics**: What if a component monitor is removed from config mid-window?
+4. **Multi-window SLOs**: Support both 30-day AND 7-day windows simultaneously?
+5. **Weighted vs. Boolean**: Use weighted health scores or simple all-critical-up logic?
+
+---
+
+**Document Version**: 1.0
+**Date**: 2025-10-24
+**Status**: Proposed - Awaiting Review

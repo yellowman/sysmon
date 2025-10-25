@@ -1,0 +1,448 @@
+dnl Process this file with autoconf to produce a configure script.
+dnl configure.in for sys-mon created by torbjorn-sysmon@EU.net
+dnl modified by jared mauch (jared@puck.nether.net)
+
+# ===========================================================================
+#   http://www.gnu.org/software/autoconf-archive/ax_cflags_gcc_option.html
+# ===========================================================================
+#
+# SYNOPSIS
+#
+#   AX_CFLAGS_GCC_OPTION (optionflag [,[shellvar][,[A][,[NA]]])
+#
+# DESCRIPTION
+#
+#   AX_CFLAGS_GCC_OPTION(-fomit-frame-pointer) would show a message like
+#   "checking CFLAGS for gcc -fomit-frame-pointer ... yes" and add the
+#   optionflag to CFLAGS if it is understood. You can override the
+#   shellvar-default of CFLAGS of course. The order of arguments stems from
+#   the explicit macros like AX_CFLAGS_WARN_ALL.
+#
+#   The cousin AX_CXXFLAGS_GCC_OPTION would check for an option to add to
+#   CXXFLAGS - and it uses the autoconf setup for C++ instead of C (since it
+#   is possible to use different compilers for C and C++).
+#
+#   The macro is a lot simpler than any special AX_CFLAGS_* macro (or
+#   ax_cxx_rtti.m4 macro) but allows to check for arbitrary options.
+#   However, if you use this macro in a few places, it would be great if you
+#   would make up a new function-macro and submit it to the ac-archive.
+#
+#     - $1 option-to-check-for : required ("-option" as non-value)
+#     - $2 shell-variable-to-add-to : CFLAGS (or CXXFLAGS in the other case)
+#     - $3 action-if-found : add value to shellvariable
+#     - $4 action-if-not-found : nothing
+#
+#   Note: in earlier versions, $1-$2 were swapped. We try to detect the
+#   situation and accept a $2=~/-/ as being the old option-to-check-for.
+#
+#   There are other variants that emerged from the original macro variant
+#   which did just test an option to be possibly added. However, some
+#   compilers accept an option silently, or possibly for just another option
+#   that was not intended. Therefore, we have to do a generic test for a
+#   compiler family. For gcc we check "-pedantic" being accepted which is
+#   also understood by compilers who just want to be compatible with gcc
+#   even when not being made from gcc sources.
+#
+#   See also: AX_CFLAGS_SUN_OPTION, AX_CFLAGS_HPUX_OPTION,
+#   AX_CFLAGS_AIX_OPTION, and AX_CFLAGS_IRIX_OPTION.
+#
+# LICENSE
+#
+#   Copyright (c) 2008 Guido U. Draheim <guidod@gmx.de>
+#
+#   This program is free software; you can redistribute it and/or modify it
+#   under the terms of the GNU General Public License as published by the
+#   Free Software Foundation; either version 3 of the License, or (at your
+#   option) any later version.
+#
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+#   Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License along
+#   with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+#   As a special exception, the respective Autoconf Macro's copyright owner
+#   gives unlimited permission to copy, distribute and modify the configure
+#   scripts that are the output of Autoconf when processing the Macro. You
+#   need not follow the terms of the GNU General Public License when using
+#   or distributing such scripts, even though portions of the text of the
+#   Macro appear in them. The GNU General Public License (GPL) does govern
+#   all other use of the material that constitutes the Autoconf Macro.
+#
+#   This special exception to the GPL applies to versions of the Autoconf
+#   Macro released by the Autoconf Archive. When you make and distribute a
+#   modified version of the Autoconf Macro, you may extend this special
+#   exception to the GPL to apply to your modified version as well.
+
+#serial 13
+
+AC_DEFUN([AX_CFLAGS_GCC_OPTION_OLD], [dnl
+AS_VAR_PUSHDEF([FLAGS],[CFLAGS])dnl
+AS_VAR_PUSHDEF([VAR],[ax_cv_cflags_gcc_option_$2])dnl
+AC_CACHE_CHECK([m4_ifval($1,$1,FLAGS) for gcc m4_ifval($2,$2,-option)],
+VAR,[AS_VAR_SET([VAR],["no, unknown"])
+ AC_LANG_SAVE
+ AC_LANG_C
+ ac_save_[]FLAGS="$[]FLAGS"
+for ac_arg dnl
+in "-pedantic -Werror % m4_ifval($2,$2,-option)"  dnl   GCC
+   "-pedantic % m4_ifval($2,$2,-option) %% no, obsolete"  dnl new GCC
+   #
+do FLAGS="$ac_save_[]FLAGS "`echo $ac_arg | sed -e 's,%%.*,,' -e 's,%,,'`
+   AC_TRY_COMPILE([],[return 0;],
+   [AS_VAR_SET([VAR],[`echo $ac_arg | sed -e 's,.*% *,,'`]); break])
+done
+ FLAGS="$ac_save_[]FLAGS"
+ AC_LANG_RESTORE
+])
+m4_ifdef([AS_VAR_COPY],[AS_VAR_COPY([var],[VAR])],[var=AS_VAR_GET([VAR])])
+case ".$var" in
+     .ok|.ok,*) m4_ifvaln($3,$3) ;;
+   .|.no|.no,*) m4_ifvaln($4,$4) ;;
+   *) m4_ifvaln($3,$3,[
+   if echo " $[]m4_ifval($1,$1,FLAGS) " | grep " $var " 2>&1 >/dev/null
+   then AC_RUN_LOG([: m4_ifval($1,$1,FLAGS) does contain $var])
+   else AC_RUN_LOG([: m4_ifval($1,$1,FLAGS)="$m4_ifval($1,$1,FLAGS) $var"])
+                      m4_ifval($1,$1,FLAGS)="$m4_ifval($1,$1,FLAGS) $var"
+   fi ]) ;;
+esac
+AS_VAR_POPDEF([VAR])dnl
+AS_VAR_POPDEF([FLAGS])dnl
+])
+
+
+dnl the only difference - the LANG selection... and the default FLAGS
+
+AC_DEFUN([AX_CXXFLAGS_GCC_OPTION_OLD], [dnl
+AS_VAR_PUSHDEF([FLAGS],[CXXFLAGS])dnl
+AS_VAR_PUSHDEF([VAR],[ax_cv_cxxflags_gcc_option_$2])dnl
+AC_CACHE_CHECK([m4_ifval($1,$1,FLAGS) for gcc m4_ifval($2,$2,-option)],
+VAR,[AS_VAR_SET([VAR],["no, unknown"])
+ AC_LANG_SAVE
+ AC_LANG_CPLUSPLUS
+ ac_save_[]FLAGS="$[]FLAGS"
+for ac_arg dnl
+in "-pedantic -Werror % m4_ifval($2,$2,-option)"  dnl   GCC
+   "-pedantic % m4_ifval($2,$2,-option) %% no, obsolete"  dnl new GCC
+   #
+do FLAGS="$ac_save_[]FLAGS "`echo $ac_arg | sed -e 's,%%.*,,' -e 's,%,,'`
+   AC_TRY_COMPILE([],[return 0;],
+   [AS_VAR_SET([VAR],[`echo $ac_arg | sed -e 's,.*% *,,'`]); break])
+done
+ FLAGS="$ac_save_[]FLAGS"
+ AC_LANG_RESTORE
+])
+m4_ifdef([AS_VAR_COPY],[AS_VAR_COPY([var],[VAR])],[var=AS_VAR_GET([VAR])])
+case ".$var" in
+     .ok|.ok,*) m4_ifvaln($3,$3) ;;
+   .|.no|.no,*) m4_ifvaln($4,$4) ;;
+   *) m4_ifvaln($3,$3,[
+   if echo " $[]m4_ifval($1,$1,FLAGS) " | grep " $var " 2>&1 >/dev/null
+   then AC_RUN_LOG([: m4_ifval($1,$1,FLAGS) does contain $var])
+   else AC_RUN_LOG([: m4_ifval($1,$1,FLAGS)="$m4_ifval($1,$1,FLAGS) $var"])
+                      m4_ifval($1,$1,FLAGS)="$m4_ifval($1,$1,FLAGS) $var"
+   fi ]) ;;
+esac
+AS_VAR_POPDEF([VAR])dnl
+AS_VAR_POPDEF([FLAGS])dnl
+])
+
+dnl -------------------------------------------------------------------------
+
+AC_DEFUN([AX_CFLAGS_GCC_OPTION_NEW], [dnl
+AS_VAR_PUSHDEF([FLAGS],[CFLAGS])dnl
+AS_VAR_PUSHDEF([VAR],[ax_cv_cflags_gcc_option_$1])dnl
+AC_CACHE_CHECK([m4_ifval($2,$2,FLAGS) for gcc m4_ifval($1,$1,-option)],
+VAR,[AS_VAR_SET([VAR],["no, unknown"])
+ AC_LANG_SAVE
+ AC_LANG_C
+ ac_save_[]FLAGS="$[]FLAGS"
+for ac_arg dnl
+in "-pedantic -Werror % m4_ifval($1,$1,-option)"  dnl   GCC
+   "-pedantic % m4_ifval($1,$1,-option) %% no, obsolete"  dnl new GCC
+   #
+do FLAGS="$ac_save_[]FLAGS "`echo $ac_arg | sed -e 's,%%.*,,' -e 's,%,,'`
+   AC_TRY_COMPILE([],[return 0;],
+   [AS_VAR_SET([VAR],[`echo $ac_arg | sed -e 's,.*% *,,'`]); break])
+done
+ FLAGS="$ac_save_[]FLAGS"
+ AC_LANG_RESTORE
+])
+m4_ifdef([AS_VAR_COPY],[AS_VAR_COPY([var],[VAR])],[var=AS_VAR_GET([VAR])])
+case ".$var" in
+     .ok|.ok,*) m4_ifvaln($3,$3) ;;
+   .|.no|.no,*) m4_ifvaln($4,$4) ;;
+   *) m4_ifvaln($3,$3,[
+   if echo " $[]m4_ifval($2,$2,FLAGS) " | grep " $var " 2>&1 >/dev/null
+   then AC_RUN_LOG([: m4_ifval($2,$2,FLAGS) does contain $var])
+   else AC_RUN_LOG([: m4_ifval($2,$2,FLAGS)="$m4_ifval($2,$2,FLAGS) $var"])
+                      m4_ifval($2,$2,FLAGS)="$m4_ifval($2,$2,FLAGS) $var"
+   fi ]) ;;
+esac
+AS_VAR_POPDEF([VAR])dnl
+AS_VAR_POPDEF([FLAGS])dnl
+])
+
+
+dnl the only difference - the LANG selection... and the default FLAGS
+
+AC_DEFUN([AX_CXXFLAGS_GCC_OPTION_NEW], [dnl
+AS_VAR_PUSHDEF([FLAGS],[CXXFLAGS])dnl
+AS_VAR_PUSHDEF([VAR],[ax_cv_cxxflags_gcc_option_$1])dnl
+AC_CACHE_CHECK([m4_ifval($2,$2,FLAGS) for gcc m4_ifval($1,$1,-option)],
+VAR,[AS_VAR_SET([VAR],["no, unknown"])
+ AC_LANG_SAVE
+ AC_LANG_CPLUSPLUS
+ ac_save_[]FLAGS="$[]FLAGS"
+for ac_arg dnl
+in "-pedantic -Werror % m4_ifval($1,$1,-option)"  dnl   GCC
+   "-pedantic % m4_ifval($1,$1,-option) %% no, obsolete"  dnl new GCC
+   #
+do FLAGS="$ac_save_[]FLAGS "`echo $ac_arg | sed -e 's,%%.*,,' -e 's,%,,'`
+   AC_TRY_COMPILE([],[return 0;],
+   [AS_VAR_SET([VAR],[`echo $ac_arg | sed -e 's,.*% *,,'`]); break])
+done
+ FLAGS="$ac_save_[]FLAGS"
+ AC_LANG_RESTORE
+])
+m4_ifdef([AS_VAR_COPY],[AS_VAR_COPY([var],[VAR])],[var=AS_VAR_GET([VAR])])
+case ".$var" in
+     .ok|.ok,*) m4_ifvaln($3,$3) ;;
+   .|.no|.no,*) m4_ifvaln($4,$4) ;;
+   *) m4_ifvaln($3,$3,[
+   if echo " $[]m4_ifval($2,$2,FLAGS) " | grep " $var " 2>&1 >/dev/null
+   then AC_RUN_LOG([: m4_ifval($2,$2,FLAGS) does contain $var])
+   else AC_RUN_LOG([: m4_ifval($2,$2,FLAGS)="$m4_ifval($2,$2,FLAGS) $var"])
+                      m4_ifval($2,$2,FLAGS)="$m4_ifval($2,$2,FLAGS) $var"
+   fi ]) ;;
+esac
+AS_VAR_POPDEF([VAR])dnl
+AS_VAR_POPDEF([FLAGS])dnl
+])
+
+AC_DEFUN([AX_CFLAGS_GCC_OPTION],[ifelse(m4_bregexp([$2],[-]),-1,
+[AX_CFLAGS_GCC_OPTION_NEW($@)],[AX_CFLAGS_GCC_OPTION_OLD($@)])])
+
+AC_DEFUN([AX_CXXFLAGS_GCC_OPTION],[ifelse(m4_bregexp([$2],[-]),-1,
+[AX_CXXFLAGS_GCC_OPTION_NEW($@)],[AX_CXXFLAGS_GCC_OPTION_OLD($@)])])
+
+dnl initialize
+AC_INIT(src/config.h)
+AC_CONFIG_HEADER(src/defines.h:autoconf/defines.h.in)
+AC_PREREQ(2.10)
+AC_PREFIX_DEFAULT(/usr/local)
+AC_CONFIG_AUX_DIR(autoconf)
+AC_PROG_MAKE_SET
+
+dnl some new options to configure
+AC_ARG_ENABLE(ssl, [ --disable-ssl  don't support ssl], , enable_ssl=yes)
+AC_ARG_ENABLE(mail, [ --disable-mail  don't support mail], , enable_mail=yes)
+AC_ARG_ENABLE(clients, [ --disable-clients  no clients], , enable_clients=yes)
+AC_ARG_ENABLE(daemon, [ --disable-daemon  no daemon], , enable_daemon=yes)
+AC_ARG_ENABLE(ipv6, [ --enable-ipv6  enable ipv6 support], , enable_v6=yes)
+
+dnl search /usr/local/
+AC_ADD_SEARCH_PATH(/usr/local/)
+
+dnl find some programs
+AC_PROG_CC
+AC_PROG_RANLIB
+AC_PROG_INSTALL
+AC_PATH_PROGS(SENDMAIL, sendmail, no, $PATH:/usr/sbin:/usr/lib)
+AC_PATH_PROGS(LEX, flex, no, $PATH:/usr/ccs/bin)
+AC_PATH_PROGS(LEX, lex, no, $PATH:/usr/ccs/bin)
+
+AX_CFLAGS_GCC_OPTION(-fstack-protector)
+dnl AX_CFLAGS_GCC_OPTION(-fstack-protector, CFLAGS, -fstack-protector)
+
+if test "$LEX" = no; then
+    AC_MSG_WARN(without lex or flex sysmon may not compile but give it a try)
+fi
+
+
+dnl find some headers
+AC_CHECK_HEADERS(paths.h)
+
+dnl find some libraries
+AC_CHECK_LIB(curses, refresh)
+AC_CHECK_LIB(ncurses, refresh)
+AC_CHECK_LIB(nsl, inet_ntoa)
+AC_CHECK_LIB(fl, yywrap)
+AC_CHECK_LIB(l, yywrap)
+AC_CHECK_LIB(pthread, pthread_create)
+
+if test "$ac_cv_lib_fl_yywrap" = no; then
+	if test "$ac_cv_lib_l_yywrap" = no; then
+		AC_MSG_WARN(We may not compile as we did not find yywrap.  I suggest installing flex. ftp://ftp.gnu.org/gnu/non-gnu/flex/)
+	fi
+fi
+
+AC_CHECK_LIB(socket, getpeername)
+AC_CHECK_LIB(resolv, gethostname)
+
+AC_CHECK_FUNC(gethostbyname, GETHOSTBYNAME=true)
+if test "$GETHOSTBYNAME" = "true"; then
+        AC_DEFINE(HAVE_GETHOSTBYNAME, 1, [if exists])
+fi
+
+AC_CHECK_FUNC(gethostbyname2, GETHOSTBYNAME2=true)
+
+if test "$GETHOSTBYNAME2" = "true"; then
+	AC_DEFINE(HAVE_GETHOSTBYNAME2, 1, [if exists])
+fi
+
+AC_CHECK_LIB(c, snprintf, SNP="-DHAVE_SNPRINTF")
+AC_CHECK_FUNC(snprintf, SNP="-DHAVE_SNPRINTF")
+AC_CHECK_FUNC(_snprintf, SNP="-DHAVE_SNPRINTF")
+AC_CHECK_LIB(bsd, revoke)
+
+dnl net-snmp requires kstat on solaris usually
+AC_CHECK_LIB(kstat, main, KSTAT="true")
+
+dnl ssl related checks - plus snmp
+AC_ADD_SEARCH_PATH(/usr/local/ssl)
+AC_CHECK_LIB(ssl, main, SSL="-DHAVE_SSL")
+AC_CHECK_LIB(crypto, main, CRYPTO_LIBS="-lcrypto")
+
+if test -z "$SSL" ; then
+        AC_MSG_WARN(without openssl SNMP may not work)
+else
+        SSL_LIBS="-lssl"
+        if test "$KSTAT" = true; then
+                LIBS="$LIBS -lkstat"
+        fi
+fi
+
+
+AC_CHECK_LIB(wrap, hosts_ctl)
+
+dnl idea from NewsCache's libwrap check
+dnl libwrap
+dnl AC_MSG_CHECKING([for hosts_ctl in -lwrap])
+dnl ac_save_LIBS="$LIBS"
+dnl LIBS="-lwrap $LIBS"
+dnl AC_TRY_LINK([#include <tcpd.h>
+dnl int allow_severity; int deny_severity;], [hosts_ctl();],
+dnl AC_MSG_RESULT([yes])
+dnl AC_DEFINE(HAVE_LIBWRAP)
+dnl ac_cv_lib_wrap_hosts_ctl=yes,
+dnl LIBS="$ac_save_LIBS"
+dnl AC_MSG_RESULT([no])
+dnl ac_cv_lib_wrap_hosts_ctl=no)
+AC_CHECK_HEADERS(tcpd.h)
+
+
+#AC_CHECK_HEADERS(netinet/icmp6.h,IPV6="ENABLE_IPV6")
+AC_CHECK_HEADERS([sys/socket.h])
+AC_CHECK_HEADERS(netinet/in.h)
+AC_CHECK_HEADERS([netinet/icmp6.h], [], [],
+[#if HAVE_SYS_TYPES_H
+#include <sys/types.h>
+# endif
+#if HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+# endif
+#if HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+])
+
+# need SSL_LIBS/CRYOPTO_LIBS for linking in snmp
+LIBS_SAVE="$LIBS"
+
+LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
+
+AC_CHECK_HEADERS(net-snmp/version.h,IS_NET_SNMP="yes")
+if test "$IS_NET_SNMP" = "yes"; then
+        AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
+        AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")
+        AC_CHECK_LIB(netsnmp,snmp_open,USABLE_NET_SNMP="yes")
+else
+	AC_CHECK_HEADERS(ucd-snmp/version.h,IS_UCD_SNMP="yes")
+	if test "$IS_UCD_SNMP" = "yes"; then
+       		AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
+        	AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")
+        	AC_CHECK_LIB(netsnmp,snmp_open,USABLE_NET_SNMP="yes")
+	fi
+fi
+
+LIBS="$LIBS_SAVE"
+
+if test "$USABLE_SNMP" = "yes"; then
+       SNMP="-DENABLE_SNMP"
+	LIBS="$LIBS -lsnmp"
+fi
+if test "$USABLE_NET_SNMP" = "yes"; then
+       SNMP="-DENABLE_SNMP"
+       LIBS="$LIBS -lnetsnmp"
+fi
+
+
+dnl ssl libs need to come after netsnmp in linkpath
+LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
+
+dnl some checks
+if test "$SENDMAIL" = no; then
+	AC_MSG_WARN(without sendmail there is no support for alert messages)
+	SENDMAIL=-DMAIL=''
+else
+	SENDMAIL=-DMAIL='"'$SENDMAIL'"'
+fi
+
+#if test "$IPV6" = "ENABLE_IPV6"; then
+#	IPV6=-DENABLE_IPV6
+#else
+#	IPV6=''
+#fi
+
+
+if test "$enable_v6" = yes; then
+	IPV6='IPV6=-DENABLE_IPV6'
+else
+	IPV6=''
+fi
+
+if test "$enable_daemon" = yes; then
+	PROGS="$PROGS sysmond"
+else
+	AC_MSG_WARN(daemon not compiled on user request)
+fi
+
+if test "$enable_clients" = yes; then
+	PROGS="$PROGS sysmon"
+else
+	AC_MSG_WARN(clients not compiled on user request)
+fi
+
+
+dnl need these
+AC_SUBST(SSL)
+AC_SUBST(SENDMAIL)
+AC_SUBST(PROGS)
+AC_SUBST(IPV6)
+AC_SUBST(SNMP)
+AC_SUBST(SNP)
+#AC_SUBST(LDFLAGS)
+
+dnl write out the Makefile
+AC_OUTPUT(src/Makefile:autoconf/Makefile.in)
+
+dnl write out some helpful text
+cat <<EOT
+
+Configuration complete, now:
+cd src
+make 
+make install
+
+Then read ALL the documentation in docs/ :)
+
+If this is your first time using sysmon, please register it.  That can
+be done by typing:
+make register
+
+If you have problems, or have questions that are not in the docs,
+send e-mail to sysmon-help@puck.nether.net
+EOT

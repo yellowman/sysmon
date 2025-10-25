@@ -1,0 +1,13 @@
+CICNet's SysMon-JClient, Version 1.1
+
+SysMon-JClient is a java based client to the System monitoring
+program (sysmond).  This client polls the server daemon and reports back
+the information.  
+
+To run the program as an application:
+
+  1: unzip or untar the distribution package.
+  2: edit the JClient.sh or JClient.bat file, edit the JCLIENT variable.
+     Set it to the full path name of the "SysMon-JClient-1.1.classes.zip"
+	 file.  
+  3: run the shell script or the batch file.
