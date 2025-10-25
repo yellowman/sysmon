@@ -1,0 +1,246 @@
+{{template "base" .}}
+
+{{define "title"}}Configuration{{end}}
+
+{{define "content"}}
+<div x-data="configPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">
+            <i class="fas fa-cog mr-2"></i>Configuration
+        </h1>
+        <div class="flex space-x-3">
+            <button @click="reload()" :disabled="reloading"
+                    class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50">
+                <i class="fas" :class="reloading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
+                Reload Sysmon
+            </button>
+            <button @click="saveConfig()" :disabled="!modified || saving"
+                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                <i class="fas" :class="saving ? 'fa-spinner fa-spin' : 'fa-save'"></i>
+                Save Changes
+            </button>
+        </div>
+    </div>
+
+    <!-- Version Conflict Warning -->
+    <div x-show="versionConflict" class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+        <div class="flex">
+            <i class="fas fa-exclamation-triangle text-yellow-400 mt-1 mr-3"></i>
+            <div>
+                <h3 class="text-sm font-medium text-yellow-800">Configuration Conflict</h3>
+                <p class="text-sm text-yellow-700 mt-1">
+                    The configuration was modified by another user. Please review the current version and try again.
+                </p>
+                <button @click="fetchConfig(); versionConflict = false" class="mt-2 text-sm text-yellow-800 underline">
+                    Reload Current Version
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mb-6 border-b border-gray-200">
+        <nav class="-mb-px flex space-x-8">
+            <button @click="activeTab = 'editor'" :class="activeTab === 'editor' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                    class="py-4 px-1 border-b-2 font-medium text-sm">
+                <i class="fas fa-edit mr-2"></i>Raw Editor
+            </button>
+            <button @click="activeTab = 'backups'" :class="activeTab === 'backups' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                    class="py-4 px-1 border-b-2 font-medium text-sm">
+                <i class="fas fa-history mr-2"></i>Backups
+            </button>
+            <button @click="activeTab = 'audit'" :class="activeTab === 'audit' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                    class="py-4 px-1 border-b-2 font-medium text-sm">
+                <i class="fas fa-list mr-2"></i>Audit Log
+            </button>
+        </nav>
+    </div>
+
+    <!-- Raw Editor Tab -->
+    <div x-show="activeTab === 'editor'" class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <div class="flex justify-between items-center">
+                <div>
+                    <p class="text-sm text-gray-600">Version: <code class="text-xs bg-gray-100 px-2 py-1 rounded" x-text="currentVersion"></code></p>
+                    <p class="text-xs text-gray-500 mt-1" x-show="modified">Unsaved changes</p>
+                </div>
+                <input type="text" x-model="comment" placeholder="Change comment (optional)"
+                       class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            </div>
+        </div>
+        <div class="p-6">
+            <textarea x-model="configContent" @input="modified = true"
+                      class="w-full h-[600px] px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Loading configuration..."></textarea>
+        </div>
+    </div>
+
+    <!-- Backups Tab -->
+    <div x-show="activeTab === 'backups'">
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-for="backup in backups" :key="backup.filename">
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="new Date(backup.timestamp).toLocaleString()"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono" x-text="backup.filename"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="formatSize(backup.size)"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <button @click="restoreBackup(backup.filename)" class="text-blue-600 hover:text-blue-900">
+                                    <i class="fas fa-undo mr-1"></i>Restore
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Audit Log Tab -->
+    <div x-show="activeTab === 'audit'">
+        <div class="bg-white rounded-lg shadow p-6">
+            <p class="text-gray-500 text-sm">Audit log display coming soon...</p>
+        </div>
+    </div>
+
+    <!-- Success Message -->
+    <div x-show="successMessage" x-transition class="fixed bottom-4 right-4 bg-green-50 border border-green-200 rounded-lg px-6 py-4 shadow-lg z-50">
+        <div class="flex items-center">
+            <i class="fas fa-check-circle text-green-500 text-xl mr-3"></i>
+            <span class="text-green-800" x-text="successMessage"></span>
+        </div>
+    </div>
+</div>
+
+<script>
+function configPage() {
+    return {
+        activeTab: 'editor',
+        configContent: '',
+        currentVersion: '',
+        modified: false,
+        comment: '',
+        saving: false,
+        reloading: false,
+        versionConflict: false,
+        backups: [],
+        successMessage: '',
+
+        init() {
+            this.fetchConfig();
+            this.fetchBackups();
+        },
+
+        async fetchConfig() {
+            try {
+                const response = await fetch('/api/config/raw');
+                const data = await response.json();
+                this.configContent = data.content;
+                this.currentVersion = data.version;
+                this.modified = false;
+            } catch (e) {
+                alert('Failed to load configuration: ' + e.message);
+            }
+        },
+
+        async saveConfig() {
+            if (!confirm('Save configuration changes?')) return;
+
+            this.saving = true;
+            this.versionConflict = false;
+
+            try {
+                const response = await fetch('/api/config/raw', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content: this.configContent,
+                        version: this.currentVersion,
+                        comment: this.comment
+                    })
+                });
+
+                if (response.status === 409) {
+                    this.versionConflict = true;
+                    throw new Error('Version conflict');
+                }
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to save');
+                }
+
+                const data = await response.json();
+                this.currentVersion = data.version;
+                this.modified = false;
+                this.comment = '';
+                this.showSuccess('Configuration saved successfully');
+                this.fetchBackups();
+            } catch (e) {
+                if (!this.versionConflict) {
+                    alert('Failed to save configuration: ' + e.message);
+                }
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        async reload() {
+            if (!confirm('Reload sysmon daemon with current configuration?')) return;
+
+            this.reloading = true;
+            try {
+                await fetch('/api/config/reload', { method: 'POST' });
+                this.showSuccess('Sysmon reloaded successfully');
+            } catch (e) {
+                alert('Failed to reload sysmon: ' + e.message);
+            } finally {
+                this.reloading = false;
+            }
+        },
+
+        async fetchBackups() {
+            try {
+                const response = await fetch('/api/backups');
+                this.backups = await response.json();
+            } catch (e) {
+                console.error('Failed to fetch backups:', e);
+            }
+        },
+
+        async restoreBackup(filename) {
+            if (!confirm(`Restore backup ${filename}? This will replace the current configuration.`)) return;
+
+            try {
+                await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
+                this.showSuccess('Backup restored successfully');
+                await this.fetchConfig();
+            } catch (e) {
+                alert('Failed to restore backup: ' + e.message);
+            }
+        },
+
+        formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        },
+
+        showSuccess(message) {
+            this.successMessage = message;
+            setTimeout(() => this.successMessage = '', 3000);
+        }
+    };
+}
+</script>
+{{end}}

@@ -272,6 +272,158 @@ Each test type has its own result format with type-specific metrics.
       "contact": "dba@example.com"
     }
   ],
+  "snmp_traps": {
+    "recent_traps": [
+      {
+        "source_ip": "192.0.2.50",
+        "source_hostname": "router01.example.com",
+        "timestamp": "2025-01-25T10:29:45Z",
+        "trap_type": "coldStart",
+        "enterprise_oid": ".1.3.6.1.4.1.9",
+        "generic_trap": 0,
+        "specific_trap": 0,
+        "uptime_ticks": 12345,
+        "community": "public",
+        "varbinds": [
+          {
+            "oid": ".1.3.6.1.2.1.1.3.0",
+            "type": "TimeTicks",
+            "value": "12345"
+          },
+          {
+            "oid": ".1.3.6.1.6.3.1.1.4.1.0",
+            "type": "OID",
+            "value": ".1.3.6.1.6.3.1.1.5.1"
+          }
+        ],
+        "decoded": {
+          "trap_name": "Cold Start",
+          "description": "Device has been powered on or rebooted",
+          "severity": "informational",
+          "category": "system"
+        },
+        "matched_host": "router01.example.com",
+        "trap_alert_enabled": true,
+        "alert_sent": true
+      },
+      {
+        "source_ip": "192.0.2.75",
+        "source_hostname": "switch02.example.com",
+        "timestamp": "2025-01-25T10:25:30Z",
+        "trap_type": "linkDown",
+        "enterprise_oid": ".1.3.6.1.4.1.9",
+        "generic_trap": 2,
+        "specific_trap": 0,
+        "uptime_ticks": 567890,
+        "community": "public",
+        "varbinds": [
+          {
+            "oid": ".1.3.6.1.2.1.2.2.1.1.10001",
+            "type": "Integer",
+            "value": "10001",
+            "description": "Interface index"
+          },
+          {
+            "oid": ".1.3.6.1.2.1.2.2.1.2.10001",
+            "type": "OctetString",
+            "value": "GigabitEthernet0/1",
+            "description": "Interface name"
+          },
+          {
+            "oid": ".1.3.6.1.2.1.2.2.1.7.10001",
+            "type": "Integer",
+            "value": "2",
+            "description": "Admin status: down"
+          }
+        ],
+        "decoded": {
+          "trap_name": "Link Down",
+          "description": "Network interface GigabitEthernet0/1 is down",
+          "severity": "warning",
+          "category": "network",
+          "interface": "GigabitEthernet0/1",
+          "interface_index": 10001
+        },
+        "matched_host": "switch02.example.com",
+        "trap_alert_enabled": true,
+        "alert_sent": true
+      },
+      {
+        "source_ip": "192.0.2.100",
+        "source_hostname": null,
+        "timestamp": "2025-01-25T10:20:15Z",
+        "trap_type": "enterpriseSpecific",
+        "enterprise_oid": ".1.3.6.1.4.1.2021",
+        "generic_trap": 6,
+        "specific_trap": 101,
+        "uptime_ticks": 234567,
+        "community": "public",
+        "varbinds": [
+          {
+            "oid": ".1.3.6.1.4.1.2021.10.1.3.1",
+            "type": "Integer",
+            "value": "95",
+            "description": "CPU load percentage"
+          }
+        ],
+        "decoded": {
+          "trap_name": "High CPU Load",
+          "description": "CPU load at 95%",
+          "severity": "critical",
+          "category": "performance",
+          "vendor": "Net-SNMP"
+        },
+        "matched_host": null,
+        "trap_alert_enabled": false,
+        "alert_sent": false,
+        "note": "No matching host configured - trap logged but no alert sent"
+      }
+    ],
+    "trap_sources": [
+      {
+        "source_ip": "192.0.2.50",
+        "hostname": "router01.example.com",
+        "first_seen": "2025-01-24T08:00:00Z",
+        "last_seen": "2025-01-25T10:29:45Z",
+        "total_traps": 45,
+        "trap_alert_enabled": true,
+        "recent_trap_types": ["coldStart", "warmStart", "linkUp"]
+      },
+      {
+        "source_ip": "192.0.2.75",
+        "hostname": "switch02.example.com",
+        "first_seen": "2025-01-25T09:15:00Z",
+        "last_seen": "2025-01-25T10:25:30Z",
+        "total_traps": 8,
+        "trap_alert_enabled": true,
+        "recent_trap_types": ["linkDown", "linkUp"]
+      },
+      {
+        "source_ip": "192.0.2.100",
+        "hostname": null,
+        "first_seen": "2025-01-25T10:20:15Z",
+        "last_seen": "2025-01-25T10:20:15Z",
+        "total_traps": 1,
+        "trap_alert_enabled": false,
+        "recent_trap_types": ["enterpriseSpecific"]
+      }
+    ],
+    "summary": {
+      "total_traps_received": 12456,
+      "traps_last_hour": 54,
+      "traps_last_24h": 892,
+      "unique_sources": 3,
+      "enabled_sources": 2,
+      "trap_types": {
+        "coldStart": 23,
+        "warmStart": 15,
+        "linkDown": 4,
+        "linkUp": 3,
+        "authenticationFailure": 0,
+        "enterpriseSpecific": 9
+      }
+    }
+  },
   "queue": {
     "size": 12,
     "pending": 3,
@@ -742,24 +894,25 @@ void output_check_result_json(int fd, struct monitorent *mon, const char *check_
         http = (struct httpdata *)mon->monitordata;
         if (http) {
             dprintf(fd, "            \"status_code\": %d,\n", http->status_code);
-            dprintf(fd, "            \"response_time_ms\": %.1f,\n",
+            dprintf(fd, "            \"response_time_ms\": %.1f",
                    mon->checkent->lastchecktime * 1000.0);
             if (http->content_length > 0) {
-                dprintf(fd, "            \"content_length\": %lu,\n", http->content_length);
+                dprintf(fd, ",\n            \"content_length\": %lu", http->content_length);
             }
             if (strcmp(check_type, "https") == 0 && http->ssl_days_remaining >= 0) {
-                dprintf(fd, "            \"ssl_days_remaining\": %d,\n", http->ssl_days_remaining);
+                dprintf(fd, ",\n            \"ssl_days_remaining\": %d", http->ssl_days_remaining);
             }
-            dprintf(fd, "            \"_last_field\": null\n");  /* Trailing comma workaround */
+            dprintf(fd, "\n");
         }
 
     } else if (strcmp(check_type, "tcp") == 0 || strcmp(check_type, "udp") == 0) {
         dprintf(fd, "            \"connected\": true,\n");
-        dprintf(fd, "            \"connection_time_ms\": %.1f\n",
+        dprintf(fd, "            \"connection_time_ms\": %.1f",
                mon->checkent->lastchecktime * 1000.0);
         if (strcmp(check_type, "udp") == 0) {
-            dprintf(fd, ",\n            \"response_received\": true\n");
+            dprintf(fd, ",\n            \"response_received\": true");
         }
+        dprintf(fd, "\n");
 
     } else if (strcmp(check_type, "smtp") == 0) {
         dprintf(fd, "            \"smtp_code\": 220,\n");  /* From check data */
@@ -912,6 +1065,268 @@ void output_summary_json(int fd)
     dprintf(fd, "      \"ok\": %d,\n", checks_ok);
     dprintf(fd, "      \"warning\": %d,\n", checks_warn);
     dprintf(fd, "      \"critical\": %d\n", checks_crit);
+    dprintf(fd, "    }\n");
+
+    dprintf(fd, "  },\n");
+}
+
+/*
+ * decode_snmp_trap - Decode SNMP trap into human-readable format
+ */
+struct trap_decode {
+    char trap_name[128];
+    char description[512];
+    char severity[32];
+    char category[64];
+    char vendor[64];
+    char interface[128];
+    int interface_index;
+};
+
+struct trap_decode *decode_snmp_trap(int generic_trap, int specific_trap,
+                                     const char *enterprise_oid,
+                                     struct varbind *varbinds, int num_varbinds)
+{
+    struct trap_decode *decoded = malloc(sizeof(struct trap_decode));
+    memset(decoded, 0, sizeof(struct trap_decode));
+
+    /* Standard SNMP generic traps */
+    switch (generic_trap) {
+        case 0:  /* coldStart */
+            strcpy(decoded->trap_name, "Cold Start");
+            strcpy(decoded->description, "Device has been powered on or rebooted");
+            strcpy(decoded->severity, "informational");
+            strcpy(decoded->category, "system");
+            break;
+
+        case 1:  /* warmStart */
+            strcpy(decoded->trap_name, "Warm Start");
+            strcpy(decoded->description, "Device configuration reloaded without power cycle");
+            strcpy(decoded->severity, "informational");
+            strcpy(decoded->category, "system");
+            break;
+
+        case 2:  /* linkDown */
+            strcpy(decoded->trap_name, "Link Down");
+            strcpy(decoded->severity, "warning");
+            strcpy(decoded->category, "network");
+
+            /* Extract interface information from varbinds */
+            for (int i = 0; i < num_varbinds; i++) {
+                /* ifIndex */
+                if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.1.")) {
+                    decoded->interface_index = atoi(varbinds[i].value);
+                }
+                /* ifDescr */
+                if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.2.")) {
+                    strncpy(decoded->interface, varbinds[i].value, sizeof(decoded->interface)-1);
+                }
+            }
+
+            snprintf(decoded->description, sizeof(decoded->description),
+                    "Network interface %s (index %d) is down",
+                    decoded->interface, decoded->interface_index);
+            break;
+
+        case 3:  /* linkUp */
+            strcpy(decoded->trap_name, "Link Up");
+            strcpy(decoded->severity, "informational");
+            strcpy(decoded->category, "network");
+
+            /* Extract interface information */
+            for (int i = 0; i < num_varbinds; i++) {
+                if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.1.")) {
+                    decoded->interface_index = atoi(varbinds[i].value);
+                }
+                if (strstr(varbinds[i].oid, ".1.3.6.1.2.1.2.2.1.2.")) {
+                    strncpy(decoded->interface, varbinds[i].value, sizeof(decoded->interface)-1);
+                }
+            }
+
+            snprintf(decoded->description, sizeof(decoded->description),
+                    "Network interface %s (index %d) is up",
+                    decoded->interface, decoded->interface_index);
+            break;
+
+        case 4:  /* authenticationFailure */
+            strcpy(decoded->trap_name, "Authentication Failure");
+            strcpy(decoded->description, "SNMP authentication failed - invalid community string");
+            strcpy(decoded->severity, "warning");
+            strcpy(decoded->category, "security");
+            break;
+
+        case 5:  /* egpNeighborLoss */
+            strcpy(decoded->trap_name, "EGP Neighbor Loss");
+            strcpy(decoded->description, "EGP neighbor connectivity lost");
+            strcpy(decoded->severity, "critical");
+            strcpy(decoded->category, "routing");
+            break;
+
+        case 6:  /* enterpriseSpecific */
+            strcpy(decoded->trap_name, "Enterprise Specific");
+
+            /* Decode based on enterprise OID */
+            if (strstr(enterprise_oid, ".1.3.6.1.4.1.9")) {
+                /* Cisco */
+                strcpy(decoded->vendor, "Cisco");
+                decode_cisco_trap(specific_trap, varbinds, num_varbinds, decoded);
+
+            } else if (strstr(enterprise_oid, ".1.3.6.1.4.1.2021")) {
+                /* Net-SNMP */
+                strcpy(decoded->vendor, "Net-SNMP");
+                decode_netsnmp_trap(specific_trap, varbinds, num_varbinds, decoded);
+
+            } else if (strstr(enterprise_oid, ".1.3.6.1.4.1.2636")) {
+                /* Juniper */
+                strcpy(decoded->vendor, "Juniper");
+                decode_juniper_trap(specific_trap, varbinds, num_varbinds, decoded);
+
+            } else if (strstr(enterprise_oid, ".1.3.6.1.4.1.6876")) {
+                /* VMware */
+                strcpy(decoded->vendor, "VMware");
+                decode_vmware_trap(specific_trap, varbinds, num_varbinds, decoded);
+
+            } else {
+                /* Unknown vendor */
+                snprintf(decoded->description, sizeof(decoded->description),
+                        "Enterprise-specific trap %d from %s",
+                        specific_trap, enterprise_oid);
+                strcpy(decoded->severity, "informational");
+                strcpy(decoded->category, "other");
+            }
+            break;
+
+        default:
+            strcpy(decoded->trap_name, "Unknown");
+            snprintf(decoded->description, sizeof(decoded->description),
+                    "Unknown trap type %d", generic_trap);
+            strcpy(decoded->severity, "informational");
+            strcpy(decoded->category, "other");
+    }
+
+    return decoded;
+}
+
+/*
+ * output_snmp_traps_json - Output SNMP trap history and statistics
+ */
+void output_snmp_traps_json(int fd)
+{
+    struct trap_history *trap;
+    struct trap_source *source;
+    int first_trap, first_source;
+    char timestamp_buf[64];
+
+    dprintf(fd, "  \"snmp_traps\": {\n");
+
+    /* Recent traps */
+    dprintf(fd, "    \"recent_traps\": [\n");
+
+    first_trap = 1;
+    for (trap = trap_history_head; trap != NULL && trap->age < 3600; trap = trap->next) {
+        if (!first_trap) {
+            dprintf(fd, ",\n");
+        }
+        first_trap = 0;
+
+        format_timestamp(timestamp_buf, sizeof(timestamp_buf), &trap->received_at);
+
+        /* Decode trap */
+        struct trap_decode *decoded = decode_snmp_trap(trap->generic_trap,
+                                                       trap->specific_trap,
+                                                       trap->enterprise_oid,
+                                                       trap->varbinds,
+                                                       trap->num_varbinds);
+
+        dprintf(fd, "      {\n");
+        dprintf(fd, "        \"source_ip\": \"%s\",\n", trap->source_ip);
+
+        if (trap->matched_host) {
+            dprintf(fd, "        \"source_hostname\": \"%s\",\n", trap->matched_host->hostname);
+        } else {
+            dprintf(fd, "        \"source_hostname\": null,\n");
+        }
+
+        dprintf(fd, "        \"timestamp\": \"%s\",\n", timestamp_buf);
+        dprintf(fd, "        \"trap_type\": \"%s\",\n", get_trap_type_string(trap->generic_trap));
+        dprintf(fd, "        \"enterprise_oid\": \"%s\",\n", trap->enterprise_oid);
+        dprintf(fd, "        \"generic_trap\": %d,\n", trap->generic_trap);
+        dprintf(fd, "        \"specific_trap\": %d,\n", trap->specific_trap);
+        dprintf(fd, "        \"uptime_ticks\": %lu,\n", trap->uptime_ticks);
+        dprintf(fd, "        \"community\": \"%s\",\n", trap->community);
+
+        /* Varbinds */
+        dprintf(fd, "        \"varbinds\": [\n");
+        for (int i = 0; i < trap->num_varbinds; i++) {
+            dprintf(fd, "          {\n");
+            dprintf(fd, "            \"oid\": \"%s\",\n", trap->varbinds[i].oid);
+            dprintf(fd, "            \"type\": \"%s\",\n", trap->varbinds[i].type);
+            dprintf(fd, "            \"value\": \"%s\"\n", trap->varbinds[i].value);
+            dprintf(fd, "          }%s\n", i < trap->num_varbinds - 1 ? "," : "");
+        }
+        dprintf(fd, "        ],\n");
+
+        /* Decoded information */
+        dprintf(fd, "        \"decoded\": {\n");
+        dprintf(fd, "          \"trap_name\": \"%s\",\n", decoded->trap_name);
+        dprintf(fd, "          \"description\": \"%s\",\n", decoded->description);
+        dprintf(fd, "          \"severity\": \"%s\",\n", decoded->severity);
+        dprintf(fd, "          \"category\": \"%s\"\n", decoded->category);
+        if (decoded->vendor[0]) {
+            dprintf(fd, "          ,\"vendor\": \"%s\"\n", decoded->vendor);
+        }
+        if (decoded->interface[0]) {
+            dprintf(fd, "          ,\"interface\": \"%s\"\n", decoded->interface);
+            dprintf(fd, "          ,\"interface_index\": %d\n", decoded->interface_index);
+        }
+        dprintf(fd, "        },\n");
+
+        dprintf(fd, "        \"matched_host\": %s,\n",
+               trap->matched_host ? trap->matched_host->hostname : "null");
+        dprintf(fd, "        \"trap_alert_enabled\": %s,\n",
+               trap->matched_host && trap->matched_host->trap_alert ? "true" : "false");
+        dprintf(fd, "        \"alert_sent\": %s\n",
+               trap->alert_sent ? "true" : "false");
+
+        dprintf(fd, "      }");
+
+        free(decoded);
+    }
+
+    dprintf(fd, "\n    ],\n");
+
+    /* Trap sources summary */
+    dprintf(fd, "    \"trap_sources\": [\n");
+
+    first_source = 1;
+    for (source = trap_sources_head; source != NULL; source = source->next) {
+        if (!first_source) {
+            dprintf(fd, ",\n");
+        }
+        first_source = 0;
+
+        dprintf(fd, "      {\n");
+        dprintf(fd, "        \"source_ip\": \"%s\",\n", source->ip);
+        dprintf(fd, "        \"hostname\": %s,\n",
+               source->hostname ? source->hostname : "null");
+        format_timestamp(timestamp_buf, sizeof(timestamp_buf), &source->first_seen);
+        dprintf(fd, "        \"first_seen\": \"%s\",\n", timestamp_buf);
+        format_timestamp(timestamp_buf, sizeof(timestamp_buf), &source->last_seen);
+        dprintf(fd, "        \"last_seen\": \"%s\",\n", timestamp_buf);
+        dprintf(fd, "        \"total_traps\": %lu,\n", source->total_traps);
+        dprintf(fd, "        \"trap_alert_enabled\": %s\n",
+               source->trap_alert_enabled ? "true" : "false");
+        dprintf(fd, "      }");
+    }
+
+    dprintf(fd, "\n    ],\n");
+
+    /* Summary statistics */
+    dprintf(fd, "    \"summary\": {\n");
+    dprintf(fd, "      \"total_traps_received\": %lu,\n", total_traps_received);
+    dprintf(fd, "      \"traps_last_hour\": %d,\n", count_recent_traps(3600));
+    dprintf(fd, "      \"traps_last_24h\": %d,\n", count_recent_traps(86400));
+    dprintf(fd, "      \"unique_sources\": %d\n", count_trap_sources());
     dprintf(fd, "    }\n");
 
     dprintf(fd, "  },\n");
@@ -1217,6 +1632,158 @@ $ echo "json" | nc localhost 3355 | jq '.summary.checks_by_type'
 1. **Phase 1** - Add JSON output to sysmon (this design)
 2. **Phase 2** - Update web UI to use JSON instead of text parsing
 3. **Phase 3** - Keep both outputs indefinitely (backwards compatibility)
+
+## Web UI Features for SNMP Trap Visualization
+
+With the rich trap data exposed, the web UI can provide:
+
+### Trap Dashboard
+```tsx
+<TrapDashboard>
+  <TrapSummaryCards>
+    <Card title="Traps Today" value={traps_last_24h} />
+    <Card title="Active Sources" value={unique_sources} />
+    <Card title="Critical Traps" value={critical_count} color="red" />
+  </TrapSummaryCards>
+
+  <TrapTimeline>
+    {/* Real-time trap stream with color-coded severity */}
+    {recent_traps.map(trap => (
+      <TrapEvent
+        time={trap.timestamp}
+        source={trap.source_hostname}
+        type={trap.decoded.trap_name}
+        severity={trap.decoded.severity}
+        message={trap.decoded.description}
+      />
+    ))}
+  </TrapTimeline>
+
+  <TrapSourcesTable>
+    {/* Devices sending traps */}
+    {trap_sources.map(source => (
+      <SourceRow
+        ip={source.source_ip}
+        hostname={source.hostname}
+        total={source.total_traps}
+        lastSeen={source.last_seen}
+        alertEnabled={source.trap_alert_enabled}
+      />
+    ))}
+  </TrapSourcesTable>
+</TrapDashboard>
+```
+
+### Trap Detail View
+```tsx
+<TrapDetailModal trap={selectedTrap}>
+  <TrapHeader>
+    <SeverityBadge severity={trap.decoded.severity} />
+    <h2>{trap.decoded.trap_name}</h2>
+    <time>{trap.timestamp}</time>
+  </TrapHeader>
+
+  <TrapInfo>
+    <Field label="Source" value={trap.source_hostname || trap.source_ip} />
+    <Field label="Description" value={trap.decoded.description} />
+    <Field label="Category" value={trap.decoded.category} />
+    {trap.decoded.vendor && (
+      <Field label="Vendor" value={trap.decoded.vendor} />
+    )}
+    {trap.decoded.interface && (
+      <Field label="Interface" value={trap.decoded.interface} />
+    )}
+  </TrapInfo>
+
+  <VarbindsTable>
+    <h3>Variable Bindings</h3>
+    {trap.varbinds.map(vb => (
+      <Row>
+        <OID>{vb.oid}</OID>
+        <Type>{vb.type}</Type>
+        <Value>{vb.value}</Value>
+        <Description>{vb.description}</Description>
+      </Row>
+    ))}
+  </VarbindsTable>
+
+  <RawDataSection>
+    <h3>Raw Trap Data</h3>
+    <Code>
+      Enterprise: {trap.enterprise_oid}
+      Generic: {trap.generic_trap}
+      Specific: {trap.specific_trap}
+      Uptime: {trap.uptime_ticks} ticks
+      Community: {trap.community}
+    </Code>
+  </RawDataSection>
+</TrapDetailModal>
+```
+
+### Network Map with Trap Indicators
+```tsx
+<NetworkMap>
+  {hosts.map(host => (
+    <HostNode
+      hostname={host.hostname}
+      status={host.status}
+      recentTraps={getTrapsForHost(host)}
+      trapBadge={host.recent_trap_count > 0}
+    >
+      {/* Show trap indicator on network map */}
+      {host.recent_trap_count > 0 && (
+        <TrapBadge count={host.recent_trap_count} />
+      )}
+    </HostNode>
+  ))}
+</NetworkMap>
+```
+
+### Trap Analytics
+```tsx
+<TrapAnalytics>
+  <TrapTypePieChart data={trap_types} />
+  <TrapTimelineGraph data={traps_over_time} />
+  <TopTrapSourcesChart data={trap_sources} />
+  <SeverityDistribution data={traps_by_severity} />
+</TrapAnalytics>
+```
+
+### Decoded Trap Messages
+
+The decode_snmp_trap() function translates raw SNMP data into:
+
+**Generic Traps:**
+- coldStart → "Device has been powered on or rebooted"
+- warmStart → "Configuration reloaded without power cycle"
+- linkDown → "Network interface GigabitEthernet0/1 is down"
+- linkUp → "Network interface GigabitEthernet0/1 is up"
+- authenticationFailure → "SNMP authentication failed"
+
+**Enterprise-Specific Traps:**
+- Cisco: BGP peer down, configuration change, etc.
+- Juniper: Chassis alarms, interface errors, etc.
+- Net-SNMP: CPU load, disk full, process monitoring
+- VMware: VM power state, host connectivity, etc.
+
+### Alert Integration
+
+Traps trigger alerts when:
+1. Source IP matches a configured host with `trap_alert` enabled
+2. Alert sent to host's primary contact
+3. Trap logged to audit trail
+4. Web UI shows trap in alerts widget
+
+### Filtering and Search
+```tsx
+<TrapFilter>
+  <Select label="Severity" options={['all', 'critical', 'warning', 'info']} />
+  <Select label="Category" options={['all', 'network', 'system', 'security']} />
+  <Select label="Source" options={trap_sources} />
+  <DateRange label="Time Range" />
+  <SearchBox placeholder="Search trap descriptions..." />
+</TrapFilter>
+```
 
 ## Summary
 
