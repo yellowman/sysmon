@@ -179,12 +179,51 @@
     </div>
 
     <!-- Error State -->
-    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-        <i class="fas fa-exclamation-circle text-4xl text-red-500 mb-4"></i>
-        <p class="text-red-800 font-medium" x-text="error"></p>
-        <button @click="fetchData()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-            Retry
-        </button>
+    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6">
+        <div class="flex items-start">
+            <i class="fas fa-exclamation-circle text-3xl text-red-500 mr-4 flex-shrink-0"></i>
+            <div class="flex-1">
+                <p class="text-red-800 font-medium mb-4" x-text="typeof error === 'string' ? error : error?.message"></p>
+
+                <!-- Show XML debug data if available -->
+                <template x-if="typeof error === 'object' && error?.details">
+                    <div class="mt-4 bg-white border border-red-300 rounded-lg p-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-sm font-semibold text-gray-900">Debug Information</h3>
+                            <button @click="copyXMLToClipboard()"
+                                    class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+                                <i class="fas fa-copy mr-1"></i> Copy XML
+                            </button>
+                        </div>
+                        <div class="text-xs text-gray-700 mb-2">
+                            <strong>Object:</strong> <span x-text="error.details.object_name"></span>
+                        </div>
+                        <div class="bg-gray-900 text-green-400 p-3 rounded font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
+                            <pre x-text="error.details.raw_xml" id="xmlDebugContent"></pre>
+                        </div>
+                        <details class="mt-3">
+                            <summary class="cursor-pointer text-sm text-blue-600 hover:text-blue-800">Show all XML samples</summary>
+                            <div class="mt-2 space-y-2" x-show="error.details.samples">
+                                <template x-for="(sample, idx) in error.details.samples" :key="idx">
+                                    <div class="border-t pt-2">
+                                        <div class="text-xs text-gray-700 mb-1">
+                                            <strong>Object:</strong> <span x-text="sample.object"></span>
+                                        </div>
+                                        <div class="bg-gray-900 text-green-400 p-2 rounded font-mono text-xs overflow-x-auto max-h-48 overflow-y-auto">
+                                            <pre x-text="sample.xml"></pre>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </details>
+                    </div>
+                </template>
+
+                <button @click="fetchData()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+                    <i class="fas fa-redo mr-2"></i> Retry
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Update Dialog Modal -->
@@ -262,7 +301,20 @@ function dashboard() {
                 this.error = null;
 
                 const response = await fetch('/api/monitoring/status');
-                if (!response.ok) throw new Error('Failed to fetch status');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    // If error has debug details (XML parse error), store them
+                    if (errorData.details) {
+                        this.error = {
+                            message: errorData.message || 'Failed to fetch status',
+                            details: errorData.details
+                        };
+                    } else {
+                        this.error = errorData.message || 'Failed to fetch status';
+                    }
+                    this.loading = false;
+                    return;
+                }
 
                 const data = await response.json();
                 this.daemon = data.daemon;
@@ -392,6 +444,17 @@ function dashboard() {
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
             return `${Math.floor(diff / 86400)}d ago`;
+        },
+
+        copyXMLToClipboard() {
+            const xmlContent = typeof this.error === 'object' && this.error?.details?.raw_xml;
+            if (xmlContent) {
+                navigator.clipboard.writeText(xmlContent).then(() => {
+                    this.showNotification('XML copied to clipboard!');
+                }).catch(err => {
+                    alert('Failed to copy XML: ' + err.message);
+                });
+            }
         }
     };
 }

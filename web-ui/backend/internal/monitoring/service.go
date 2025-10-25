@@ -17,6 +17,18 @@ type Service struct {
 	sysmonAddr string
 }
 
+// XMLParseError represents an XML parsing error with debug data
+type XMLParseError struct {
+	Message     string
+	ObjectName  string
+	RawXML      string
+	AllSamples  []map[string]string
+}
+
+func (e *XMLParseError) Error() string {
+	return e.Message
+}
+
 // NewService creates a new monitoring service
 func NewService(sysmonAddr string) *Service {
 	return &Service{
@@ -121,6 +133,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 	hostsUp := 0
 	hostsDown := 0
+	debugXMLSamples := []map[string]string{} // Collect first few XML samples for debugging
 
 	for _, objName := range objectNames {
 		// Send SHOWOBJ command
@@ -146,16 +159,24 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			}
 		}
 
-		// Debug: log raw XML for first object
-		if len(status.Hosts) == 0 {
-			fmt.Fprintf(os.Stderr, "DEBUG: First object XML for %s:\n%s\n", objName, xmlData)
+		// Collect XML samples for debugging (first 3 objects)
+		if len(debugXMLSamples) < 3 {
+			debugXMLSamples = append(debugXMLSamples, map[string]string{
+				"object": objName,
+				"xml":    xmlData,
+			})
 		}
 
 		// Parse XML
 		var xmlObj XMLObjectStatus
 		if err := xml.Unmarshal([]byte(xmlData), &xmlObj); err != nil {
-			fmt.Fprintf(os.Stderr, "XML parse error for %s: %v\nXML data:\n%s\n", objName, err, xmlData)
-			continue // Skip objects with parse errors
+			// On first parse error, return error with debug data
+			return nil, &XMLParseError{
+				Message:     fmt.Sprintf("Failed to parse XML for object %s: %v", objName, err),
+				ObjectName:  objName,
+				RawXML:      xmlData,
+				AllSamples:  debugXMLSamples,
+			}
 		}
 
 		// Create host status entry

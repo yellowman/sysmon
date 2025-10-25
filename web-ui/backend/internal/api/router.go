@@ -309,6 +309,15 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request) {
 	status, err := r.monitoring.GetStatus()
 	if err != nil {
+		// Check if it's an XML parse error with debug data
+		if xmlErr, ok := err.(*monitoring.XMLParseError); ok {
+			r.sendErrorWithDetails(w, http.StatusServiceUnavailable, xmlErr.Message, map[string]interface{}{
+				"object_name": xmlErr.ObjectName,
+				"raw_xml":     xmlErr.RawXML,
+				"samples":     xmlErr.AllSamples,
+			})
+			return
+		}
 		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to connect to sysmon: %v", err))
 		return
 	}
@@ -756,6 +765,16 @@ func (r *Router) sendError(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(models.APIError{
 		Error:   http.StatusText(status),
 		Message: message,
+	})
+}
+
+func (r *Router) sendErrorWithDetails(w http.ResponseWriter, status int, message string, details interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(models.APIError{
+		Error:   http.StatusText(status),
+		Message: message,
+		Details: details,
 	})
 }
 
