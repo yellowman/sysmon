@@ -88,7 +88,7 @@
 #endif /* HAVE_UCD_SNMP_VERSION_H */
 
 
-#define SYSM_VERS	"v0.93"
+#define SYSM_VERS	"v0.94"
 #ifdef _PATH_VARRUN
 #define PIDFILE		_PATH_VARRUN "sysmond.pid"
 #else
@@ -340,6 +340,7 @@ struct hostinfo {
 
 	unsigned long queuetime; /* per-object check-interval in seconds */
 	time_t next_queuetime; /* next time object should be queued */
+	int pageinterval; /* per-object re-page interval in minutes, -1 = use global */
 
 	unsigned int send_pings; /* number of pings to send to host */
 	unsigned int min_pings; /* min number of pings to require for
@@ -709,6 +710,7 @@ extern char *parser_dnsexpire;
 extern int parser_i_dnslog;
 extern char *parser_dnslog;
 extern int parser_i_pageinterval;
+extern int parser_obj_i_pageinterval;
 extern char *parser_pageinterval;
 extern int parser_i_maxqueued;
 extern char *parser_maxqueued;
