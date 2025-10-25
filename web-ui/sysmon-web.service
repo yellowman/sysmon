@@ -1,0 +1,29 @@
+[Unit]
+Description=Sysmon Web Configuration Manager
+Documentation=file:///usr/local/libexec/sysmon-web/README.md
+After=network.target sysmond.service
+Requires=sysmond.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+ExecStart=/usr/local/bin/sysmon-web \
+  -socket /var/run/sysmon-web.sock \
+  -config /etc/sysmon.conf \
+  -sysmon localhost:3333 \
+  -templates /usr/local/libexec/sysmon-web/templates \
+  -backups /var/backups/sysmon \
+  -audit /var/log/sysmon-web-audit.log
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/run /var/backups/sysmon /var/log /etc/sysmon.conf
+
+[Install]
+WantedBy=multi-user.target

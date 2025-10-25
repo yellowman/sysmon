@@ -7,3 +7,4 @@ src/parser.c
 src/sysmond
 src/sysmon
 src/sysmon-ping-helper
+web-ui/backend/sysmon-web
