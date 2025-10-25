@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,27 @@ import (
 // Service handles monitoring queries to sysmon daemon
 type Service struct {
 	sysmonAddr string
+}
+
+// XMLParseError represents an XML parsing error with debug data
+type XMLParseError struct {
+	Message      string
+	ObjectName   string
+	RawXML       string
+	AllSamples   []map[string]string
+	AllResponses []ResponseCapture // Capture ALL protocol responses
+}
+
+func (e *XMLParseError) Error() string {
+	return e.Message
+}
+
+// ResponseCapture captures a single protocol response
+type ResponseCapture struct {
+	Command  string `json:"command"`
+	Response string `json:"response"`
+	Parsed   bool   `json:"parsed"`
+	Error    string `json:"error,omitempty"`
 }
 
 // NewService creates a new monitoring service
@@ -99,6 +121,10 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		// Parse plain text format from STAT (even in XML mode)
 		// Format: hostname:type:port:lastcheck:downct:contacted:deathtime
 		// OR just: objectname (for STATO command)
+		// NOTE: We only extract the object name (first field) here, as detailed
+		// monitoring data (type, port, status, etc.) is retrieved via SHOWOBJ
+		// XML responses in the next step. The additional STAT fields are thus
+		// redundant and intentionally ignored.
 		fields := strings.Split(line, ":")
 		if len(fields) > 0 && fields[0] != "" {
 			objectNames = append(objectNames, fields[0])
@@ -116,6 +142,15 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 	hostsUp := 0
 	hostsDown := 0
+	debugXMLSamples := []map[string]string{} // Collect first few XML samples for debugging
+	allResponses := []ResponseCapture{}       // Capture ALL protocol responses
+
+	// Capture MODE xml response
+	allResponses = append(allResponses, ResponseCapture{
+		Command:  "MODE xml",
+		Response: response,
+		Parsed:   strings.Contains(response, "333"),
+	})
 
 	for _, objName := range objectNames {
 		// Send SHOWOBJ command
@@ -129,6 +164,8 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
+				// Log error and break
+				fmt.Fprintf(os.Stderr, "Error reading line for %s: %v\n", objName, err)
 				break
 			}
 			xmlData += line
@@ -139,10 +176,38 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			}
 		}
 
+		// Collect XML samples for debugging (first 3 objects)
+		if len(debugXMLSamples) < 3 {
+			debugXMLSamples = append(debugXMLSamples, map[string]string{
+				"object": objName,
+				"xml":    xmlData,
+			})
+		}
+
 		// Parse XML
 		var xmlObj XMLObjectStatus
-		if err := xml.Unmarshal([]byte(xmlData), &xmlObj); err != nil {
-			continue // Skip objects with parse errors
+		parseErr := xml.Unmarshal([]byte(xmlData), &xmlObj)
+
+		// Capture this response
+		capture := ResponseCapture{
+			Command:  fmt.Sprintf("SHOWOBJ %s", objName),
+			Response: xmlData,
+			Parsed:   parseErr == nil,
+		}
+		if parseErr != nil {
+			capture.Error = parseErr.Error()
+		}
+		allResponses = append(allResponses, capture)
+
+		// If parse failed, return error with ALL captured data
+		if parseErr != nil {
+			return nil, &XMLParseError{
+				Message:      fmt.Sprintf("Failed to parse XML for object %s: %v", objName, parseErr),
+				ObjectName:   objName,
+				RawXML:       xmlData,
+				AllSamples:   debugXMLSamples,
+				AllResponses: allResponses,
+			}
 		}
 
 		// Create host status entry
@@ -200,6 +265,9 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	status.Statistics.HealthyHosts = hostsUp
 	status.Statistics.CriticalHosts = hostsDown
 	// WarningHosts and ChecksByType/ChecksByStatus are incremented in the loop above
+
+	// Send QUIT to close connection cleanly
+	conn.Write([]byte("QUIT\n"))
 
 	return status, nil
 }
@@ -732,6 +800,8 @@ func (s *Service) GetObjectsXML() (string, error) {
 		}
 
 		// Parse object name from first field
+		// NOTE: STAT returns colon-delimited data (hostname:type:port:...),
+		// but we only need the object name to query full XML via SHOWOBJ
 		fields := strings.Split(line, ":")
 		if len(fields) > 0 && fields[0] != "" {
 			objectNames = append(objectNames, fields[0])
@@ -767,6 +837,9 @@ func (s *Service) GetObjectsXML() (string, error) {
 	}
 
 	xmlOutput.WriteString("</SysmonStatus>\n")
+
+	// Send QUIT to close connection cleanly
+	conn.Write([]byte("QUIT\n"))
 
 	return xmlOutput.String(), nil
 }
@@ -826,6 +899,9 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 			return "", fmt.Errorf("object not found or MODE xml not enabled")
 		}
 	}
+
+	// Send QUIT to close connection cleanly
+	conn.Write([]byte("QUIT\n"))
 
 	return xmlOutput.String(), nil
 }

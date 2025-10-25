@@ -457,6 +457,12 @@ void update_globs_from_parser()
 		statusfilename = STRDUP(parser_statusfile,"status file name");
 		html = parser_statusfile_type;
 	}
+	if (parser_statustempdir != NULL)
+	{
+		if (statustempdirname != NULL)
+			FREE(statustempdirname);
+		statustempdirname = STRDUP(parser_statustempdir,"status temp dir name");
+	}
 	if (parser_cssfile != NULL)
 	{
 		if (cssfilename != NULL )

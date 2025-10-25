@@ -79,6 +79,7 @@ char *errorsto = NULL;
 char *replyto = NULL;
 int html = -1;
 char *statusfilename = NULL;
+char *statustempdirname = NULL;
 char *cssfilename = NULL;
 char *upcolor = NULL;
 char *downcolor = NULL;
@@ -138,6 +139,11 @@ void set_defaults()
 	{
 		free(statusfilename);
 		statusfilename = NULL;
+	}
+	if (statustempdirname != NULL)
+	{
+		free(statustempdirname);
+		statustempdirname = NULL;
 	}
 	if (cssfilename != NULL)
 	{
