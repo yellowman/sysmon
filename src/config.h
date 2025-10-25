@@ -206,6 +206,7 @@
 #define SYSM_TYPE_PING_LATENCY 19 /* latency - stick timeval in packet */
 #define SYSM_TYPE_PINGv6 20 /* IPv6 PING */
 #define SYSM_TYPE_UDP_RTT 21 /* udp rtt packet timeval coolness */
+#define SYSM_TYPE_PKTLOSS 22 /* packet loss monitoring with history */
 
 /* Return Values */
 #define SYSM_ERR	-2
@@ -223,6 +224,9 @@
 #define SYSM_BAD_AUTH 	11
 #define SYSM_BAD_RESP 	12
 #define X500_WEDGED 	13
+#define SYSM_PKTLOSS_EXCEED 23 /* packet loss exceeds tolerance */
+#define SYSM_SNMP_TRAP  24 /* SNMP trap received */
+#define SYSM_JITTER_HIGH 25 /* jitter exceeds threshold */
 #define SYSM_KILLED	14 /* killed locally */
 #define SYSM_HOSTUNRCH	15
 #define SYSM_RTT_HIGH   16
@@ -248,13 +252,42 @@
 #define SYSM_CONTACT_DOWN	1
 #define SYSM_CONTACT_UP		2
 
+/* Packet loss monitoring constants */
+#define PKTLOSS_HISTORY_SIZE     1440  /* 24 hours @ 1 minute intervals */
+#define PKTLOSS_DEFAULT_HISTORY  24    /* Default hours to keep */
+#define PKTLOSS_MAX_HISTORY      168   /* Max 7 days (1 week) */
+
+/* Forward declaration for pingdata (defined in icmp.c) */
+struct pingdata;
+
+/* Packet loss history sample */
+struct pktloss_sample {
+	time_t timestamp;           /* When this sample was taken */
+	unsigned int sent;          /* Packets sent this cycle */
+	unsigned int received;      /* Packets received this cycle */
+	unsigned int lost;          /* Packets lost (sent - received) */
+};
+
+/* Packet loss tracking data (stored in monitorent->monitordata) */
+struct pktloss_data {
+	struct pktloss_sample history[PKTLOSS_HISTORY_SIZE];
+	unsigned int history_head;      /* Circular buffer head index */
+	unsigned int history_count;     /* Number of valid samples */
+	unsigned long long total_sent;      /* Running total (64-bit for long runs) */
+	unsigned long long total_received;  /* Running total */
+	unsigned long long total_lost;      /* Running total */
+
+	/* Reuse pingdata for actual ICMP operations */
+	struct pingdata *ping;
+};
+
 struct hostinfo {
         unsigned char *hostname; /* name of system to check */
-        unsigned int type; /* 1 = tcp, 2 = udp, 3 = ping, 4 = snmp, 5 = nntp 
+        unsigned int type; /* 1 = tcp, 2 = udp, 3 = ping, 4 = snmp, 5 = nntp
 		6 = smtp, 7 = imap, 8 = pop3 9 = umichX500 10 = pop2
 		11 = bootp 12 = dns 13 = www-content, 14 = radius,
-		15 = https, 16 = sysmon, 17 = ssh, 18=ircd, 
-		19= latency, 20 = ping6, 21 = rtt */
+		15 = https, 16 = sysmon, 17 = ssh, 18=ircd,
+		19= latency, 20 = ping6, 21 = rtt, 22 = pktloss */
         unsigned int port; /* only relevant for tcp/udp */
         unsigned char *message; /* message to print for outages */
         unsigned char *contact; /* e-mail contact for this */
@@ -311,6 +344,22 @@ struct hostinfo {
 	unsigned int send_pings; /* number of pings to send to host */
 	unsigned int min_pings; /* min number of pings to require for
 		host to be up */
+
+	/* Packet loss specific configuration */
+	unsigned int pktloss_tolerance;     /* Max packets that can be lost before alert */
+	unsigned int pktloss_history_hours; /* Hours of history to keep (default 24) */
+	time_t pktloss_last_check;          /* Last time we evaluated packet loss */
+
+	/* RTT/Jitter configuration (SAA-lite) */
+	unsigned int rtt_threshold;         /* Max RTT in milliseconds before alert */
+	unsigned int jitter_threshold;      /* Max jitter in milliseconds before alert */
+	unsigned int rtt_samples;           /* Number of samples for rolling average */
+
+	/* SNMP trap alert configuration */
+	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
+
+	/* Wakeup/stale check configuration */
+	unsigned int max_wakeup_retries;    /* Max times to retry waking stale check (0 = unlimited) */
 
 	bool reverse; /* if true then {if down, follow siblings}, else
 			behave as we do otherwise */
@@ -378,6 +427,10 @@ struct monitorent {
 	short int retval; /* set to the return val, or -1 if check not
 			done yet */
 	void *monitordata; /* should be free'ed when retval is set */
+
+	/* Wakeup tracking for stale check management */
+	unsigned int wakeup_count;      /* How many times woken up */
+	time_t last_wakeup_time;        /* When last woken up */
 	};
 
 /* client status */
@@ -656,6 +709,12 @@ void setup_icmp_fd();
 void handle_icmp_responses();
 void start_test_ping(struct monitorent *);
 void service_test_ping(struct monitorent *, struct timeval *);
+void start_test_pktloss(struct monitorent *);
+void service_test_pktloss(struct monitorent *, struct timeval *);
+void pktloss_add_sample(struct pktloss_data *, time_t, unsigned int, unsigned int);
+void start_test_rtt(struct monitorent *);
+void service_test_rtt(struct monitorent *, struct timeval *);
+void stop_test_rtt(struct monitorent *);
 unsigned short int generate_ident();
 unsigned short in_cksum();
 
@@ -694,6 +753,7 @@ void service_test_sshd(struct monitorent *here, time_t);
 void stop_test_tcp(struct monitorent *);
 void stop_test_udp(struct monitorent *);
 void stop_test_ping(struct monitorent *);
+void stop_test_pktloss(struct monitorent *);
 void stop_test_snmp(struct monitorent *);
 void process_snmp_trap(int);
 void stop_test_nntp(struct monitorent *);
@@ -815,6 +875,8 @@ void stop_check_dns(struct monitorent *);
 /* snmp.c */
 void service_test_snmp(struct monitorent *);
 void start_test_snmp(struct monitorent *);
+struct graph_elements *find_object_by_ip(char *);
+void send_trap_alert(struct graph_elements *, struct in_addr);
 
 /* radius check */
 void start_check_radius(struct monitorent *, time_t);

@@ -1,6 +1,12 @@
 /* $Id: page.c,v 1.59 2006/09/22 19:43:45 jared Exp $ */
 #include "config.h"
 
+/* Override empty MAIL definition from configure when sendmail not found */
+#ifdef MAIL
+#undef MAIL
+#endif
+#define MAIL "/usr/sbin/sendmail"
+
 /*
  *
  */

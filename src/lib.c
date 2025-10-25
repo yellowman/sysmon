@@ -191,6 +191,12 @@ char	*errtostr( int value )
 			/* invalid? */
 		case SYSM_SNMP_HIGHRATE:
 			return "High Rate";
+		case SYSM_PKTLOSS_EXCEED:
+			return "Pkt Loss High";
+		case SYSM_SNMP_TRAP:
+			return "SNMP Trap";
+		case SYSM_JITTER_HIGH:
+			return "Jitter too high";
 		default:
 			return "ERROR";
 	}
@@ -570,6 +576,10 @@ short int name_to_type(char *sent_type)
 			if (strcmp(type, "pingv6") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PINGv6;
 			break;
+		case 8:
+			if (strcmp(type, "pktloss") == 0 && (!disable_icmp))
+				return SYSM_TYPE_PKTLOSS;
+			break;
 		case 9:
 			if (strcmp(type, "umichx500") == 0)
 				return SYSM_TYPE_X500;
@@ -622,6 +632,8 @@ char *type_to_name(int type)
 			return "ircd";
 		case SYSM_TYPE_PINGv6:
 			return "pingv6";
+		case SYSM_TYPE_PKTLOSS:
+			return "pktloss";
 		default:
 			return "ERROR";
 	}
