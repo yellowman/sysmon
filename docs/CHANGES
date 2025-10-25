@@ -1,15 +1,41 @@
                         Bug fixes, new features, etc..
      _________________________________________________________________
    Changes for 0.94 (2025)
-     * Add SNMP trap alert monitoring with matched_host support
-     * Add packet loss monitoring (min_pings, send_pings, packet_loss_threshold)
-     * Add RTT (round-trip time) threshold monitoring for latency alerts
-     * Add jitter threshold monitoring for connection stability
-     * Add wakeup checks (Wake-on-LAN) for proactive monitoring
-     * Add privilege dropping for enhanced security (drop_privileges directive)
+     WISHLIST ITEMS COMPLETED:
+     * Configurable pings per check per-host (WISHLIST item from 2006)
+       - min_pings: minimum successful pings required for UP status
+       - send_pings: number of ICMP echo requests per check
+       - packet_loss_threshold: percentage threshold for packet loss alerts
+     * SNMP trap monitoring (WISHLIST "what to do w/ snmp traps?")
+       - trap_alert directive to enable trap monitoring per object
+       - matched_host support to link traps with monitored hosts
+       - config trap_port to set SNMP trap listener port
+     * Packet loss check with history (WISHLIST detailed spec)
+       - 24-hour history tracking with configurable hours
+       - pktloss_tolerance for maximum acceptable lost packets
+       - proper down/degraded state reporting
+     * RTT check (WISHLIST "rtt check?")
+       - rtt_threshold directive for latency monitoring
+       - ICMP-based RTT measurement in milliseconds
+     * SAA-lite (WISHLIST "SAA?")
+       - jitter_threshold for RFC 3550 jitter calculation
+       - rtt_samples for rolling average configuration
+       - VoIP quality assessment metrics
+     * Privilege dropping (WISHLIST "revoke root!")
+       - drop_privileges directive for enhanced security
+       - setuid ping helper for ICMP when unprivileged
+       - proper capability separation
+     * Wakeup checks improvements (WISHLIST item)
+       - max_wakeup_retries for proactive Wake-on-LAN
+       - proper retry logic with throttling
+       - state management for stale check recovery
+
+     NEW FEATURES:
      * Add JSON output mode for machine-readable monitoring data
      * Add web UI configuration manager (FastCGI-based, written in Go)
      * Add setuid ping helper for unprivileged ICMP operations
+
+     BUG FIXES:
      * Fix infinite loop when ping helper is missing
      * Fix JSON formatting bugs (unquoted strings in SNMP trap output)
      * Fix config reload endpoint to actually reload sysmon
@@ -18,6 +44,8 @@
      * Fix security warnings: replace rand() with random()
      * Convert MD5 code from K&R C to ANSI C (eliminate 30+ warnings)
      * Fix quicksort function pointer prototypes (eliminate 8 warnings)
+
+     ENHANCEMENTS:
      * Enhance configure script to search lib64 and multiarch library paths
      * Update XML output to include new monitoring fields
      * Update documentation for all new features and configuration options
