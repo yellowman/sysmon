@@ -251,16 +251,21 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		readErr := error(nil)
 		for {
 			line, err := reader.ReadString('\n')
+
+			// IMPORTANT: Process line FIRST, even if err != nil
+			// ReadString() can return both data AND error (e.g., EOF) on same call
+			xmlData += line
+
+			// Check for terminator
+			if strings.Contains(line, "</ObjectStatus>") {
+				break // Success! Complete XML received
+			}
+
+			// THEN check for error (after processing line)
 			if err != nil {
 				// Save error for reporting
 				readErr = err
 				fmt.Fprintf(os.Stderr, "Error reading line for %s: %v\n", objName, err)
-				break
-			}
-			xmlData += line
-
-			// XML ends with </ObjectStatus>
-			if strings.Contains(line, "</ObjectStatus>") {
 				break
 			}
 		}
@@ -773,13 +778,18 @@ func (s *Service) PrintQueue(authKey string) (string, error) {
 	var output strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			break // End of output
-		}
+
+		// Process line first (ReadString can return data + error)
 		output.WriteString(line)
-		// Stop if we see end marker or timeout
+
+		// Stop if we see end marker
 		if strings.Contains(line, "333") || strings.Contains(line, "444") {
 			break
+		}
+
+		// Then check error
+		if err != nil {
+			break // End of output
 		}
 	}
 
@@ -933,14 +943,18 @@ func (s *Service) GetObjectsXML() (string, error) {
 		// Read multi-line XML response until we see </ObjectStatus>
 		for {
 			line, err := reader.ReadString('\n')
-			if err != nil {
-				return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
-			}
 
+			// Process line first (ReadString can return data + error)
 			xmlOutput.WriteString(line)
 
+			// Check for terminator
 			if strings.Contains(line, "</ObjectStatus>") {
 				break
+			}
+
+			// Then check error
+			if err != nil {
+				return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
 			}
 		}
 	}
@@ -993,12 +1007,11 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 	var xmlOutput strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
-		}
 
+		// Process line first (ReadString can return data + error)
 		xmlOutput.WriteString(line)
 
+		// Check for terminator
 		if strings.Contains(line, "</ObjectStatus>") {
 			break
 		}
@@ -1006,6 +1019,11 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 		// Check for error responses
 		if strings.Contains(line, "403") {
 			return "", fmt.Errorf("object not found or MODE xml not enabled")
+		}
+
+		// Then check error
+		if err != nil {
+			return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
 		}
 	}
 
