@@ -1,9 +1,10 @@
 package monitoring
 
 import (
-	"encoding/json"
+	"bufio"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"sysmon-web/internal/models"
@@ -21,29 +22,96 @@ func NewService(sysmonAddr string) *Service {
 	}
 }
 
-// GetStatus gets the complete sysmon status via JSON
+// GetStatus gets the complete sysmon status via TCP protocol
 func (s *Service) GetStatus() (*models.SysmonStatus, error) {
-	// Connect to sysmon
+	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to sysmon: %w", err)
+		return nil, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", s.sysmonAddr, err)
 	}
 	defer conn.Close()
 
-	// Request JSON output
-	_, err = conn.Write([]byte("json\n"))
+	// Set connection timeout
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	// Request status (STAT command returns status of all objects)
+	_, err = conn.Write([]byte("STAT\n"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to send command: %w", err)
+		return nil, fmt.Errorf("failed to send STAT command: %w", err)
 	}
 
-	// Read and parse JSON response
-	var status models.SysmonStatus
-	decoder := json.NewDecoder(conn)
-	if err := decoder.Decode(&status); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON from sysmon: %w", err)
+	// Read response line by line
+	scanner := bufio.NewScanner(conn)
+	status := &models.SysmonStatus{
+		Hosts:      []models.HostStatus{},
+		Statistics: models.Stats{},
 	}
 
-	return &status, nil
+	hostsUp := 0
+	hostsDown := 0
+	hostsTotal := 0
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// End of status output
+		if strings.Contains(line, "333") {
+			break
+		}
+
+		// Parse status line format: hostname:type:port:lastcheck:downct:contacted:deathtime
+		// Example: router1.example.com:3:0:0:0:0:0
+		fields := strings.Split(line, ":")
+		if len(fields) < 7 {
+			continue
+		}
+
+		hostname := fields[0]
+		if hostname == "" {
+			continue
+		}
+
+		hostsTotal++
+
+		// lastcheck field: 0 = OK, anything else = problem
+		lastcheck := fields[3]
+		isUp := (lastcheck == "0")
+
+		if isUp {
+			hostsUp++
+		} else {
+			hostsDown++
+		}
+
+		// Create host status entry
+		host := models.HostStatus{
+			Hostname:      hostname,
+			OverallStatus: "OK",
+			StatusColor:   "green",
+			Checks:        []models.CheckResult{},
+		}
+
+		if !isUp {
+			host.OverallStatus = "CRITICAL"
+			host.StatusColor = "red"
+		}
+
+		status.Hosts = append(status.Hosts, host)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading from sysmon: %w", err)
+	}
+
+	// Fill in statistics
+	status.Statistics.TotalHosts = hostsTotal
+	status.Statistics.HealthyHosts = hostsUp
+	status.Statistics.CriticalHosts = hostsDown
+	status.Statistics.WarningHosts = 0
+	status.Statistics.ChecksByType = make(map[string]int)
+	status.Statistics.ChecksByStatus = make(map[string]int)
+
+	return status, nil
 }
 
 // GetHostStatus gets status for a specific host
