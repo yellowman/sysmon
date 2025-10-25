@@ -487,19 +487,21 @@ func (r *Router) handleAuthTest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Get auth key from header or body
-	var body struct {
-		AuthKey string `json:"auth_key"`
-	}
-	json.NewDecoder(req.Body).Decode(&body)
+	// Get auth key from header first
+	authKey := req.Header.Get("X-Auth-Key")
 
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
+	// If no header, try to parse from body (but don't fail if body is empty)
+	if authKey == "" && req.Body != nil {
+		var body struct {
+			AuthKey string `json:"auth_key"`
+		}
+		// Ignore decode errors - body might be empty, which is OK if header is set
+		json.NewDecoder(req.Body).Decode(&body)
+		authKey = body.AuthKey
 	}
 
 	if authKey == "" {
-		r.sendError(w, http.StatusBadRequest, "Auth key required")
+		r.sendError(w, http.StatusBadRequest, "Auth key required in X-Auth-Key header or JSON body")
 		return
 	}
 
