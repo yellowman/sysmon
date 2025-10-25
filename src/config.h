@@ -358,6 +358,9 @@ struct hostinfo {
 	/* SNMP trap alert configuration */
 	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
 
+	/* Wakeup/stale check configuration */
+	unsigned int max_wakeup_retries;    /* Max times to retry waking stale check (0 = unlimited) */
+
 	bool reverse; /* if true then {if down, follow siblings}, else
 			behave as we do otherwise */
 	bool contacted; /* true if mailed contact -- false if not */
@@ -424,6 +427,10 @@ struct monitorent {
 	short int retval; /* set to the return val, or -1 if check not
 			done yet */
 	void *monitordata; /* should be free'ed when retval is set */
+
+	/* Wakeup tracking for stale check management */
+	unsigned int wakeup_count;      /* How many times woken up */
+	time_t last_wakeup_time;        /* When last woken up */
 	};
 
 /* client status */

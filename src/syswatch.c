@@ -32,6 +32,9 @@ unsigned short int killed = 0;
 unsigned short int killafter = 61; /* kill a check after this many seconds */
 unsigned short int warnafter = 45; /* warn of a stale check after */
 unsigned short int warnlog = 1; /* default = on */
+
+/* Wakeup retry configuration */
+#define DEFAULT_MAX_WAKEUP_RETRIES 3  /* Default max retry attempts for stale checks */
 unsigned short disable_icmp = 0;
 
 /* command line specified vars & args */
@@ -1467,57 +1470,116 @@ void fast_cleanup_checks()
 /*
  * This makes sure that something being monitored isn't "Dead"
  */
-void wakeup_checks()
+void wakeup_checks(time_t now_t)
 {
-	/* wake up checks that need timeout */
+	/* Wake up checks that have become stale, with retry logic */
 	struct monitorent *here = NULL;
+	struct monitorent *next = NULL;
 	struct timeval now;
+	double stale_time;
+	unsigned int max_retries;
 
 	gettimeofday(&now, NULL); /* get the current time */
 
 	if (debug)
 	{
-		print_err(0, "syswatch.c:wakeup_checks() waking up checks");
+		print_err(0, "syswatch.c:wakeup_checks() checking for stale checks");
 	}
-	/* walk the current queue */
+
+	/* Walk the current queue */
 	here = queuehead;
 	while (here != NULL)
 	{
+		next = here->next;  /* Save next pointer before potential modifications */
+		stale_time = mydifftime(here->queueat, now);
+
 		if (debug)
 		{
-			print_err(0, "syswatch.c:wakeup_checks() looking at %s:%s:%d", 
-				here->checkent->hostname,
-				type_to_name(here->checkent->type),
-				here->checkent->port);
-		}
-		if (mydifftime(here->queueat, now) >= killafter)
-		{
-			print_err(0, "Killing stale check %s:%s:%d lasting %10.6fsecs",
+			print_err(0, "syswatch.c:wakeup_checks() examining %s:%s:%d (queued %.2fs ago, wakeup_count=%u)",
 				here->checkent->hostname,
 				type_to_name(here->checkent->type),
 				here->checkent->port,
-				mydifftime(here->queueat, now));
+				stale_time,
+				here->wakeup_count);
+		}
 
-			if (here->checkent->type != SYSM_TYPE_PING)
+		/* Check if this check has been queued too long */
+		if (stale_time >= killafter)
+		{
+			/* Determine max retries (use per-host config if set, otherwise default) */
+			max_retries = (here->checkent->max_wakeup_retries > 0)
+				? here->checkent->max_wakeup_retries
+				: DEFAULT_MAX_WAKEUP_RETRIES;
+
+			/* Check if we've exceeded max retries */
+			if (here->wakeup_count >= max_retries)
 			{
-				stop_this(here);
+				print_err(0, "Permanently killing check %s:%s:%d after %u wakeup attempts (stale for %.2fs)",
+					here->checkent->hostname,
+					type_to_name(here->checkent->type),
+					here->checkent->port,
+					here->wakeup_count,
+					stale_time);
+
+				if (here->checkent->type != SYSM_TYPE_PING)
+				{
+					stop_this(here);
+				}
 				here->retval = SYSM_KILLED;
 				killed++;
-				print_err(1, "possible BUG numkilled = %d -- normally should never exceed zero", killed);
 			}
-		} else if ((mydifftime(here->queueat,now) >= warnafter) && warnlog) {
-			print_err(0, "Possibly stale check of %s:%s:%d lasting %10.6f",
+			else
+			{
+				/* Wake up the stale check and retry */
+				print_err(0, "Waking up stale check %s:%s:%d (attempt %u/%u, stale for %.2fs)",
+					here->checkent->hostname,
+					type_to_name(here->checkent->type),
+					here->checkent->port,
+					here->wakeup_count + 1,
+					max_retries,
+					stale_time);
+
+				/* Stop the stuck check */
+				if (here->checkent->type != SYSM_TYPE_PING)
+				{
+					stop_this(here);
+				}
+
+				/* Mark as timeout (will trigger alert if configured) */
+				here->retval = SYSM_TIMEDOUT;
+
+				/* Increment wakeup counter and update timestamp */
+				here->wakeup_count++;
+				here->last_wakeup_time = now_t;
+
+				/* Re-queue by resetting last check time */
+				/* This will cause queue_checks() to pick it up again */
+				here->checkent->lchecktime = now_t - here->checkent->queuetime;
+
+				if (debug)
+				{
+					print_err(0, "Re-queued %s:%s:%d for retry (lchecktime set to %ld)",
+						here->checkent->hostname,
+						type_to_name(here->checkent->type),
+						here->checkent->port,
+						here->checkent->lchecktime);
+				}
+			}
+		}
+		else if (stale_time >= warnafter && warnlog)
+		{
+			/* Warn about possibly stale check */
+			print_err(0, "Possibly stale check of %s:%s:%d lasting %.2fs (wakeup_count=%u)",
 				here->checkent->hostname,
 				type_to_name(here->checkent->type),
 				here->checkent->port,
-				mydifftime(here->queueat, now) );
+				stale_time,
+				here->wakeup_count);
 		}
-		here = here->next;
-		if (debug)
-		{
-			print_err(0, "syswatch.c:wakeup_checks() - just moved here");
-		}
+
+		here = next;
 	}
+
 	if (debug)
 	{
 		print_err(0, "wakeup_checks() exiting");
@@ -1579,6 +1641,7 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 	struct all_elements_list *hupdata = NULL;
 	time_t now_t, last_t;
 	time_t last_periodic_t = 0;
+	time_t last_wakeup_t = 0;  /* Throttle wakeup_checks() calls */
 	last_t = 0;
 
 #ifdef HAVE_LIBPTHREAD
@@ -1609,9 +1672,15 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 #endif
 		}
 
+		/* Throttled wakeup check - run every 10 seconds instead of every second */
+		if ((now_t - last_wakeup_t) >= 10)
+		{
+			wakeup_checks(now_t);  /* wakeup any "stale" checks */
+			last_wakeup_t = now_t;
+		}
+
 		if (now_t > last_t)
 		{
-			wakeup_checks();  /* wakeup any "stale" checks */
 			last_t = now_t;
 		}
 
@@ -1638,7 +1707,7 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		{
 			time(&now_t);
 			service_checks(now_t);
-			wakeup_checks();
+			wakeup_checks(now_t);
 			do_tree_periodic(now_t);
 			needssleep(now_t);
 		}
