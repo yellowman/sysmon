@@ -114,11 +114,11 @@ void	start_test_sshd(struct monitorent *here, time_t now_t)
 
 void	service_test_sshd(struct monitorent *here, time_t now_t)
 {
-	/* do the actual real parts of the checks after 
+	/* do the actual real parts of the checks after
 	   it's been set up */
-	
+
 	struct sshdata *localstruct = NULL;
-	char buffer[256];
+	char buffer[PROTO_RESPONSE_SIZE + 1];
         int isopenretval = -1;
 	int bytes = 0;
 
@@ -188,8 +188,8 @@ void	service_test_sshd(struct monitorent *here, time_t now_t)
 		{
 			if (data_waiting_read(here->filedes, 0))
 			{
-				memset(buffer, 0, 256);
-				bytes =read(here->filedes, buffer, 254);
+				memset(buffer, 0, sizeof(buffer));
+				bytes =read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
 				if (bytes != 0 && bytes != -1)
 				{
 					buffer[strlen(buffer)-1] = '\0';
