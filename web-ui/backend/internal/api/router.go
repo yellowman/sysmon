@@ -201,8 +201,9 @@ func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
 		user, ip := r.getUserInfo(req)
 		newVersion, err := r.config.UpdateRawConfig(data.Content, data.Version, data.Comment, user, ip)
 		if err != nil {
-			if _, ok := err.(*models.VersionConflictError); ok {
-				http.Error(w, "Version conflict", http.StatusConflict)
+			if versionErr, ok := err.(*models.VersionConflictError); ok {
+				w.WriteHeader(http.StatusConflict)
+				r.sendJSON(w, versionErr)
 				return
 			}
 			r.sendError(w, http.StatusBadRequest, err.Error())
@@ -258,6 +259,12 @@ func (r *Router) handleHosts(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleHostDetail(w http.ResponseWriter, req *http.Request) {
 	// Extract hostname from path
 	hostname := strings.TrimPrefix(req.URL.Path, "/api/hosts/")
+	hostname = strings.TrimSpace(hostname)
+
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "hostname required")
+		return
+	}
 
 	snapshot, err := r.config.GetConfig()
 	if err != nil {
@@ -324,6 +331,12 @@ func (r *Router) handleBackups(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 	filename := strings.TrimPrefix(req.URL.Path, "/api/backups/")
+	filename = strings.TrimSpace(filename)
+
+	if filename == "" {
+		r.sendError(w, http.StatusBadRequest, "backup filename required")
+		return
+	}
 
 	if strings.HasSuffix(filename, "/restore") {
 		// Restore backup
@@ -375,6 +388,12 @@ func (r *Router) handleMonitoringHosts(w http.ResponseWriter, req *http.Request)
 
 func (r *Router) handleMonitoringHost(w http.ResponseWriter, req *http.Request) {
 	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/host/")
+	hostname = strings.TrimSpace(hostname)
+
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "hostname required")
+		return
+	}
 
 	host, err := r.monitoring.GetHostStatus(hostname)
 	if err != nil {
@@ -407,6 +426,12 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 
 func (r *Router) handleMonitoringTrapsBySource(w http.ResponseWriter, req *http.Request) {
 	sourceIP := strings.TrimPrefix(req.URL.Path, "/api/monitoring/traps/")
+	sourceIP = strings.TrimSpace(sourceIP)
+
+	if sourceIP == "" {
+		r.sendError(w, http.StatusBadRequest, "source IP required")
+		return
+	}
 
 	traps, err := r.monitoring.GetTrapsBySource(sourceIP)
 	if err != nil {

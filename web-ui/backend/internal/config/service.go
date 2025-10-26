@@ -187,7 +187,13 @@ func (s *Service) UpdateRawConfig(content, version, comment, user, ip string) (s
 	}
 
 	s.logAudit("raw_config_update", user, ip, comment)
-	s.reloadSysmon()
+
+	// Attempt to reload sysmon daemon - log but don't fail if reload fails
+	// Config was successfully updated, reload is a separate operation
+	if err := s.reloadSysmon(); err != nil {
+		s.logAudit("reload_failed", user, ip, fmt.Sprintf("Config updated but reload failed: %v", err))
+		// Note: We still return success since config was updated
+	}
 
 	newVersion := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 	return newVersion, nil
@@ -251,7 +257,13 @@ func (s *Service) RestoreBackup(filename, user, ip string) error {
 	}
 
 	s.logAudit("restore_backup", user, ip, filename)
-	s.reloadSysmon()
+
+	// Attempt to reload sysmon daemon - log but don't fail if reload fails
+	// Backup was successfully restored, reload is a separate operation
+	if err := s.reloadSysmon(); err != nil {
+		s.logAudit("reload_failed", user, ip, fmt.Sprintf("Backup restored but reload failed: %v", err))
+		// Note: We still return success since backup was restored
+	}
 
 	return nil
 }
