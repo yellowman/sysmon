@@ -94,7 +94,7 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
            it's been set up */
 
         struct pop3data *localstruct = NULL;
-        char buffer[256];
+        char buffer[PROTO_RESPONSE_SIZE + 1];
         int isopenretval = -1;
 
         /* do some variable shufflign */
@@ -154,13 +154,13 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                         if (data_waiting_read(here->filedes, 0))
                         {
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, 254);
+                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
                                 {
 				        /* prepare the buffer */
-				        snprintf(buffer, 253, "USER %s", 
+				        snprintf(buffer, PROTO_RESPONSE_SIZE, "USER %s",
 						here->checkent->username);
 
 				        /* send the buffer out the socket */
@@ -177,13 +177,13 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                         if (data_waiting_read(here->filedes, 0))
                         {
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, 254);
+                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
                                 {
                                         /* prepare the buffer */
-                                        snprintf(buffer, 254, "PASS %s", 
+                                        snprintf(buffer, PROTO_RESPONSE_SIZE, "PASS %s",
 						here->checkent->password);
 
                                         /* send the buffer out the socket */
@@ -199,8 +199,8 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                memset(buffer, 0, sizeof(buffer));
+                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
                                 if (debug)
                                         print_err(0, "Got(pop3_sent_pass):%s:", 
 						buffer);
@@ -221,8 +221,8 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                memset(buffer, 0, sizeof(buffer));
+                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
                                 if (debug)
                                         print_err(0, "Got2:%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)

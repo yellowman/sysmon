@@ -619,11 +619,11 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 void srv_client_do_trace(struct clientstatus *client, char *buff)
 {
-        char objname[128];
+        char objname[OBJECT_NAME_SIZE];
         struct graph_elements *found_obj = NULL;
- 
-        strncpy(objname, buff+6, 127);
-        objname[127] = '\0';
+
+        strncpy(objname, buff+6, OBJECT_NAME_SIZE-1);
+        objname[OBJECT_NAME_SIZE-1] = '\0';
         if (debug)
                 print_err(1, "will search for object :%s:", objname);
 
@@ -652,11 +652,11 @@ void srv_client_do_trace(struct clientstatus *client, char *buff)
  */
 void srv_client_do_showobject(struct clientstatus *client, char *buff)
 {
-	char objname[128];
+	char objname[OBJECT_NAME_SIZE];
 	struct graph_elements *found_obj = NULL;
 
-	strncpy(objname, buff+8, 127);
-	objname[127] = '\0';
+	strncpy(objname, buff+8, OBJECT_NAME_SIZE-1);
+	objname[OBJECT_NAME_SIZE-1] = '\0';
 	if (debug)
 		print_err(1, "will search for object :%s:", objname);
 	if (!client->xml)
@@ -681,16 +681,17 @@ void srv_client_do_showobject(struct clientstatus *client, char *buff)
  */
 void do_ack(struct clientstatus *client, char *buff)
 {
-        char objname[128];
+        char objname[OBJECT_NAME_SIZE];
         struct graph_elements *found_obj = NULL;
 
         if (client->authlvl  <= 0)
         {
                 sendline(client->filedes, "444 Permission Denied");
+                return; /* SECURITY: Must return after permission denied */
         }
 
-        strncpy(objname, buff+4, 127);
-        objname[127] = '\0';
+        strncpy(objname, buff+4, OBJECT_NAME_SIZE-1);
+        objname[OBJECT_NAME_SIZE-1] = '\0';
         if (debug)
                 print_err(1, "will search for object :%s:", objname);
         if (!client->xml)
