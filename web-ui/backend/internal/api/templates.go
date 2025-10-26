@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"html/template"
 	"net/http"
 	"path/filepath"
@@ -47,11 +48,18 @@ func (r *Router) renderTemplate(w http.ResponseWriter, tmpl string, data interfa
 		return
 	}
 
-	// Execute the base template which includes the page-specific content
-	err := t.ExecuteTemplate(w, "base", data)
+	// Execute the base template into a buffer first to catch errors
+	// before writing to the response writer
+	var buf bytes.Buffer
+	err := t.ExecuteTemplate(&buf, "base", data)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Template rendering failed", http.StatusInternalServerError)
+		return
 	}
+
+	// Write the buffered content to the response
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
 }
 
 // Page handlers
