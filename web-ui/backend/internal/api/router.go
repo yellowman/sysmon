@@ -3,11 +3,14 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"sysmon-web/internal/config"
+	"sysmon-web/internal/middleware"
 	"sysmon-web/internal/models"
 	"sysmon-web/internal/monitoring"
 )
@@ -60,7 +63,17 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
 	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
 	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
+
+	// Bulk operations
+	r.mux.HandleFunc("/api/monitoring/bulk/ack", r.handleBulkAck)
+	r.mux.HandleFunc("/api/monitoring/bulk/update", r.handleBulkUpdate)
+	r.mux.HandleFunc("/api/monitoring/bulk/trace", r.handleBulkTrace)
+
 	r.mux.HandleFunc("/api/auth/test", r.handleAuthTest)
+
+	// API documentation
+	r.mux.HandleFunc("/api/docs", r.handleAPIDocs)
+	r.mux.HandleFunc("/api/openapi.yaml", r.handleOpenAPISpec)
 
 	// XML passthrough endpoints (comprehensive data)
 	r.mux.HandleFunc("/api/xml/objects", r.handleXMLObjects)
@@ -89,7 +102,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Serve static files (CSS, JS)
 	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
-	return r.addCORS(r.mux)
+	// Apply rate limiting (60 requests per minute for general API, configurable)
+	rateLimiter := middleware.NewRateLimiter(60, 1*time.Minute)
+
+	return r.addCORS(rateLimiter.Middleware(r.mux))
 }
 
 // Config handlers
@@ -772,6 +788,240 @@ func (r *Router) handleAdminSessionErrors(w http.ResponseWriter, req *http.Reque
 		"errors": errors,
 		"count":  len(errors),
 	})
+}
+
+// Bulk operation handlers
+
+func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	// Parse JSON body
+	var body struct {
+		Hostnames []string `json:"hostnames"`
+		AuthKey   string   `json:"auth_key,omitempty"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if len(body.Hostnames) == 0 {
+		r.sendError(w, http.StatusBadRequest, "Hostnames array is required and cannot be empty")
+		return
+	}
+
+	// Use auth key from body if provided, otherwise from header
+	authKey := body.AuthKey
+	if authKey == "" {
+		authKey = req.Header.Get("X-Auth-Key")
+	}
+
+	// Call bulk acknowledge
+	results := r.monitoring.BulkAckHosts(body.Hostnames, authKey)
+
+	// Count successes and failures
+	successCount := 0
+	failureCount := 0
+	for _, result := range results {
+		if result.Success {
+			successCount++
+		} else {
+			failureCount++
+		}
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"status":        "completed",
+		"total":         len(body.Hostnames),
+		"success_count": successCount,
+		"failure_count": failureCount,
+		"results":       results,
+	})
+}
+
+func (r *Router) handleBulkUpdate(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	// Parse JSON body
+	var body struct {
+		Hostnames []string `json:"hostnames"`
+		Note      string   `json:"note"`
+		AuthKey   string   `json:"auth_key,omitempty"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if len(body.Hostnames) == 0 {
+		r.sendError(w, http.StatusBadRequest, "Hostnames array is required and cannot be empty")
+		return
+	}
+
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "Note is required")
+		return
+	}
+
+	// Use auth key from body if provided, otherwise from header
+	authKey := body.AuthKey
+	if authKey == "" {
+		authKey = req.Header.Get("X-Auth-Key")
+	}
+
+	// Call bulk update
+	results := r.monitoring.BulkUpdateHosts(body.Hostnames, body.Note, authKey)
+
+	// Count successes and failures
+	successCount := 0
+	failureCount := 0
+	for _, result := range results {
+		if result.Success {
+			successCount++
+		} else {
+			failureCount++
+		}
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"status":        "completed",
+		"total":         len(body.Hostnames),
+		"success_count": successCount,
+		"failure_count": failureCount,
+		"results":       results,
+		"note":          body.Note,
+	})
+}
+
+func (r *Router) handleBulkTrace(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	// Parse JSON body
+	var body struct {
+		Hostnames []string `json:"hostnames"`
+		Enable    bool     `json:"enable"`
+		AuthKey   string   `json:"auth_key,omitempty"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if len(body.Hostnames) == 0 {
+		r.sendError(w, http.StatusBadRequest, "Hostnames array is required and cannot be empty")
+		return
+	}
+
+	// Use auth key from body if provided, otherwise from header
+	authKey := body.AuthKey
+	if authKey == "" {
+		authKey = req.Header.Get("X-Auth-Key")
+	}
+
+	// Call bulk trace toggle
+	results := r.monitoring.BulkToggleTrace(body.Hostnames, body.Enable, authKey)
+
+	// Count successes and failures
+	successCount := 0
+	failureCount := 0
+	for _, result := range results {
+		if result.Success {
+			successCount++
+		} else {
+			failureCount++
+		}
+	}
+
+	r.sendJSON(w, map[string]interface{}{
+		"status":        "completed",
+		"total":         len(body.Hostnames),
+		"success_count": successCount,
+		"failure_count": failureCount,
+		"results":       results,
+		"enable":        body.Enable,
+	})
+}
+
+// API Documentation Handlers
+
+func (r *Router) handleOpenAPISpec(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Read OpenAPI spec file
+	specData, err := ioutil.ReadFile("./api/openapi.yaml")
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, "Failed to load API specification")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/yaml")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(http.StatusOK)
+	w.Write(specData)
+}
+
+func (r *Router) handleAPIDocs(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Serve Swagger UI HTML
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sysmon API Documentation</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            window.ui = SwaggerUIBundle({
+                url: "/api/openapi.yaml",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                tryItOutEnabled: true,
+                persistAuthorization: true
+            });
+        };
+    </script>
+</body>
+</html>`
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
 }
 
 // XML Passthrough Handlers - Return raw XML with comprehensive data
