@@ -234,8 +234,12 @@ void ABORT()
 {
 	char my_dir[PATH_MAX];
 	signal(SIGABRT, SIG_DFL);
-	getcwd(my_dir, PATH_MAX);
-	print_err(1, "about to abort and dump core (i think in %s)", my_dir);
+	if (getcwd(my_dir, PATH_MAX) == NULL)
+	{
+		print_err(1, "about to abort and dump core (getcwd failed)");
+	} else {
+		print_err(1, "about to abort and dump core (i think in %s)", my_dir);
+	}
 	abort();
 }
 
