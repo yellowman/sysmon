@@ -33,11 +33,6 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/config/reload", r.handleConfigReload)
 	r.mux.HandleFunc("/api/config/raw", r.handleConfigRaw)
 
-	// Visual config editor endpoints (structured data, not raw file)
-	r.mux.HandleFunc("/api/config/editor/get", r.handleConfigEditorGet)
-	r.mux.HandleFunc("/api/config/editor/save", r.handleConfigEditorSave)
-	r.mux.HandleFunc("/api/config/editor/spawns", r.handleConfigEditorSpawns)
-
 	// Hosts
 	r.mux.HandleFunc("/api/hosts", r.handleHosts)
 	r.mux.HandleFunc("/api/hosts/", r.handleHostDetail)
@@ -215,34 +210,6 @@ func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-
-// Visual config editor handlers (structured data, not raw file)
-func (r *Router) handleConfigEditorGet(w http.ResponseWriter, req *http.Request) {
-	// TODO: Build config from monitoring data
-	// For now, return stub data
-	config := models.Config{
-		Global: models.GlobalSettings{
-			ClientPort:    1345,
-			CheckInterval: 60,
-		},
-		Spawns: []models.SpawnCommand{},
-		Hosts:  []models.Host{},
-	}
-	r.sendJSON(w, config)
-}
-
-func (r *Router) handleConfigEditorSave(w http.ResponseWriter, req *http.Request) {
-	// TODO: Implement save logic
-	r.sendJSON(w, map[string]interface{}{
-		"success": true,
-		"message": "Config editor save not yet implemented",
-	})
-}
-
-func (r *Router) handleConfigEditorSpawns(w http.ResponseWriter, req *http.Request) {
-	// TODO: Handle spawns CRUD operations
-	r.sendJSON(w, []models.SpawnCommand{})
 }
 
 // Hosts handlers
