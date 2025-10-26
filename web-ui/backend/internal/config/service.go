@@ -343,10 +343,12 @@ func (s *Service) reloadSysmon() error {
 	}
 
 	var pid int
-	fmt.Sscanf(string(pidContent), "%d", &pid)
+	if _, err := fmt.Sscanf(string(pidContent), "%d", &pid); err != nil {
+		return fmt.Errorf("failed to parse PID from file: %w", err)
+	}
 
-	if pid <= 0 {
-		return fmt.Errorf("invalid PID: %d", pid)
+	if pid <= 0 || pid > 1<<22 { // Max reasonable PID on modern Linux
+		return fmt.Errorf("invalid PID value: %d", pid)
 	}
 
 	process, err := os.FindProcess(pid)
