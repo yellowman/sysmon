@@ -156,8 +156,8 @@ void	service_test_x500(struct monitorent *here)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                memset(buffer, 0, sizeof(buffer));
+                                read(here->filedes, buffer, sizeof(buffer) - 1);
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "replication okay", 16) == 0)
