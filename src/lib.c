@@ -464,8 +464,10 @@ short int name_to_snmp_type(char *sent_type)
 			i_ret, sent_type, (i_ret - sent_type));
 		memset(type, 0, 256);
 		strncpy(type, sent_type, (i_ret - sent_type));
+		type[255] = '\0';  /* Ensure null termination */
 	} else {
 		strncpy(type, sent_type, 250);
+		type[250] = '\0';  /* Ensure null termination */
 	}
 
 	len = strlen(type);
@@ -519,8 +521,10 @@ short int name_to_type(char *sent_type)
 			i_ret, sent_type, (i_ret - sent_type));
 		memset(type, 0, 256);
 		strncpy(type, sent_type, (i_ret - sent_type));
+		type[255] = '\0';  /* Ensure null termination */
 	} else {
 		strncpy(type, sent_type, 250);
+		type[250] = '\0';  /* Ensure null termination */
 	}
 
 	len = strlen(type);
@@ -656,11 +660,13 @@ char	*timedata(time_t t)
 	if (t == 0)
 	{
 		strncpy(nfo, "Never", 29);
+		nfo[29] = '\0';  /* Ensure null termination */
 		return nfo;
 	}
 
         strncpy(nfo,ctime(&t)+4, 29); /* convert it to a string, copy to buffer */
-        nfo[strlen(nfo) -5] = '\0';
+        nfo[29] = '\0';  /* Ensure null termination after strncpy */
+        nfo[strlen(nfo) -5] = '\0';  /* Remove year and newline */
 
         return nfo;
 }
