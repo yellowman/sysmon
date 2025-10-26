@@ -153,8 +153,14 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
@@ -176,8 +182,14 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
@@ -199,10 +211,16 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
-                                        print_err(0, "Got(pop3_sent_pass):%s:", 
+                                        print_err(0, "Got(pop3_sent_pass):%s:",
 						buffer);
 				if (strncmp(buffer, "+OK", 3) == 0)
 					here->retval = SYSM_OK;
@@ -221,8 +239,14 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
                                         print_err(0, "Got2:%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)

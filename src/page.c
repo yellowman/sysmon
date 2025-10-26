@@ -258,7 +258,11 @@ void run_command_and_mail_output(struct hostinfo *svc, char *myhostname)
 
 	if ((svc->contact == NULL) || (strlen(svc->contact) == 0))
 	{
-		system(runme);
+		int ret = system(runme);
+		if (ret == -1)
+		{
+			perror("page.c:run_command_and_mail_output:system");
+		}
 		free(runme);
 		exit(0);
 	}
