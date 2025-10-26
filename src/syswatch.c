@@ -493,7 +493,7 @@ void recurs_print_q(int filedes, struct all_elements_list *start)
 	{
 		if (here->value->data->queued == 1)
 		{
-			snprintf(buffer, 256, "treeQ: %s", 
+			snprintf(buffer, sizeof(buffer), "treeQ: %s", 
 				here->value->unique_name);
 		       	sendline(filedes, buffer);
 		}
@@ -507,7 +507,7 @@ void print_queue(int filedes)
 	/* Print out the currently queued entries for debugging */
 	recurs_print_q(filedes, currenthead);
 
-	snprintf(buffer, 256, "Number of elements in queue count: %d", numqueued);
+	snprintf(buffer, sizeof(buffer), "Number of elements in queue count: %d", numqueued);
 	sendline(filedes, buffer);
 
 	return;
