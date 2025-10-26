@@ -40,18 +40,6 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/config/reload", r.handleConfigReload)
 	r.mux.HandleFunc("/api/config/raw", r.handleConfigRaw)
 
-	// Hosts
-	r.mux.HandleFunc("/api/hosts", r.handleHosts)
-	r.mux.HandleFunc("/api/hosts/", r.handleHostDetail)
-
-	// Checks
-	r.mux.HandleFunc("/api/checks", r.handleChecks)
-	r.mux.HandleFunc("/api/checks/", r.handleCheckDetail)
-
-	// Contacts
-	r.mux.HandleFunc("/api/contacts", r.handleContacts)
-	r.mux.HandleFunc("/api/contacts/", r.handleContactDetail)
-
 	// Backups
 	r.mux.HandleFunc("/api/backups", r.handleBackups)
 	r.mux.HandleFunc("/api/backups/", r.handleBackupDetail)
@@ -59,11 +47,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Live monitoring
 	r.mux.HandleFunc("/api/monitoring/status", r.handleMonitoringStatus)
 	r.mux.HandleFunc("/api/monitoring/hosts", r.handleMonitoringHosts)
-	r.mux.HandleFunc("/api/monitoring/host/", r.handleMonitoringHost)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
-	r.mux.HandleFunc("/api/monitoring/traps/", r.handleMonitoringTrapsBySource)
-	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
 	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
 	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
@@ -73,8 +58,6 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/bulk/update", r.handleBulkUpdate)
 	r.mux.HandleFunc("/api/monitoring/bulk/trace", r.handleBulkTrace)
 
-	r.mux.HandleFunc("/api/auth/test", r.handleAuthTest)
-
 	// API documentation
 	r.mux.HandleFunc("/api/docs", r.handleAPIDocs)
 	r.mux.HandleFunc("/api/openapi.yaml", r.handleOpenAPISpec)
@@ -82,8 +65,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Metrics
 	r.mux.HandleFunc("/api/metrics", r.handleMetrics)
 
-	// XML passthrough endpoints (comprehensive data)
-	r.mux.HandleFunc("/api/xml/objects", r.handleXMLObjects)
+	// XML passthrough endpoint (for host detail - kept for compatibility)
 	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
 
 	// Admin/debug endpoints
@@ -113,9 +95,13 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Apply rate limiting (60 requests per minute for general API, configurable)
 	rateLimiter := middleware.NewRateLimiter(60, 1*time.Minute)
 
-	// Apply middleware chain: CORS -> Metrics -> Rate Limiting -> Handler
+	// Create cache middleware
+	cache := middleware.NewCacheConfig()
+
+	// Apply middleware chain: CORS -> Metrics -> Cache -> Rate Limiting -> Handler
 	handler := r.mux
 	handler = rateLimiter.Middleware(handler)
+	handler = cache.Middleware(handler)
 	handler = metrics.Middleware(handler)
 	handler = r.addCORS(handler)
 
@@ -242,79 +228,6 @@ func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Hosts handlers
-func (r *Router) handleHosts(w http.ResponseWriter, req *http.Request) {
-	snapshot, err := r.config.GetConfig()
-	if err != nil {
-		r.sendError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	r.sendJSON(w, snapshot.Config.Hosts)
-}
-
-func (r *Router) handleHostDetail(w http.ResponseWriter, req *http.Request) {
-	// Extract hostname from path
-	hostname := strings.TrimPrefix(req.URL.Path, "/api/hosts/")
-	hostname = strings.TrimSpace(hostname)
-
-	if hostname == "" {
-		r.sendError(w, http.StatusBadRequest, "hostname required")
-		return
-	}
-
-	snapshot, err := r.config.GetConfig()
-	if err != nil {
-		r.sendError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	for _, host := range snapshot.Config.Hosts {
-		if host.ID == hostname || host.Hostname == hostname {
-			r.sendJSON(w, host)
-			return
-		}
-	}
-
-	http.Error(w, "Host not found", http.StatusNotFound)
-}
-
-// Checks handlers
-func (r *Router) handleChecks(w http.ResponseWriter, req *http.Request) {
-	snapshot, err := r.config.GetConfig()
-	if err != nil {
-		r.sendError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Collect all checks from all hosts
-	var allChecks []models.Check
-	for _, host := range snapshot.Config.Hosts {
-		allChecks = append(allChecks, host.Checks...)
-	}
-
-	r.sendJSON(w, allChecks)
-}
-
-func (r *Router) handleCheckDetail(w http.ResponseWriter, req *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
-
-// Contacts handlers
-func (r *Router) handleContacts(w http.ResponseWriter, req *http.Request) {
-	snapshot, err := r.config.GetConfig()
-	if err != nil {
-		r.sendError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	r.sendJSON(w, snapshot.Config.Contacts)
-}
-
-func (r *Router) handleContactDetail(w http.ResponseWriter, req *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
-
 // Backups handlers
 func (r *Router) handleBackups(w http.ResponseWriter, req *http.Request) {
 	backups, err := r.config.ListBackups()
@@ -323,7 +236,39 @@ func (r *Router) handleBackups(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r.sendJSON(w, backups)
+	// Check if pagination is requested
+	if req.URL.Query().Get("page") != "" || req.URL.Query().Get("limit") != "" {
+		params := r.parsePaginationParams(req)
+
+		total := len(backups)
+		start := (params.Page - 1) * params.Limit
+		end := start + params.Limit
+
+		if start >= total {
+			start = total
+			end = total
+		} else if end > total {
+			end = total
+		}
+
+		paginatedBackups := backups[start:end]
+		totalPages := (total + params.Limit - 1) / params.Limit
+		if totalPages == 0 {
+			totalPages = 1
+		}
+
+		response := map[string]interface{}{
+			"data":        paginatedBackups,
+			"total":       total,
+			"page":        params.Page,
+			"limit":       params.Limit,
+			"total_pages": totalPages,
+		}
+		r.sendJSON(w, response)
+	} else {
+		// No pagination requested, return all backups (backward compatible)
+		r.sendJSON(w, backups)
+	}
 }
 
 func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
@@ -380,25 +325,39 @@ func (r *Router) handleMonitoringHosts(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	r.sendJSON(w, status.Hosts)
-}
+	// Check if pagination is requested
+	if req.URL.Query().Get("page") != "" || req.URL.Query().Get("limit") != "" {
+		params := r.parsePaginationParams(req)
 
-func (r *Router) handleMonitoringHost(w http.ResponseWriter, req *http.Request) {
-	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/host/")
-	hostname = strings.TrimSpace(hostname)
+		total := len(status.Hosts)
+		start := (params.Page - 1) * params.Limit
+		end := start + params.Limit
 
-	if hostname == "" {
-		r.sendError(w, http.StatusBadRequest, "hostname required")
-		return
+		if start >= total {
+			start = total
+			end = total
+		} else if end > total {
+			end = total
+		}
+
+		paginatedHosts := status.Hosts[start:end]
+		totalPages := (total + params.Limit - 1) / params.Limit
+		if totalPages == 0 {
+			totalPages = 1
+		}
+
+		response := map[string]interface{}{
+			"data":        paginatedHosts,
+			"total":       total,
+			"page":        params.Page,
+			"limit":       params.Limit,
+			"total_pages": totalPages,
+		}
+		r.sendJSON(w, response)
+	} else {
+		// No pagination requested, return all hosts (backward compatible)
+		r.sendJSON(w, status.Hosts)
 	}
-
-	host, err := r.monitoring.GetHostStatus(hostname)
-	if err != nil {
-		r.sendError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	r.sendJSON(w, host)
 }
 
 func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request) {
@@ -418,35 +377,39 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	r.sendJSON(w, traps)
-}
+	// Check if pagination is requested
+	if req.URL.Query().Get("page") != "" || req.URL.Query().Get("limit") != "" {
+		params := r.parsePaginationParams(req)
 
-func (r *Router) handleMonitoringTrapsBySource(w http.ResponseWriter, req *http.Request) {
-	sourceIP := strings.TrimPrefix(req.URL.Path, "/api/monitoring/traps/")
-	sourceIP = strings.TrimSpace(sourceIP)
+		total := len(traps)
+		start := (params.Page - 1) * params.Limit
+		end := start + params.Limit
 
-	if sourceIP == "" {
-		r.sendError(w, http.StatusBadRequest, "source IP required")
-		return
+		if start >= total {
+			start = total
+			end = total
+		} else if end > total {
+			end = total
+		}
+
+		paginatedTraps := traps[start:end]
+		totalPages := (total + params.Limit - 1) / params.Limit
+		if totalPages == 0 {
+			totalPages = 1
+		}
+
+		response := map[string]interface{}{
+			"data":        paginatedTraps,
+			"total":       total,
+			"page":        params.Page,
+			"limit":       params.Limit,
+			"total_pages": totalPages,
+		}
+		r.sendJSON(w, response)
+	} else {
+		// No pagination requested, return all traps (backward compatible)
+		r.sendJSON(w, traps)
 	}
-
-	traps, err := r.monitoring.GetTrapsBySource(sourceIP)
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-
-	r.sendJSON(w, traps)
-}
-
-func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request) {
-	stats, err := r.monitoring.GetStatistics()
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-
-	r.sendJSON(w, stats)
 }
 
 func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
@@ -562,45 +525,6 @@ func (r *Router) handleMonitoringTrace(w http.ResponseWriter, req *http.Request)
 		"hostname": hostname,
 		"tracing_enabled": enabled,
 		"message":  fmt.Sprintf("Tracing %s for %s", map[bool]string{true: "enabled", false: "disabled"}[enabled], hostname),
-	})
-}
-
-func (r *Router) handleAuthTest(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
-		return
-	}
-
-	// Get auth key from header first
-	authKey := req.Header.Get("X-Auth-Key")
-
-	// If no header, try to parse from body (but don't fail if body is empty)
-	if authKey == "" && req.Body != nil {
-		var body struct {
-			AuthKey string `json:"auth_key"`
-		}
-		// Ignore decode errors - body might be empty, which is OK if header is set
-		json.NewDecoder(req.Body).Decode(&body)
-		authKey = body.AuthKey
-	}
-
-	if authKey == "" {
-		r.sendError(w, http.StatusBadRequest, "Auth key required in X-Auth-Key header or JSON body")
-		return
-	}
-
-	valid, err := r.monitoring.TestAuth(authKey)
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to test auth: %v", err))
-		return
-	}
-
-	r.sendJSON(w, map[string]interface{}{
-		"valid": valid,
-		"message": map[bool]string{
-			true:  "Authentication successful",
-			false: "Invalid auth key",
-		}[valid],
 	})
 }
 
@@ -1050,26 +974,7 @@ func (r *Router) handleAPIDocs(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(html))
 }
 
-// XML Passthrough Handlers - Return raw XML with comprehensive data
-
-func (r *Router) handleXMLObjects(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
-		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
-		return
-	}
-
-	// Get raw XML from sysmon with all enhanced fields
-	xmlData, err := r.monitoring.GetObjectsXML()
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get objects XML: %v", err))
-		return
-	}
-
-	// Return raw XML with proper Content-Type
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(xmlData))
-}
+// XML Passthrough Handler - Return raw XML for single object (used by host-detail.html)
 
 func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
@@ -1150,6 +1055,94 @@ func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 func (r *Router) getAuthKey(req *http.Request) string {
 	// Get auth key from X-Auth-Key header
 	return req.Header.Get("X-Auth-Key")
+}
+
+// Pagination helpers
+type PaginationParams struct {
+	Page  int
+	Limit int
+	Sort  string
+}
+
+type PaginatedResponse struct {
+	Data       interface{} `json:"data"`
+	Total      int         `json:"total"`
+	Page       int         `json:"page"`
+	Limit      int         `json:"limit"`
+	TotalPages int         `json:"total_pages"`
+}
+
+// parsePaginationParams extracts pagination parameters from query string
+func (r *Router) parsePaginationParams(req *http.Request) PaginationParams {
+	params := PaginationParams{
+		Page:  1,
+		Limit: 50, // Default limit
+		Sort:  "",
+	}
+
+	// Parse page number
+	if pageStr := req.URL.Query().Get("page"); pageStr != "" {
+		if page, err := strconv.Atoi(pageStr); err == nil && page > 0 {
+			params.Page = page
+		}
+	}
+
+	// Parse limit
+	if limitStr := req.URL.Query().Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 1000 {
+			params.Limit = limit
+		}
+	}
+
+	// Parse sort field
+	params.Sort = req.URL.Query().Get("sort")
+
+	return params
+}
+
+// paginateSlice paginates a slice and returns pagination metadata
+func (r *Router) paginateSlice(data interface{}, params PaginationParams) PaginatedResponse {
+	// Use reflection to handle different slice types
+	// For simplicity, we'll assume data is already a slice
+	// In a real implementation, you might want to add type checking
+
+	// Calculate pagination
+	total := 0
+	var paginatedData interface{}
+
+	// For now, we'll handle the common case of []interface{}
+	// and let the caller handle type conversion if needed
+	switch v := data.(type) {
+	case []interface{}:
+		total = len(v)
+		start := (params.Page - 1) * params.Limit
+		end := start + params.Limit
+
+		if start >= total {
+			paginatedData = []interface{}{}
+		} else {
+			if end > total {
+				end = total
+			}
+			paginatedData = v[start:end]
+		}
+	default:
+		// If not a slice we recognize, return everything
+		paginatedData = data
+	}
+
+	totalPages := (total + params.Limit - 1) / params.Limit
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	return PaginatedResponse{
+		Data:       paginatedData,
+		Total:      total,
+		Page:       params.Page,
+		Limit:      params.Limit,
+		TotalPages: totalPages,
+	}
 }
 
 func (r *Router) addCORS(next http.Handler) http.Handler {
