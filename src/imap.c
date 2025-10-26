@@ -245,25 +245,26 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+				char *response;  /* Pointer to walk through buffer */
+
                                 memset(buffer, 0, sizeof(buffer));
                                 read(here->filedes, buffer, sizeof(buffer) - 1);
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
 				}
-				/* ditch informational msg(s) */
-doover:				if (strncmp(buffer, "*", 1) == 0) {
-				    if ((retptr = strchr(buffer, '\n')) != NULL) {
-					/* Use memmove for overlapping memory regions */
-					size_t len = strlen(retptr + 1);
-					memmove(buffer, retptr + 1, len + 1);  /* +1 to include null terminator */
+				/* Skip informational msg(s) starting with '*' */
+				response = buffer;
+doover:				if (strncmp(response, "*", 1) == 0) {
+				    if ((retptr = strchr(response, '\n')) != NULL) {
+					response = retptr + 1;  /* Advance pointer past this line */
 					goto doover;
 				    }
 				}
-                                if (strncmp(buffer, "A100 OK", 7) == 0)
+                                if (strncmp(response, "A100 OK", 7) == 0)
                                 {
 					here->retval = SYSM_OK;
-				} else if (strncmp(buffer, "A100 NO", 7) == 0)
+				} else if (strncmp(response, "A100 NO", 7) == 0)
 				{
 					here->retval = SYSM_BAD_AUTH;
                                 } else {
