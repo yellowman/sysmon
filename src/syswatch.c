@@ -157,6 +157,11 @@ void set_defaults()
 	{
 		free(pmesg);
 		pmesg = strdup(PMESG);
+		if (pmesg == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(PMESG) failed - out of memory");
+			exit(1);
+		}
 	}
 	if (statefile != NULL)
 	{
@@ -167,6 +172,11 @@ void set_defaults()
 	{
 		free (subject);
 		subject = strdup(SUBJECT);
+		if (subject == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(SUBJECT) failed - out of memory");
+			exit(1);
+		}
 	}
 	if (sender != NULL)
 	{
@@ -176,23 +186,53 @@ void set_defaults()
 	if (upcolor == NULL)
 	{
 		upcolor=strdup(UPCOLOR);
+		if (upcolor == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(UPCOLOR) failed - out of memory");
+			exit(1);
+		}
 	} else {
 		free(upcolor);
 		upcolor = strdup(UPCOLOR);
+		if (upcolor == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(UPCOLOR) failed - out of memory");
+			exit(1);
+		}
 	}
 	if (downcolor == NULL)
 	{
 		downcolor = strdup(DOWNCOLOR);
+		if (downcolor == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(DOWNCOLOR) failed - out of memory");
+			exit(1);
+		}
 	} else {
 		free(downcolor);
 		downcolor = strdup(DOWNCOLOR);
+		if (downcolor == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(DOWNCOLOR) failed - out of memory");
+			exit(1);
+		}
 	}
 	if (recentcolor == NULL)
 	{
 		recentcolor = strdup(RECENTCOLOR);
+		if (recentcolor == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(RECENTCOLOR) failed - out of memory");
+			exit(1);
+		}
 	} else {
 		free(recentcolor);
 		recentcolor = strdup(RECENTCOLOR);
+		if (recentcolor == NULL)
+		{
+			print_err(1, "reset_defaults: strdup(RECENTCOLOR) failed - out of memory");
+			exit(1);
+		}
 	}
 }
 
