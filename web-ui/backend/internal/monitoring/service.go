@@ -1122,7 +1122,17 @@ func (s *Service) sendSimpleCommand(command string, authKey string) (string, err
 		return "", fmt.Errorf("failed to read %s response: %w", command, err)
 	}
 
-	return strings.TrimSpace(response), nil
+	response = strings.TrimSpace(response)
+
+	// Check for error response codes
+	if strings.Contains(response, "444") {
+		return "", fmt.Errorf("authentication failed - auth key required for %s command", command)
+	} else if strings.Contains(response, "403") {
+		return "", fmt.Errorf("command failed or permission denied")
+	}
+
+	// Success - return the response
+	return response, nil
 }
 
 // GetObjectsXML returns raw XML for all monitored objects
