@@ -228,7 +228,7 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
                                 if (strncmp(buffer, "* OK", 4) == 0)
                                 {
                                         /* prepare the buffer */
-                                        snprintf(buffer, 256, "A100 LOGIN %s %s",
+                                        snprintf(buffer, sizeof(buffer), "A100 LOGIN %s %s",
                                                 here->checkent->username,
 						here->checkent->password);
 
