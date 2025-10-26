@@ -151,9 +151,13 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
 				case 'r':
 			                tmp1 = svc->totaldown;
 			                tmp2 = svc->totalchecked;
-			                value = (100.0000-((tmp1/tmp2) * 100));
-			                if (value<0) value=0.000;
-			                if (tmp2==0) value=100.00;
+			                /* BUG FIX: Check for divide-by-zero BEFORE division */
+			                if (tmp2==0) {
+			                	value=100.00;
+			                } else {
+			                	value = (100.0000-((tmp1/tmp2) * 100));
+			                	if (value<0) value=0.000;
+			                }
 					snprintf(tmp, sizeof(tmp), "%s %10.6f%%", out,
 						value);
 					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
