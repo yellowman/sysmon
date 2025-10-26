@@ -255,6 +255,7 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 doover:				if (strncmp(buffer, "*", 1) == 0) {
 				    if ((retptr = strchr(buffer, '\n')) != NULL) {
 					strncpy(buffer, retptr + 1, sizeof(buffer) - 1);
+					buffer[sizeof(buffer) - 1] = '\0';  /* Ensure null-termination */
 					goto doover;
 				    }
 				}
