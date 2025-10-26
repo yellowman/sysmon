@@ -465,8 +465,15 @@ function hostsPage() {
 
         getLastCheckTime(host) {
             if (!host.checks || host.checks.length === 0) return 'Never';
-            const times = host.checks.map(c => new Date(c.last_check_time));
-            const latest = new Date(Math.max(...times));
+
+            // Filter out invalid timestamps before using Math.max
+            const validTimes = host.checks
+                .map(c => new Date(c.last_check_time).getTime())
+                .filter(t => !isNaN(t) && t > 0);
+
+            if (validTimes.length === 0) return 'Never';
+
+            const latest = new Date(Math.max(...validTimes));
 
             // Handle invalid/epoch dates (year < 1980 is likely invalid)
             if (latest.getFullYear() < 1980) return 'Never';
