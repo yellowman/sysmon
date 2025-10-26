@@ -254,8 +254,9 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 				/* ditch informational msg(s) */
 doover:				if (strncmp(buffer, "*", 1) == 0) {
 				    if ((retptr = strchr(buffer, '\n')) != NULL) {
-					strncpy(buffer, retptr + 1, sizeof(buffer) - 1);
-					buffer[sizeof(buffer) - 1] = '\0';  /* Ensure null-termination */
+					/* Use memmove for overlapping memory regions */
+					size_t len = strlen(retptr + 1);
+					memmove(buffer, retptr + 1, len + 1);  /* +1 to include null terminator */
 					goto doover;
 				    }
 				}
