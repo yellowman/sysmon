@@ -459,9 +459,14 @@ function hostsPage() {
             if (!host.checks || host.checks.length === 0) return 'Never';
             const times = host.checks.map(c => new Date(c.last_check_time));
             const latest = new Date(Math.max(...times));
+
+            // Handle invalid/epoch dates (year < 1980 is likely invalid)
+            if (latest.getFullYear() < 1980) return 'Never';
+
             const now = new Date();
             const diff = Math.floor((now - latest) / 1000);
 
+            if (diff < 0) return 'just now'; // Future date, clock skew
             if (diff < 60) return `${diff}s ago`;
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
