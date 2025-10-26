@@ -54,6 +54,7 @@ char *get_hostname(struct my_hostent *hp)
 	}
 
 	strncpy(local, localhp->h_name, 250);
+	local[250] = '\0';  /* Ensure null termination */
 
 	return local;
 	
