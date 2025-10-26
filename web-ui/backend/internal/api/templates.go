@@ -23,6 +23,7 @@ func InitTemplates(dir string) error {
 		"traps.html",
 		"config.html",
 		"admin.html",
+		"metrics.html",
 	}
 
 	// Parse each page template along with base template
@@ -89,4 +90,8 @@ func (r *Router) handleConfigEditorPage(w http.ResponseWriter, req *http.Request
 
 func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "admin.html", nil)
+}
+
+func (r *Router) handleMetricsPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "metrics.html", nil)
 }
