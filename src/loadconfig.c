@@ -4,6 +4,9 @@
 
 extern char *parser_root;
 
+/* Forward declaration for lex-generated function */
+int sysmon_conf_yylex(void);
+
 struct set_type {
 	unsigned char *name;
 	unsigned char *value;

@@ -2,9 +2,12 @@
 
 #include "config.h"
 
-/* One of the many include files defines a 'clear' macro 
+/* One of the many include files defines a 'clear' macro
 which breaks the build on Mac OS X */
 #undef clear
+
+/* Forward declaration for print_in_hex (defined in radius.c) */
+void print_in_hex(unsigned char *message, int msgsize);
 
 /* SNMP specific includes */
 #ifdef ENABLE_SNMP
