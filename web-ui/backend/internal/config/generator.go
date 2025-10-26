@@ -9,6 +9,10 @@ import (
 
 // Generate generates sysmon.conf format from config
 func Generate(config *models.Config) (string, error) {
+	if config == nil {
+		return "", fmt.Errorf("config is nil")
+	}
+
 	var sb strings.Builder
 
 	// Header comment
@@ -114,6 +118,10 @@ func Generate(config *models.Config) (string, error) {
 
 // Validate validates a config
 func Validate(config *models.Config) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+
 	// Check required global settings
 	if config.Global.ClientPort <= 0 || config.Global.ClientPort > 65535 {
 		return fmt.Errorf("invalid client port: %d", config.Global.ClientPort)

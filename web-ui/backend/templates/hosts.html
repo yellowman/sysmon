@@ -324,6 +324,7 @@ function hostsPage() {
         viewMode: 'comparison', // 'comparison' or 'table'
         sortField: 'hostname',
         sortDirection: 'asc',
+        refreshInterval: null,
 
         get filteredHosts() {
             return this.hosts.filter(host => {
@@ -363,7 +364,14 @@ function hostsPage() {
 
         init() {
             this.fetchHosts();
-            setInterval(() => this.fetchHosts(), 10000);
+            this.refreshInterval = setInterval(() => this.fetchHosts(), 10000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async fetchHosts() {

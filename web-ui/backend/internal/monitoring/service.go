@@ -64,14 +64,14 @@ func (sl *SessionLogger) Log(command, response string, isError bool, errorMsg st
 
 	// Add to main log (circular buffer)
 	sl.entries = append(sl.entries, entry)
-	if len(sl.entries) > sl.maxEntries {
+	if len(sl.entries) >= sl.maxEntries {
 		sl.entries = sl.entries[len(sl.entries)-sl.maxEntries:]
 	}
 
 	// Add to errors log if it's an error (circular buffer)
 	if isError {
 		sl.errors = append(sl.errors, entry)
-		if len(sl.errors) > sl.maxErrors {
+		if len(sl.errors) >= sl.maxErrors {
 			sl.errors = sl.errors[len(sl.errors)-sl.maxErrors:]
 		}
 	}
