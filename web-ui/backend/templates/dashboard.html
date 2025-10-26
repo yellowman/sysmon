@@ -437,7 +437,7 @@ function dashboard() {
 
                 this.loading = false;
             } catch (e) {
-                this.error = e.message;
+                this.error = e?.message || e?.toString() || 'Unknown error';
                 this.loading = false;
             }
         },
