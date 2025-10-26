@@ -1309,3 +1309,326 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 
 	return xmlOutput.String(), nil
 }
+
+// BulkOperationResult represents the result of a single operation in a bulk request
+type BulkOperationResult struct {
+	Hostname string `json:"hostname"`
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
+}
+
+// BulkAckHosts acknowledges multiple hosts in a single connection
+func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperationResult {
+	results := make([]BulkOperationResult, len(hostnames))
+
+	// Validate input
+	if len(hostnames) == 0 {
+		return results
+	}
+
+	// Connect to sysmon daemon once
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 10*time.Second)
+	if err != nil {
+		// If connection fails, mark all as failed
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to connect to sysmon: %v", err),
+			}
+		}
+		return results
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second)) // Longer timeout for bulk
+	reader := bufio.NewReader(conn)
+
+	// Read welcome banner
+	if err := readWelcomeBanner(reader); err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to read welcome banner: %v", err),
+			}
+		}
+		return results
+	}
+
+	// Authenticate once
+	if err := authenticate(conn, reader, authKey); err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("authentication failed: %v", err),
+			}
+		}
+		return results
+	}
+
+	// Process each hostname
+	for i, hostname := range hostnames {
+		// Send ACK command
+		cmd := fmt.Sprintf("ACK %s\n", hostname)
+		_, err := conn.Write([]byte(cmd))
+		if err != nil {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to send command: %v", err),
+			}
+			continue
+		}
+
+		s.sessionLog.Log(fmt.Sprintf("ACK %s", hostname), "", false, "")
+
+		// Read response
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to read response: %v", err),
+			}
+			continue
+		}
+
+		response = strings.TrimSpace(response)
+		s.sessionLog.Log(fmt.Sprintf("ACK %s", hostname), response, false, "")
+
+		// Check if command succeeded
+		if strings.HasPrefix(response, "OK") || strings.Contains(response, "acknowledged") {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  true,
+			}
+		} else {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    response,
+			}
+		}
+	}
+
+	// Send QUIT
+	conn.Write([]byte("QUIT\n"))
+
+	return results
+}
+
+// BulkUpdateHosts updates multiple hosts with the same note in a single connection
+func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey string) []BulkOperationResult {
+	results := make([]BulkOperationResult, len(hostnames))
+
+	// Validate input
+	if len(hostnames) == 0 {
+		return results
+	}
+	if note == "" {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    "note is required",
+			}
+		}
+		return results
+	}
+
+	// Connect to sysmon daemon once
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 10*time.Second)
+	if err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to connect to sysmon: %v", err),
+			}
+		}
+		return results
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Read welcome banner
+	if err := readWelcomeBanner(reader); err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to read welcome banner: %v", err),
+			}
+		}
+		return results
+	}
+
+	// Authenticate once
+	if err := authenticate(conn, reader, authKey); err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("authentication failed: %v", err),
+			}
+		}
+		return results
+	}
+
+	// Process each hostname
+	for i, hostname := range hostnames {
+		// Send UPDATE command
+		cmd := fmt.Sprintf("UPDATE %s %s\n", hostname, note)
+		_, err := conn.Write([]byte(cmd))
+		if err != nil {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to send command: %v", err),
+			}
+			continue
+		}
+
+		s.sessionLog.Log(fmt.Sprintf("UPDATE %s %s", hostname, note), "", false, "")
+
+		// Read response
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to read response: %v", err),
+			}
+			continue
+		}
+
+		response = strings.TrimSpace(response)
+		s.sessionLog.Log(fmt.Sprintf("UPDATE %s", hostname), response, false, "")
+
+		// Check if command succeeded
+		if strings.HasPrefix(response, "OK") || strings.Contains(response, "updated") {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  true,
+			}
+		} else {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    response,
+			}
+		}
+	}
+
+	// Send QUIT
+	conn.Write([]byte("QUIT\n"))
+
+	return results
+}
+
+// BulkToggleTrace toggles trace for multiple hosts in a single connection
+func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey string) []BulkOperationResult {
+	results := make([]BulkOperationResult, len(hostnames))
+
+	// Validate input
+	if len(hostnames) == 0 {
+		return results
+	}
+
+	// Connect to sysmon daemon once
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 10*time.Second)
+	if err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to connect to sysmon: %v", err),
+			}
+		}
+		return results
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	// Read welcome banner
+	if err := readWelcomeBanner(reader); err != nil {
+		for i, hostname := range hostnames {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to read welcome banner: %v", err),
+			}
+		}
+		return results
+	}
+
+	// Authenticate once (trace doesn't require auth but accept it)
+	if authKey != "" {
+		if err := authenticate(conn, reader, authKey); err != nil {
+			for i, hostname := range hostnames {
+				results[i] = BulkOperationResult{
+					Hostname: hostname,
+					Success:  false,
+					Error:    fmt.Sprintf("authentication failed: %v", err),
+				}
+			}
+			return results
+		}
+	}
+
+	// Process each hostname
+	for i, hostname := range hostnames {
+		// Send TRACE command (toggle)
+		cmd := fmt.Sprintf("TRACE %s\n", hostname)
+		_, err := conn.Write([]byte(cmd))
+		if err != nil {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to send command: %v", err),
+			}
+			continue
+		}
+
+		s.sessionLog.Log(fmt.Sprintf("TRACE %s", hostname), "", false, "")
+
+		// Read response
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    fmt.Sprintf("failed to read response: %v", err),
+			}
+			continue
+		}
+
+		response = strings.TrimSpace(response)
+		s.sessionLog.Log(fmt.Sprintf("TRACE %s", hostname), response, false, "")
+
+		// Check if command succeeded
+		if strings.HasPrefix(response, "OK") || strings.Contains(response, "trace") {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  true,
+			}
+		} else {
+			results[i] = BulkOperationResult{
+				Hostname: hostname,
+				Success:  false,
+				Error:    response,
+			}
+		}
+	}
+
+	// Send QUIT
+	conn.Write([]byte("QUIT\n"))
+
+	return results
+}
