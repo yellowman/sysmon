@@ -325,6 +325,8 @@ func (s *Service) backupConfig(comment string) error {
 
 	dst, err := os.Create(backupPath)
 	if err != nil {
+		// Explicitly close src since defer hasn't registered for dst yet
+		src.Close()
 		return err
 	}
 	defer dst.Close()

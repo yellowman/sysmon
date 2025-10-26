@@ -575,7 +575,10 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	// WarningHosts and ChecksByType/ChecksByStatus are incremented in the loop above
 
 	// Send QUIT to close connection cleanly
-	conn.Write([]byte("QUIT\n"))
+	if _, err := conn.Write([]byte("QUIT\n")); err != nil {
+		// Log but don't fail - connection is closing anyway
+		s.sessionLog.Log("QUIT", "", true, fmt.Sprintf("Error sending QUIT: %v", err))
+	}
 
 	// Log successful completion
 	s.sessionLog.Log("GetStatus", fmt.Sprintf("Complete: %d total, %d up, %d down, %d warnings",
@@ -1235,7 +1238,7 @@ func (s *Service) GetObjectsXML() (string, error) {
 
 	xmlOutput.WriteString("</SysmonStatus>\n")
 
-	// Send QUIT to close connection cleanly
+	// Send QUIT to close connection cleanly (ignore error - connection closing)
 	conn.Write([]byte("QUIT\n"))
 
 	return xmlOutput.String(), nil
@@ -1301,7 +1304,7 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 		}
 	}
 
-	// Send QUIT to close connection cleanly
+	// Send QUIT to close connection cleanly (ignore error - connection closing)
 	conn.Write([]byte("QUIT\n"))
 
 	return xmlOutput.String(), nil
