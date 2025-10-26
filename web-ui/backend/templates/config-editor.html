@@ -946,13 +946,44 @@ function configEditor() {
         },
 
         validateConfig() {
+            // Validate global settings
+            if (this.config.global) {
+                const clientPort = parseInt(this.config.global.clientport);
+                if (isNaN(clientPort) || clientPort < 1 || clientPort > 65535) {
+                    alert('Client port must be between 1 and 65535');
+                    return false;
+                }
+
+                const checkInterval = parseInt(this.config.global.checkinterval);
+                if (this.config.global.checkinterval && (isNaN(checkInterval) || checkInterval < 1)) {
+                    alert('Check interval must be a positive number');
+                    return false;
+                }
+
+                const pageInterval = parseInt(this.config.global.pageinterval);
+                if (this.config.global.pageinterval && (isNaN(pageInterval) || pageInterval < -1)) {
+                    alert('Page interval must be -1 (use default) or a positive number');
+                    return false;
+                }
+            }
+
             // Validate hosts
             for (const host of this.config.hosts) {
                 if (!host.hostname || !host.ip || !host.type) {
                     alert('All hosts must have hostname, IP, and type specified');
                     return false;
                 }
+
+                // Validate host-specific page interval
+                if (host.pageinterval !== undefined && host.pageinterval !== null) {
+                    const hostPageInterval = parseInt(host.pageinterval);
+                    if (isNaN(hostPageInterval) || hostPageInterval < -1) {
+                        alert(`Host ${host.hostname}: page interval must be -1 (use global) or a positive number`);
+                        return false;
+                    }
+                }
             }
+
             return true;
         },
 
