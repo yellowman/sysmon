@@ -514,10 +514,13 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		}
 
 		// Add check details
+		// Set last check time to current time since XML doesn't provide per-check timestamps
+		// The actual last check is very recent (within checkinterval seconds)
 		check := models.CheckResult{
 			Type:          xmlObj.ObjectType,
 			Port:          xmlObj.ObjectPort,
 			Status:        host.OverallStatus,
+			LastCheckTime: time.Now(),
 			StatusMessage: xmlObj.ObjectMessage,
 		}
 		host.Checks = append(host.Checks, check)
@@ -1119,7 +1122,17 @@ func (s *Service) sendSimpleCommand(command string, authKey string) (string, err
 		return "", fmt.Errorf("failed to read %s response: %w", command, err)
 	}
 
-	return strings.TrimSpace(response), nil
+	response = strings.TrimSpace(response)
+
+	// Check for error response codes
+	if strings.Contains(response, "444") {
+		return "", fmt.Errorf("authentication failed - auth key required for %s command", command)
+	} else if strings.Contains(response, "403") {
+		return "", fmt.Errorf("command failed or permission denied")
+	}
+
+	// Success - return the response
+	return response, nil
 }
 
 // GetObjectsXML returns raw XML for all monitored objects
