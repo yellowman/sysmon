@@ -242,6 +242,12 @@
                         <p class="text-xs text-gray-500 mt-1">Temp directory for status files</p>
                     </div>
                     <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">CSS File</label>
+                        <input type="text" x-model="config.global.cssfile" placeholder="/etc/sysmon/custom.css"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                        <p class="text-xs text-gray-500 mt-1">Custom CSS file for HTML output</p>
+                    </div>
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">JSON Output Path</label>
                         <input type="text" x-model="config.global.outputjson" placeholder="/var/log/sysmon/status.json"
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
@@ -428,6 +434,9 @@
                                         <button @click="host.activeTab = 'snmp'" :class="host.activeTab === 'snmp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                             SNMP
                                         </button>
+                                        <button @click="host.activeTab = 'protocol'" :class="host.activeTab === 'protocol' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                            Protocol
+                                        </button>
                                         <button @click="host.activeTab = 'advanced'" :class="host.activeTab === 'advanced' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                             Advanced
                                         </button>
@@ -569,6 +578,28 @@
 
                                 <!-- SNMP Tab -->
                                 <div x-show="host.activeTab === 'snmp'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <!-- SNMP Community and OID -->
+                                    <div class="md:col-span-2">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">SNMP Community String</label>
+                                        <input type="text" x-model="host.snmpcommunity" placeholder="public"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">SNMP v1/v2c community string (default: "public")</p>
+                                    </div>
+
+                                    <div class="md:col-span-2">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">SNMP OID</label>
+                                        <input type="text" x-model="host.snmpoid" placeholder=".1.3.6.1.2.1.1.3.0"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">Object Identifier to query (e.g., ".1.3.6.1.2.1.1.3.0" for sysUpTime)</p>
+                                    </div>
+
+                                    <div class="md:col-span-2">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Secondary OID (Optional)</label>
+                                        <input type="text" x-model="host.snmpoidsec" placeholder=""
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">Secondary OID for comparison checks</p>
+                                    </div>
+
                                     <div class="md:col-span-2">
                                         <label class="block text-sm font-medium text-gray-700 mb-1">SNMP Check Type</label>
                                         <select x-model="host.snmptype"
@@ -621,9 +652,112 @@
                                         </label>
                                     </div>
 
+                                    <!-- Custom SNMP Messages -->
+                                    <div x-show="host.snmptype" class="md:col-span-2">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Custom UP Message (Optional)</label>
+                                        <input type="text" x-model="host.snmpupmsg" placeholder=""
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">Custom message when SNMP check passes</p>
+                                    </div>
+
+                                    <div x-show="host.snmptype" class="md:col-span-2">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Custom DOWN Message (Optional)</label>
+                                        <input type="text" x-model="host.snmpdownmsg" placeholder=""
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">Custom message when SNMP check fails</p>
+                                    </div>
+
                                     <div x-show="!host.snmptype" class="md:col-span-2 text-center py-8 text-gray-500">
                                         <i class="fas fa-network-wired text-4xl text-gray-300 mb-2"></i>
                                         <p>Select an SNMP check type above to configure SNMP monitoring</p>
+                                    </div>
+                                </div>
+
+                                <!-- Protocol Tab (DNS, HTTP, Auth) -->
+                                <div x-show="host.activeTab === 'protocol'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <!-- DNS Check Settings -->
+                                    <div class="md:col-span-2 bg-gray-50 p-4 rounded-lg">
+                                        <h4 class="font-semibold text-gray-700 mb-3">DNS Check Settings</h4>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">DNS Query Hostname</label>
+                                                <input type="text" x-model="host.dnsquery" placeholder="example.com"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Hostname to query (for DNS check type)</p>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <input type="checkbox" x-model="host.dnsaa" :id="'dnsaa-' + index"
+                                                       class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                <label :for="'dnsaa-' + index" class="ml-2 block text-sm text-gray-900">
+                                                    Require Authoritative Answer
+                                                    <p class="text-xs text-gray-500">Ensure response is authoritative</p>
+                                                </label>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <input type="checkbox" x-model="host.dnsrecursion" :id="'dnsrecursion-' + index"
+                                                       class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                <label :for="'dnsrecursion-' + index" class="ml-2 block text-sm text-gray-900">
+                                                    Enable Recursion
+                                                    <p class="text-xs text-gray-500">Perform recursive DNS query</p>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- HTTP/HTTPS Check Settings -->
+                                    <div class="md:col-span-2 bg-gray-50 p-4 rounded-lg">
+                                        <h4 class="font-semibold text-gray-700 mb-3">HTTP/HTTPS Check Settings</h4>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">URL Path</label>
+                                                <input type="text" x-model="host.url" placeholder="/health"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">URL path to check (e.g., "/", "/health", "/api/status")</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Expected Text in Response</label>
+                                                <input type="text" x-model="host.urltext" placeholder="OK"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Text string that must appear in HTTP response</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">HTTP Header Name</label>
+                                                <input type="text" x-model="host.header" placeholder="X-Status"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">HTTP header to check</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Expected Header Value</label>
+                                                <input type="text" x-model="host.headerval" placeholder="active"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Expected value for the header</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Protocol Authentication -->
+                                    <div class="md:col-span-2 bg-gray-50 p-4 rounded-lg">
+                                        <h4 class="font-semibold text-gray-700 mb-3">Protocol Authentication</h4>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                                <input type="text" x-model="host.username" placeholder=""
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">For POP3, IMAP, etc.</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                                <input type="password" x-model="host.password" placeholder=""
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Authentication password</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">RADIUS Secret</label>
+                                                <input type="password" x-model="host.secret" placeholder=""
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">RADIUS shared secret</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -673,6 +807,49 @@
                                         <input type="text" x-model="host.dependencies" placeholder="router1,gateway"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                                         <p class="text-xs text-gray-500 mt-1">Comma-separated host dependencies</p>
+                                    </div>
+
+                                    <!-- Per-Object Overrides -->
+                                    <div class="md:col-span-2 bg-gray-50 p-4 rounded-lg mt-4">
+                                        <h4 class="font-semibold text-gray-700 mb-3">Per-Object Overrides</h4>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Check Interval (seconds)</label>
+                                                <input type="number" x-model="host.queuetime" placeholder="60"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Override global check interval</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Group/Category</label>
+                                                <input type="text" x-model="host.group" placeholder="databases"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Organizational group</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Custom Page Message</label>
+                                                <input type="text" x-model="host.pmsg" placeholder="%H is %u - %d"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Custom alert message format (%H=host, %u=status, %d=description)</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Command on Failure</label>
+                                                <input type="text" x-model="host.command" placeholder="/usr/local/bin/restart-service.sh"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Command to execute when host fails</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Packet Loss Tolerance (count)</label>
+                                                <input type="number" x-model="host.pktlosstolerance" placeholder="5"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Max packets that can be lost</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Packet Loss History (hours)</label>
+                                                <input type="number" x-model="host.pktlosshistoryhours" placeholder="24"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Hours of history to keep</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

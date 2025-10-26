@@ -46,6 +46,7 @@ type GlobalSettings struct {
 	StatusFile     string `json:"statusfile,omitempty"`     // path to status file
 	StatusFileType string `json:"statusfiletype,omitempty"` // "html" or "text"
 	StatusTempDir  string `json:"statustempdir,omitempty"`  // temp directory for status files
+	CSSFile        string `json:"cssfile,omitempty"`        // path to custom CSS file for HTML output
 	PidFile        string `json:"pidfile,omitempty"`        // PID file path
 	Logging        string `json:"logging,omitempty"`        // syslog facility
 	OutputJSON     string `json:"outputjson,omitempty"`     // JSON output file path
@@ -111,12 +112,41 @@ type Host struct {
 	MatchedHost string `json:"matchedhost,omitempty"` // associated host for trap matching
 
 	// SNMP monitoring settings
-	SNMPType   string  `json:"snmptype,omitempty"`   // SNMP check type (high/low/range/exact/rate/uptime)
-	SNMPHigh   int64   `json:"snmphigh,omitempty"`   // upper threshold
-	SNMPLow    int64   `json:"snmplow,omitempty"`    // lower threshold
-	SNMPExact  int64   `json:"snmpexact,omitempty"`  // exact value to match
-	SNMPRate   int64   `json:"snmprate,omitempty"`   // rate per second threshold
-	SNMPOctets bool    `json:"snmpoctets,omitempty"` // convert bytes to bits for rate
+	SNMPCommunity string  `json:"snmpcommunity,omitempty"` // SNMP community string (e.g., "public")
+	SNMPOID       string  `json:"snmpoid,omitempty"`       // OID to query (e.g., ".1.3.6.1.2.1.1.3.0")
+	SNMPOIDSec    string  `json:"snmpoidsec,omitempty"`    // Secondary OID for comparison
+	SNMPUpMsg     string  `json:"snmpupmsg,omitempty"`     // Custom message when SNMP check passes
+	SNMPDownMsg   string  `json:"snmpdownmsg,omitempty"`   // Custom message when SNMP check fails
+	SNMPType      string  `json:"snmptype,omitempty"`      // SNMP check type (high/low/range/exact/rate/uptime)
+	SNMPHigh      int64   `json:"snmphigh,omitempty"`      // upper threshold
+	SNMPLow       int64   `json:"snmplow,omitempty"`       // lower threshold
+	SNMPExact     int64   `json:"snmpexact,omitempty"`     // exact value to match
+	SNMPRate      int64   `json:"snmprate,omitempty"`      // rate per second threshold
+	SNMPOctets    bool    `json:"snmpoctets,omitempty"`    // convert bytes to bits for rate
+
+	// DNS check settings
+	DNSQuery      string `json:"dnsquery,omitempty"`      // DNS hostname to query
+	DNSAA         bool   `json:"dnsaa,omitempty"`         // Require authoritative answer
+	DNSRecursion  bool   `json:"dnsrecursion,omitempty"`  // Perform recursive query
+
+	// Protocol authentication (POP3, IMAP, RADIUS, etc.)
+	Username string `json:"username,omitempty"` // Authentication username
+	Password string `json:"password,omitempty"` // Authentication password
+	Secret   string `json:"secret,omitempty"`   // RADIUS shared secret
+
+	// HTTP/HTTPS check settings
+	URL       string `json:"url,omitempty"`       // URL path to check (e.g., "/health")
+	URLText   string `json:"urltext,omitempty"`   // Text to find in HTTP response
+	Header    string `json:"header,omitempty"`    // HTTP header name to check
+	HeaderVal string `json:"headerval,omitempty"` // Expected HTTP header value
+
+	// Per-object overrides and customization
+	QueueTime            int    `json:"queuetime,omitempty"`            // per-object check interval in seconds
+	PMsg                 string `json:"pmsg,omitempty"`                 // custom page message format
+	Command              string `json:"command,omitempty"`              // command to execute on failure
+	Group                string `json:"group,omitempty"`                // group/category for organization
+	PktLossTolerance     int    `json:"pktlosstolerance,omitempty"`     // packet count threshold (not percentage)
+	PktLossHistoryHours  int    `json:"pktlosshistoryhours,omitempty"`  // hours of packet loss history
 
 	// Advanced settings
 	Reverse      bool   `json:"reverse,omitempty"`      // reverse logic (alert when UP)
