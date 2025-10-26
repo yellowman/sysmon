@@ -18,6 +18,17 @@
                 <option value="WARNING">WARNING</option>
                 <option value="CRITICAL">CRITICAL</option>
             </select>
+            <!-- Per Page Selector -->
+            <div class="flex items-center space-x-2">
+                <span class="text-sm text-gray-600">Show:</span>
+                <select x-model="perPage" @change="changePerPage()" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                    <option value="all">All</option>
+                    <option value="10">10</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+            </div>
             <!-- View Toggle -->
             <div class="flex border border-gray-300 rounded-lg overflow-hidden">
                 <button @click="viewMode = 'comparison'"
@@ -276,6 +287,39 @@
         </table>
     </div>
 
+    <!-- Pagination Controls -->
+    <div x-show="perPage !== 'all' && totalPages > 1" class="mt-6 flex justify-between items-center">
+        <div class="text-sm text-gray-600">
+            Showing <span x-text="((currentPage - 1) * limit) + 1"></span> to
+            <span x-text="Math.min(currentPage * limit, totalHosts)"></span> of
+            <span x-text="totalHosts"></span> hosts
+        </div>
+        <div class="flex items-center space-x-2">
+            <button @click="goToPage(currentPage - 1)"
+                    :disabled="currentPage === 1"
+                    :class="currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'"
+                    class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                <i class="fas fa-chevron-left"></i> Previous
+            </button>
+
+            <div class="flex items-center space-x-1">
+                <template x-for="page in visiblePages" :key="page">
+                    <button @click="goToPage(page)"
+                            :class="page === currentPage ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                            class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium transition-colors"
+                            x-text="page"></button>
+                </template>
+            </div>
+
+            <button @click="goToPage(currentPage + 1)"
+                    :disabled="currentPage === totalPages"
+                    :class="currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'"
+                    class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                Next <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+
     <!-- Empty State -->
     <div x-show="filteredHosts.length === 0 && !loading" class="text-center py-12">
         <i class="fas fa-server text-6xl text-gray-300 mb-4"></i>
@@ -406,6 +450,13 @@ function hostsPage() {
         sortDirection: 'asc',
         refreshInterval: null,
 
+        // Pagination
+        perPage: 'all',
+        currentPage: 1,
+        totalPages: 1,
+        totalHosts: 0,
+        limit: 50,
+
         // Bulk operations
         selectedHosts: [],
         showBulkUpdateModal: false,
@@ -421,6 +472,23 @@ function hostsPage() {
 
                 return matchesSearch && matchesStatus;
             });
+        },
+
+        get visiblePages() {
+            const pages = [];
+            const maxVisible = 5;
+            let start = Math.max(1, this.currentPage - Math.floor(maxVisible / 2));
+            let end = Math.min(this.totalPages, start + maxVisible - 1);
+
+            // Adjust start if we're near the end
+            if (end - start < maxVisible - 1) {
+                start = Math.max(1, end - maxVisible + 1);
+            }
+
+            for (let i = start; i <= end; i++) {
+                pages.push(i);
+            }
+            return pages;
         },
 
         get sortedHosts() {
@@ -461,13 +529,50 @@ function hostsPage() {
 
         async fetchHosts() {
             try {
-                const response = await fetch('/api/monitoring/hosts');
-                this.hosts = await response.json();
+                let url = '/api/monitoring/hosts';
+
+                // Add pagination parameters if not showing all
+                if (this.perPage !== 'all') {
+                    url += `?page=${this.currentPage}&limit=${this.limit}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // Handle paginated response
+                if (this.perPage !== 'all' && data.data) {
+                    this.hosts = data.data;
+                    this.totalHosts = data.total;
+                    this.totalPages = data.total_pages;
+                    this.currentPage = data.page;
+                } else {
+                    // Non-paginated response (all hosts)
+                    this.hosts = data;
+                    this.totalHosts = data.length;
+                    this.totalPages = 1;
+                    this.currentPage = 1;
+                }
                 this.loading = false;
             } catch (e) {
                 console.error('Failed to fetch hosts:', e);
                 this.loading = false;
             }
+        },
+
+        changePerPage() {
+            // Update limit based on perPage selection
+            if (this.perPage !== 'all') {
+                this.limit = parseInt(this.perPage);
+            }
+            // Reset to page 1 when changing per-page value
+            this.currentPage = 1;
+            this.fetchHosts();
+        },
+
+        goToPage(page) {
+            if (page < 1 || page > this.totalPages) return;
+            this.currentPage = page;
+            this.fetchHosts();
         },
 
         selectHost(host) {
