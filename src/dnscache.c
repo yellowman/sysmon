@@ -41,7 +41,7 @@ char *get_hostname(struct my_hostent *hp)
 	static char local[256];
 	struct hostent *localhp;
 
-	memset(local, 0, 256);
+	memset(local, 0, sizeof(local));
 	if (hp == NULL)
 	{
 		return "NULL";
@@ -53,7 +53,8 @@ char *get_hostname(struct my_hostent *hp)
 		return(get_ip(hp));
 	}
 
-	strncpy(local, localhp->h_name, 250);
+	strncpy(local, localhp->h_name, sizeof(local) - 1);
+	local[sizeof(local) - 1] = '\0';  /* Ensure null-termination */
 
 	return local;
 	
