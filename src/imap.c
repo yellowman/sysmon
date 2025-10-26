@@ -219,8 +219,8 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                memset(buffer, 0, sizeof(buffer));
+                                read(here->filedes, buffer, sizeof(buffer) - 1);
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
@@ -245,8 +245,8 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                memset(buffer, 0, sizeof(buffer));
+                                read(here->filedes, buffer, sizeof(buffer) - 1);
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
@@ -254,7 +254,7 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 				/* ditch informational msg(s) */
 doover:				if (strncmp(buffer, "*", 1) == 0) {
 				    if ((retptr = strchr(buffer, '\n')) != NULL) {
-					strncpy(buffer, retptr + 1, 250);
+					strncpy(buffer, retptr + 1, sizeof(buffer) - 1);
 					goto doover;
 				    }
 				}
@@ -279,8 +279,8 @@ doover:				if (strncmp(buffer, "*", 1) == 0) {
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                memset(buffer, 0, sizeof(buffer));
+                                read(here->filedes, buffer, sizeof(buffer) - 1);
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);

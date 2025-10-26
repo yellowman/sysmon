@@ -840,7 +840,7 @@ void send_uptime(struct clientstatus *client, time_t now_t)
 {
 	char buffer[256];
 
-	snprintf(buffer, 256, "Uptime = %s", str_difftime_sec(boottime, now_t));
+	snprintf(buffer, sizeof(buffer), "Uptime = %s", str_difftime_sec(boottime, now_t));
 	sendline(client->filedes, buffer);
 }
 

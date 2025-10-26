@@ -250,8 +250,8 @@ void calculate_RA(unsigned char *RA, unsigned char *packet,
         secretlen = strlen(Secret);
         md5sumlen = (secretlen+packetlen);
 
-        memset(buffer, 0, 256);
-        memset(temp_pkt, 0, 4096);
+        memset(buffer, 0, sizeof(buffer));
+        memset(temp_pkt, 0, sizeof(temp_pkt));
 
         memcpy(temp_pkt, packet, packetlen);
         memcpy(temp_pkt+packetlen, Secret, secretlen);

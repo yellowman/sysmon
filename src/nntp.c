@@ -208,7 +208,7 @@ void	service_test_nntp(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
+                                memset(buffer, 0, sizeof(buffer));
                                 getline_tcp(here->filedes, buffer);
                                 if (debug)
                                         print_err(0, "nntp.c:getline_tcp:Got :%s:", buffer);
@@ -233,7 +233,7 @@ void	service_test_nntp(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
-                                memset(buffer, 0, 256);
+                                memset(buffer, 0, sizeof(buffer));
                                 getline_tcp(here->filedes, buffer);
                                 if (debug)
                                         print_err(0, "nntp.c:getline_tcp:Got2:%s:", buffer);
