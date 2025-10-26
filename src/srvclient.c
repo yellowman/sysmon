@@ -317,7 +317,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	if (obj->data->url_text != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url, XML_OBJ_URL_TEXT);
+		/* BUG FIX: Use url_text instead of url */
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url_text, XML_OBJ_URL_TEXT);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
