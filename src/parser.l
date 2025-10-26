@@ -962,7 +962,7 @@ config\ pageinterval\ [^;]+;          {
   if (parser_name != NULL)
   {
         parser_obj_i_pageinterval = atol(parser_pageinterval);
-        if (parser_obj_i_pageinterval == -1 || parser_obj_i_pageinterval < 0)
+        if (parser_obj_i_pageinterval < 0)
         {
           print_err(1, "Invalid per-object pageinterval specified in %s line %d",
                   current_parsing_filename, line_no);
@@ -970,7 +970,7 @@ config\ pageinterval\ [^;]+;          {
         }
   } else {
     parser_i_pageinterval = atol(parser_pageinterval);
-    if (parser_i_pageinterval == -1 || parser_i_pageinterval < 0)
+    if (parser_i_pageinterval < 0)
     {
           print_err(1, "Invalid pageinterval specified in %s line %d",
                   current_parsing_filename, line_no);
