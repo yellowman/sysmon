@@ -75,6 +75,10 @@ func (r *Router) handleConfigPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "config.html", nil)
 }
 
+func (r *Router) handleConfigEditorPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "config-editor.html", nil)
+}
+
 func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "admin.html", nil)
 }

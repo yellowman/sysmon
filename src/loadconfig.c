@@ -914,3 +914,91 @@ void debug_made_deps(struct all_elements_list *root)
 	}
 }
 
+/*
+ * Spawn command management functions
+ * Support for spawns {} block with named spawn commands
+ */
+
+/* Add a spawn command definition to the global list */
+void add_spawn_def(char *name, char *command)
+{
+	struct spawn_def *new_spawn;
+	struct spawn_def *current;
+
+	if (name == NULL || command == NULL)
+	{
+		print_err(1, "add_spawn_def: NULL name or command");
+		return;
+	}
+
+	/* Check if spawn name already exists */
+	current = spawn_defs_head;
+	while (current != NULL)
+	{
+		if (strcmp(current->name, name) == 0)
+		{
+			print_err(1, "WARNING: Spawn command '%s' redefined, using new definition", name);
+			FREE(current->command);
+			current->command = STRDUP(command, "spawn command");
+			return;
+		}
+		current = current->next;
+	}
+
+	/* Create new spawn definition */
+	new_spawn = (struct spawn_def *)MALLOC(sizeof(struct spawn_def), "spawn_def");
+	new_spawn->name = STRDUP(name, "spawn name");
+	new_spawn->command = STRDUP(command, "spawn command");
+	new_spawn->next = spawn_defs_head;
+	spawn_defs_head = new_spawn;
+
+	if (debug)
+		print_err(0, "Added spawn definition: %s = %s", name, command);
+}
+
+/* Look up a spawn command by name, return command string or NULL */
+char *lookup_spawn_command(char *name)
+{
+	struct spawn_def *current;
+
+	if (name == NULL)
+		return NULL;
+
+	current = spawn_defs_head;
+	while (current != NULL)
+	{
+		if (strcmp(current->name, name) == 0)
+		{
+			if (debug)
+				print_err(0, "Found spawn '%s': %s", name, current->command);
+			return current->command;
+		}
+		current = current->next;
+	}
+
+	if (debug)
+		print_err(0, "Spawn command '%s' not found in definitions", name);
+	return NULL;
+}
+
+/* Free all spawn definitions (cleanup on config reload) */
+void free_spawn_defs()
+{
+	struct spawn_def *current;
+	struct spawn_def *next;
+
+	current = spawn_defs_head;
+	while (current != NULL)
+	{
+		next = current->next;
+		FREE(current->name);
+		FREE(current->command);
+		FREE(current);
+		current = next;
+	}
+	spawn_defs_head = NULL;
+
+	if (debug)
+		print_err(0, "Freed all spawn definitions");
+}
+
