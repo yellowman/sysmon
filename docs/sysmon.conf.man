@@ -68,9 +68,10 @@ router.example.com ping "main router" $oncall
 
 .SS Values that can be configured with ``config''
 
-queuetime include showupalso errorsto maxqueued replyto noheartbeat
+queuetime include showupalso errorsto maxqueued replyto noheartbeat nologconnects
 pageinterval logging dnslog dnsexpire statusfile statustempdir nosubject
-numfailures html refresh pidfile output drop_privileges disable_icmp trap_port
+numfailures minnumfailures flaptime html refresh pidfile output drop_privileges
+disable_icmp trap_port snmp-trap authkey savestate
 
 .SS queuetime
 The ``config queuetime'' directive is used to specify the number of
@@ -218,17 +219,22 @@ specifies the minimum number of consecutive failures before a host
 appears in the status file (HTML or text) as yellow/down. This is
 useful for filtering out transient failures and reducing false alarms.
 For example, if set to 3, a host must fail at least 3 times in a row
-before appearing in the output. The default is 1 (show after first
-failure). Must be >= 1.
+before appearing in the output. A host will only show as down when both
+numfailures and minnumfailures thresholds are met. The default is 1
+(show after first failure). Must be >= 1.
+Example: config minnumfailures 2;
 
 .SS flaptime
 The ``config flaptime'' directive takes an integer argument in minutes
 and controls how long a host continues to display as green/up in the
-status file after recovering from a failure. This prevents the
+status file after recovering from a failure. This prevents the visual
 "flapping" appearance when a host goes up and down repeatedly. For
 example, if set to 5, a host that recovers will show as green for 5
-minutes even if it goes down again during that window. The default is
-0 (disabled). Set to 0 to disable this feature.
+minutes even if it goes down again during that window. During the flap
+time period, the host appears stable even if subsequent checks fail,
+reducing alert fatigue. The default is 0 (disabled). Set to 0 to
+disable this feature.
+Example: config flaptime 5;
 
 .SS sleeptime
 The ``config sleeptime'' option is now obsolete.  See the queuetime
@@ -262,6 +268,39 @@ The ``config trap_port'' directive specifies the UDP port for receiving
 SNMP trap alerts. Default is 162 (standard SNMP trap port). Requires
 root privileges or CAP_NET_BIND_SERVICE capability to bind ports below 1024.
 Example: config trap_port 162;
+
+.SS snmp-trap
+The ``config snmp-trap'' directive enables SNMP trap monitoring globally.
+When enabled, sysmond opens a UDP socket on the trap_port (default 162)
+to receive SNMP trap PDUs. Individual objects can then use the trap_alert
+directive to enable trap monitoring for specific hosts. Traps are matched
+to objects by source IP address. Requires trap_port to be configured.
+Example: config snmp-trap;
+
+.SS nologconnects
+The ``config nologconnects'' directive disables logging of client connections
+to the sysmon daemon. When enabled, connection messages from clients are
+suppressed from the logs, reducing log verbosity in environments with
+frequent client connections or monitoring systems that poll regularly.
+Useful for reducing log noise while maintaining operational logging.
+Example: config nologconnects;
+
+.SS authkey
+The ``config authkey'' directive sets an authentication key required for
+privileged client commands. Clients must send "AUTH <key>" to authenticate
+before performing certain operations. The daemon responds with "333 Good
+Authentication" on success or "444" on failure. This provides basic access
+control for administrative operations via the client protocol.
+Example: config authkey "secret_password_here";
+
+.SS savestate
+The ``config savestate'' directive specifies a file path where sysmond
+will periodically save the complete monitoring state in XML format. This
+is primarily useful for debugging and understanding the internal state of
+all monitored objects. The file contains detailed information about each
+object including check counts, timestamps, and current status. Not required
+for normal operation.
+Example: config savestate "/var/log/sysmon/state.xml";
 
 .SH OBJECT OPTIONS
 Once you have declared an object, additional configuration options are
@@ -331,6 +370,59 @@ a specific host object. Used to link SNMP trap alerts with the
 corresponding monitored host. Allows trap-triggered state changes to
 affect the associated host's status.
 Example: matched_host "router1";
+
+.SS snmp-type
+The ``snmp-type'' directive specifies the type of SNMP check to perform.
+Valid types are: high (alert if value exceeds threshold), low (alert if
+value is below threshold), range (alert if outside range), exact (alert
+if not matching exact value), rate (alert if counter rate exceeds threshold),
+and uptime (monitor system uptime). Must be used with corresponding
+snmp-high, snmp-low, snmp-exact, or snmp-rate directives.
+Example: snmp-type "high";
+
+.SS snmp-high
+The ``snmp-high'' directive sets the upper threshold for SNMP monitoring.
+When snmp-type is "high", alerts are triggered if the polled SNMP value
+exceeds this threshold. When snmp-type is "range", this sets the upper
+bound of the acceptable range. Value is an unsigned integer.
+Example: snmp-high 1000000;
+
+.SS snmp-low
+The ``snmp-low'' directive sets the lower threshold for SNMP monitoring.
+When snmp-type is "low", alerts are triggered if the polled SNMP value
+falls below this threshold. When snmp-type is "range", this sets the lower
+bound of the acceptable range. Value is an unsigned integer.
+Example: snmp-low 100;
+
+.SS snmp-exact
+The ``snmp-exact'' directive specifies the exact value expected from an
+SNMP query. When snmp-type is "exact", alerts are triggered if the polled
+value does not match this exact value. Useful for monitoring specific
+states or counters that should remain constant. Value is an unsigned integer.
+Example: snmp-exact 1;
+
+.SS snmp-rate
+The ``snmp-rate'' directive sets the maximum acceptable rate of change for
+an SNMP counter. When snmp-type is "rate", sysmond calculates the rate of
+change between polls and alerts if it exceeds this threshold. Use with
+snmp-octets to convert bytes/sec to bits/sec. Value is rate per second.
+Example: snmp-rate 100000;
+
+.SS snmp-octets
+The ``snmp-octets'' directive modifies SNMP rate calculations to convert
+from bytes to bits by multiplying by 8. Only affects snmp-type "rate" checks.
+Useful for monitoring network interface bandwidth where counters are in
+bytes but you want to alert on bits per second (e.g., Mbps).
+Example: snmp-octets;
+
+.SS pageinterval
+The ``pageinterval'' directive allows per-object override of the global
+page interval setting. This is an integer representing the number of
+minutes between reminder alerts for a down host. Critical hosts can be
+configured with shorter intervals for more frequent alerts, while less
+important hosts can have longer intervals. If not specified, the global
+pageinterval setting is used.
+Example: pageinterval 30;
 
 .SH EXAMPLES
 Here are some examples, which should give you an idea of how each option

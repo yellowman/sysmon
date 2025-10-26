@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -194,14 +195,18 @@ type XMLObjectStatus struct {
 	ObjectPort      int      `xml:"ObjectPort"`
 	ObjectType      string   `xml:"ObjectType"`
 	ObjectMessage   string   `xml:"ObjectMessage"`
+	ObjectNotes     string   `xml:"ObjectNotes"`          // Description/notes for the object
 	ObjectContact   string   `xml:"ObjectContact"`
 	ObjectState     int      `xml:"ObjectLastcheckState"` // 0=OK, non-zero=problem
 	ObjectContacted int      `xml:"ObjectContacted"`      // 0=not alerted, 1=alerted
 	TotalChecked    int64    `xml:"ObjectTotalChecked"`
 	TotalDown       int64    `xml:"ObjectTotalDown"`
-	DownCt          int64    `xml:"ObjectDownCt"`
+	DownCt          int64    `xml:"ObjectDownCt"`          // Current consecutive down count
+	UpCt            int64    `xml:"ObjectUpCt"`            // Current consecutive up count
 	SendPings       int      `xml:"ObjectSendPings"`
 	MinPings        int      `xml:"ObjectMinPings"`
+	DeathTime       int64    `xml:"ObjectOutageTime"`      // When it went down (Unix timestamp)
+	LastTimeUp      int64    `xml:"ObjectLastTimeUp"`      // When it last came back up (Unix timestamp)
 }
 
 // GetStatus gets the complete sysmon status via TCP protocol
@@ -273,28 +278,30 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	}
 	s.sessionLog.Log("MODE xml", resp.Message, false, "")
 
-	// Step 2: Get list of objects with STATO command
-	// CRITICAL: Use STATO (not STAT) because:
-	// - STATO returns unique_name (the object identifier)
+	// Step 2: Get list of ALL objects with STATAL command
+	// CRITICAL: Use STATAL (not STATO or STAT) because:
+	// - STATAL returns ALL hosts (both up and down)
+	// - STATO only returns hosts with errors (lastcheck != 0)
+	// - STATAL returns unique_name (the object identifier) like STATO
 	// - STAT returns hostname:type:port:... where hostname != unique_name
 	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
-	_, err = conn.Write([]byte("STATO\n"))
+	_, err = conn.Write([]byte("STATAL\n"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to send STATO command: %w", err)
+		return nil, fmt.Errorf("failed to send STATAL command: %w", err)
 	}
 
-	// Read object names from STATO response
+	// Read object names from STATAL response
 	objectNames := []string{}
 	for {
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
-			return nil, fmt.Errorf("error reading STATO response: %w", err)
+			return nil, fmt.Errorf("error reading STATAL response: %w", err)
 		}
 
 		// Check for response codes
 		if resp.Code != "" {
 			if resp.IsError {
-				return nil, fmt.Errorf("STATO command failed: %s", resp.Message)
+				return nil, fmt.Errorf("STATAL command failed: %s", resp.Message)
 			}
 			// Code 333 = end of output
 			if resp.Code == "333" {
@@ -303,13 +310,13 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		}
 
 		// It's a data line (no response code)
-		// STATO returns just the unique_name (object identifier), one per line
+		// STATAL returns just the unique_name (object identifier), one per line
 		objectName := strings.TrimSpace(resp.Message)
 		if objectName != "" {
 			objectNames = append(objectNames, objectName)
 		}
 	}
-	s.sessionLog.Log("STATO", fmt.Sprintf("Retrieved %d objects", len(objectNames)), false, "")
+	s.sessionLog.Log("STATAL", fmt.Sprintf("Retrieved %d objects (all hosts)", len(objectNames)), false, "")
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
 	status := &models.SysmonStatus{
@@ -463,9 +470,27 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		// Create host status entry
 		host := models.HostStatus{
 			Hostname:      xmlObj.HostName,
+			Description:   xmlObj.ObjectNotes,
+			IPv4Address:   xmlObj.HostName, // Default to hostname, TODO: resolve to actual IP
 			OverallStatus: "OK",
 			StatusColor:   "green",
+			DownCount:     xmlObj.DownCt,
+			UpCount:       xmlObj.UpCt,
+			TotalDown:     xmlObj.TotalDown,
+			TotalChecked:  xmlObj.TotalChecked,
 			Checks:        []models.CheckResult{},
+		}
+
+		// Calculate last change time from DeathTime (when went down) or LastTimeUp (when came back up)
+		// Use the most recent of the two as the last change time
+		if xmlObj.ObjectState != 0 && xmlObj.DeathTime > 0 {
+			// Currently down, so DeathTime is the last change
+			changeTime := time.Unix(xmlObj.DeathTime, 0)
+			host.LastChangeTime = &changeTime
+		} else if xmlObj.ObjectState == 0 && xmlObj.LastTimeUp > 0 {
+			// Currently up, so LastTimeUp is the last change
+			changeTime := time.Unix(xmlObj.LastTimeUp, 0)
+			host.LastChangeTime = &changeTime
 		}
 
 		// Status logic:
@@ -509,6 +534,36 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 		status.Hosts = append(status.Hosts, host)
 	}
+
+	// Sort hosts: CRITICAL first, then WARNING, then OK
+	// Within each status level, sort alphabetically by hostname
+	sort.SliceStable(status.Hosts, func(i, j int) bool {
+		hostI := status.Hosts[i]
+		hostJ := status.Hosts[j]
+
+		// Define priority: CRITICAL=0, WARNING=1, OK=2
+		priorityI := 2 // OK
+		if hostI.OverallStatus == "CRITICAL" {
+			priorityI = 0
+		} else if hostI.OverallStatus == "WARNING" {
+			priorityI = 1
+		}
+
+		priorityJ := 2 // OK
+		if hostJ.OverallStatus == "CRITICAL" {
+			priorityJ = 0
+		} else if hostJ.OverallStatus == "WARNING" {
+			priorityJ = 1
+		}
+
+		// Sort by priority first
+		if priorityI != priorityJ {
+			return priorityI < priorityJ
+		}
+
+		// Within same priority, sort alphabetically by hostname
+		return hostI.Hostname < hostJ.Hostname
+	})
 
 	// Fill in statistics
 	status.Statistics.TotalHosts = len(objectNames)
@@ -1098,23 +1153,26 @@ func (s *Service) GetObjectsXML() (string, error) {
 		return "", fmt.Errorf("MODE xml failed: %s", response)
 	}
 
-	// Get list of objects with STATO
-	// CRITICAL: Use STATO (not STAT) because:
-	// - STATO returns unique_name (the object identifier)
+	// Get list of ALL objects with STATAL command
+	// CRITICAL: Use STATAL (not STATO or STAT) because:
+	// - STATAL returns ALL hosts (both up and down)
+	// - STATO only returns hosts with errors (lastcheck != 0)
+	// - STATAL returns unique_name (the object identifier) like STATO
 	// - STAT returns hostname:type:port:... where hostname != unique_name
 	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
-	_, err = conn.Write([]byte("STATO\n"))
+	_, err = conn.Write([]byte("STATAL\n"))
 	if err != nil {
-		return "", fmt.Errorf("failed to send STATO command: %w", err)
+		return "", fmt.Errorf("failed to send STATAL command: %w", err)
 	}
-	s.sessionLog.Log("STATO", "getting object list", false, "")
+	s.sessionLog.Log("STATAL", "getting object list (all hosts)", false, "")
 
-	// Read unique_names from STATO response
+	// Read object names from STATAL response
+	// STATAL returns just unique_name, one per line (like STATO but for all hosts)
 	objectNames := []string{}
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return "", fmt.Errorf("error reading STATO response: %w", err)
+			return "", fmt.Errorf("error reading STATAL response: %w", err)
 		}
 
 		line = strings.TrimSpace(line)
@@ -1123,7 +1181,7 @@ func (s *Service) GetObjectsXML() (string, error) {
 			break
 		}
 
-		// STATO returns just the unique_name (one per line)
+		// STATAL returns unique_name directly (no parsing needed)
 		// This is exactly what SHOWOBJ expects
 		if line != "" {
 			objectNames = append(objectNames, line)

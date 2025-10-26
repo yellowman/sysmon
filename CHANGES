@@ -4,6 +4,25 @@ Sysmon Version History
 Version 0.94 - 2025-01-XX
 -------------------------
 
+This release represents a major update with critical bug fixes, new wishlist features,
+and comprehensive web-UI enhancements.
+
+Wishlist Features Implemented:
+  * config minnumfailures <n>
+    - Minimum consecutive failures before host appears in status file
+    - Reduces false alarms from transient failures
+    - Default is 1 (show after first failure)
+  * config flaptime <minutes>
+    - Keep host showing as green for N minutes after recovery
+    - Prevents "flapping" appearance in status output
+    - Default is 0 (disabled)
+  * Per-object pageinterval configuration:
+    - Allow different hosts to have different re-page intervals
+    - Critical hosts can have shorter intervals (e.g., 15 minutes)
+    - Less critical hosts can have longer intervals (e.g., 60 minutes)
+    - Uses global pageinterval if not specified per-object
+    - Syntax: config pageinterval <minutes>; inside object definition
+
 Web UI Improvements:
   * Fixed critical 403 "object not found" errors by switching from STAT to STATO
     command (hostname vs unique_name mismatch eliminated)
@@ -36,20 +55,8 @@ Daemon Improvements:
   * Fixed NULL pointer bug in textfile.c (filename checked before use)
   * Fixed incomplete XML send on connection errors (do_send_xml returns status)
   * Added SEND_OR_ABORT macro for reliable XML transmission
-  * Implemented config minnumfailures directive:
-    - Minimum consecutive failures before host appears in status file
-    - Reduces false alarms from transient failures
-    - Default is 1 (show after first failure)
-  * Implemented config flaptime directive:
-    - Keep host showing as green for N minutes after recovery
-    - Prevents "flapping" appearance in status output
-    - Default is 0 (disabled)
-  * Implemented per-object pageinterval configuration:
-    - Allow different hosts to have different re-page intervals
-    - Critical hosts can have shorter intervals (e.g., 15 minutes)
-    - Less critical hosts can have longer intervals (e.g., 60 minutes)
-    - Uses global pageinterval if not specified per-object
-    - Syntax: config pageinterval <minutes>; inside object definition
+  * Added statustempdir for privilege-dropped operation
+  * Proper handling of all response codes (333, 403, 444)
 
 Security and Privilege Dropping:
   * Added statustempdir configuration directive for privilege-dropped daemon
@@ -65,6 +72,7 @@ Documentation:
   * Improved man page formatting and clarity
   * Added minnumfailures and flaptime directive documentation to man page
   * Converted all markdown documentation to plain ASCII text in docs/
+  * Removed all JSON mode references (never implemented)
 
 Bug Fixes:
   * Fixed perror() calls behind debug checks to reduce log noise
@@ -78,6 +86,20 @@ Performance:
   * Eliminated hundreds of failed SHOWOBJ requests
   * Reduced protocol overhead with proper command usage
   * Session logging replaces stderr output for better observability
+
+Technical Details:
+  * Parser changes (requires flex to regenerate parser.c):
+    - Added parser_i_minnumfailures and parser_minnumfailures variables
+    - Added parser_i_flaptime and parser_flaptime variables
+    - Added parser_i_pageinterval and parser_obj_i_pageinterval variables
+    - Updated object creation to use per-object overrides when set
+    - Added validation for negative values and error handling
+  * Struct changes:
+    - Added last_recovery field to hostinfo struct (for flaptime)
+    - Added pageinterval field to hostinfo struct (for per-object intervals)
+  * API endpoints added:
+    - GET /api/admin/session-log?limit=N
+    - GET /api/admin/session-errors?limit=N
 
 Version 0.93 and Earlier
 ------------------------
