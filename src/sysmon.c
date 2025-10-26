@@ -175,8 +175,14 @@ void service_check_sysmon(struct monitorent *here, time_t now_t)
 		{
 			if (data_waiting_read(here->filedes, 0))
 			{
+				int bytes_read;
 				memset(buffer, 0, 256);
-				read(here->filedes, buffer, 254);
+				bytes_read = read(here->filedes, buffer, 254);
+				if (bytes_read <= 0)
+				{
+					here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+					break;
+				}
 				buffer[strlen(buffer)-1] = '\0';
 				if (debug)
 					print_err(0, "Got :%s:", buffer);
@@ -208,8 +214,14 @@ void service_check_sysmon(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, 256);
-                                read(here->filedes, buffer, 254);
+                                bytes_read = read(here->filedes, buffer, 254);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 buffer[strlen(buffer)-1] = '\0';
                                 if (debug)
 					print_err(0, "Got2:%s:", buffer);

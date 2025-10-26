@@ -219,8 +219,14 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
@@ -245,8 +251,14 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
@@ -279,8 +291,14 @@ doover:				if (strncmp(buffer, "*", 1) == 0) {
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
