@@ -350,6 +350,7 @@ function dashboard() {
         alerts: [],
         traps: [],
         allHosts: [], // All monitored hosts
+        refreshInterval: null,
         updateDialog: {
             show: false,
             hostname: '',
@@ -376,11 +377,18 @@ function dashboard() {
         init() {
             this.fetchData();
             // Auto-refresh every 10 seconds (but not if there's an error showing)
-            setInterval(() => {
+            this.refreshInterval = setInterval(() => {
                 if (!this.error) {
                     this.fetchData();
                 }
             }, 10000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async fetchData() {
@@ -410,10 +418,16 @@ function dashboard() {
 
                 // Get all hosts for tooltips
                 const hostsResponse = await fetch('/api/monitoring/hosts');
+                if (!hostsResponse.ok) {
+                    throw new Error(`Failed to fetch hosts: ${hostsResponse.statusText}`);
+                }
                 this.allHosts = await hostsResponse.json();
 
                 // Get alerts
                 const alertsResponse = await fetch('/api/monitoring/alerts');
+                if (!alertsResponse.ok) {
+                    throw new Error(`Failed to fetch alerts: ${alertsResponse.statusText}`);
+                }
                 this.alerts = await alertsResponse.json();
 
                 // Get traps

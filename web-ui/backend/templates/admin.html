@@ -233,6 +233,7 @@ function adminPage() {
         killitText: '',
         sessionLog: [],
         sessionErrors: [],
+        refreshInterval: null,
 
         get hasAuth() {
             return !!getAuthKey();
@@ -245,10 +246,17 @@ function adminPage() {
             this.loadSessionErrors();
 
             // Auto-refresh session log every 5 seconds
-            setInterval(() => {
+            this.refreshInterval = setInterval(() => {
                 this.loadSessionLog();
                 this.loadSessionErrors();
             }, 5000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async loadVersion() {

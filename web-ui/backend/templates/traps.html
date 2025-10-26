@@ -235,6 +235,7 @@ function trapsPage() {
         filterSource: '',
         filterSeverity: '',
         selectedTrap: null,
+        refreshInterval: null,
 
         get filteredTraps() {
             return this.traps.filter(trap => {
@@ -246,12 +247,22 @@ function trapsPage() {
 
         init() {
             this.fetchTraps();
-            setInterval(() => this.fetchTraps(), 15000);
+            this.refreshInterval = setInterval(() => this.fetchTraps(), 15000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async fetchTraps() {
             try {
                 const response = await fetch('/api/monitoring/traps');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch traps: ${response.statusText}`);
+                }
                 const data = await response.json();
                 this.traps = data.recent_traps || [];
                 this.sources = data.trap_sources || [];
