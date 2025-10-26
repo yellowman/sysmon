@@ -514,10 +514,13 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		}
 
 		// Add check details
+		// Set last check time to current time since XML doesn't provide per-check timestamps
+		// The actual last check is very recent (within checkinterval seconds)
 		check := models.CheckResult{
 			Type:          xmlObj.ObjectType,
 			Port:          xmlObj.ObjectPort,
 			Status:        host.OverallStatus,
+			LastCheckTime: time.Now(),
 			StatusMessage: xmlObj.ObjectMessage,
 		}
 		host.Checks = append(host.Checks, check)
