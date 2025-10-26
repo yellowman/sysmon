@@ -13,6 +13,10 @@
             <button @click="reloadConfig()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
                 <i class="fas fa-sync mr-2"></i>Reload
             </button>
+            <button @click="validateConfig()" :disabled="validating" class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50">
+                <i class="fas mr-2" :class="validating ? 'fa-spinner fa-spin' : 'fa-check-circle'"></i>
+                <span x-text="validating ? 'Validating...' : 'Validate'"></span>
+            </button>
             <button @click="saveConfig()" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                 <i class="fas fa-save mr-2"></i>
                 <span x-text="saving ? 'Saving...' : 'Save Changes'"></span>
@@ -872,6 +876,7 @@ function configEditor() {
     return {
         loading: true,
         saving: false,
+        validating: false,
         config: {
             global: {},
             spawns: [],
@@ -919,8 +924,46 @@ function configEditor() {
             }
         },
 
+        async validateConfig() {
+            this.validating = true;
+            try {
+                const response = await fetch('/api/config/validate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.config)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Validation request failed');
+                }
+
+                const result = await response.json();
+
+                if (result.valid) {
+                    alert('Configuration is valid!');
+                    return true;
+                } else {
+                    alert('Configuration validation failed:\n\n' + result.error);
+                    return false;
+                }
+            } catch (e) {
+                console.error('Validation error:', e);
+                alert('Failed to validate configuration: ' + e.message);
+                return false;
+            } finally {
+                this.validating = false;
+            }
+        },
+
         async saveConfig() {
-            if (!this.validateConfig()) {
+            // Validate first using local validation
+            if (!this.validateConfigLocally()) {
+                return;
+            }
+
+            // Optionally validate with server before saving
+            const confirmSave = confirm('Save configuration changes?\n\nNote: Changes will require a daemon restart to take effect.');
+            if (!confirmSave) {
                 return;
             }
 
@@ -945,7 +988,7 @@ function configEditor() {
             this.saving = false;
         },
 
-        validateConfig() {
+        validateConfigLocally() {
             // Validate global settings
             if (this.config.global) {
                 const clientPort = parseInt(this.config.global.clientport);
