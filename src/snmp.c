@@ -152,7 +152,7 @@ int snmp_callback_response(int operation, struct snmp_session *sp, int reqid,
 	struct monitorent *here = (struct monitorent *)magic;
 	struct snmpdata *localstruct;
 
-	if (debug|snmp_debug)
+	if (debug||snmp_debug)
 	{
         	print_err(1, "snmp.c:inside snmp_callback_response %x", 
 			here->monitordata);
@@ -167,7 +167,7 @@ int snmp_callback_response(int operation, struct snmp_session *sp, int reqid,
 	{
 		if (extract_snmp_result(STAT_SUCCESS, localstruct->sess, pdu, localstruct))
 		{
-			if (debug|snmp_debug) 
+			if (debug||snmp_debug) 
 				print_err(1, "snmp.c:snmp_callback_response:snmp_retval = %d on %s", localstruct->snmp_retval, here->checkent->hostname);
 			return 1;
 		}
@@ -242,7 +242,7 @@ void start_test_snmp(struct monitorent *here)
 		localstruct->oid_len);
 
 	/* send snmp packet */
-        if (debug|snmp_debug) print_err(1, "calling snmp_send");
+        if (debug||snmp_debug) print_err(1, "calling snmp_send");
 
 	/* snmp_send returns 0 on error, 1 on success */
 	if (snmp_send(localstruct->sess, localstruct->req) == 0)
@@ -305,14 +305,14 @@ void service_test_snmp(struct monitorent *here)
 		snmp_read(&fdset);
 	}
 
-	if (debug|snmp_debug) print_err(1, "snmp.c:svc_test_snmp:snmp_response = %d", localstruct->snmp_response);
+	if (debug||snmp_debug) print_err(1, "snmp.c:svc_test_snmp:snmp_response = %d", localstruct->snmp_response);
 	if (localstruct->snmp_response)
 	{
-		if (debug|snmp_debug) print_err(1, "snmp.c:snmp_response(%s)", here->checkent->hostname);
+		if (debug||snmp_debug) print_err(1, "snmp.c:snmp_response(%s)", here->checkent->hostname);
 		switch (here->checkent->snmp_test_type)
 		{
 			case SYSM_SNMP_TYPE_REBOOT:
-				if (debug|snmp_debug) print_err(1, "snmp.c:type_reboot:comparing last(%d) > now(%d)", here->checkent->system_uptime, localstruct->snmp_retval);
+				if (debug||snmp_debug) print_err(1, "snmp.c:type_reboot:comparing last(%d) > now(%d)", here->checkent->system_uptime, localstruct->snmp_retval);
 				if (here->checkent->system_uptime > localstruct->snmp_retval)
 				{
 					here->retval = SYSM_SNMP_REBOOT;
@@ -322,7 +322,7 @@ void service_test_snmp(struct monitorent *here)
 				here->checkent->system_uptime = localstruct->snmp_retval;
 				break;
 			case SYSM_SNMP_TYPE_HIGH:
-				if (debug|snmp_debug) print_err(1, "snmp.c:type_high:comparing received value %d with configured %d", localstruct->snmp_retval, here->checkent->snmp_high);
+				if (debug||snmp_debug) print_err(1, "snmp.c:type_high:comparing received value %d with configured %d", localstruct->snmp_retval, here->checkent->snmp_high);
 				if (here->checkent->snmp_high < localstruct->snmp_retval)
 				{
 					here->retval = SYSM_SNMP_HIGH;
@@ -333,7 +333,7 @@ void service_test_snmp(struct monitorent *here)
                                 here->checkent->system_uptime = localstruct->snmp_retval;
 				break;
 			case SYSM_SNMP_TYPE_LOW:
-				if (debug|snmp_debug) print_err(1, "snmp.c:type_low:comparing received value %d with configured %d", localstruct->snmp_retval, here->checkent->snmp_low);
+				if (debug||snmp_debug) print_err(1, "snmp.c:type_low:comparing received value %d with configured %d", localstruct->snmp_retval, here->checkent->snmp_low);
 				if (here->checkent->snmp_low > localstruct->snmp_retval)
 				{
 					here->retval = SYSM_SNMP_LOW;
@@ -375,7 +375,7 @@ void service_test_snmp(struct monitorent *here)
 					rate_avg_val=(rate_time_val/rate_time);
 				}
 
-				if (debug|snmp_debug) 
+				if (debug||snmp_debug) 
 					print_err(1, "snmp.c:rate_avg_val = %u ; here->checkent->snmp_rate %u", rate_avg_val, here->checkent->snmp_rate);
 				here->checkent->system_uptime = localstruct->snmp_retval;
 				here->checkent->last_snmp_resptime = localstruct->snmp_response_time;
@@ -400,14 +400,14 @@ void service_test_snmp(struct monitorent *here)
 		}
 	}
 
-	if (debug|snmp_debug) 
+	if (debug||snmp_debug) 
 	{
 		print_err(1, "snmp.c:svc_test_snmp:checking here->retval it is %d", here->retval);
 	}
 
 	if (here->retval != -1)
 	{
-		if (debug|snmp_debug) print_err(1, "snmp.c:svc_test_snmp:here->retval = %d", here->retval);
+		if (debug||snmp_debug) print_err(1, "snmp.c:svc_test_snmp:here->retval = %d", here->retval);
                 snmp_close(localstruct->sess);
 
                 free(here->monitordata);

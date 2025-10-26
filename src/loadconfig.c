@@ -879,7 +879,7 @@ struct all_elements_list *loadconfig(char *cfg_path)
 	make_adjs(parser_head);
 
 	/* debug the built dependencies */
-	if (debug | debug_adj_builder)
+	if (debug || debug_adj_builder)
 	{
 		debug_made_deps(parser_head);
 	}
