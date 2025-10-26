@@ -34,20 +34,97 @@
         </div>
     </div>
 
+    <!-- Bulk Actions Toolbar (Floating) -->
+    <div x-show="selectedHosts.length > 0"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 translate-y-4"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         class="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-gray-200 px-6 py-4">
+        <div class="flex items-center space-x-6">
+            <div class="flex items-center">
+                <span class="text-sm font-medium text-gray-700">
+                    <span x-text="selectedHosts.length"></span> host<span x-show="selectedHosts.length !== 1">s</span> selected
+                </span>
+                <button @click="clearSelection()" class="ml-3 text-sm text-gray-500 hover:text-gray-700">
+                    Clear
+                </button>
+            </div>
+            <div class="h-6 w-px bg-gray-300"></div>
+            <div class="flex space-x-2">
+                <button @click="bulkAcknowledge()"
+                        class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors flex items-center">
+                    <i class="fas fa-check mr-2"></i>
+                    Acknowledge
+                </button>
+                <button @click="showBulkUpdateModal = true"
+                        class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center">
+                    <i class="fas fa-edit mr-2"></i>
+                    Update Note
+                </button>
+                <button @click="bulkToggleTrace()"
+                        class="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors flex items-center">
+                    <i class="fas fa-bug mr-2"></i>
+                    Toggle Trace
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Update Modal -->
+    <div x-show="showBulkUpdateModal"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-50 overflow-y-auto"
+         style="display: none;">
+        <div class="flex items-center justify-center min-h-screen px-4">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="showBulkUpdateModal = false"></div>
+            <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+                <h3 class="text-lg font-medium text-gray-900 mb-4">
+                    Update <span x-text="selectedHosts.length"></span> Host<span x-show="selectedHosts.length !== 1">s</span>
+                </h3>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Status Note</label>
+                    <textarea x-model="bulkNote" rows="3"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                              placeholder="Enter status note for all selected hosts..."></textarea>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button @click="showBulkUpdateModal = false"
+                            class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button @click="bulkUpdate()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        Update All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Comparison View -->
     <div x-show="viewMode === 'comparison'" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
         <template x-for="host in filteredHosts" :key="host.hostname">
             <div class="relative group">
+                <!-- Selection Checkbox -->
+                <div class="absolute top-2 left-2 z-10">
+                    <input type="checkbox"
+                           :checked="isSelected(host.hostname)"
+                           @click.stop="toggleSelection(host.hostname)"
+                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
+                </div>
                 <div class="bg-white rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
                      :class="{
-                         'border-green-500': host.overall_status === 'OK',
-                         'border-yellow-500': host.overall_status === 'WARNING',
-                         'border-red-500': host.overall_status === 'CRITICAL',
-                         'border-gray-400': host.paused
+                         'border-green-500': host.overall_status === 'OK' && !isSelected(host.hostname),
+                         'border-yellow-500': host.overall_status === 'WARNING' && !isSelected(host.hostname),
+                         'border-red-500': host.overall_status === 'CRITICAL' && !isSelected(host.hostname),
+                         'border-gray-400': host.paused && !isSelected(host.hostname),
+                         'border-blue-500 ring-2 ring-blue-200': isSelected(host.hostname)
                      }"
                      @click="selectHost(host)">
                     <!-- Compact Header -->
-                    <div class="px-2 py-1.5">
+                    <div class="px-2 py-1.5 pl-8">
                         <div class="flex items-center justify-between mb-1">
                             <h3 class="text-xs font-bold text-gray-900 truncate" x-text="host.hostname" :title="host.hostname"></h3>
                             <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0"></i>
@@ -124,6 +201,12 @@
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>
+                    <th class="px-4 py-2 w-12">
+                        <input type="checkbox"
+                               :checked="selectedHosts.length === filteredHosts.length && filteredHosts.length > 0"
+                               @change="toggleSelectAll()"
+                               class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
+                    </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         @click="sortBy('hostname')">
                         Hostname <i class="fas fa-sort text-xs ml-1"></i>
@@ -148,7 +231,15 @@
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
                 <template x-for="host in sortedHosts" :key="host.hostname">
-                    <tr class="hover:bg-gray-50 cursor-pointer" @click="selectHost(host)">
+                    <tr class="hover:bg-gray-50 cursor-pointer"
+                        :class="{'bg-blue-50': isSelected(host.hostname)}"
+                        @click="selectHost(host)">
+                        <td class="px-4 py-2 whitespace-nowrap" @click.stop>
+                            <input type="checkbox"
+                                   :checked="isSelected(host.hostname)"
+                                   @change="toggleSelection(host.hostname)"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
+                        </td>
                         <td class="px-4 py-2 whitespace-nowrap">
                             <div class="flex items-center">
                                 <div class="w-2 h-2 rounded-full mr-2"
@@ -326,6 +417,11 @@ function hostsPage() {
         sortDirection: 'asc',
         refreshInterval: null,
 
+        // Bulk operations
+        selectedHosts: [],
+        showBulkUpdateModal: false,
+        bulkNote: '',
+
         get filteredHosts() {
             return this.hosts.filter(host => {
                 const matchesSearch = !this.searchQuery ||
@@ -486,6 +582,157 @@ function hostsPage() {
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
             return `${Math.floor(diff / 86400)}d ago`;
+        },
+
+        // Bulk operations methods
+        isSelected(hostname) {
+            return this.selectedHosts.includes(hostname);
+        },
+
+        toggleSelection(hostname) {
+            const index = this.selectedHosts.indexOf(hostname);
+            if (index === -1) {
+                this.selectedHosts.push(hostname);
+            } else {
+                this.selectedHosts.splice(index, 1);
+            }
+        },
+
+        toggleSelectAll() {
+            if (this.selectedHosts.length === this.filteredHosts.length) {
+                this.selectedHosts = [];
+            } else {
+                this.selectedHosts = this.filteredHosts.map(h => h.hostname);
+            }
+        },
+
+        clearSelection() {
+            this.selectedHosts = [];
+        },
+
+        async bulkAcknowledge() {
+            if (this.selectedHosts.length === 0) {
+                alert('No hosts selected');
+                return;
+            }
+
+            if (!confirm(`Acknowledge ${this.selectedHosts.length} host(s)?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/monitoring/bulk/ack', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Key': getAuthKey()
+                    },
+                    body: JSON.stringify({
+                        hostnames: this.selectedHosts
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to acknowledge hosts');
+                }
+
+                const result = await response.json();
+                alert(`Acknowledged ${result.success_count} of ${result.total} host(s).\n` +
+                      (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
+
+                // Clear selection and refresh
+                this.clearSelection();
+                await this.fetchHosts();
+            } catch (e) {
+                console.error('Bulk acknowledge failed:', e);
+                alert(`Error: ${e.message}`);
+            }
+        },
+
+        async bulkUpdate() {
+            if (this.selectedHosts.length === 0) {
+                alert('No hosts selected');
+                return;
+            }
+
+            if (!this.bulkNote) {
+                alert('Please enter a status note');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/monitoring/bulk/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Key': getAuthKey()
+                    },
+                    body: JSON.stringify({
+                        hostnames: this.selectedHosts,
+                        note: this.bulkNote
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to update hosts');
+                }
+
+                const result = await response.json();
+                alert(`Updated ${result.success_count} of ${result.total} host(s).\n` +
+                      (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
+
+                // Clear form and selection
+                this.showBulkUpdateModal = false;
+                this.bulkNote = '';
+                this.clearSelection();
+                await this.fetchHosts();
+            } catch (e) {
+                console.error('Bulk update failed:', e);
+                alert(`Error: ${e.message}`);
+            }
+        },
+
+        async bulkToggleTrace() {
+            if (this.selectedHosts.length === 0) {
+                alert('No hosts selected');
+                return;
+            }
+
+            if (!confirm(`Toggle trace for ${this.selectedHosts.length} host(s)?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/monitoring/bulk/trace', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Key': getAuthKey()
+                    },
+                    body: JSON.stringify({
+                        hostnames: this.selectedHosts,
+                        enable: true
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to toggle trace');
+                }
+
+                const result = await response.json();
+                alert(`Toggled trace for ${result.success_count} of ${result.total} host(s).\n` +
+                      (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
+
+                // Clear selection and refresh
+                this.clearSelection();
+                await this.fetchHosts();
+            } catch (e) {
+                console.error('Bulk trace failed:', e);
+                alert(`Error: ${e.message}`);
+            }
         }
     };
 }

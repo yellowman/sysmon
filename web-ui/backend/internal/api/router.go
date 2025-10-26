@@ -20,14 +20,18 @@ type Router struct {
 	config     *config.Service
 	monitoring *monitoring.Service
 	mux        *http.ServeMux
+	metrics    *middleware.MetricsCollector
 }
 
 // NewRouter creates a new API router
 func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
+	metrics := middleware.NewMetricsCollector()
+
 	r := &Router{
 		config:     cfg,
 		monitoring: mon,
 		mux:        http.NewServeMux(),
+		metrics:    metrics,
 	}
 
 	// Configuration endpoints (file-based)
@@ -75,6 +79,9 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/docs", r.handleAPIDocs)
 	r.mux.HandleFunc("/api/openapi.yaml", r.handleOpenAPISpec)
 
+	// Metrics
+	r.mux.HandleFunc("/api/metrics", r.handleMetrics)
+
 	// XML passthrough endpoints (comprehensive data)
 	r.mux.HandleFunc("/api/xml/objects", r.handleXMLObjects)
 	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
@@ -98,6 +105,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
 	r.mux.HandleFunc("/config-editor.html", r.handleConfigEditorPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
+	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
 
 	// Serve static files (CSS, JS)
 	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
@@ -105,7 +113,13 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Apply rate limiting (60 requests per minute for general API, configurable)
 	rateLimiter := middleware.NewRateLimiter(60, 1*time.Minute)
 
-	return r.addCORS(rateLimiter.Middleware(r.mux))
+	// Apply middleware chain: CORS -> Metrics -> Rate Limiting -> Handler
+	handler := r.mux
+	handler = rateLimiter.Middleware(handler)
+	handler = metrics.Middleware(handler)
+	handler = r.addCORS(handler)
+
+	return handler
 }
 
 // Config handlers
@@ -949,6 +963,18 @@ func (r *Router) handleBulkTrace(w http.ResponseWriter, req *http.Request) {
 		"results":       results,
 		"enable":        body.Enable,
 	})
+}
+
+// Metrics Handler
+
+func (r *Router) handleMetrics(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	metrics := r.metrics.GetMetrics()
+	r.sendJSON(w, metrics)
 }
 
 // API Documentation Handlers
