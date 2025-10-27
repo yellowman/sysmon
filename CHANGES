@@ -22,6 +22,24 @@ Wishlist Features Implemented:
     - Less critical hosts can have longer intervals (e.g., 60 minutes)
     - Uses global pageinterval if not specified per-object
     - Syntax: config pageinterval <minutes>; inside object definition
+  * SNMP custom up/down messages per object:
+    - snmp_up_msg and snmp_down_msg fields for custom SNMP status messages
+    - Allows per-object customization of alert text for SNMP monitors
+  * Per-object custom page messages:
+    - pmesg directive inside monitor objects for custom alert text
+    - Overrides global pmesg for specific monitors
+  * DNS authoritative answer validation:
+    - dns-aa keyword for DNS monitor objects
+    - Validates that DNS responses have the AA (Authoritative Answer) flag set
+    - Useful for ensuring responses come from authoritative nameservers
+  * DNS recursion control:
+    - dns-recursion keyword for DNS monitor objects
+    - Controls whether DNS queries use recursive resolution
+    - Useful for testing non-recursive DNS servers
+  * SNMP OID comparison monitoring:
+    - snmp-oid-sec keyword for secondary OID specification
+    - Enables comparison of two SNMP OID values
+    - Type: SYSM_SNMP_TYPE_COMPARE for OID comparison checks
 
 Web UI Improvements:
   * Fixed critical 403 "object not found" errors by switching from STAT to STATO

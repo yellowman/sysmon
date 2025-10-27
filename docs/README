@@ -28,6 +28,13 @@ network and destroy your users and damage your hardware.  It will
 always do this.
 
 New Features (2025):
+	- Per-object page interval (pageinterval directive per monitor)
+	- Flap detection and dampening (flaptime, minnumfailures config options)
+	- SNMP custom up/down messages per object (snmp_up_msg, snmp_down_msg)
+	- Per-object custom page messages (pmesg directive per monitor)
+	- DNS authoritative answer validation (dns-aa keyword for DNS monitors)
+	- DNS recursion control (dns-recursion keyword for DNS monitors)
+	- SNMP OID comparison monitoring (snmp-oid-sec for comparing two OIDs)
 	- SNMP trap alert monitoring with matched_host support
 	- Packet loss monitoring (min_pings, send_pings, packet_loss_threshold)
 	- RTT and jitter threshold monitoring (rtt_threshold, jitter_threshold)
