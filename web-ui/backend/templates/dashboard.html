@@ -26,7 +26,10 @@
                                 'fas fa-exclamation-triangle text-yellow-400': host.overall_status === 'WARNING',
                                 'fas fa-times-circle text-red-400': host.overall_status === 'CRITICAL'
                             }"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -50,7 +53,10 @@
                     <template x-for="host in healthyHosts" :key="host.hostname">
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-check-circle text-green-400"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -74,7 +80,10 @@
                     <template x-for="host in warningHosts" :key="host.hostname">
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-exclamation-triangle text-yellow-400"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -98,7 +107,10 @@
                     <template x-for="host in criticalHosts" :key="host.hostname">
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-times-circle text-red-400"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
