@@ -32,6 +32,8 @@ int parser_i_flaptime = -1;
 char *parser_desc = NULL;
 char *parser_group = NULL;
 char *parser_dns_query = NULL;
+bool parser_dns_aa = FALSE;
+bool parser_dns_recursion = FALSE;
 char *parser_spawn = NULL;
 char *parser_contact = NULL;
 int parser_when = SYSM_CONTACT_DOWN | SYSM_CONTACT_UP;
@@ -73,6 +75,7 @@ char *parser_secret = NULL;
 char *parser_username = NULL;
 char *parser_community = NULL;
 char *parser_oid = NULL;
+char *parser_snmp_oid_sec = NULL;
 char *parser_snmp_type = NULL;
 int parser_i_snmp_type = -1;
 char *parser_snmp_low = NULL;
@@ -1778,6 +1781,22 @@ dns-query\ [^;]+;          {
 
 }
 
+dns-aa{WS}*;	{
+  if (parser_name == NULL)
+    print_err(1, "WARNING: dns-aa specified when not inside an object at line %d", line_no);
+  parser_dns_aa = TRUE;
+  if (debug)
+    print_err(0, "dns_aa : TRUE");
+}
+
+dns-recursion{WS}*;	{
+  if (parser_name == NULL)
+    print_err(1, "WARNING: dns-recursion specified when not inside an object at line %d", line_no);
+  parser_dns_recursion = TRUE;
+  if (debug)
+    print_err(0, "dns_recursion : TRUE");
+}
+
 
 secret\ [^;]+;          {
   if (parser_name == NULL)
@@ -2013,7 +2032,41 @@ oid\ [^;]+;          {
   parser_oid[ parser_pos2 - parser_pos1 ] = '\0';
 
   if (debug)
-    print_err(0, "oid : %s", parser_oid); 
+    print_err(0, "oid : %s", parser_oid);
+
+}
+
+snmp-oid-sec\ [^;]+;          {
+  if (parser_name == NULL)
+        print_err(1, "WARNING: snmp-oid-sec specified when not inside an object at line %d", line_no);
+
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  if (parser_snmp_oid_sec != NULL)
+  {
+        FREE(parser_snmp_oid_sec);
+  }
+  parser_snmp_oid_sec = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_snmp_oid_sec");
+
+  strncpy( parser_snmp_oid_sec, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_snmp_oid_sec[ parser_pos2 - parser_pos1 ] = '\0';
+
+  if (debug)
+    print_err(0, "snmp_oid_sec : %s", parser_snmp_oid_sec);
 
 }
 
@@ -2902,6 +2955,16 @@ void add_object()
 			new_ele->value->data->snmp_oid = NULL;
 		}
 
+		/* If snmp secondary oid configured, use it */
+		if ((parser_i_type == SYSM_TYPE_SNMP) && (parser_snmp_oid_sec != NULL))
+		{
+			new_ele->value->data->snmp_oid_sec = STRDUP(parser_snmp_oid_sec, "OID_SEC");
+                        FREE(parser_snmp_oid_sec);
+                        parser_snmp_oid_sec = NULL;
+		} else {
+			new_ele->value->data->snmp_oid_sec = NULL;
+		}
+
 		if (parser_snmp_type != NULL)
 		{
 			new_ele->value->data->snmp_test_type = parser_i_snmp_type;
@@ -2950,6 +3013,10 @@ void add_object()
 		} else {
 			new_ele->value->data->dns_query = NULL;
 		}
+
+		/* Copy DNS flags */
+		new_ele->value->data->dns_aa = parser_dns_aa;
+		new_ele->value->data->dns_recursion = parser_dns_recursion;
 
 		if (parser_username != NULL)
 		{
@@ -3171,6 +3238,8 @@ void initalize_parser()
 		FREE(parser_community);
 	if (parser_oid != NULL)
 		FREE(parser_community);
+	if (parser_snmp_oid_sec != NULL)
+		FREE(parser_snmp_oid_sec);
 
 /* null stuff out */
 	parser_value = NULL;
@@ -3187,6 +3256,8 @@ void initalize_parser()
 	parser_desc = NULL;
 	parser_group = NULL;
 	parser_dns_query = NULL;
+	parser_dns_aa = FALSE;
+	parser_dns_recursion = FALSE;
 	parser_spawn = NULL;
 	parser_contact = NULL;
 	parser_child = NULL;
@@ -3239,6 +3310,7 @@ void initalize_parser()
 	parser_snmp_exact = NULL;
 	parser_community = NULL;
 	parser_oid = NULL;
+	parser_snmp_oid_sec = NULL;
 	parser_dateformat = NULL;
 }
 

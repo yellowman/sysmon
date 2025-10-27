@@ -28,9 +28,6 @@ func Generate(config *models.Config) (string, error) {
 	if config.Global.DisableICMP {
 		sb.WriteString("disableicmp\n")
 	}
-	if config.Global.LogLevel > 0 {
-		sb.WriteString(fmt.Sprintf("loglevel %d\n", config.Global.LogLevel))
-	}
 	sb.WriteString("\n")
 
 	// Hosts
