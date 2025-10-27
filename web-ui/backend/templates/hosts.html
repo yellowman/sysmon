@@ -53,7 +53,7 @@
                             <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0"></i>
                         </div>
                         <div class="flex items-center justify-between text-xs">
-                            <span class="text-gray-500 truncate text-[10px]" x-text="host.ipv4_address" :title="host.ipv4_address"></span>
+                            <span class="text-gray-500 truncate text-[10px]" x-text="host.description || host.ipv4_address" :title="(host.description || '') + (host.description && host.ipv4_address ? ' - ' : '') + (host.ipv4_address || '')"></span>
                             <span class="text-xs font-medium"
                                   :class="{
                                       'text-green-600': host.overall_status === 'OK',
@@ -69,6 +69,7 @@
                 <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
                     <div class="font-bold mb-2" x-text="host.hostname"></div>
                     <div class="space-y-1 text-xs">
+                        <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
                         <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
                         <div><span class="text-gray-400">Status:</span>
                             <span :class="{
@@ -162,7 +163,11 @@
                                 <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 ml-2"></i>
                             </div>
                         </td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500" x-text="host.ipv4_address || '-'"></td>
+                        <td class="px-4 py-2 text-sm text-gray-500">
+                            <div x-text="host.description" class="font-medium" x-show="host.description"></div>
+                            <div x-text="host.ipv4_address" class="text-xs text-gray-400" x-show="host.ipv4_address"></div>
+                            <span x-show="!host.description && !host.ipv4_address">-</span>
+                        </td>
                         <td class="px-4 py-2 whitespace-nowrap">
                             <span class="px-2 py-1 text-xs font-medium rounded"
                                   :class="{
