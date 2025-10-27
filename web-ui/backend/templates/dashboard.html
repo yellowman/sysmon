@@ -26,7 +26,10 @@
                                 'fas fa-exclamation-triangle text-yellow-400': host.overall_status === 'WARNING',
                                 'fas fa-times-circle text-red-400': host.overall_status === 'CRITICAL'
                             }"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -50,7 +53,10 @@
                     <template x-for="host in healthyHosts" :key="host.hostname">
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-check-circle text-green-400"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -74,7 +80,10 @@
                     <template x-for="host in warningHosts" :key="host.hostname">
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-exclamation-triangle text-yellow-400"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -98,7 +107,10 @@
                     <template x-for="host in criticalHosts" :key="host.hostname">
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-times-circle text-red-400"></i>
-                            <span x-text="host.hostname"></span>
+                            <div class="flex-1">
+                                <div x-text="host.hostname" class="font-medium"></div>
+                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                            </div>
                         </div>
                     </template>
                 </div>
@@ -135,49 +147,141 @@
         </div>
     </div>
 
-    <!-- Active Alerts -->
-    <div class="bg-white rounded-lg shadow mb-8" x-show="alerts.length > 0">
+    <!-- Monitored Hosts -->
+    <div class="bg-white rounded-lg shadow mb-8">
         <div class="px-6 py-4 border-b border-gray-200">
             <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-bell mr-2 text-red-500"></i>Active Alerts
+                <i class="fas fa-server mr-2"></i>Monitored Hosts
             </h2>
         </div>
-        <div class="divide-y divide-gray-200">
+        <div class="p-4">
+            <!-- Down/Warning/Critical Hosts First -->
+            <template x-if="downAndWarningHosts.length > 0">
+                <div class="mb-6">
+                    <h3 class="text-sm font-semibold text-red-600 mb-3 flex items-center">
+                        <i class="fas fa-exclamation-circle mr-2"></i>
+                        Problem Hosts (<span x-text="downAndWarningHosts.length"></span>)
+                    </h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                        <template x-for="host in downAndWarningHosts" :key="host.hostname">
+                            <div class="relative group">
+                                <div class="border-2 rounded p-2 cursor-pointer transition-all duration-200 hover:shadow-md"
+                                     :class="{
+                                         'border-yellow-400 bg-yellow-50': host.overall_status === 'WARNING',
+                                         'border-red-500 bg-red-50': host.overall_status === 'CRITICAL'
+                                     }">
+                                    <div class="text-xs font-bold truncate" x-text="host.hostname" :title="host.hostname"></div>
+                                    <div class="text-[10px] text-gray-500 truncate" x-text="host.description || host.ipv4_address" :title="host.description || host.ipv4_address"></div>
+                                    <div class="absolute top-1 right-1 w-2 h-2 rounded-full"
+                                         :class="{
+                                             'bg-yellow-500': host.overall_status === 'WARNING',
+                                             'bg-red-500': host.overall_status === 'CRITICAL'
+                                         }"></div>
+                                </div>
+                                <!-- Hover Tooltip -->
+                                <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
+                                    <div class="font-bold mb-2" x-text="host.hostname"></div>
+                                    <div class="space-y-1">
+                                        <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
+                                        <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
+                                        <div><span class="text-gray-400">Status:</span>
+                                            <span :class="{
+                                                'text-yellow-400': host.overall_status === 'WARNING',
+                                                'text-red-400': host.overall_status === 'CRITICAL'
+                                            }" x-text="host.overall_status"></span>
+                                        </div>
+                                        <div x-show="host.contact"><span class="text-gray-400">Contact:</span> <span x-text="host.contact"></span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Healthy Hosts -->
+            <template x-if="healthyHosts.length > 0">
+                <div>
+                    <h3 class="text-sm font-semibold text-green-600 mb-3 flex items-center">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        Healthy Hosts (<span x-text="healthyHosts.length"></span>)
+                    </h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                        <template x-for="host in healthyHosts" :key="host.hostname">
+                            <div class="relative group">
+                                <div class="border border-green-200 bg-green-50 rounded p-2 cursor-pointer transition-all duration-200 hover:shadow-md hover:border-green-400">
+                                    <div class="text-xs font-bold truncate" x-text="host.hostname" :title="host.hostname"></div>
+                                    <div class="text-[10px] text-gray-500 truncate" x-text="host.description || host.ipv4_address" :title="host.description || host.ipv4_address"></div>
+                                    <div class="absolute top-1 right-1 w-2 h-2 rounded-full bg-green-500"></div>
+                                </div>
+                                <!-- Hover Tooltip -->
+                                <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
+                                    <div class="font-bold mb-2" x-text="host.hostname"></div>
+                                    <div class="space-y-1">
+                                        <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
+                                        <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
+                                        <div><span class="text-gray-400">Status:</span> <span class="text-green-400">OK</span></div>
+                                        <div x-show="host.contact"><span class="text-gray-400">Contact:</span> <span x-text="host.contact"></span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Active Alerts -->
+    <div class="bg-white rounded-lg shadow mb-8" x-show="alerts.length > 0">
+        <div class="px-4 py-3 border-b border-gray-200">
+            <h2 class="text-base font-semibold text-gray-900">
+                <i class="fas fa-bell mr-2 text-red-500"></i>Active Alerts (<span x-text="alerts.length"></span>)
+            </h2>
+        </div>
+        <div class="divide-y divide-gray-100">
             <template x-for="alert in alerts" :key="alert.hostname">
-                <div class="px-6 py-4 hover:bg-gray-50">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
+                <div class="px-4 py-2 hover:bg-gray-50 text-sm">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-2 flex-1 min-w-0">
                             <span :class="{
                                 'bg-yellow-100 text-yellow-800': alert.overall_status === 'WARNING',
                                 'bg-red-100 text-red-800': alert.overall_status === 'CRITICAL'
-                            }" class="px-2 py-1 rounded text-xs font-medium" x-text="alert.overall_status"></span>
-                            <span class="font-medium text-gray-900" x-text="alert.hostname"></span>
+                            }" class="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0" x-text="alert.overall_status"></span>
+                            <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
+                            <span class="text-xs text-gray-400 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
+                            <!-- Inline check badges -->
+                            <div class="flex gap-1 flex-wrap">
+                                <template x-for="check in alert.checks" :key="check.type">
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]"
+                                          :class="{
+                                              'bg-green-50 text-green-700': check.status === 'OK',
+                                              'bg-yellow-50 text-yellow-700': check.status === 'WARNING',
+                                              'bg-red-50 text-red-700': check.status === 'CRITICAL'
+                                          }">
+                                        <i :class="{
+                                            'fas fa-check': check.status === 'OK',
+                                            'fas fa-exclamation-triangle': check.status === 'WARNING',
+                                            'fas fa-times': check.status === 'CRITICAL'
+                                        }" class="text-[8px]"></i>
+                                        <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
+                                    </span>
+                                </template>
+                            </div>
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-500 mr-2" x-text="alert.contact"></span>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                            <span class="text-xs text-gray-500 hidden sm:inline" x-show="alert.contact" x-text="alert.contact"></span>
                             <button @click="ackHost(alert.hostname)"
-                                    class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    title="Acknowledge this alert">
-                                <i class="fas fa-check mr-1"></i>Ack
+                                    class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
+                                    title="Acknowledge">
+                                <i class="fas fa-check"></i>
                             </button>
                             <button @click="showUpdateDialog(alert.hostname)"
-                                    class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    title="Update with status note">
-                                <i class="fas fa-edit mr-1"></i>Update
+                                    class="px-2 py-1 bg-green-600 text-white text-[10px] rounded hover:bg-green-700"
+                                    title="Update">
+                                <i class="fas fa-edit"></i>
                             </button>
                         </div>
-                    </div>
-                    <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <template x-for="check in alert.checks" :key="check.type">
-                            <div class="flex items-center space-x-2">
-                                <i :class="{
-                                    'fas fa-check text-green-500': check.status === 'OK',
-                                    'fas fa-exclamation-triangle text-yellow-500': check.status === 'WARNING',
-                                    'fas fa-times text-red-500': check.status === 'CRITICAL'
-                                }"></i>
-                                <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
-                            </div>
-                        </template>
                     </div>
                 </div>
             </template>
@@ -371,6 +475,10 @@ function dashboard() {
 
         get criticalHosts() {
             return this.allHosts.filter(h => h.overall_status === 'CRITICAL');
+        },
+
+        get downAndWarningHosts() {
+            return this.allHosts.filter(h => h.overall_status === 'WARNING' || h.overall_status === 'CRITICAL');
         },
 
         init() {
