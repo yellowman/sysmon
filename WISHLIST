@@ -6,19 +6,9 @@ Future: (Unknown)
 	* multiple textfiles
 		. by groups?
 		. by state (all, 'down' status..)
-	* pageinterval configurable per host
 	* textfile displays objects that are down when the parent is also down
-	* config flaptime <minutes>;
-		display host in html/text file for next <minutes>
-		amount of time as green after host came back up
-	* native dns checks - needs additional features and docs
-		(basic dns check exists with dns-query, dns_aa, dns_recursion)
 	* http://example.com:1345/ textfile+auth+object history
 		NOTE: Web UI now available at separate port with FastCGI
-	* snmp custom "down" message
-	* snmp custom "up" message
-	* ability to compare two snmp oids w/ each other and alert if
-		equal, not equal, etc..
 	* ability to configure descriptions for snmp errors on a per-object
 		basis
 	* show FILENAME in errors (standardize format?)
@@ -33,11 +23,27 @@ Future: (Unknown)
 	* ircd check - DONE (basic ircd check implemented)
 	* config authfile (file-type sysmon|passwd|htpasswd|etc)
 	* curses client fix
-	* config minnumfailures (but before it appears in txt file, ie:
-		becomes yellow)
 	* All bugs gone :)
 
 COMPLETED in v0.94 (2025):
+	* pageinterval configurable per host - DONE
+		(pageinterval directive per monitor object)
+	* config flaptime <minutes> - DONE
+		(keeps host green for N minutes after recovery)
+	* config minnumfailures <n> - DONE
+		(minimum failures before status change/yellow)
+	* snmp custom "down" message - DONE
+		(snmp_down_msg field for per-object customization)
+	* snmp custom "up" message - DONE
+		(snmp_up_msg field for per-object customization)
+	* per-object pmesg - DONE
+		(pmesg directive inside monitor objects)
+	* native dns checks - DONE
+		(dns-aa for authoritative answer validation)
+		(dns-recursion for recursion control)
+	* snmp oid comparison - DONE
+		(snmp-oid-sec for comparing two OID values)
+		(SYSM_SNMP_TYPE_COMPARE type implemented)
 	* pings per check configurable per-host - DONE
 		(min_pings, send_pings fully implemented with packet_loss_threshold)
 	* snmp traps - DONE

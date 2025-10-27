@@ -415,6 +415,29 @@ Useful for monitoring network interface bandwidth where counters are in
 bytes but you want to alert on bits per second (e.g., Mbps).
 Example: snmp-octets;
 
+.SS snmp-oid-sec
+The ``snmp-oid-sec'' directive specifies a secondary SNMP OID for comparison
+monitoring. When snmp-type is "compare", the value from this OID is compared
+to the value from the primary oid. Alerts are triggered based on the comparison
+result (equal, not equal, greater than, less than, etc.). Use for monitoring
+relationships between two SNMP counters or values.
+Example: snmp-oid-sec "1.3.6.1.2.1.2.2.1.11.1";
+
+.SS dns-aa
+The ``dns-aa'' directive enables authoritative answer validation for DNS checks.
+When specified, the DNS response must have the AA (Authoritative Answer) flag
+set, indicating the response came from an authoritative nameserver. Useful
+for verifying that responses are from the correct source and not from caching
+resolvers. Only applies to DNS type monitors.
+Example: dns-aa;
+
+.SS dns-recursion
+The ``dns-recursion'' directive enables recursive DNS queries. When specified,
+DNS queries will request recursive resolution from the nameserver. When not
+specified, queries are non-recursive. Useful for testing authoritative-only
+nameservers that should not perform recursion. Only applies to DNS type monitors.
+Example: dns-recursion;
+
 .SS pageinterval
 The ``pageinterval'' directive allows per-object override of the global
 page interval setting. This is an integer representing the number of
