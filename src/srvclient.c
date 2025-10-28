@@ -34,12 +34,12 @@ void send_stat_start(struct clientstatus client, struct all_elements_list *head,
 			} else {
 
 			/* down in some fashion */
-			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%d:%ld",
+			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%d:%lld",
 			here->value->data->hostname, here->value->data->type,
 			here->value->data->port, here->value->data->lastcheck,
 			here->value->data->downct,
 			here->value->data->contacted,
-			here->value->data->deathtime);
+			(long long)here->value->data->deathtime);
 			}
 
 			/* write it out the socket */
@@ -69,12 +69,12 @@ void send_stat_all(struct clientstatus client, struct all_elements_list *head, i
 			snprintf(buff, 256, "%s", here->value->unique_name);
 		} else {
 			/* Return detailed format (like STAT) */
-			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%ld:%ld",
+			snprintf(buff, 256, "%s:%d:%d:%d:%ld:%ld:%lld",
 			here->value->data->hostname, here->value->data->type,
 			here->value->data->port, here->value->data->lastcheck,
 			here->value->data->downct,
 			here->value->data->upct,
-			here->value->data->deathtime);
+			(long long)here->value->data->deathtime);
 		}
 
 		/* write it out the socket */
@@ -260,7 +260,7 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_RATE, obj->data->snmp_rate, XML_SNMP_RATE);
 		SEND_OR_ABORT(fd, fh, buffer);
 
-		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LASTRESP, obj->data->last_snmp_resptime, XML_SNMP_LASTRESP);
+		snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>", XML_SNMP_LASTRESP, (long long)obj->data->last_snmp_resptime, XML_SNMP_LASTRESP);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -358,7 +358,7 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJ_CONTACTED, obj->data->contacted, XML_OBJ_CONTACTED);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_OBJ_CONTACTEDAT, obj->data->lastcontacted, XML_OBJ_CONTACTEDAT);
+	snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>", XML_OBJ_CONTACTEDAT, (long long)obj->data->lastcontacted, XML_OBJ_CONTACTEDAT);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_CONTACT_UP, obj->data->contact_when, XML_CONTACT_UP);
@@ -367,16 +367,16 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_QUEUED, obj->data->queued, XML_QUEUED);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LASTCHECK, obj->data->lchecktime, XML_LASTCHECK);
+	snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>", XML_LASTCHECK, (long long)obj->data->lchecktime, XML_LASTCHECK);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_CHECK_START, obj->data->check_start, XML_CHECK_START);
+	snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>", XML_CHECK_START, (long long)obj->data->check_start, XML_CHECK_START);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_OUTAGE_TIME, obj->data->deathtime, XML_OUTAGE_TIME);
+	snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>", XML_OUTAGE_TIME, (long long)obj->data->deathtime, XML_OUTAGE_TIME);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_LAST_TIME_UP, obj->data->last_up, XML_LAST_TIME_UP);
+	snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>", XML_LAST_TIME_UP, (long long)obj->data->last_up, XML_LAST_TIME_UP);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	/* Packet loss tolerance (max packets that can be lost) */
@@ -468,8 +468,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	}
 
 	if (obj->data->pktloss_last_check > 0) {
-		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
-			XML_PKTLOSS_LAST_CHK, obj->data->pktloss_last_check,
+		snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>",
+			XML_PKTLOSS_LAST_CHK, (long long)obj->data->pktloss_last_check,
 			XML_PKTLOSS_LAST_CHK);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
@@ -483,8 +483,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	/* Next Scheduled Queue Time */
 	if (obj->data->next_queuetime > 0) {
-		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
-			XML_NEXT_QUEUE_TIME, obj->data->next_queuetime, XML_NEXT_QUEUE_TIME);
+		snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>",
+			XML_NEXT_QUEUE_TIME, (long long)obj->data->next_queuetime, XML_NEXT_QUEUE_TIME);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -550,8 +550,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 					XML_CHECK_WAKEUP_CNT);
 				SEND_OR_ABORT(fd, fh, buffer);
 
-				snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>",
-					XML_CHECK_WAKEUP_TIME, found_qent->last_wakeup_time,
+				snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>",
+					XML_CHECK_WAKEUP_TIME, (long long)found_qent->last_wakeup_time,
 					XML_CHECK_WAKEUP_TIME);
 				SEND_OR_ABORT(fd, fh, buffer);
 			}
@@ -596,8 +596,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 						struct pktloss_sample *sample = &pld->history[idx];
 
 						snprintf(buffer, sizeof(buffer),
-							"<Sample timestamp=\"%ld\" sent=\"%u\" received=\"%u\" lost=\"%u\"/>",
-							sample->timestamp, sample->sent, sample->received, sample->lost);
+							"<Sample timestamp=\"%lld\" sent=\"%u\" received=\"%u\" lost=\"%u\"/>",
+							(long long)sample->timestamp, sample->sent, sample->received, sample->lost);
 						SEND_OR_ABORT(fd, fh, buffer);
 					}
 
