@@ -2,6 +2,7 @@ package api
 
 import (
 	"html/template"
+	"log"
 	"net/http"
 	"path/filepath"
 )
@@ -48,9 +49,12 @@ func (r *Router) renderTemplate(w http.ResponseWriter, tmpl string, data interfa
 	}
 
 	// Execute the base template which includes the page-specific content
+	// Note: If ExecuteTemplate returns an error, it may have already started writing
+	// to the response, so we can't call http.Error (which would cause a superfluous
+	// WriteHeader call). We just log the error instead.
 	err := t.ExecuteTemplate(w, "base", data)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Error executing template %s: %v", tmpl, err)
 	}
 }
 
