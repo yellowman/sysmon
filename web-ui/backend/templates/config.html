@@ -639,26 +639,26 @@
                             <!-- Host Tab Navigation -->
                             <div class="mb-4 border-b border-gray-200">
                                 <nav class="-mb-px flex space-x-6">
-                                    <button @click="editingHost.activeTab = 'overview'" :class="editingHost.activeTab === 'overview' || !editingHost.activeTab ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                    <button @click="editingHost.activeTab = 'overview'" :class="editingHost && (editingHost.activeTab === 'overview' || !editingHost.activeTab) ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                         Overview
                                     </button>
-                                    <button @click="editingHost.activeTab = 'typespecific'" :class="editingHost.activeTab === 'typespecific' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                    <button @click="editingHost.activeTab = 'typespecific'" :class="editingHost && editingHost.activeTab === 'typespecific' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                         Type-Specific
                                     </button>
-                                    <button @click="editingHost.activeTab = 'alerts'" :class="editingHost.activeTab === 'alerts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                    <button @click="editingHost.activeTab = 'alerts'" :class="editingHost && editingHost.activeTab === 'alerts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                         Alerts & Contact
                                     </button>
-                                    <button @click="editingHost.activeTab = 'snmp'" :class="editingHost.activeTab === 'snmp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                    <button @click="editingHost.activeTab = 'snmp'" :class="editingHost && editingHost.activeTab === 'snmp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                         SNMP
                                     </button>
-                                    <button @click="editingHost.activeTab = 'advanced'" :class="editingHost.activeTab === 'advanced' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                    <button @click="editingHost.activeTab = 'advanced'" :class="editingHost && editingHost.activeTab === 'advanced' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
                                         Advanced
                                     </button>
                                 </nav>
                             </div>
 
                                     <!-- Overview Tab - Most Common Fields -->
-                                    <div x-show="!editingHost.activeTab || editingHost.activeTab === 'overview'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div x-show="editingHost && (!editingHost.activeTab || editingHost.activeTab === 'overview')" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
                                             <label class="block text-sm font-medium text-gray-700 mb-1">IP Address / Hostname *</label>
                                             <input type="text" x-model="editingHost.ip" required placeholder="192.168.1.1 or hostname.example.com"
@@ -753,7 +753,7 @@
                                     </div>
 
                                     <!-- Type-Specific Tab -->
-                                    <div x-show="editingHost.activeTab === 'typespecific'" class="space-y-6">
+                                    <div x-show="editingHost && editingHost.activeTab === 'typespecific'" class="space-y-6">
                                         <!-- Port field (shown for most types) -->
                                         <div x-show="['tcp', 'udp', 'http', 'https', 'ssh', 'smtp', 'pop3', 'imap', 'dns', 'radius', 'snmp', 'nntp', 'ircd'].includes(editingHost.type)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
@@ -924,7 +924,7 @@
                                     </div>
 
                                     <!-- Alerts & Contact Tab -->
-                                    <div x-show="editingHost.activeTab === 'alerts'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div x-show="editingHost && editingHost.activeTab === 'alerts'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div class="md:col-span-2">
                                             <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
                                             <input type="email" x-model="editingHost.contact" placeholder="admin@example.com"
@@ -956,7 +956,7 @@
                                     </div>
 
                                     <!-- SNMP Tab -->
-                                    <div x-show="editingHost.activeTab === 'snmp'" class="space-y-4">
+                                    <div x-show="editingHost && editingHost.activeTab === 'snmp'" class="space-y-4">
                                         <div class="bg-blue-50 p-3 rounded-lg">
                                             <p class="text-sm text-blue-800">
                                                 <i class="fas fa-info-circle mr-2"></i>
@@ -1046,7 +1046,7 @@
                                     </div>
 
                                     <!-- Advanced Tab -->
-                                    <div x-show="editingHost.activeTab === 'advanced'" class="space-y-6">
+                                    <div x-show="editingHost && editingHost.activeTab === 'advanced'" class="space-y-6">
                                         <div class="bg-gray-50 p-4 rounded-lg">
                                             <h4 class="font-semibold text-gray-700 mb-3">Timing & Queue Settings</h4>
                                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
