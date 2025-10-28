@@ -220,8 +220,16 @@
                                 'bg-yellow-100 text-yellow-800': alert.overall_status === 'WARNING',
                                 'bg-red-100 text-red-800': alert.overall_status === 'CRITICAL'
                             }" class="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0" x-text="alert.overall_status"></span>
-                            <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
-                            <span class="text-xs text-gray-400 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
+                            <div class="flex flex-col min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs text-gray-500" x-show="alert.ipv4_address" x-text="alert.ipv4_address"></span>
+                                    <span class="font-medium text-gray-900 truncate" x-text="alert.description || alert.hostname" :title="alert.description || alert.hostname"></span>
+                                </div>
+                                <div class="text-[10px] text-gray-400" x-show="alert.last_change_time">
+                                    <i class="fas fa-clock mr-1"></i>
+                                    <span x-text="formatTimeAgo(alert.last_change_time)"></span>
+                                </div>
+                            </div>
                             <!-- Inline check badges -->
                             <div class="flex gap-1 flex-wrap">
                                 <template x-for="check in alert.checks" :key="check.type">
@@ -592,6 +600,22 @@ function dashboard() {
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
             return `${Math.floor(diff / 86400)}d ago`;
+        },
+
+        formatTimeAgo(timestamp) {
+            if (!timestamp) return '';
+            const now = new Date();
+            const then = new Date(timestamp);
+            const diffMs = now - then;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return then.toLocaleDateString();
         },
 
         copyXMLToClipboard() {
