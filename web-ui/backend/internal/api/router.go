@@ -97,12 +97,14 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Create cache middleware
 	cache := middleware.NewCacheConfig()
 
-	// Apply middleware chain: CORS -> Metrics -> Cache -> Rate Limiting -> Handler
+	// Apply middleware chain: Recovery -> CORS -> Metrics -> Cache -> Rate Limiting -> Handler
+	// Recovery must be outermost to catch panics from all other middleware
 	var handler http.Handler = r.mux
 	handler = rateLimiter.Middleware(handler)
 	handler = cache.Middleware(handler)
 	handler = metrics.Middleware(handler)
 	handler = r.addCORS(handler)
+	handler = middleware.Recovery(handler)
 
 	return handler
 }
