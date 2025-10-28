@@ -342,11 +342,11 @@ function trapsPage() {
 
                 // Handle paginated response
                 if (this.perPage !== 'all' && data.data) {
-                    // Paginated response
-                    const paginatedData = data.data;
-                    this.traps = paginatedData.recent_traps || [];
-                    this.sources = paginatedData.trap_sources || [];
-                    this.summary = paginatedData.summary || {};
+                    // Paginated response: data.data is array of traps,
+                    // trap_sources and summary are at top level
+                    this.traps = data.data || [];
+                    this.sources = data.trap_sources || [];
+                    this.summary = data.summary || {};
                     this.totalTraps = data.total;
                     this.totalPages = data.total_pages;
                     this.currentPage = data.page;
