@@ -115,42 +115,53 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
                                         break;
 				case 'G':
 					snprintf(tmp, sizeof(tmp), "%s%s", out, svc->group);
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
                                 case 'i':
-                                        snprintf(tmp, sizeof(tmp), "%s%ld%p", out, 
+                                        snprintf(tmp, sizeof(tmp), "%s%ld%p", out,
 						svc->deathtime, svc);
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
                                         break;
 				case 'I':
-					snprintf(tmp, sizeof(tmp), "%s%s", out, 
+					snprintf(tmp, sizeof(tmp), "%s%s", out,
 						get_ip(hp));
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
 				case 'c':
-					snprintf(tmp, sizeof(tmp), "%s %ld", out, 
+					snprintf(tmp, sizeof(tmp), "%s %ld", out,
 						svc->downct);
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
 				case 'C':
-					snprintf(tmp, sizeof(tmp), "%s %ld", out, 
+					snprintf(tmp, sizeof(tmp), "%s %ld", out,
 						svc->upct);
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
 				case 'p':
-					snprintf(tmp, sizeof(tmp), "%s %d", out, 
+					snprintf(tmp, sizeof(tmp), "%s %d", out,
 						svc->port);
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
 				case 'r':
 			                tmp1 = svc->totaldown;
 			                tmp2 = svc->totalchecked;
-			                value = (100.0000-((tmp1/tmp2) * 100));
-			                if (value<0) value=0.000;
-			                if (tmp2==0) value=100.00;
+			                /* BUG FIX: Check for divide-by-zero BEFORE division */
+			                if (tmp2==0) {
+			                	value=100.00;
+			                } else {
+			                	value = (100.0000-((tmp1/tmp2) * 100));
+			                	if (value<0) value=0.000;
+			                }
 					snprintf(tmp, sizeof(tmp), "%s %10.6f%%", out,
 						value);
-					memcpy(out,tmp,sizeof(out)); current_len = strlen(out);
+					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
+					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
                                 case 's':
                                         SAFE_APPEND( type_to_name(svc->type));
@@ -247,7 +258,11 @@ void run_command_and_mail_output(struct hostinfo *svc, char *myhostname)
 
 	if ((svc->contact == NULL) || (strlen(svc->contact) == 0))
 	{
-		system(runme);
+		int ret = system(runme);
+		if (ret == -1)
+		{
+			perror("page.c:run_command_and_mail_output:system");
+		}
 		free(runme);
 		exit(0);
 	}

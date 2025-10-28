@@ -1,0 +1,1011 @@
+openapi: 3.0.3
+info:
+  title: Sysmon Web API
+  description: |
+    RESTful API for the Sysmon monitoring system. Provides access to configuration management,
+    real-time monitoring data, administrative commands, and bulk operations.
+
+    ## Rate Limiting
+    All API endpoints are rate limited to 60 requests per minute per IP address.
+    Rate limit information is returned in response headers:
+    - `X-RateLimit-Limit`: Maximum requests allowed in the time window
+    - `X-RateLimit-Remaining`: Number of requests remaining in current window
+    - `X-RateLimit-Reset`: Unix timestamp when the rate limit resets
+
+    ## Authentication
+    Most write operations and all admin endpoints require authentication via the `X-Auth-Key` header.
+    The auth key must match the key configured in the sysmon daemon.
+  version: 1.0.0
+  contact:
+    name: Sysmon API Support
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.sysmon.example.com
+    description: Production server
+
+tags:
+  - name: Configuration
+    description: Configuration file management
+  - name: Monitoring
+    description: Real-time monitoring data and status
+  - name: Bulk Operations
+    description: Batch operations on multiple hosts
+  - name: Admin
+    description: Administrative and debug commands
+  - name: Backups
+    description: Configuration backup management
+  - name: XML
+    description: Raw XML data access (legacy)
+
+paths:
+  # Configuration endpoints
+  /api/config:
+    get:
+      tags: [Configuration]
+      summary: Get structured configuration
+      description: Returns the current configuration in structured JSON format
+      responses:
+        '200':
+          description: Configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Configuration]
+      summary: Update configuration
+      description: Updates the configuration with structured data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdate'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/config/validate:
+    post:
+      tags: [Configuration]
+      summary: Validate configuration
+      description: Validates configuration without saving it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  error:
+                    type: string
+
+  /api/config/reload:
+    post:
+      tags: [Configuration]
+      summary: Reload daemon configuration
+      description: Sends SIGHUP to sysmond to reload configuration
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Reload triggered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: sysmon reloaded successfully
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/config/raw:
+    get:
+      tags: [Configuration]
+      summary: Get raw configuration file
+      description: Returns the configuration file as plain text
+      responses:
+        '200':
+          description: Raw configuration file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: string
+                  version:
+                    type: string
+
+    put:
+      tags: [Configuration]
+      summary: Update raw configuration file
+      description: Updates the configuration file with raw text content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                version:
+                  type: string
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Configuration saved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+
+  # Monitoring endpoints
+  /api/monitoring/status:
+    get:
+      tags: [Monitoring]
+      summary: Get overall monitoring status
+      description: Returns summary statistics and daemon status
+      responses:
+        '200':
+          description: Status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoringStatus'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/monitoring/hosts:
+    get:
+      tags: [Monitoring]
+      summary: Get all monitored hosts
+      description: Returns status information for all monitored hosts
+      responses:
+        '200':
+          description: Hosts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostStatus'
+
+  /api/monitoring/host/{hostname}:
+    get:
+      tags: [Monitoring]
+      summary: Get single host status
+      description: Returns detailed status for a specific host
+      parameters:
+        - name: hostname
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Host status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/monitoring/alerts:
+    get:
+      tags: [Monitoring]
+      summary: Get active alerts
+      description: Returns all hosts currently in alert state
+      responses:
+        '200':
+          description: Alerts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostStatus'
+
+  /api/monitoring/traps:
+    get:
+      tags: [Monitoring]
+      summary: Get SNMP traps
+      description: Returns received SNMP traps
+      responses:
+        '200':
+          description: Traps retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SNMPTrap'
+
+  /api/monitoring/stats:
+    get:
+      tags: [Monitoring]
+      summary: Get statistics
+      description: Returns monitoring statistics
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Statistics'
+
+  /api/monitoring/ack/{hostname}:
+    post:
+      tags: [Monitoring]
+      summary: Acknowledge host alert
+      description: Acknowledges an alert for a specific host
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: hostname
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Host acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+                  hostname:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/monitoring/update/{hostname}:
+    post:
+      tags: [Monitoring]
+      summary: Update host status note
+      description: Updates the status note for a host
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: hostname
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  example: Investigating connectivity issue
+                auth_key:
+                  type: string
+              required:
+                - note
+      responses:
+        '200':
+          description: Host updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+                  hostname:
+                    type: string
+                  note:
+                    type: string
+
+  /api/monitoring/trace/{hostname}:
+    post:
+      tags: [Monitoring]
+      summary: Toggle trace for host
+      description: Enables or disables debug tracing for a host
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: hostname
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trace toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  hostname:
+                    type: string
+                  tracing_enabled:
+                    type: boolean
+                  message:
+                    type: string
+
+  # Bulk operations
+  /api/monitoring/bulk/ack:
+    post:
+      tags: [Bulk Operations]
+      summary: Acknowledge multiple hosts
+      description: Acknowledges alerts for multiple hosts in a single request
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostnames:
+                  type: array
+                  items:
+                    type: string
+                  example: ["web1", "web2", "db1"]
+                auth_key:
+                  type: string
+              required:
+                - hostnames
+      responses:
+        '200':
+          description: Bulk operation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkOperationResponse'
+
+  /api/monitoring/bulk/update:
+    post:
+      tags: [Bulk Operations]
+      summary: Update multiple hosts
+      description: Updates status note for multiple hosts with the same message
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostnames:
+                  type: array
+                  items:
+                    type: string
+                  example: ["web1", "web2", "web3"]
+                note:
+                  type: string
+                  example: Maintenance window - planned outage
+                auth_key:
+                  type: string
+              required:
+                - hostnames
+                - note
+      responses:
+        '200':
+          description: Bulk operation completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkOperationResponse'
+                  - type: object
+                    properties:
+                      note:
+                        type: string
+
+  /api/monitoring/bulk/trace:
+    post:
+      tags: [Bulk Operations]
+      summary: Toggle trace for multiple hosts
+      description: Enables or disables tracing for multiple hosts
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostnames:
+                  type: array
+                  items:
+                    type: string
+                  example: ["web1", "web2"]
+                enable:
+                  type: boolean
+                  example: true
+                auth_key:
+                  type: string
+              required:
+                - hostnames
+                - enable
+      responses:
+        '200':
+          description: Bulk operation completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkOperationResponse'
+                  - type: object
+                    properties:
+                      enable:
+                        type: boolean
+
+  # Backups
+  /api/backups:
+    get:
+      tags: [Backups]
+      summary: List configuration backups
+      description: Returns a list of available configuration backups
+      responses:
+        '200':
+          description: Backup list retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Backup'
+
+  /api/backups/{filename}/restore:
+    post:
+      tags: [Backups]
+      summary: Restore configuration backup
+      description: Restores configuration from a backup file
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+          example: config.2024-01-15.bak
+      responses:
+        '200':
+          description: Backup restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+
+  # Admin endpoints
+  /api/admin/version:
+    get:
+      tags: [Admin]
+      summary: Get daemon version
+      description: Returns the sysmon daemon version
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Version retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+
+  /api/admin/debug:
+    post:
+      tags: [Admin]
+      summary: Toggle debug mode
+      description: Toggles debug logging in the daemon
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Debug mode toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+
+  /api/admin/snmpd:
+    post:
+      tags: [Admin]
+      summary: Toggle SNMP debug
+      description: Toggles SNMP debug logging
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: SNMP debug toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+
+  /api/admin/expiredns:
+    post:
+      tags: [Admin]
+      summary: Expire DNS cache
+      description: Forces expiration of the DNS cache
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: DNS cache expired
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+
+  /api/admin/printq:
+    get:
+      tags: [Admin]
+      summary: Print check queue
+      description: Returns the current check queue status
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Queue status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+
+  /api/admin/nfd:
+    get:
+      tags: [Admin]
+      summary: Get next file descriptor info
+      description: Returns next file descriptor allocation info (debugging)
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: FD info retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  info:
+                    type: string
+
+  /api/admin/killit:
+    post:
+      tags: [Admin]
+      summary: Shutdown daemon
+      description: Gracefully shuts down the sysmon daemon
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Shutdown initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  message:
+                    type: string
+
+  /api/admin/session-log:
+    get:
+      tags: [Admin]
+      summary: Get session log
+      description: Returns recent sysmon protocol session log entries
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        '200':
+          description: Session log retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SessionLogEntry'
+                  count:
+                    type: integer
+
+  /api/admin/session-errors:
+    get:
+      tags: [Admin]
+      summary: Get session errors
+      description: Returns recent session error entries
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+      responses:
+        '200':
+          description: Session errors retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SessionLogEntry'
+                  count:
+                    type: integer
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Auth-Key
+      description: Authentication key for protected endpoints
+
+  schemas:
+    Config:
+      type: object
+      properties:
+        global:
+          $ref: '#/components/schemas/GlobalSettings'
+        spawns:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpawnCommand'
+        hosts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Host'
+
+    GlobalSettings:
+      type: object
+      properties:
+        clientport:
+          type: integer
+          example: 1345
+        checkinterval:
+          type: integer
+          example: 60
+        numfailures:
+          type: integer
+          example: 4
+        pageinterval:
+          type: integer
+          example: 60
+        sender:
+          type: string
+          format: email
+        from:
+          type: string
+          format: email
+        subject:
+          type: string
+        authkey:
+          type: string
+
+    SpawnCommand:
+      type: object
+      properties:
+        name:
+          type: string
+          example: pagechris
+        command:
+          type: string
+          example: /usr/local/bin/sms.sh %s %s
+
+    Host:
+      type: object
+      properties:
+        hostname:
+          type: string
+          example: web-server-01
+        ip:
+          type: string
+          example: 192.168.1.10
+        type:
+          type: string
+          enum: [icmp, tcp, http, https, ssh, smtp, pop3, imap, dns, snmp]
+        port:
+          type: integer
+        contact:
+          type: string
+          format: email
+        spawn:
+          type: string
+        paused:
+          type: boolean
+        notes:
+          type: string
+
+    ConfigSnapshot:
+      type: object
+      properties:
+        config:
+          $ref: '#/components/schemas/Config'
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ConfigUpdate:
+      allOf:
+        - $ref: '#/components/schemas/Config'
+        - type: object
+          properties:
+            version:
+              type: string
+            comment:
+              type: string
+
+    MonitoringStatus:
+      type: object
+      properties:
+        daemon_version:
+          type: string
+        uptime:
+          type: integer
+        total_hosts:
+          type: integer
+        hosts_up:
+          type: integer
+        hosts_down:
+          type: integer
+        hosts_critical:
+          type: integer
+        last_check:
+          type: string
+          format: date-time
+
+    HostStatus:
+      type: object
+      properties:
+        hostname:
+          type: string
+        ip:
+          type: string
+        type:
+          type: string
+        overall_status:
+          type: string
+          enum: [OK, WARNING, CRITICAL, UNKNOWN]
+        status_message:
+          type: string
+        last_check:
+          type: string
+          format: date-time
+        uptime_percent:
+          type: number
+        response_time_ms:
+          type: number
+        packet_loss_percent:
+          type: number
+
+    SNMPTrap:
+      type: object
+      properties:
+        source_ip:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        oid:
+          type: string
+        value:
+          type: string
+        severity:
+          type: string
+
+    Statistics:
+      type: object
+      properties:
+        total_checks:
+          type: integer
+        checks_per_second:
+          type: number
+        average_response_time:
+          type: number
+
+    Backup:
+      type: object
+      properties:
+        filename:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        size_bytes:
+          type: integer
+        comment:
+          type: string
+
+    BulkOperationResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: completed
+        total:
+          type: integer
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkOperationResult'
+
+    BulkOperationResult:
+      type: object
+      properties:
+        hostname:
+          type: string
+        success:
+          type: boolean
+        error:
+          type: string
+
+    SessionLogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        command:
+          type: string
+        response:
+          type: string
+        is_error:
+          type: boolean
+        error_msg:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized - authentication required or failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Conflict:
+      description: Conflict - version mismatch or concurrent modification
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per time window
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests in current window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when limit resets
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+      content:
+        text/plain:
+          schema:
+            type: string
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ServiceUnavailable:
+      description: Service unavailable - cannot connect to sysmon daemon
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

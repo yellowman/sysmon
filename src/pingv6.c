@@ -215,7 +215,7 @@ void pinger_v6(struct pingv6data *localdata, struct monitorent *here)
 	ret1 = sendto(glob_icmpv6_fd, localdata->outpack, send_octets, 0,
 		(struct sockaddr *)&localdata->ping_target, sizeof(struct sockaddr_in6));
 
-	if (debug|debug_pingv6)
+	if (debug||debug_pingv6)
 		print_err(1, "pingv6.c:sendto got %d", ret1);
 
         serrno = errno;
@@ -314,7 +314,7 @@ void start_test_pingv6(struct monitorent *checkme)
         /* initalize the variable */
         memset(&localstruct->ping_target, 0, sizeof(struct sockaddr));
 
-        if (debug|debug_pingv6)
+        if (debug||debug_pingv6)
         {
                 print_err(0, "setting up ping of host %s",
                         checkme->checkent->hostname);
@@ -364,7 +364,7 @@ void start_test_pingv6(struct monitorent *checkme)
         /* generate our identity for the packet */
         localstruct->ident = generate_ident();
 
-        if (debug|debug_pingv6)
+        if (debug||debug_pingv6)
         {
                 print_err(0, "pingv6.c:Created ICMP identity id of %d", localstruct->ident);
         }
@@ -372,7 +372,7 @@ void start_test_pingv6(struct monitorent *checkme)
         /*  Send a ping */
         pinger_v6(localstruct, checkme);
 
-        if (debug|debug_pingv6)
+        if (debug||debug_pingv6)
         {
                 print_err(0, "pingv6.c:Sent an ICMP echo-request to %s",
                         checkme->checkent->hostname);
@@ -543,7 +543,7 @@ void    handle_pingv6_responses()
                         perror("pingv6.c: recvfrom");
                         continue; /* try again */
                 }
-		if (debug|debug_pingv6)
+		if (debug||debug_pingv6)
 			print_err(1, "pingv6.c: have a packet, len = %d attempting to parse", ret);
 
                 /* Check the IPv6 header */

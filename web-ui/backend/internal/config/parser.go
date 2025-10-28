@@ -35,14 +35,21 @@ func Parse(content []byte) (*models.Config, error) {
 
 		// Parse global settings
 		if strings.HasPrefix(line, "clientport ") {
-			port, _ := strconv.Atoi(strings.TrimPrefix(line, "clientport "))
-			config.Global.ClientPort = port
+			portStr := strings.TrimSpace(strings.TrimPrefix(line, "clientport "))
+			if port, err := strconv.Atoi(portStr); err == nil {
+				config.Global.ClientPort = port
+			}
+			// Silently skip invalid values - validation happens later
 		} else if strings.HasPrefix(line, "snmptrapport ") {
-			port, _ := strconv.Atoi(strings.TrimPrefix(line, "snmptrapport "))
-			config.Global.SNMPTrapPort = port
+			portStr := strings.TrimSpace(strings.TrimPrefix(line, "snmptrapport "))
+			if port, err := strconv.Atoi(portStr); err == nil {
+				config.Global.SNMPTrapPort = port
+			}
 		} else if strings.HasPrefix(line, "checkinterval ") {
-			interval, _ := strconv.Atoi(strings.TrimPrefix(line, "checkinterval "))
-			config.Global.CheckInterval = interval
+			intervalStr := strings.TrimSpace(strings.TrimPrefix(line, "checkinterval "))
+			if interval, err := strconv.Atoi(intervalStr); err == nil {
+				config.Global.CheckInterval = interval
+			}
 		} else if line == "disableicmp" {
 			config.Global.DisableICMP = true
 
@@ -74,12 +81,18 @@ func Parse(content []byte) (*models.Config, error) {
 				})
 
 			} else if strings.HasPrefix(line, "tcp ") {
-				port, _ := strconv.Atoi(strings.TrimPrefix(line, "tcp "))
-				currentHost.Checks = append(currentHost.Checks, models.Check{
-					ID:   generateID(fmt.Sprintf("tcp-%d", port)),
-					Type: "tcp",
-					Port: port,
-				})
+				portStr := strings.TrimSpace(strings.TrimPrefix(line, "tcp "))
+				port := 0
+				if p, err := strconv.Atoi(portStr); err == nil {
+					port = p
+				}
+				if port > 0 {
+					currentHost.Checks = append(currentHost.Checks, models.Check{
+						ID:   generateID(fmt.Sprintf("tcp-%d", port)),
+						Type: "tcp",
+						Port: port,
+					})
+				}
 
 			} else if strings.HasPrefix(line, "http ") || strings.HasPrefix(line, "https ") {
 				var checkType string
@@ -87,16 +100,20 @@ func Parse(content []byte) (*models.Config, error) {
 				if strings.HasPrefix(line, "https ") {
 					checkType = "https"
 					port = 443
-					portStr := strings.TrimPrefix(line, "https ")
+					portStr := strings.TrimSpace(strings.TrimPrefix(line, "https "))
 					if portStr != "" {
-						port, _ = strconv.Atoi(portStr)
+						if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+							port = p
+						}
 					}
 				} else {
 					checkType = "http"
 					port = 80
-					portStr := strings.TrimPrefix(line, "http ")
+					portStr := strings.TrimSpace(strings.TrimPrefix(line, "http "))
 					if portStr != "" {
-						port, _ = strconv.Atoi(portStr)
+						if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+							port = p
+						}
 					}
 				}
 				currentHost.Checks = append(currentHost.Checks, models.Check{
@@ -136,7 +153,9 @@ func Parse(content []byte) (*models.Config, error) {
 				parts := strings.Fields(line)
 				threshold := 5.0
 				if len(parts) >= 2 {
-					threshold, _ = strconv.ParseFloat(parts[1], 64)
+					if t, err := strconv.ParseFloat(parts[1], 64); err == nil && t >= 0 {
+						threshold = t
+					}
 				}
 				currentHost.Checks = append(currentHost.Checks, models.Check{
 					ID:   generateID("pktloss"),
