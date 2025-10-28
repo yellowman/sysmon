@@ -166,7 +166,7 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                                 if (strncmp(buffer, "+OK", 3) == 0)
                                 {
 				        /* prepare the buffer */
-				        snprintf(buffer, PROTO_RESPONSE_SIZE, "USER %s",
+				        snprintf(buffer, sizeof(buffer), "USER %s",
 						here->checkent->username);
 
 				        /* send the buffer out the socket */
@@ -195,7 +195,7 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                                 if (strncmp(buffer, "+OK", 3) == 0)
                                 {
                                         /* prepare the buffer */
-                                        snprintf(buffer, PROTO_RESPONSE_SIZE, "PASS %s",
+                                        snprintf(buffer, sizeof(buffer), "PASS %s",
 						here->checkent->password);
 
                                         /* send the buffer out the socket */
