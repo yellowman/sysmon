@@ -547,10 +547,13 @@ function unifiedConfigPage() {
     return {
         // Mode control
         editorMode: 'structured',
+        originalStructuredConfig: null,
+        structuredHasChanges: false,
 
         // Raw editor state
         activeTab: 'editor',
         configContent: '',
+        originalConfigContent: '',
         currentVersion: '',
         modified: false,
         comment: '',
@@ -585,6 +588,33 @@ function unifiedConfigPage() {
             this.fetchConfigRaw();
             this.fetchBackups();
             this.loadConfigStructured();
+
+            // Watch for mode changes
+            this.$watch('editorMode', (newMode, oldMode) => {
+                if (oldMode === 'structured' && newMode === 'raw') {
+                    this.onSwitchToRaw();
+                }
+            });
+
+            // Watch for structured config changes
+            this.$watch('structuredConfig', () => {
+                this.checkStructuredChanges();
+            }, { deep: true });
+        },
+
+        checkStructuredChanges() {
+            if (!this.originalStructuredConfig) return;
+
+            const current = JSON.stringify(this.structuredConfig);
+            const original = JSON.stringify(this.originalStructuredConfig);
+            this.structuredHasChanges = current !== original;
+        },
+
+        async onSwitchToRaw() {
+            if (this.structuredHasChanges) {
+                // Show warning about unsaved structured changes
+                this.showSuccess('Warning: You have unsaved changes in structured mode. Save them first or they will be lost.');
+            }
         },
 
         // RAW EDITOR METHODS
@@ -593,6 +623,7 @@ function unifiedConfigPage() {
                 const response = await fetch('/api/config/raw');
                 const data = await response.json();
                 this.configContent = data.content;
+                this.originalConfigContent = data.content; // Save original for diff
                 this.currentVersion = data.version;
                 this.modified = false;
             } catch (e) {
@@ -694,6 +725,9 @@ function unifiedConfigPage() {
                     if (!this.structuredConfig.global) {
                         this.structuredConfig.global = {};
                     }
+                    // Save original for change detection
+                    this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
+                    this.structuredHasChanges = false;
                 } else {
                     alert('Failed to load configuration');
                 }
@@ -724,6 +758,9 @@ function unifiedConfigPage() {
                 });
 
                 if (response.ok) {
+                    // Reset change tracking after successful save
+                    this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
+                    this.structuredHasChanges = false;
                     this.showSuccess('Configuration saved successfully! Reload sysmon to apply changes.');
                 } else {
                     const error = await response.text();
