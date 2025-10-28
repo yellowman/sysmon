@@ -59,13 +59,13 @@
                     </div>
                     <div>
                         <span :class="{
-                            'status-ok': host.ObjectLastcheckState == 0,
-                            'status-warning': host.ObjectLastcheckState != 0 && host.ObjectContacted == 0,
-                            'status-critical': host.ObjectLastcheckState != 0 && host.ObjectContacted == 1
+                            'status-ok': host.ObjectLastcheckState === 0,
+                            'status-warning': host.ObjectLastcheckState !== 0 && host.ObjectContacted === 0,
+                            'status-critical': host.ObjectLastcheckState !== 0 && host.ObjectContacted === 1
                         }" class="px-6 py-3 rounded-xl text-lg font-bold shadow-md">
-                            <span x-show="host.ObjectLastcheckState == 0">OK</span>
-                            <span x-show="host.ObjectLastcheckState != 0 && host.ObjectContacted == 0">WARNING</span>
-                            <span x-show="host.ObjectLastcheckState != 0 && host.ObjectContacted == 1">CRITICAL</span>
+                            <span x-show="host.ObjectLastcheckState === 0">OK</span>
+                            <span x-show="host.ObjectLastcheckState !== 0 && host.ObjectContacted === 0">WARNING</span>
+                            <span x-show="host.ObjectLastcheckState !== 0 && host.ObjectContacted === 1">CRITICAL</span>
                         </span>
                     </div>
                 </div>
@@ -420,7 +420,7 @@ function hostDetail() {
         },
 
         calculateUptime() {
-            if (!this.host || !this.host.ObjectTotalChecked || this.host.ObjectTotalChecked == 0) {
+            if (!this.host || !this.host.ObjectTotalChecked || this.host.ObjectTotalChecked === 0) {
                 return 100;
             }
             const upChecks = this.host.ObjectTotalChecked - this.host.ObjectTotalDown;
@@ -428,8 +428,14 @@ function hostDetail() {
         },
 
         formatTimestamp(ts) {
-            if (!ts || ts == 0) return 'Never';
+            if (!ts || ts === 0) return 'Never';
             const date = new Date(ts * 1000);
+
+            // Validate date
+            if (isNaN(date.getTime()) || date.getFullYear() < 1970) {
+                return 'Invalid';
+            }
+
             return date.toLocaleString();
         },
 
@@ -438,8 +444,14 @@ function hostDetail() {
             // Handle format "seconds.microseconds"
             const parts = ts.toString().split('.');
             const secs = parseInt(parts[0]);
-            const usecs = parts[1] || '0';
+            const usecs = (parts[1] || '0').toString();
             const date = new Date(secs * 1000);
+
+            // Handle invalid dates
+            if (isNaN(date.getTime())) {
+                return 'Invalid Date';
+            }
+
             return date.toLocaleString() + '.' + usecs.padEnd(6, '0');
         },
 

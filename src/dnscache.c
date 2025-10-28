@@ -41,7 +41,7 @@ char *get_hostname(struct my_hostent *hp)
 	static char local[256];
 	struct hostent *localhp;
 
-	memset(local, 0, sizeof(local));
+	memset(local, 0, 256);
 	if (hp == NULL)
 	{
 		return "NULL";
@@ -53,8 +53,8 @@ char *get_hostname(struct my_hostent *hp)
 		return(get_ip(hp));
 	}
 
-	strncpy(local, localhp->h_name, sizeof(local) - 1);
-	local[sizeof(local) - 1] = '\0';  /* Ensure null-termination */
+	strncpy(local, localhp->h_name, 250);
+	local[250] = '\0';  /* Ensure null termination */
 
 	return local;
 	
@@ -233,8 +233,8 @@ struct my_hostent *do_my_gethostbyname(char *hostname, int query_af)
 	/* memset(&hp, 0, sizeof (struct hostent)); */
 	memcpy(&hp, hp2, sizeof(struct hostent));
 
-	if (!&hp)
-		return NULL;
+	/* BUG FIX: Removed dead code - if (!&hp) was always false.
+	   The check for !hp2 above already handles NULL case. */
 
 	/* allocate memory for the new entry */
 	newent = MALLOC(sizeof(struct dnscache), "struct dnscache");
@@ -243,6 +243,11 @@ struct my_hostent *do_my_gethostbyname(char *hostname, int query_af)
 
 	/* copy hostname over */
 	newent->hostname = strdup(hostname);
+	if (newent->hostname == NULL)
+	{
+		FREE(newent);
+		return NULL;
+	}
 
 	/* allocate memory for this entry */
 	newent->hp = MALLOC(sizeof(struct my_hostent), "struct my_hostent");
@@ -253,6 +258,13 @@ struct my_hostent *do_my_gethostbyname(char *hostname, int query_af)
 	/* copy needed date to new hp thingie */
 
 	newent->hp->h_name = strdup(hp.h_name);
+	if (newent->hp->h_name == NULL)
+	{
+		FREE(newent->hp);
+		free(newent->hostname);
+		FREE(newent);
+		return NULL;
+	}
 	newent->hp->h_addrtype_v4 = hp.h_addrtype;
 	newent->hp->h_length_v4 = hp.h_length;
 

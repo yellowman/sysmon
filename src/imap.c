@@ -160,7 +160,7 @@ void	start_test_imap(struct monitorent *here, time_t now_t)
 void	service_test_imap(struct monitorent *here, time_t now_t)
 {
         struct imapdata *localstruct = NULL;
-        char buffer[256], *retptr;
+        char buffer[PROTO_RESPONSE_SIZE + 1], *retptr;
         int isopenretval = -1;
 
         /* do some variable shufflign */
@@ -219,8 +219,14 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
@@ -245,26 +251,29 @@ void	service_test_imap(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
-				char *response;  /* Pointer to walk through buffer */
-
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);
 				}
-				/* Skip informational msg(s) starting with '*' */
-				response = buffer;
-doover:				if (strncmp(response, "*", 1) == 0) {
-				    if ((retptr = strchr(response, '\n')) != NULL) {
-					response = retptr + 1;  /* Advance pointer past this line */
+				/* ditch informational msg(s) */
+doover:				if (strncmp(buffer, "*", 1) == 0) {
+				    if ((retptr = strchr(buffer, '\n')) != NULL) {
+					strncpy(buffer, retptr + 1, PROTO_RESPONSE_SIZE - 5);
 					goto doover;
 				    }
 				}
-                                if (strncmp(response, "A100 OK", 7) == 0)
+                                if (strncmp(buffer, "A100 OK", 7) == 0)
                                 {
 					here->retval = SYSM_OK;
-				} else if (strncmp(response, "A100 NO", 7) == 0)
+				} else if (strncmp(buffer, "A100 NO", 7) == 0)
 				{
 					here->retval = SYSM_BAD_AUTH;
                                 } else {
@@ -282,8 +291,14 @@ doover:				if (strncmp(response, "*", 1) == 0) {
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
 				{
 					print_err(0, "imap.c:Got :%s:\n", buffer);

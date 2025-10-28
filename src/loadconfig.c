@@ -4,6 +4,9 @@
 
 extern char *parser_root;
 
+/* Forward declaration for lex-generated function */
+int sysmon_conf_yylex(void);
+
 struct set_type {
 	unsigned char *name;
 	unsigned char *value;
@@ -668,6 +671,12 @@ struct nei_list *make_adjs_add_neighbor(struct nei_list *current_list, struct gr
 
 	new_nei = MALLOC(sizeof(struct nei_list), "loadconfig.c:make_adjs_add_nei:nei_list");
 	new_nei->nei_name = strdup(add->unique_name);
+	if (new_nei->nei_name == NULL)
+	{
+		print_err(1, "make_adjs_add_nei: strdup() failed - out of memory");
+		FREE(new_nei);
+		return current_list;
+	}
 	new_nei->g_element = add;
 	new_nei->next = current_list;
 	return new_nei;
@@ -870,7 +879,7 @@ struct all_elements_list *loadconfig(char *cfg_path)
 	make_adjs(parser_head);
 
 	/* debug the built dependencies */
-	if (debug | debug_adj_builder)
+	if (debug || debug_adj_builder)
 	{
 		debug_made_deps(parser_head);
 	}

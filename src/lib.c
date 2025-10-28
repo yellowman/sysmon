@@ -95,13 +95,13 @@ float	mydifftime(struct timeval first, struct timeval second)
  */
 char	*str_difftime_sec(time_t timedown, time_t now)
 {
-        static char buff[15];
+        static char buff[24];  /* Increased to safely accommodate format string */
 
 	int ss = 0, mm = 0, hh = 0, dd = 0;
 
         if (timedown == 0)
 	{
-		strncpy(buff, "Never", 14);
+		strncpy(buff, "Never", sizeof(buff)-1);
 		return buff;
 	}
 
@@ -110,7 +110,7 @@ char	*str_difftime_sec(time_t timedown, time_t now)
         mm = ((now-timedown-(dd*86400+hh*3600)) / 60) % 60;
 	ss = ((now-timedown) %60);
 
-        snprintf(buff, 15, "%-2.2dd%-2.2dh%-2.2dm%-2.2ds", dd,hh,mm,ss);
+        snprintf(buff, sizeof(buff), "%-2.2dd%-2.2dh%-2.2dm%-2.2ds", dd,hh,mm,ss);
 
         return buff;
 }
@@ -120,7 +120,7 @@ char	*str_difftime_sec(time_t timedown, time_t now)
  */
 char	*str_difftime(time_t timedown, time_t now)
 {
-        static char buff[10];
+        static char buff[18];  /* Increased to safely accommodate format string */
         int mm = 0, hh = 0, dd = 0;
 
 	if (timedown == 0)
@@ -132,7 +132,7 @@ char	*str_difftime(time_t timedown, time_t now)
         hh = ((now-timedown- (dd*86400)) / 3600) % 3600;
         mm = ((now-timedown-(dd*86400+hh*3600)) / 60) % 60;
 
-        snprintf(buff, 10, "%-2.2d:%-2.2d:%-2.2d", dd,hh,mm);
+        snprintf(buff, sizeof(buff), "%-2.2d:%-2.2d:%-2.2d", dd,hh,mm);
 
         return buff;
 }
@@ -234,8 +234,12 @@ void ABORT()
 {
 	char my_dir[PATH_MAX];
 	signal(SIGABRT, SIG_DFL);
-	getcwd(my_dir, PATH_MAX);
-	print_err(1, "about to abort and dump core (i think in %s)", my_dir);
+	if (getcwd(my_dir, PATH_MAX) == NULL)
+	{
+		print_err(1, "about to abort and dump core (getcwd failed)");
+	} else {
+		print_err(1, "about to abort and dump core (i think in %s)", my_dir);
+	}
 	abort();
 }
 
@@ -460,8 +464,10 @@ short int name_to_snmp_type(char *sent_type)
 			i_ret, sent_type, (i_ret - sent_type));
 		memset(type, 0, 256);
 		strncpy(type, sent_type, (i_ret - sent_type));
+		type[255] = '\0';  /* Ensure null termination */
 	} else {
 		strncpy(type, sent_type, 250);
+		type[250] = '\0';  /* Ensure null termination */
 	}
 
 	len = strlen(type);
@@ -515,8 +521,10 @@ short int name_to_type(char *sent_type)
 			i_ret, sent_type, (i_ret - sent_type));
 		memset(type, 0, 256);
 		strncpy(type, sent_type, (i_ret - sent_type));
+		type[255] = '\0';  /* Ensure null termination */
 	} else {
 		strncpy(type, sent_type, 250);
+		type[250] = '\0';  /* Ensure null termination */
 	}
 
 	len = strlen(type);
@@ -652,11 +660,13 @@ char	*timedata(time_t t)
 	if (t == 0)
 	{
 		strncpy(nfo, "Never", 29);
+		nfo[29] = '\0';  /* Ensure null termination */
 		return nfo;
 	}
 
         strncpy(nfo,ctime(&t)+4, 29); /* convert it to a string, copy to buffer */
-        nfo[strlen(nfo) -5] = '\0';
+        nfo[29] = '\0';  /* Ensure null termination after strncpy */
+        nfo[strlen(nfo) -5] = '\0';  /* Remove year and newline */
 
         return nfo;
 }
