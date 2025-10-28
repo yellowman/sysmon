@@ -224,6 +224,7 @@
                                 <div class="flex items-center gap-2">
                                     <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
                                     <span class="text-xs text-gray-500" x-show="alert.ipv4_address && !isIPAddress(alert.hostname)" x-text="alert.ipv4_address"></span>
+                                    <span class="text-sm text-gray-600 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
                                 </div>
                                 <div class="text-[10px] text-gray-400" x-show="alert.last_change_time">
                                     <i class="fas fa-clock mr-1"></i>
