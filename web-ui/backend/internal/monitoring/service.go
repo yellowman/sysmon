@@ -471,7 +471,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		host := models.HostStatus{
 			Hostname:      xmlObj.HostName,
 			Description:   xmlObj.ObjectNotes,
-			IPv4Address:   xmlObj.HostName, // Default to hostname, TODO: resolve to actual IP
+			IPv4Address:   "", // Will be set below if hostname is an IP
 			OverallStatus: "OK",
 			StatusColor:   "green",
 			DownCount:     xmlObj.DownCt,
@@ -479,6 +479,12 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			TotalDown:     xmlObj.TotalDown,
 			TotalChecked:  xmlObj.TotalChecked,
 			Checks:        []models.CheckResult{},
+		}
+
+		// If HostName is an IP address, populate IPv4Address field
+		// Otherwise leave it empty (it's a DNS name or hostname)
+		if net.ParseIP(xmlObj.HostName) != nil {
+			host.IPv4Address = xmlObj.HostName
 		}
 
 		// Calculate last change time from DeathTime (when went down) or LastTimeUp (when came back up)
