@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"html/template"
 	"log"
 	"net/http"
@@ -48,13 +49,22 @@ func (r *Router) renderTemplate(w http.ResponseWriter, tmpl string, data interfa
 		return
 	}
 
-	// Execute the base template which includes the page-specific content
-	// Note: If ExecuteTemplate returns an error, it may have already started writing
-	// to the response, so we can't call http.Error (which would cause a superfluous
-	// WriteHeader call). We just log the error instead.
-	err := t.ExecuteTemplate(w, "base", data)
+	// Render to buffer first to catch errors before writing to response
+	// This prevents sending a 200 OK status when template execution fails
+	var buf bytes.Buffer
+	err := t.ExecuteTemplate(&buf, "base", data)
 	if err != nil {
 		log.Printf("Error executing template %s: %v", tmpl, err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Only write to response if template executed successfully
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, err = buf.WriteTo(w)
+	if err != nil {
+		// At this point headers are already sent, but log the write error
+		log.Printf("Error writing template output for %s: %v", tmpl, err)
 	}
 }
 

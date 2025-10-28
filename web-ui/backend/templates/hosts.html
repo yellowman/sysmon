@@ -36,7 +36,7 @@
 
     <!-- Comparison View -->
     <div x-show="viewMode === 'comparison'" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
-        <template x-for="host in filteredHosts" :key="host.hostname">
+        <template x-for="host in filteredHosts" :key="'comp-' + host.hostname">
             <div class="relative group">
                 <div class="bg-white rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
                      :class="{
@@ -81,7 +81,7 @@
                         <div><span class="text-gray-400">Contact:</span> <span x-text="host.contact || 'None'"></span></div>
                         <div class="border-t border-gray-700 mt-2 pt-2">
                             <div class="font-semibold mb-1">Checks:</div>
-                            <template x-for="check in host.checks.slice(0, 5)" :key="check.type + check.port">
+                            <template x-for="(check, checkIndex) in host.checks.slice(0, 5)" :key="host.hostname + '-' + checkIndex">
                                 <div class="flex items-center justify-between">
                                     <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
                                     <span :class="{
@@ -148,7 +148,7 @@
                 </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
-                <template x-for="host in sortedHosts" :key="host.hostname">
+                <template x-for="host in sortedHosts" :key="'table-' + host.hostname">
                     <tr class="hover:bg-gray-50 cursor-pointer" @click="selectHost(host)">
                         <td class="px-4 py-2 whitespace-nowrap">
                             <div class="flex items-center">
@@ -300,7 +300,7 @@
 
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">Check Results</h3>
                         <div class="space-y-3">
-                            <template x-for="check in selectedHost.checks" :key="check.type + (check.port || '')">
+                            <template x-for="(check, checkIndex) in selectedHost.checks" :key="'modal-' + checkIndex">
                                 <div class="border border-gray-200 rounded-lg p-4">
                                     <div class="flex items-center justify-between">
                                         <div class="flex items-center space-x-3">
@@ -414,7 +414,8 @@ function hostsPage() {
                     return;
                 }
 
-                this.hosts = await response.json();
+                const data = await response.json();
+                this.hosts = Array.isArray(data) ? data : [];
                 this.loading = false;
             } catch (e) {
                 console.error('Failed to fetch hosts:', e);
