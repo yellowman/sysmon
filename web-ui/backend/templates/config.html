@@ -3,130 +3,533 @@
 {{define "title"}}Configuration{{end}}
 
 {{define "content"}}
-<div x-data="configPage()" x-init="init()">
-    <!-- Header -->
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">
-            <i class="fas fa-cog mr-2"></i>Configuration
-        </h1>
-        <div class="flex space-x-3">
-            <a href="/config-editor.html" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 inline-flex items-center">
-                <i class="fas fa-edit mr-2"></i>GUI Editor
-            </a>
-            <button @click="reload()" :disabled="reloading"
-                    class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50">
-                <i class="fas" :class="reloading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
-                Reload Sysmon
-            </button>
-            <button @click="saveConfig()" :disabled="!modified || saving"
-                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                <i class="fas" :class="saving ? 'fa-spinner fa-spin' : 'fa-save'"></i>
-                Save Changes
-            </button>
-        </div>
-    </div>
-
-    <!-- Info Banner -->
-    <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
-        <div class="flex">
-            <i class="fas fa-info-circle text-blue-400 mt-1 mr-3"></i>
-            <div>
-                <h3 class="text-sm font-medium text-blue-800">GUI Editor Available</h3>
-                <p class="text-sm text-blue-700 mt-1">
-                    For easier configuration editing, try the <a href="/config-editor.html" class="underline font-semibold">GUI Editor</a> with form-based inputs and validation.
-                    This raw text editor is best for advanced users who prefer direct config file editing.
-                </p>
+<div x-data="unifiedConfigPage()" x-init="init()">
+    <!-- Mode Selector at Top -->
+    <div class="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-1 bg-white rounded-lg p-1 shadow-sm">
+                <button @click="editorMode = 'structured'"
+                        :class="editorMode === 'structured' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                        class="px-6 py-2 rounded-md font-medium text-sm transition-all duration-200">
+                    <i class="fas fa-edit mr-2"></i>Structured
+                </button>
+                <button @click="editorMode = 'raw'"
+                        :class="editorMode === 'raw' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                        class="px-6 py-2 rounded-md font-medium text-sm transition-all duration-200">
+                    <i class="fas fa-code mr-2"></i>Raw
+                </button>
             </div>
+            <p class="text-sm text-gray-600">
+                <span x-show="editorMode === 'structured'">Form-based configuration editor with structured inputs</span>
+                <span x-show="editorMode === 'raw'">Direct text editing of sysmon.conf file</span>
+            </p>
         </div>
     </div>
 
-    <!-- Version Conflict Warning -->
-    <div x-show="versionConflict" class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
-        <div class="flex">
-            <i class="fas fa-exclamation-triangle text-yellow-400 mt-1 mr-3"></i>
-            <div>
-                <h3 class="text-sm font-medium text-yellow-800">Configuration Conflict</h3>
-                <p class="text-sm text-yellow-700 mt-1">
-                    The configuration was modified by another user. Please review the current version and try again.
-                </p>
-                <button @click="fetchConfig(); versionConflict = false" class="mt-2 text-sm text-yellow-800 underline">
-                    Reload Current Version
+    <!-- RAW EDITOR MODE -->
+    <div x-show="editorMode === 'raw'">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-900">
+                <i class="fas fa-code mr-2"></i>Configuration - Raw Editor
+            </h1>
+            <div class="flex space-x-3">
+                <button @click="reloadRaw()" :disabled="reloading"
+                        class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50">
+                    <i class="fas" :class="reloading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
+                    Reload Sysmon
+                </button>
+                <button @click="saveConfigRaw()" :disabled="!modified || saving"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                    <i class="fas" :class="saving ? 'fa-spinner fa-spin' : 'fa-save'"></i>
+                    Save Changes
                 </button>
             </div>
         </div>
-    </div>
 
-    <!-- Tabs -->
-    <div class="mb-6 border-b border-gray-200">
-        <nav class="-mb-px flex space-x-8">
-            <button @click="activeTab = 'editor'" :class="activeTab === 'editor' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
-                    class="py-4 px-1 border-b-2 font-medium text-sm">
-                <i class="fas fa-edit mr-2"></i>Raw Editor
-            </button>
-            <button @click="activeTab = 'backups'" :class="activeTab === 'backups' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
-                    class="py-4 px-1 border-b-2 font-medium text-sm">
-                <i class="fas fa-history mr-2"></i>Backups
-            </button>
-            <button @click="activeTab = 'audit'" :class="activeTab === 'audit' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
-                    class="py-4 px-1 border-b-2 font-medium text-sm">
-                <i class="fas fa-list mr-2"></i>Audit Log
-            </button>
-        </nav>
-    </div>
-
-    <!-- Raw Editor Tab -->
-    <div x-show="activeTab === 'editor'" class="bg-white rounded-lg shadow">
-        <div class="px-6 py-4 border-b border-gray-200">
-            <div class="flex justify-between items-center">
+        <!-- Version Conflict Warning -->
+        <div x-show="versionConflict" class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+            <div class="flex">
+                <i class="fas fa-exclamation-triangle text-yellow-400 mt-1 mr-3"></i>
                 <div>
-                    <p class="text-sm text-gray-600">Version: <code class="text-xs bg-gray-100 px-2 py-1 rounded" x-text="currentVersion"></code></p>
-                    <p class="text-xs text-gray-500 mt-1" x-show="modified">Unsaved changes</p>
+                    <h3 class="text-sm font-medium text-yellow-800">Configuration Conflict</h3>
+                    <p class="text-sm text-yellow-700 mt-1">
+                        The configuration was modified by another user. Please review the current version and try again.
+                    </p>
+                    <button @click="fetchConfigRaw(); versionConflict = false" class="mt-2 text-sm text-yellow-800 underline">
+                        Reload Current Version
+                    </button>
                 </div>
-                <input type="text" x-model="comment" placeholder="Change comment (optional)"
-                       class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
             </div>
         </div>
-        <div class="p-6">
-            <textarea x-model="configContent" @input="modified = true"
-                      class="w-full h-[600px] px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Loading configuration..."></textarea>
-        </div>
-    </div>
 
-    <!-- Backups Tab -->
-    <div x-show="activeTab === 'backups'">
-        <div class="bg-white rounded-lg shadow overflow-hidden">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    <template x-for="backup in backups" :key="backup.filename">
+        <!-- Tabs -->
+        <div class="mb-6 border-b border-gray-200">
+            <nav class="-mb-px flex space-x-8">
+                <button @click="activeTab = 'editor'" :class="activeTab === 'editor' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                        class="py-4 px-1 border-b-2 font-medium text-sm">
+                    <i class="fas fa-edit mr-2"></i>Editor
+                </button>
+                <button @click="activeTab = 'backups'" :class="activeTab === 'backups' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                        class="py-4 px-1 border-b-2 font-medium text-sm">
+                    <i class="fas fa-history mr-2"></i>Backups
+                </button>
+                <button @click="activeTab = 'audit'" :class="activeTab === 'audit' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                        class="py-4 px-1 border-b-2 font-medium text-sm">
+                    <i class="fas fa-list mr-2"></i>Audit Log
+                </button>
+            </nav>
+        </div>
+
+        <!-- Raw Editor Tab -->
+        <div x-show="activeTab === 'editor'" class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm text-gray-600">Version: <code class="text-xs bg-gray-100 px-2 py-1 rounded" x-text="currentVersion"></code></p>
+                        <p class="text-xs text-gray-500 mt-1" x-show="modified">Unsaved changes</p>
+                    </div>
+                    <input type="text" x-model="comment" placeholder="Change comment (optional)"
+                           class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                </div>
+            </div>
+            <div class="p-6">
+                <textarea x-model="configContent" @input="modified = true"
+                          class="w-full h-[600px] px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Loading configuration..."></textarea>
+            </div>
+        </div>
+
+        <!-- Backups Tab -->
+        <div x-show="activeTab === 'backups'">
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
                         <tr>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="new Date(backup.timestamp).toLocaleString()"></td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono" x-text="backup.filename"></td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="formatSize(backup.size)"></td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <button @click="restoreBackup(backup.filename)" class="text-blue-600 hover:text-blue-900">
-                                    <i class="fas fa-undo mr-1"></i>Restore
-                                </button>
-                            </td>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                         </tr>
-                    </template>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <template x-for="backup in backups" :key="backup.filename">
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="new Date(backup.timestamp).toLocaleString()"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono" x-text="backup.filename"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="formatSize(backup.size)"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                    <button @click="restoreBackup(backup.filename)" class="text-blue-600 hover:text-blue-900">
+                                        <i class="fas fa-undo mr-1"></i>Restore
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Audit Log Tab -->
+        <div x-show="activeTab === 'audit'">
+            <div class="bg-white rounded-lg shadow p-6">
+                <p class="text-gray-500 text-sm">Audit log display coming soon...</p>
+            </div>
         </div>
     </div>
 
-    <!-- Audit Log Tab -->
-    <div x-show="activeTab === 'audit'">
-        <div class="bg-white rounded-lg shadow p-6">
-            <p class="text-gray-500 text-sm">Audit log display coming soon...</p>
+    <!-- STRUCTURED EDITOR MODE -->
+    <div x-show="editorMode === 'structured'">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-900">
+                <i class="fas fa-cog mr-2"></i>Configuration - Structured Editor
+            </h1>
+            <div class="flex space-x-3">
+                <button @click="reloadStructured()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
+                    <i class="fas fa-sync mr-2"></i>Reload
+                </button>
+                <button @click="saveConfigStructured()" :disabled="savingStructured" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                    <i class="fas fa-save mr-2"></i>
+                    <span x-text="savingStructured ? 'Saving...' : 'Save Changes'"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div x-show="loadingStructured" class="text-center py-12">
+            <i class="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
+            <p class="mt-4 text-gray-600">Loading configuration...</p>
+        </div>
+
+        <!-- Config Content -->
+        <div x-show="!loadingStructured" class="space-y-6">
+
+            <!-- Global Settings Section -->
+            <div class="bg-white rounded-lg shadow-md">
+                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
+                     @click="sections.global = !sections.global">
+                    <h2 class="text-xl font-semibold text-gray-900">
+                        <i class="fas fa-globe mr-2"></i>Global Settings
+                    </h2>
+                    <i class="fas" :class="sections.global ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                </div>
+                <div x-show="sections.global" class="px-6 py-4">
+                    <!-- Core Settings Tab Navigation -->
+                    <div class="mb-4 border-b border-gray-200">
+                        <nav class="-mb-px flex space-x-8">
+                            <button @click="globalTab = 'core'" :class="globalTab === 'core' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm">
+                                Core Settings
+                            </button>
+                            <button @click="globalTab = 'alerts'" :class="globalTab === 'alerts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm">
+                                Alert Settings
+                            </button>
+                            <button @click="globalTab = 'display'" :class="globalTab === 'display' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm">
+                                Display & HTML
+                            </button>
+                            <button @click="globalTab = 'system'" :class="globalTab === 'system' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'" class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm">
+                                System & Files
+                            </button>
+                        </nav>
+                    </div>
+
+                    <!-- Core Settings Tab -->
+                    <div x-show="globalTab === 'core'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Check Interval (seconds)</label>
+                            <input type="number" x-model="structuredConfig.global.checkinterval" placeholder="60"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Time between checks (default: 60)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Number of Failures</label>
+                            <input type="number" x-model="structuredConfig.global.numfailures" placeholder="4"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Failures before alert (default: 4)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Min Num Failures</label>
+                            <input type="number" x-model="structuredConfig.global.minnumfailures" placeholder="1"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Minimum failures threshold</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Flap Time (seconds)</label>
+                            <input type="number" x-model="structuredConfig.global.flaptime" placeholder="300"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Flap detection window</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Client Port</label>
+                            <input type="number" x-model="structuredConfig.global.clientport" placeholder="1345"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">TCP port for clients (default: 1345)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">SNMP Trap Port</label>
+                            <input type="number" x-model="structuredConfig.global.trapport" placeholder="162"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">UDP port for traps (default: 162)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Max Queued Checks</label>
+                            <input type="number" x-model="structuredConfig.global.maxqueued" placeholder="100"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Max simultaneous checks (default: 100)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">DNS Cache Expire (seconds)</label>
+                            <input type="number" x-model="structuredConfig.global.dnsexpire" placeholder="1500"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">DNS TTL (default: 1500)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">DNS Log Interval (seconds)</label>
+                            <input type="number" x-model="structuredConfig.global.dnslog" placeholder="900"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">DNS stats logging (default: 900)</p>
+                        </div>
+                    </div>
+
+                    <!-- Alert Settings Tab -->
+                    <div x-show="globalTab === 'alerts'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Page Interval (minutes)</label>
+                            <input type="number" x-model="structuredConfig.global.pageinterval" placeholder="60"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Alert reminder interval</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Email Sender</label>
+                            <input type="email" x-model="structuredConfig.global.sender" placeholder="sysmon@example.com"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Email sender address</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Email From</label>
+                            <input type="email" x-model="structuredConfig.global.from" placeholder="monitoring@example.com"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">From address</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Email Subject</label>
+                            <input type="text" x-model="structuredConfig.global.subject" placeholder="Sysmon Alert"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Default subject line</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Reply-To</label>
+                            <input type="email" x-model="structuredConfig.global.replyto" placeholder="support@example.com"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Reply-to header</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Errors-To</label>
+                            <input type="email" x-model="structuredConfig.global.errorsto" placeholder="bounce@example.com"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Errors-to header</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Page Message Format</label>
+                            <input type="text" x-model="structuredConfig.global.pmesg" placeholder="%s is %s"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Message template</p>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.nosubject" id="nosubject"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="nosubject" class="ml-2 block text-sm text-gray-900">
+                                No Subject Line
+                                <p class="text-xs text-gray-500">Disable subject for pagers</p>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Display & HTML Tab -->
+                    <div x-show="globalTab === 'display'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Status File Path</label>
+                            <input type="text" x-model="structuredConfig.global.statusfile" placeholder="/tmp/sysmon.html"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Path to status file</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Status File Type</label>
+                            <select x-model="structuredConfig.global.statusfiletype"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                <option value="">None</option>
+                                <option value="html">HTML</option>
+                                <option value="text">Text</option>
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">Output format</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Up Color</label>
+                            <input type="text" x-model="structuredConfig.global.upcolor" placeholder="#00FF00"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Color for UP status</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Down Color</label>
+                            <input type="text" x-model="structuredConfig.global.downcolor" placeholder="#FF0000"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Color for DOWN status</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Recent Color</label>
+                            <input type="text" x-model="structuredConfig.global.recentcolor" placeholder="#FFFF00"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Color for recent changes</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">HTML Refresh (seconds)</label>
+                            <input type="number" x-model="structuredConfig.global.htmlrefresh" placeholder="60"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Auto-refresh interval (default: 60)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Date Format</label>
+                            <input type="text" x-model="structuredConfig.global.dateformat" placeholder="%x %X"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">strftime format or ISO/DEC</p>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.showupalso" id="showupalso"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="showupalso" class="ml-2 block text-sm text-gray-900">
+                                Show UP Hosts
+                                <p class="text-xs text-gray-500">Display all hosts in status</p>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- System & Files Tab -->
+                    <div x-show="globalTab === 'system'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">PID File</label>
+                            <input type="text" x-model="structuredConfig.global.pidfile" placeholder="/var/run/sysmond.pid"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Path to PID file</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Status Temp Dir</label>
+                            <input type="text" x-model="structuredConfig.global.statustempdir" placeholder="/var/run/sysmon"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Temp directory for status files</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">CSS File</label>
+                            <input type="text" x-model="structuredConfig.global.cssfile" placeholder="/etc/sysmon/custom.css"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Custom CSS file for HTML output</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">JSON Output Path</label>
+                            <input type="text" x-model="structuredConfig.global.outputjson" placeholder="/var/log/sysmon/status.json"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">JSON output file</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Save State Path</label>
+                            <input type="text" x-model="structuredConfig.global.savestate" placeholder="/var/log/sysmon/state.xml"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">XML state dump (for debugging)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Auth Key</label>
+                            <input type="password" x-model="structuredConfig.global.authkey" placeholder="secret_password"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Client authentication password</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Syslog Facility</label>
+                            <select x-model="structuredConfig.global.logging"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                <option value="">None</option>
+                                <option value="daemon">daemon</option>
+                                <option value="local0">local0</option>
+                                <option value="local1">local1</option>
+                                <option value="local2">local2</option>
+                                <option value="local3">local3</option>
+                                <option value="local4">local4</option>
+                                <option value="local5">local5</option>
+                                <option value="local6">local6</option>
+                                <option value="local7">local7</option>
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">Logging facility</p>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.dropprivileges" id="dropprivileges"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="dropprivileges" class="ml-2 block text-sm text-gray-900">
+                                Drop Privileges
+                                <p class="text-xs text-gray-500">Run as unprivileged user</p>
+                            </label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.disableicmp" id="disableicmp"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="disableicmp" class="ml-2 block text-sm text-gray-900">
+                                Disable ICMP
+                                <p class="text-xs text-gray-500">Disable ping monitoring</p>
+                            </label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.noheartbeat" id="noheartbeat"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="noheartbeat" class="ml-2 block text-sm text-gray-900">
+                                No Heartbeat
+                                <p class="text-xs text-gray-500">Disable registration</p>
+                            </label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.nologconnects" id="nologconnects"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="nologconnects" class="ml-2 block text-sm text-gray-900">
+                                No Log Connects
+                                <p class="text-xs text-gray-500">Don't log client connections</p>
+                            </label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" x-model="structuredConfig.global.snmptrap" id="snmptrap"
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="snmptrap" class="ml-2 block text-sm text-gray-900">
+                                Enable SNMP Traps
+                                <p class="text-xs text-gray-500">Listen for SNMP trap alerts</p>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Spawn Commands Section -->
+            <div class="bg-white rounded-lg shadow-md">
+                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
+                     @click="sections.spawns = !sections.spawns">
+                    <h2 class="text-xl font-semibold text-gray-900">
+                        <i class="fas fa-terminal mr-2"></i>Spawn Commands
+                        <span class="text-sm font-normal text-gray-500 ml-2">(<span x-text="structuredConfig.spawns.length"></span> commands)</span>
+                    </h2>
+                    <i class="fas" :class="sections.spawns ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                </div>
+                <div x-show="sections.spawns" class="px-6 py-4">
+                    <!-- Add New Spawn -->
+                    <div class="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                        <div class="flex gap-3">
+                            <input type="text" x-model="newSpawn.name" placeholder="Spawn name (e.g., pagechris)"
+                                   class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <input type="text" x-model="newSpawn.command" placeholder="Command (e.g., /usr/local/bin/sms.sh %s %s %i)"
+                                   class="flex-[2] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <button @click="addSpawn()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                                <i class="fas fa-plus mr-2"></i>Add
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-600 mt-2">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Variables: %s (hostname), %i (IP), %p (port), %c (contact), %t (type)
+                        </p>
+                    </div>
+
+                    <!-- Spawn List -->
+                    <div class="space-y-2">
+                        <template x-for="(spawn, index) in structuredConfig.spawns" :key="index">
+                            <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                                <div class="flex-1">
+                                    <div class="font-medium text-gray-900 flex items-center">
+                                        <i class="fas fa-terminal mr-2 text-blue-600"></i>
+                                        <span x-text="spawn.name"></span>
+                                    </div>
+                                    <div class="text-sm text-gray-600 mt-1 font-mono" x-text="spawn.command"></div>
+                                </div>
+                                <button @click="editSpawn(index)" class="px-3 py-1 text-blue-600 hover:bg-blue-100 rounded transition-colors">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button @click="deleteSpawn(index)" class="px-3 py-1 text-red-600 hover:bg-red-100 rounded transition-colors">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </template>
+                        <div x-show="structuredConfig.spawns.length === 0" class="text-center py-8 text-gray-500">
+                            <i class="fas fa-terminal text-4xl text-gray-300 mb-2"></i>
+                            <p>No spawn commands defined. Add one above to get started.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Note about host management -->
+            <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                <div class="flex">
+                    <i class="fas fa-info-circle text-blue-400 mt-1 mr-3"></i>
+                    <div>
+                        <h3 class="text-sm font-medium text-blue-800">Partial Configuration Editor</h3>
+                        <p class="text-sm text-blue-700 mt-1">
+                            This structured editor currently supports global settings and spawn commands.
+                            For full host configuration, please use the Raw editor mode above or the legacy config format parser/generator is being enhanced.
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -140,8 +543,12 @@
 </div>
 
 <script>
-function configPage() {
+function unifiedConfigPage() {
     return {
+        // Mode control
+        editorMode: 'structured',
+
+        // Raw editor state
         activeTab: 'editor',
         configContent: '',
         currentVersion: '',
@@ -151,14 +558,37 @@ function configPage() {
         reloading: false,
         versionConflict: false,
         backups: [],
+
+        // Structured editor state
+        loadingStructured: true,
+        savingStructured: false,
+        structuredConfig: {
+            global: {},
+            spawns: [],
+            hosts: []
+        },
+        sections: {
+            global: true,
+            spawns: true,
+            hosts: true
+        },
+        globalTab: 'core',
+        expandedHosts: {},
+        newSpawn: {
+            name: '',
+            command: ''
+        },
+
         successMessage: '',
 
         init() {
-            this.fetchConfig();
+            this.fetchConfigRaw();
             this.fetchBackups();
+            this.loadConfigStructured();
         },
 
-        async fetchConfig() {
+        // RAW EDITOR METHODS
+        async fetchConfigRaw() {
             try {
                 const response = await fetch('/api/config/raw');
                 const data = await response.json();
@@ -170,7 +600,7 @@ function configPage() {
             }
         },
 
-        async saveConfig() {
+        async saveConfigRaw() {
             if (!confirm('Save configuration changes?')) return;
 
             this.saving = true;
@@ -212,7 +642,7 @@ function configPage() {
             }
         },
 
-        async reload() {
+        async reloadRaw() {
             if (!confirm('Reload sysmon daemon with current configuration?')) return;
 
             this.reloading = true;
@@ -241,7 +671,7 @@ function configPage() {
             try {
                 await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
                 this.showSuccess('Backup restored successfully');
-                await this.fetchConfig();
+                await this.fetchConfigRaw();
             } catch (e) {
                 alert('Failed to restore backup: ' + e.message);
             }
@@ -251,6 +681,103 @@ function configPage() {
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / 1048576).toFixed(1) + ' MB';
+        },
+
+        // STRUCTURED EDITOR METHODS
+        async loadConfigStructured() {
+            this.loadingStructured = true;
+            try {
+                const response = await fetch('/api/config');
+                if (response.ok) {
+                    this.structuredConfig = await response.json();
+                    // Ensure global object exists
+                    if (!this.structuredConfig.global) {
+                        this.structuredConfig.global = {};
+                    }
+                } else {
+                    alert('Failed to load configuration');
+                }
+            } catch (e) {
+                console.error('Failed to load config:', e);
+                alert('Error loading configuration: ' + e.message);
+            }
+            this.loadingStructured = false;
+        },
+
+        async reloadStructured() {
+            if (confirm('Reload configuration from file? Unsaved changes will be lost.')) {
+                await this.loadConfigStructured();
+            }
+        },
+
+        async saveConfigStructured() {
+            if (!this.validateConfigStructured()) {
+                return;
+            }
+
+            this.savingStructured = true;
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.structuredConfig)
+                });
+
+                if (response.ok) {
+                    this.showSuccess('Configuration saved successfully! Reload sysmon to apply changes.');
+                } else {
+                    const error = await response.text();
+                    alert('Failed to save configuration: ' + error);
+                }
+            } catch (e) {
+                console.error('Failed to save config:', e);
+                alert('Error saving configuration: ' + e.message);
+            }
+            this.savingStructured = false;
+        },
+
+        validateConfigStructured() {
+            // Validate hosts
+            for (const host of this.structuredConfig.hosts) {
+                if (!host.hostname || !host.ip || !host.type) {
+                    alert('All hosts must have hostname, IP, and type specified');
+                    return false;
+                }
+            }
+            return true;
+        },
+
+        addSpawn() {
+            if (!this.newSpawn.name || !this.newSpawn.command) {
+                alert('Spawn name and command are required');
+                return;
+            }
+
+            this.structuredConfig.spawns.push({
+                name: this.newSpawn.name,
+                command: this.newSpawn.command
+            });
+
+            this.newSpawn.name = '';
+            this.newSpawn.command = '';
+        },
+
+        editSpawn(index) {
+            const spawn = this.structuredConfig.spawns[index];
+            const newName = prompt('Spawn name:', spawn.name);
+            if (newName === null) return;
+
+            const newCommand = prompt('Spawn command:', spawn.command);
+            if (newCommand === null) return;
+
+            this.structuredConfig.spawns[index].name = newName;
+            this.structuredConfig.spawns[index].command = newCommand;
+        },
+
+        deleteSpawn(index) {
+            if (confirm('Delete this spawn command?')) {
+                this.structuredConfig.spawns.splice(index, 1);
+            }
         },
 
         showSuccess(message) {
