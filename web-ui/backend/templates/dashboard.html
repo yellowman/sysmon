@@ -27,8 +27,8 @@
                                 'fas fa-times-circle text-red-400': host.overall_status === 'CRITICAL'
                             }"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -54,8 +54,8 @@
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-check-circle text-green-400"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -81,8 +81,8 @@
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-exclamation-triangle text-yellow-400"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -108,8 +108,8 @@
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-times-circle text-red-400"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
