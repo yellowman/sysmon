@@ -2,10 +2,12 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"html/template"
 	"log"
 	"net/http"
 	"path/filepath"
+	"syscall"
 )
 
 var templateCache map[string]*template.Template
@@ -68,9 +70,25 @@ func (r *Router) renderTemplate(w http.ResponseWriter, tmpl string, data interfa
 	w.Header().Set("Expires", "0")
 	_, err = buf.WriteTo(w)
 	if err != nil {
-		// At this point headers are already sent, but log the write error
+		// Check if this is a broken pipe error (client disconnected)
+		// These are normal and shouldn't be logged as errors
+		if isBrokenPipe(err) {
+			// Client disconnected - this is expected, don't log
+			return
+		}
+		// For other write errors, log them
 		log.Printf("Error writing template output for %s: %v", tmpl, err)
 	}
+}
+
+// isBrokenPipe checks if an error is a broken pipe error (client disconnect)
+func isBrokenPipe(err error) bool {
+	// Check for EPIPE (broken pipe) or ECONNRESET (connection reset by peer)
+	var syscallErr syscall.Errno
+	if errors.As(err, &syscallErr) {
+		return syscallErr == syscall.EPIPE || syscallErr == syscall.ECONNRESET
+	}
+	return false
 }
 
 // Page handlers
