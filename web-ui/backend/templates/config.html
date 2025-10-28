@@ -196,7 +196,7 @@
                                         :class="settingsView === 'spawns' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
                                         class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
                                     <i class="fas fa-terminal mr-2"></i>Spawn Commands
-                                    <span class="ml-1 text-xs" x-text="'(' + structuredConfig.spawns.length + ')'"></span>
+                                    <span class="ml-1 text-xs" x-text="'(' + (structuredConfig.spawns?.length || 0) + ')'"></span>
                                 </button>
                             </div>
                             <button @click="settingsExpanded = false"
@@ -516,7 +516,7 @@
 
                     <!-- Spawn List -->
                     <div class="space-y-2">
-                        <template x-for="(spawn, index) in structuredConfig.spawns" :key="index">
+                        <template x-for="(spawn, index) in structuredConfig.spawns" :key="spawn.name || 'spawn-' + index">
                             <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                                 <div class="flex-1">
                                     <div class="font-medium text-gray-900 flex items-center">
@@ -533,7 +533,7 @@
                                 </button>
                             </div>
                         </template>
-                        <div x-show="structuredConfig.spawns.length === 0" class="text-center py-8 text-gray-500">
+                        <div x-show="structuredConfig.spawns?.length === 0" class="text-center py-8 text-gray-500">
                             <i class="fas fa-terminal text-4xl text-gray-300 mb-2"></i>
                             <p>No spawn commands defined. Add one above to get started.</p>
                         </div>
@@ -548,7 +548,7 @@
                      @click="sections.hosts = !sections.hosts">
                     <h2 class="text-xl font-semibold text-gray-900">
                         <i class="fas fa-server mr-2"></i>Monitored Hosts
-                        <span class="text-sm font-normal text-gray-500 ml-2">(<span x-text="structuredConfig.hosts.length"></span> hosts)</span>
+                        <span class="text-sm font-normal text-gray-500 ml-2">(<span x-text="structuredConfig.hosts?.length || 0"></span> hosts)</span>
                     </h2>
                     <div class="flex items-center gap-3">
                         <button @click.stop="addHost()" class="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm transition-colors">
@@ -573,7 +573,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <template x-for="(host, index) in structuredConfig.hosts" :key="index">
+                                <template x-for="(host, index) in structuredConfig.hosts" :key="host.ip || 'host-' + index">
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-4 py-3 whitespace-nowrap">
                                             <div class="text-sm font-medium text-gray-900" x-text="host.ip || 'Not set'"></div>
@@ -607,7 +607,7 @@
                             </tbody>
                         </table>
 
-                        <div x-show="structuredConfig.hosts.length === 0" class="text-center py-12 text-gray-500">
+                        <div x-show="structuredConfig.hosts?.length === 0" class="text-center py-12 text-gray-500">
                             <i class="fas fa-server text-6xl text-gray-300 mb-4"></i>
                             <p class="text-lg mb-2">No hosts configured</p>
                             <p class="text-sm">Click "Add Host" above to create your first monitored host.</p>
@@ -635,7 +635,7 @@
 
                     <!-- Modal Body (Scrollable) -->
                     <div class="flex-1 overflow-y-auto px-6 py-4">
-                        <div x-show="editingHost">
+                        <template x-if="editingHost">
                             <!-- Host Tab Navigation -->
                             <div class="mb-4 border-b border-gray-200">
                                 <nav class="-mb-px flex space-x-6">
@@ -1129,7 +1129,7 @@
                                             </div>
                                         </div>
                                     </div>
-                        </div>
+                        </template>
                     </div>
 
                     <!-- Modal Footer -->
@@ -1345,9 +1345,15 @@ function unifiedConfigPage() {
                 const response = await fetch('/api/config');
                 if (response.ok) {
                     this.structuredConfig = await response.json();
-                    // Ensure global object exists
+                    // Ensure required properties exist and are arrays
                     if (!this.structuredConfig.global) {
                         this.structuredConfig.global = {};
+                    }
+                    if (!Array.isArray(this.structuredConfig.hosts)) {
+                        this.structuredConfig.hosts = [];
+                    }
+                    if (!Array.isArray(this.structuredConfig.spawns)) {
+                        this.structuredConfig.spawns = [];
                     }
                     // Save original for change detection
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
