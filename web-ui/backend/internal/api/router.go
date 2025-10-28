@@ -88,7 +88,6 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/host-detail.html", r.handleHostDetailPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
-	r.mux.HandleFunc("/config-editor.html", r.handleConfigEditorPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 
 	// Serve static files (CSS, JS)
