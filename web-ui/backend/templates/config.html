@@ -517,16 +517,607 @@
                 </div>
             </div>
 
-            <!-- Note about host management -->
-            <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
-                <div class="flex">
-                    <i class="fas fa-info-circle text-blue-400 mt-1 mr-3"></i>
-                    <div>
-                        <h3 class="text-sm font-medium text-blue-800">Partial Configuration Editor</h3>
-                        <p class="text-sm text-blue-700 mt-1">
-                            This structured editor currently supports global settings and spawn commands.
-                            For full host configuration, please use the Raw editor mode above or the legacy config format parser/generator is being enhanced.
-                        </p>
+            <!-- Hosts Section -->
+            <div class="bg-white rounded-lg shadow-md">
+                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
+                     @click="sections.hosts = !sections.hosts">
+                    <h2 class="text-xl font-semibold text-gray-900">
+                        <i class="fas fa-server mr-2"></i>Monitored Hosts
+                        <span class="text-sm font-normal text-gray-500 ml-2">(<span x-text="structuredConfig.hosts.length"></span> hosts)</span>
+                    </h2>
+                    <div class="flex items-center gap-3">
+                        <button @click.stop="addHost()" class="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm transition-colors">
+                            <i class="fas fa-plus mr-1"></i>Add Host
+                        </button>
+                        <i class="fas" :class="sections.hosts ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                    </div>
+                </div>
+                <div x-show="sections.hosts" class="px-6 py-4">
+                    <!-- Compact Host List -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP / Hostname</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dependencies</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Alert</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <template x-for="(host, index) in structuredConfig.hosts" :key="index">
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <div class="text-sm font-medium text-gray-900" x-text="host.ip || 'Not set'"></div>
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded" x-text="host.type || 'ping'"></span>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-900 truncate max-w-xs" x-text="host.notes || '-'"></div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-500 truncate max-w-xs" x-text="host.dependencies || '-'"></div>
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <div class="text-sm text-gray-500" x-text="host.spawn || host.customspawn || '-'"></div>
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <span x-show="host.paused" class="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded">PAUSED</span>
+                                            <span x-show="!host.paused" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">ACTIVE</span>
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                                            <button @click="editHost(index)" class="text-blue-600 hover:text-blue-900 mr-3">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </button>
+                                            <button @click="deleteHost(index)" class="text-red-600 hover:text-red-900">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+
+                        <div x-show="structuredConfig.hosts.length === 0" class="text-center py-12 text-gray-500">
+                            <i class="fas fa-server text-6xl text-gray-300 mb-4"></i>
+                            <p class="text-lg mb-2">No hosts configured</p>
+                            <p class="text-sm">Click "Add Host" above to create your first monitored host.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Host Editor Modal -->
+            <div x-show="showHostModal" x-cloak
+                 class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+                 @click.self="closeHostModal()">
+                <div class="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col"
+                     @click.stop>
+                    <!-- Modal Header -->
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <h2 class="text-xl font-semibold text-gray-900">
+                            <i class="fas fa-server mr-2"></i>
+                            <span x-text="editingHostIndex === -1 ? 'Add New Host' : 'Edit Host'"></span>
+                        </h2>
+                        <button @click="closeHostModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
+                    </div>
+
+                    <!-- Modal Body (Scrollable) -->
+                    <div class="flex-1 overflow-y-auto px-6 py-4">
+                        <div x-show="editingHost">
+                            <!-- Host Tab Navigation -->
+                            <div class="mb-4 border-b border-gray-200">
+                                <nav class="-mb-px flex space-x-6">
+                                    <button @click="editingHost.activeTab = 'overview'" :class="editingHost.activeTab === 'overview' || !editingHost.activeTab ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                        Overview
+                                    </button>
+                                    <button @click="editingHost.activeTab = 'typespecific'" :class="editingHost.activeTab === 'typespecific' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                        Type-Specific
+                                    </button>
+                                    <button @click="editingHost.activeTab = 'alerts'" :class="editingHost.activeTab === 'alerts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                        Alerts & Contact
+                                    </button>
+                                    <button @click="editingHost.activeTab = 'snmp'" :class="editingHost.activeTab === 'snmp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                        SNMP
+                                    </button>
+                                    <button @click="editingHost.activeTab = 'advanced'" :class="editingHost.activeTab === 'advanced' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'" class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm">
+                                        Advanced
+                                    </button>
+                                </nav>
+                            </div>
+
+                                    <!-- Overview Tab - Most Common Fields -->
+                                    <div x-show="!editingHost.activeTab || editingHost.activeTab === 'overview'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">IP Address / Hostname *</label>
+                                            <input type="text" x-model="editingHost.ip" required placeholder="192.168.1.1 or hostname.example.com"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            <p class="text-xs text-gray-500 mt-1">IP address or DNS hostname to monitor</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Check Type *</label>
+                                            <select x-model="editingHost.type" required
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <option value="ping">Ping (ICMP)</option>
+                                                <option value="pingv4">Ping IPv4 Only</option>
+                                                <option value="tcp">TCP Port</option>
+                                                <option value="udp">UDP Port</option>
+                                                <option value="http">HTTP</option>
+                                                <option value="https">HTTPS</option>
+                                                <option value="ssh">SSH</option>
+                                                <option value="smtp">SMTP</option>
+                                                <option value="pop3">POP3</option>
+                                                <option value="imap">IMAP</option>
+                                                <option value="dns">DNS</option>
+                                                <option value="radius">RADIUS</option>
+                                                <option value="snmp">SNMP</option>
+                                                <option value="nntp">NNTP</option>
+                                                <option value="ircd">IRC</option>
+                                            </select>
+                                        </div>
+                                        <div class="md:col-span-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                            <input type="text" x-model="editingHost.notes" placeholder="Main database server"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            <p class="text-xs text-gray-500 mt-1">Friendly description shown in alerts and status</p>
+                                        </div>
+                                        <div class="md:col-span-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Dependencies</label>
+                                            <input type="text" x-model="editingHost.dependencies"
+                                                   @input="updateDependencySuggestions(editingHostIndex, $event.target.value)"
+                                                   @focus="showDependencySuggestions[editingHostIndex] = true"
+                                                   placeholder="Type to search hosts..."
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            <p class="text-xs text-gray-500 mt-1">Comma-separated list of host dependencies (e.g., "router,gateway")</p>
+                                            <!-- Dependency suggestions dropdown -->
+                                            <div x-show="showDependencySuggestions[editingHostIndex] && dependencySuggestions[editingHostIndex]?.length > 0"
+                                                 class="mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                                                <template x-for="suggestion in dependencySuggestions[editingHostIndex]" :key="suggestion">
+                                                    <div @click="addDependency(editingHostIndex, suggestion); showDependencySuggestions[editingHostIndex] = false"
+                                                         class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm">
+                                                        <span class="font-medium" x-text="suggestion"></span>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <div class="md:col-span-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Alert Command</label>
+                                            <!-- Smart spawn selector -->
+                                            <div x-show="!editingHost.useCustomSpawn">
+                                                <select x-model="editingHost.spawn" @change="if (editingHost.spawn === '__custom__') { editingHost.useCustomSpawn = true; editingHost.spawn = ''; }"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <option value="">No alert</option>
+                                                    <template x-for="spawn in structuredConfig.spawns" :key="spawn.name">
+                                                        <option :value="spawn.name" x-text="spawn.name + ' - ' + spawn.command"></option>
+                                                    </template>
+                                                    <option value="__custom__" class="font-semibold text-blue-600">✏️ Custom command...</option>
+                                                </select>
+                                            </div>
+                                            <!-- Custom spawn input -->
+                                            <div x-show="editingHost.useCustomSpawn" class="space-y-2">
+                                                <div class="flex gap-2">
+                                                    <input type="text" x-model="editingHost.customspawn" placeholder="Enter custom spawn command"
+                                                           @click="$event.target.select()"
+                                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                                                    <button @click="editingHost.useCustomSpawn = false; editingHost.customspawn = ''"
+                                                            class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                                            title="Switch back to predefined spawns">
+                                                        <i class="fas fa-list"></i>
+                                                    </button>
+                                                </div>
+                                                <p class="text-xs text-gray-500">
+                                                    <i class="fas fa-info-circle mr-1"></i>
+                                                    Variables: %s (hostname), %i (IP), %p (port), %c (contact), %t (type)
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <input type="checkbox" x-model="editingHost.paused" :id="'paused-' + editingHostIndex"
+                                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                            <label :for="'paused-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                Pause Monitoring
+                                                <p class="text-xs text-gray-500">Temporarily disable checks without removing host</p>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Type-Specific Tab -->
+                                    <div x-show="editingHost.activeTab === 'typespecific'" class="space-y-6">
+                                        <!-- Port field (shown for most types) -->
+                                        <div x-show="['tcp', 'udp', 'http', 'https', 'ssh', 'smtp', 'pop3', 'imap', 'dns', 'radius', 'snmp', 'nntp', 'ircd'].includes(editingHost.type)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Port</label>
+                                                <input type="number" x-model="editingHost.port" placeholder="Default port for type"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Leave empty to use default</p>
+                                            </div>
+                                        </div>
+
+                                        <!-- ICMP/Ping fields -->
+                                        <div x-show="['ping', 'pingv4'].includes(editingHost.type)" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">Ping/ICMP Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Send Pings</label>
+                                                    <input type="number" x-model="editingHost.sendpings" placeholder="5"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">ICMP packets per check</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Min Pings Required</label>
+                                                    <input type="number" x-model="editingHost.minpings" placeholder="1"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Min successful responses</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Packet Loss % Threshold</label>
+                                                    <input type="number" step="0.1" x-model="editingHost.packetlossthreshold" placeholder="0.0"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Alert if loss exceeds (0-100%)</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">RTT Threshold (ms)</label>
+                                                    <input type="number" x-model="editingHost.rttthreshold" placeholder="100"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Latency alert threshold</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Jitter Threshold (ms)</label>
+                                                    <input type="number" x-model="editingHost.jitterthreshold" placeholder="50"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">RTT variation threshold</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">RTT Samples</label>
+                                                    <input type="number" x-model="editingHost.rttsamples" placeholder="5"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Number of RTT samples</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- HTTP/HTTPS fields -->
+                                        <div x-show="['http', 'https'].includes(editingHost.type)" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">HTTP/HTTPS Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div class="md:col-span-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">URL Path</label>
+                                                    <input type="text" x-model="editingHost.url" placeholder="/health"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Path to check (e.g., "/", "/api/status")</p>
+                                                </div>
+                                                <div class="md:col-span-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Expected Text in Response</label>
+                                                    <input type="text" x-model="editingHost.urltext" placeholder="OK"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">String that must appear in response</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">HTTP Header Name</label>
+                                                    <input type="text" x-model="editingHost.header" placeholder="X-Status"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Expected Header Value</label>
+                                                    <input type="text" x-model="editingHost.headerval" placeholder="active"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Username (if auth required)</label>
+                                                    <input type="text" x-model="editingHost.username" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                                    <input type="password" x-model="editingHost.password" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- DNS fields -->
+                                        <div x-show="editingHost.type === 'dns'" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">DNS Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div class="md:col-span-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Query Hostname</label>
+                                                    <input type="text" x-model="editingHost.dnsquery" placeholder="example.com"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Hostname to query from this DNS server</p>
+                                                </div>
+                                                <div class="flex items-center">
+                                                    <input type="checkbox" x-model="editingHost.dnsaa" :id="'dnsaa-' + editingHostIndex"
+                                                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                    <label :for="'dnsaa-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                        Require Authoritative Answer
+                                                        <p class="text-xs text-gray-500">Response must have AA flag</p>
+                                                    </label>
+                                                </div>
+                                                <div class="flex items-center">
+                                                    <input type="checkbox" x-model="editingHost.dnsrecursion" :id="'dnsrecursion-' + editingHostIndex"
+                                                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                    <label :for="'dnsrecursion-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                        Enable Recursion
+                                                        <p class="text-xs text-gray-500">Perform recursive query</p>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- RADIUS fields -->
+                                        <div x-show="editingHost.type === 'radius'" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">RADIUS Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                                    <input type="text" x-model="editingHost.username" placeholder="testuser"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                                    <input type="password" x-model="editingHost.password" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div class="md:col-span-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Shared Secret</label>
+                                                    <input type="password" x-model="editingHost.secret" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">RADIUS shared secret key</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- SSH/IMAP/POP3/SMTP fields (username/password) -->
+                                        <div x-show="['ssh', 'imap', 'pop3', 'smtp'].includes(editingHost.type)" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3"><span x-text="editingHost.type.toUpperCase()"></span> Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                                    <input type="text" x-model="editingHost.username" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                                    <input type="password" x-model="editingHost.password" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- No type-specific fields message -->
+                                        <div x-show="!['ping', 'pingv4', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
+                                            <i class="fas fa-info-circle text-4xl text-gray-300 mb-2"></i>
+                                            <p>No additional type-specific settings for <span x-text="editingHost.type" class="font-semibold"></span> check type.</p>
+                                            <p class="text-sm mt-1">Configure port number in Overview tab if needed.</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Alerts & Contact Tab -->
+                                    <div x-show="editingHost.activeTab === 'alerts'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div class="md:col-span-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+                                            <input type="email" x-model="editingHost.contact" placeholder="admin@example.com"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            <p class="text-xs text-gray-500 mt-1">Email address for alerts</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Page Interval (minutes)</label>
+                                            <input type="number" x-model="editingHost.pageinterval" placeholder="60"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            <p class="text-xs text-gray-500 mt-1">Re-alert interval (overrides global)</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Contact On</label>
+                                            <select x-model="editingHost.contacton"
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <option value="">Default (both up & down)</option>
+                                                <option value="down">Down only</option>
+                                                <option value="up">Up only</option>
+                                                <option value="both">Both up & down</option>
+                                            </select>
+                                        </div>
+                                        <div class="md:col-span-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Custom Page Message</label>
+                                            <input type="text" x-model="editingHost.pmsg" placeholder="%s is %s"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                                            <p class="text-xs text-gray-500 mt-1">Alert message format (%s = hostname, %s = status)</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- SNMP Tab -->
+                                    <div x-show="editingHost.activeTab === 'snmp'" class="space-y-4">
+                                        <div class="bg-blue-50 p-3 rounded-lg">
+                                            <p class="text-sm text-blue-800">
+                                                <i class="fas fa-info-circle mr-2"></i>
+                                                SNMP monitoring allows querying SNMP OIDs and alerting based on thresholds.
+                                                For basic SNMP availability, use type "snmp". For advanced threshold monitoring, configure fields below.
+                                            </p>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">SNMP Community String</label>
+                                                <input type="text" x-model="editingHost.snmpcommunity" placeholder="public"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">SNMPv1/v2c community (default: "public")</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">SNMP OID</label>
+                                                <input type="text" x-model="editingHost.snmpoid" placeholder=".1.3.6.1.2.1.1.3.0"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                                                <p class="text-xs text-gray-500 mt-1">Object Identifier to query (e.g., sysUpTime)</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Secondary OID (for comparisons)</label>
+                                                <input type="text" x-model="editingHost.snmpoidsec" placeholder=""
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                                                <p class="text-xs text-gray-500 mt-1">Second OID for compare-type monitoring</p>
+                                            </div>
+                                            <div class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">SNMP Check Type</label>
+                                                <select x-model="editingHost.snmptype"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <option value="">None (basic availability only)</option>
+                                                    <option value="high">High - Alert if value exceeds threshold</option>
+                                                    <option value="low">Low - Alert if value below threshold</option>
+                                                    <option value="range">Range - Alert if outside range</option>
+                                                    <option value="exact">Exact - Alert if not matching value</option>
+                                                    <option value="rate">Rate - Alert if counter rate exceeds threshold</option>
+                                                    <option value="uptime">Uptime - Monitor system uptime</option>
+                                                    <option value="compare">Compare - Compare two OIDs</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- Threshold fields (conditional) -->
+                                            <div x-show="['high', 'range'].includes(editingHost.snmptype)">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">High Threshold</label>
+                                                <input type="number" x-model="editingHost.snmphigh"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            </div>
+                                            <div x-show="['low', 'range'].includes(editingHost.snmptype)">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Low Threshold</label>
+                                                <input type="number" x-model="editingHost.snmplow"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            </div>
+                                            <div x-show="editingHost.snmptype === 'exact'">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Exact Value</label>
+                                                <input type="number" x-model="editingHost.snmpexact"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            </div>
+                                            <div x-show="editingHost.snmptype === 'rate'">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Rate Threshold (per second)</label>
+                                                <input type="number" x-model="editingHost.snmprate"
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            </div>
+                                            <div x-show="editingHost.snmptype === 'rate'" class="flex items-center">
+                                                <input type="checkbox" x-model="editingHost.snmpoctets" :id="'snmpoctets-' + editingHostIndex"
+                                                       class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                <label :for="'snmpoctets-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                    Convert Bytes to Bits (×8)
+                                                    <p class="text-xs text-gray-500">For bandwidth monitoring</p>
+                                                </label>
+                                            </div>
+
+                                            <!-- Custom SNMP messages -->
+                                            <div x-show="editingHost.snmptype" class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Custom UP Message</label>
+                                                <input type="text" x-model="editingHost.snmpupmsg" placeholder=""
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Message when SNMP check passes</p>
+                                            </div>
+                                            <div x-show="editingHost.snmptype" class="md:col-span-2">
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">Custom DOWN Message</label>
+                                                <input type="text" x-model="editingHost.snmpdownmsg" placeholder=""
+                                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                <p class="text-xs text-gray-500 mt-1">Message when SNMP check fails</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Advanced Tab -->
+                                    <div x-show="editingHost.activeTab === 'advanced'" class="space-y-6">
+                                        <div class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">Timing & Queue Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Check Interval (seconds)</label>
+                                                    <input type="number" x-model="editingHost.queuetime" placeholder="60"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Override global check interval</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Group/Category</label>
+                                                    <input type="text" x-model="editingHost.group" placeholder="databases"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Organizational grouping</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">Wake-on-LAN Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                <div class="flex items-center">
+                                                    <input type="checkbox" x-model="editingHost.wakeupcheck" :id="'wakeup-' + editingHostIndex"
+                                                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                    <label :for="'wakeup-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                        Enable Wakeup Check
+                                                        <p class="text-xs text-gray-500">Try Wake-on-LAN before alerting</p>
+                                                    </label>
+                                                </div>
+                                                <div x-show="editingHost.wakeupcheck">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Wakeup Retries</label>
+                                                    <input type="number" x-model="editingHost.wakeupretries" placeholder="3"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                                <div x-show="editingHost.wakeupcheck">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Check Interval (sec)</label>
+                                                    <input type="number" x-model="editingHost.wakeupcheckinterval" placeholder="300"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">SNMP Trap Settings</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div class="flex items-center">
+                                                    <input type="checkbox" x-model="editingHost.trapalert" :id="'trap-' + editingHostIndex"
+                                                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                    <label :for="'trap-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                        Enable Trap Alerts
+                                                        <p class="text-xs text-gray-500">Monitor SNMP traps from this host</p>
+                                                    </label>
+                                                </div>
+                                                <div x-show="editingHost.trapalert">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Matched Host</label>
+                                                    <input type="text" x-model="editingHost.matchedhost" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Associate traps with this host</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-3">Other Advanced Options</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div class="flex items-center">
+                                                    <input type="checkbox" x-model="editingHost.reverse" :id="'reverse-' + editingHostIndex"
+                                                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                                    <label :for="'reverse-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
+                                                        Reverse Check Logic
+                                                        <p class="text-xs text-gray-500">Alert when UP instead of DOWN</p>
+                                                    </label>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Custom Command</label>
+                                                    <input type="text" x-model="editingHost.command" placeholder=""
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                                                    <p class="text-xs text-gray-500 mt-1">Custom check command override</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                        </div>
+                    </div>
+
+                    <!-- Modal Footer -->
+                    <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50">
+                        <button @click="closeHostModal()"
+                                class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                            <i class="fas fa-times mr-2"></i>Cancel
+                        </button>
+                        <button @click="saveHostModal()"
+                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="fas fa-save mr-2"></i>
+                            <span x-text="editingHostIndex === -1 ? 'Add Host' : 'Save Changes'"></span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -577,10 +1168,15 @@ function unifiedConfigPage() {
         },
         globalTab: 'core',
         expandedHosts: {},
+        dependencySuggestions: {},
+        showDependencySuggestions: {},
         newSpawn: {
             name: '',
             command: ''
         },
+        showHostModal: false,
+        editingHostIndex: -1,
+        editingHost: null,
 
         successMessage: '',
 
@@ -776,10 +1372,11 @@ function unifiedConfigPage() {
         validateConfigStructured() {
             // Validate hosts
             for (const host of this.structuredConfig.hosts) {
-                if (!host.hostname || !host.ip || !host.type) {
-                    alert('All hosts must have hostname, IP, and type specified');
+                if (!host.ip || !host.type) {
+                    alert('All hosts must have IP address and check type specified');
                     return false;
                 }
+                // Hostname defaults to IP if not set (this is done on save/backend)
             }
             return true;
         },
@@ -814,6 +1411,153 @@ function unifiedConfigPage() {
         deleteSpawn(index) {
             if (confirm('Delete this spawn command?')) {
                 this.structuredConfig.spawns.splice(index, 1);
+            }
+        },
+
+        addHost() {
+            // Create new host template
+            this.editingHost = {
+                ip: '',
+                type: 'ping',
+                notes: '',
+                dependencies: '',
+                spawn: '',
+                useCustomSpawn: false,
+                customspawn: '',
+                paused: false,
+                contact: '',
+                pageinterval: null,
+                contacton: '',
+                pmsg: '',
+                port: null,
+                // Ping/ICMP
+                sendpings: null,
+                minpings: null,
+                packetlossthreshold: null,
+                rttthreshold: null,
+                jitterthreshold: null,
+                rttsamples: null,
+                // HTTP/HTTPS
+                url: '',
+                urltext: '',
+                header: '',
+                headerval: '',
+                username: '',
+                password: '',
+                // DNS
+                dnsquery: '',
+                dnsaa: false,
+                dnsrecursion: false,
+                // RADIUS
+                secret: '',
+                // SNMP
+                snmpcommunity: '',
+                snmpoid: '',
+                snmpoidsec: '',
+                snmptype: '',
+                snmphigh: null,
+                snmplow: null,
+                snmpexact: null,
+                snmprate: null,
+                snmpoctets: false,
+                snmpupmsg: '',
+                snmpdownmsg: '',
+                // Advanced
+                queuetime: null,
+                group: '',
+                wakeupcheck: false,
+                wakeupretries: null,
+                wakeupcheckinterval: null,
+                trapalert: false,
+                matchedhost: '',
+                reverse: false,
+                command: '',
+                activeTab: 'overview'
+            };
+
+            this.editingHostIndex = -1;
+            this.showHostModal = true;
+        },
+
+        editHost(index) {
+            // Make a deep copy of the host for editing
+            this.editingHost = JSON.parse(JSON.stringify(this.structuredConfig.hosts[index]));
+            this.editingHostIndex = index;
+            this.showHostModal = true;
+        },
+
+        closeHostModal() {
+            this.showHostModal = false;
+            this.editingHost = null;
+            this.editingHostIndex = -1;
+        },
+
+        saveHostModal() {
+            if (!this.editingHost.ip || !this.editingHost.type) {
+                alert('IP address and check type are required');
+                return;
+            }
+
+            if (this.editingHostIndex === -1) {
+                // Adding new host
+                this.structuredConfig.hosts.push(this.editingHost);
+            } else {
+                // Updating existing host
+                this.structuredConfig.hosts[this.editingHostIndex] = this.editingHost;
+            }
+
+            this.closeHostModal();
+        },
+
+        updateDependencySuggestions(hostIndex, searchTerm) {
+            if (!searchTerm) {
+                this.dependencySuggestions[hostIndex] = [];
+                return;
+            }
+
+            const search = searchTerm.toLowerCase();
+            // Get last comma-separated item being typed
+            const parts = searchTerm.split(',');
+            const currentTerm = parts[parts.length - 1].trim().toLowerCase();
+
+            if (!currentTerm) {
+                this.dependencySuggestions[hostIndex] = [];
+                return;
+            }
+
+            // Get already selected dependencies
+            const selected = parts.slice(0, -1).map(s => s.trim());
+
+            // Filter hosts matching current term, exclude already selected
+            const suggestions = this.structuredConfig.hosts
+                .filter(h => {
+                    const hostname = (h.hostname || h.ip || '').toLowerCase();
+                    return hostname.includes(currentTerm) && !selected.includes(h.hostname || h.ip);
+                })
+                .map(h => h.hostname || h.ip)
+                .slice(0, 10); // Limit to 10 suggestions
+
+            this.dependencySuggestions[hostIndex] = suggestions;
+        },
+
+        addDependency(hostIndex, hostname) {
+            // If modal is open, update editingHost, otherwise update array
+            const host = this.showHostModal ? this.editingHost : this.structuredConfig.hosts[hostIndex];
+            if (!host.dependencies) {
+                host.dependencies = hostname;
+            } else {
+                // Split, trim, filter empties
+                const deps = host.dependencies.split(',').map(s => s.trim()).filter(s => s);
+                // Remove last item (being typed) and add selected
+                deps[deps.length - 1] = hostname;
+                host.dependencies = deps.join(', ');
+            }
+            this.dependencySuggestions[hostIndex] = [];
+        },
+
+        deleteHost(index) {
+            if (confirm('Delete this host?')) {
+                this.structuredConfig.hosts.splice(index, 1);
             }
         },
 
