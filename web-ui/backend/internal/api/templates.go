@@ -61,6 +61,10 @@ func (r *Router) renderTemplate(w http.ResponseWriter, tmpl string, data interfa
 
 	// Only write to response if template executed successfully
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Prevent browser caching to ensure fresh content on every load
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	_, err = buf.WriteTo(w)
 	if err != nil {
 		// At this point headers are already sent, but log the write error
