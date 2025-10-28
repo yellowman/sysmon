@@ -635,7 +635,7 @@
 
                     <!-- Modal Body (Scrollable) -->
                     <div class="flex-1 overflow-y-auto px-6 py-4">
-                        <div x-show="editingHost">
+                        <template x-if="editingHost">
                             <!-- Host Tab Navigation -->
                             <div class="mb-4 border-b border-gray-200">
                                 <nav class="-mb-px flex space-x-6">
@@ -1129,7 +1129,7 @@
                                             </div>
                                         </div>
                                     </div>
-                        </div>
+                        </template>
                     </div>
 
                     <!-- Modal Footer -->
