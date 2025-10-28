@@ -516,7 +516,7 @@
 
                     <!-- Spawn List -->
                     <div class="space-y-2">
-                        <template x-for="(spawn, index) in structuredConfig.spawns" :key="index">
+                        <template x-for="(spawn, index) in structuredConfig.spawns" :key="spawn.name || 'spawn-' + index">
                             <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                                 <div class="flex-1">
                                     <div class="font-medium text-gray-900 flex items-center">
@@ -573,7 +573,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <template x-for="(host, index) in structuredConfig.hosts" :key="index">
+                                <template x-for="(host, index) in structuredConfig.hosts" :key="host.ip || 'host-' + index">
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-4 py-3 whitespace-nowrap">
                                             <div class="text-sm font-medium text-gray-900" x-text="host.ip || 'Not set'"></div>

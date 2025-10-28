@@ -233,7 +233,7 @@
                                     </div>
                                     <!-- Inline check badges -->
                                     <div class="flex gap-1 flex-wrap mt-1">
-                                        <template x-for="check in alert.checks" :key="check.type">
+                                        <template x-for="check in alert.checks" :key="alert.hostname + '-' + check.type + '-' + (check.port || '0')">
                                             <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]"
                                                   :class="{
                                                       'bg-green-50 text-green-700': check.status === 'OK',
@@ -346,7 +346,7 @@
                                       class="text-gray-500"></span>
                             </summary>
                             <div class="mt-2 space-y-3" x-show="error.details.all_responses">
-                                <template x-for="(resp, idx) in error.details.all_responses" :key="idx">
+                                <template x-for="resp in error.details.all_responses" :key="resp.command + '-' + (resp.response || '').substring(0, 100)">
                                     <div class="border rounded-lg p-3"
                                          :class="resp.parsed ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'">
                                         <div class="flex justify-between items-start mb-2">
@@ -361,7 +361,7 @@
                                                 </div>
                                                 <div x-show="resp.error" class="text-xs text-red-700 mt-1" x-text="resp.error"></div>
                                             </div>
-                                            <button @click="copyResponseToClipboard(resp.response, idx)"
+                                            <button @click="copyResponseToClipboard(resp.response, resp.command)"
                                                     class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex-shrink-0 ml-2">
                                                 <i class="fas fa-copy mr-1"></i> Copy
                                             </button>
@@ -643,10 +643,10 @@ function dashboard() {
             }
         },
 
-        copyResponseToClipboard(responseText, idx) {
+        copyResponseToClipboard(responseText, command) {
             if (responseText) {
                 navigator.clipboard.writeText(responseText).then(() => {
-                    this.showNotification(`Response ${idx + 1} copied to clipboard!`);
+                    this.showNotification(`Response '${command}' copied to clipboard!`);
                 }).catch(err => {
                     alert('Failed to copy response: ' + err.message);
                 });
