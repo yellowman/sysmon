@@ -490,11 +490,21 @@ function dashboard() {
 
                 // Get all hosts for tooltips
                 const hostsResponse = await fetch('/api/monitoring/hosts');
-                this.allHosts = await hostsResponse.json();
+                if (hostsResponse.ok) {
+                    this.allHosts = await hostsResponse.json();
+                } else {
+                    console.warn('Failed to fetch hosts for tooltips');
+                    this.allHosts = [];
+                }
 
                 // Get alerts
                 const alertsResponse = await fetch('/api/monitoring/alerts');
-                this.alerts = await alertsResponse.json();
+                if (alertsResponse.ok) {
+                    this.alerts = await alertsResponse.json();
+                } else {
+                    console.warn('Failed to fetch alerts');
+                    this.alerts = [];
+                }
 
                 // Get traps
                 if (data.snmp_traps) {
