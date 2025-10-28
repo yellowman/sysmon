@@ -1245,13 +1245,16 @@ function unifiedConfigPage() {
         async fetchConfigRaw() {
             try {
                 const response = await fetch('/api/config/raw');
+                if (!response.ok) {
+                    throw new Error(`Failed to load config: ${response.statusText}`);
+                }
                 const data = await response.json();
                 this.configContent = data.content;
                 this.originalConfigContent = data.content; // Save original for diff
                 this.currentVersion = data.version;
                 this.modified = false;
             } catch (e) {
-                alert('Failed to load configuration: ' + e.message);
+                alert('Failed to load configuration: ' + (e?.message || e));
             }
         },
 
@@ -1302,10 +1305,13 @@ function unifiedConfigPage() {
 
             this.reloading = true;
             try {
-                await fetch('/api/config/reload', { method: 'POST' });
+                const response = await fetch('/api/config/reload', { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error(`Reload failed: ${response.statusText}`);
+                }
                 this.showSuccess('Sysmon reloaded successfully');
             } catch (e) {
-                alert('Failed to reload sysmon: ' + e.message);
+                alert('Failed to reload sysmon: ' + (e?.message || e));
             } finally {
                 this.reloading = false;
             }
@@ -1314,6 +1320,9 @@ function unifiedConfigPage() {
         async fetchBackups() {
             try {
                 const response = await fetch('/api/backups');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch backups: ${response.statusText}`);
+                }
                 this.backups = await response.json();
             } catch (e) {
                 console.error('Failed to fetch backups:', e);
@@ -1324,7 +1333,10 @@ function unifiedConfigPage() {
             if (!confirm(`Restore backup ${filename}? This will replace the current configuration.`)) return;
 
             try {
-                await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
+                const response = await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error(`Restore failed: ${response.statusText}`);
+                }
                 this.showSuccess('Backup restored successfully');
                 await this.fetchConfigRaw();
             } catch (e) {

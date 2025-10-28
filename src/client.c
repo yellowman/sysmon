@@ -356,8 +356,9 @@ int	main(int argc, char **argv)
 
 	clear();
 	refresh();
+	/* Ensure server name doesn't overflow buffer - leave room for static text */
 	snprintf(tempbuf, sizeof(tempbuf),
-		"Connecting to server %s and getting inital data...\n",
+		"Connecting to server %.950s and getting inital data...\n",
 		server);
 	mvaddstr(0,0, tempbuf);
 

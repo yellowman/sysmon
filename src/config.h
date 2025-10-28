@@ -110,6 +110,9 @@
 #define LARGE_TEMPBUF_SIZE	4096	/* Large temporary buffer */
 #define SERVER_NAME_SIZE	1024	/* Server hostname buffer */
 #define TIME_STR_SIZE		32	/* Time string buffer */
+#define NETWORK_LINE_SIZE	256	/* Network line read buffer (getline_tcp) */
+#define OBJECT_NAME_SIZE	128	/* Object/hostname identifier buffer */
+#define PROTO_RESPONSE_SIZE	255	/* Protocol response buffer (pop3, smtp, etc) */
 
 /* the following should be read from /etc/services */
 
