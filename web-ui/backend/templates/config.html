@@ -10,6 +10,9 @@
             <i class="fas fa-cog mr-2"></i>Configuration
         </h1>
         <div class="flex space-x-3">
+            <a href="/config-editor.html" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 inline-flex items-center">
+                <i class="fas fa-edit mr-2"></i>GUI Editor
+            </a>
             <button @click="reload()" :disabled="reloading"
                     class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50">
                 <i class="fas" :class="reloading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
@@ -20,6 +23,20 @@
                 <i class="fas" :class="saving ? 'fa-spinner fa-spin' : 'fa-save'"></i>
                 Save Changes
             </button>
+        </div>
+    </div>
+
+    <!-- Info Banner -->
+    <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
+        <div class="flex">
+            <i class="fas fa-info-circle text-blue-400 mt-1 mr-3"></i>
+            <div>
+                <h3 class="text-sm font-medium text-blue-800">GUI Editor Available</h3>
+                <p class="text-sm text-blue-700 mt-1">
+                    For easier configuration editing, try the <a href="/config-editor.html" class="underline font-semibold">GUI Editor</a> with form-based inputs and validation.
+                    This raw text editor is best for advanced users who prefer direct config file editing.
+                </p>
+            </div>
         </div>
     </div>
 
