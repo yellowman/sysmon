@@ -1482,6 +1482,17 @@ function unifiedConfigPage() {
         editHost(index) {
             // Make a deep copy of the host for editing
             this.editingHost = JSON.parse(JSON.stringify(this.structuredConfig.hosts[index]));
+
+            // Initialize UI-specific fields that aren't saved in config
+            if (!this.editingHost.activeTab) {
+                this.editingHost.activeTab = 'overview';
+            }
+
+            // Determine if using custom spawn (not in predefined spawns list)
+            const isCustomSpawn = this.editingHost.customspawn ||
+                (this.editingHost.spawn && !this.structuredConfig.spawns.some(s => s.name === this.editingHost.spawn));
+            this.editingHost.useCustomSpawn = isCustomSpawn;
+
             this.editingHostIndex = index;
             this.showHostModal = true;
         },
@@ -1498,12 +1509,33 @@ function unifiedConfigPage() {
                 return;
             }
 
+            // Create a clean copy without UI-only fields
+            const hostToSave = { ...this.editingHost };
+            delete hostToSave.activeTab;
+            delete hostToSave.useCustomSpawn;
+
+            // Handle spawn vs customspawn
+            if (this.editingHost.useCustomSpawn && this.editingHost.customspawn) {
+                hostToSave.spawn = '';
+                hostToSave.customspawn = this.editingHost.customspawn;
+            } else if (this.editingHost.spawn) {
+                hostToSave.spawn = this.editingHost.spawn;
+                hostToSave.customspawn = '';
+            }
+
+            // Remove empty/null fields to keep config clean
+            Object.keys(hostToSave).forEach(key => {
+                if (hostToSave[key] === '' || hostToSave[key] === null || hostToSave[key] === undefined) {
+                    delete hostToSave[key];
+                }
+            });
+
             if (this.editingHostIndex === -1) {
                 // Adding new host
-                this.structuredConfig.hosts.push(this.editingHost);
+                this.structuredConfig.hosts.push(hostToSave);
             } else {
                 // Updating existing host
-                this.structuredConfig.hosts[this.editingHostIndex] = this.editingHost;
+                this.structuredConfig.hosts[this.editingHostIndex] = hostToSave;
             }
 
             this.closeHostModal();
