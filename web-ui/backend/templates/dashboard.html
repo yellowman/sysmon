@@ -224,7 +224,7 @@
                                 <div class="flex flex-col min-w-0 flex-1">
                                     <div class="flex items-center gap-2 flex-wrap">
                                         <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
-                                        <span class="text-xs text-gray-500" x-show="alert.ipv4_address && !isIPAddress(alert.hostname)" x-text="alert.ipv4_address"></span>
+                                        <span class="text-xs text-gray-500" x-show="alert.ipv4_address && alert.ipv4_address !== alert.hostname" x-text="alert.ipv4_address"></span>
                                         <span class="text-sm text-gray-600 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
                                     </div>
                                     <div class="text-[10px] text-gray-400" x-show="alert.last_change_time">
@@ -630,12 +630,6 @@ function dashboard() {
             else relativeTime = `${diffDays}d ago`;
 
             return `(${relativeTime}) ${absoluteTime}`;
-        },
-
-        isIPAddress(str) {
-            if (!str) return false;
-            // Check if string matches IPv4 pattern (simple check)
-            return /^(\d{1,3}\.){3}\d{1,3}$/.test(str);
         },
 
         copyXMLToClipboard() {
