@@ -65,7 +65,7 @@
                 <i class="fas fa-bug mr-2"></i>Protocol Errors (<span x-text="errors.length"></span>)
             </h3>
             <div class="space-y-2">
-                <template x-for="(error, index) in errors" :key="index">
+                <template x-for="error in errors" :key="error.timestamp + '-' + error.command">
                     <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50">
                         <div class="flex justify-between items-start">
                             <div class="text-xs text-gray-500" x-text="error.timestamp"></div>
