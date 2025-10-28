@@ -436,6 +436,7 @@ function dashboard() {
         alerts: [],
         traps: [],
         allHosts: [], // All monitored hosts
+        refreshInterval: null,
         updateDialog: {
             show: false,
             hostname: '',
@@ -466,11 +467,18 @@ function dashboard() {
         init() {
             this.fetchData();
             // Auto-refresh every 10 seconds (but not if there's an error showing)
-            setInterval(() => {
+            this.refreshInterval = setInterval(() => {
                 if (!this.error) {
                     this.fetchData();
                 }
             }, 10000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async fetchData() {
@@ -523,7 +531,7 @@ function dashboard() {
 
                 this.loading = false;
             } catch (e) {
-                this.error = e.message;
+                this.error = e?.message || e?.toString() || 'Unknown error';
                 this.loading = false;
             }
         },

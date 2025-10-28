@@ -237,8 +237,8 @@ int getline_tcp(int fd, char *buffer)
 	int selTimeout = 0;
 	int ret = 0;
 
-	/* Null it out */
-	memset(buffer, 0, sizeof(buffer));
+	/* Null it out - use NETWORK_LINE_SIZE instead of sizeof(pointer) */
+	memset(buffer, 0, NETWORK_LINE_SIZE);
 
         while ( 1 ) /* while forever */
         {
@@ -299,7 +299,7 @@ int getline_tcp(int fd, char *buffer)
                         return 0;
 		}
                 strncat(buffer, &buf, 1);
-		if (strlen(buffer) > 200)
+		if (strlen(buffer) >= NETWORK_LINE_SIZE - 1) /* Leave room for null terminator */
 		{
 			return 0;
 		}

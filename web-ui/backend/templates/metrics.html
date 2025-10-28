@@ -1,0 +1,287 @@
+{{template "base" .}}
+
+{{define "title"}}API Metrics{{end}}
+
+{{define "content"}}
+<div x-data="metricsPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">
+            <i class="fas fa-chart-line mr-2"></i>API Metrics Dashboard
+        </h1>
+        <div class="text-sm text-gray-500">
+            Auto-refresh: <span x-text="autoRefresh ? 'ON' : 'OFF'"></span>
+            <button @click="autoRefresh = !autoRefresh" class="ml-2 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
+                Toggle
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <!-- Total Requests -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Total Requests</p>
+                    <p class="text-3xl font-bold text-gray-900" x-text="formatNumber(metrics.total_requests)"></p>
+                </div>
+                <div class="p-3 bg-blue-100 rounded-full">
+                    <i class="fas fa-exchange-alt text-2xl text-blue-600"></i>
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">
+                <span class="text-green-600" x-text="formatNumber(metrics.successful_requests)"></span> success,
+                <span class="text-red-600" x-text="formatNumber(metrics.failed_requests)"></span> failed
+            </p>
+        </div>
+
+        <!-- Requests Per Second -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Requests/Second</p>
+                    <p class="text-3xl font-bold text-gray-900" x-text="formatDecimal(metrics.requests_per_second)"></p>
+                </div>
+                <div class="p-3 bg-green-100 rounded-full">
+                    <i class="fas fa-tachometer-alt text-2xl text-green-600"></i>
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">
+                <span x-text="formatNumber(metrics.requests_last_minute)"></span> in last minute
+            </p>
+        </div>
+
+        <!-- Rate Limit Hits -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Rate Limit Hits</p>
+                    <p class="text-3xl font-bold text-gray-900" x-text="formatNumber(metrics.rate_limit_hits)"></p>
+                </div>
+                <div class="p-3 bg-yellow-100 rounded-full">
+                    <i class="fas fa-ban text-2xl text-yellow-600"></i>
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">
+                Limit: 60/minute per IP
+            </p>
+        </div>
+
+        <!-- Bulk Operations -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-600">Bulk Operations</p>
+                    <p class="text-3xl font-bold text-gray-900" x-text="formatNumber(metrics.bulk_operations)"></p>
+                </div>
+                <div class="p-3 bg-purple-100 rounded-full">
+                    <i class="fas fa-layer-group text-2xl text-purple-600"></i>
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">
+                <span x-text="formatNumber(metrics.bulk_hosts_processed)"></span> hosts processed
+            </p>
+        </div>
+    </div>
+
+    <!-- Uptime and Hourly Stats -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <!-- Uptime -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">
+                <i class="fas fa-clock mr-2"></i>System Uptime
+            </h3>
+            <div class="text-4xl font-bold text-blue-600" x-text="formatUptime(metrics.uptime_seconds)"></div>
+            <p class="mt-2 text-sm text-gray-500">
+                Since server started
+            </p>
+        </div>
+
+        <!-- Hourly Activity -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">
+                <i class="fas fa-clock mr-2"></i>Recent Activity
+            </h3>
+            <div class="space-y-2">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">Last Minute</span>
+                    <span class="text-lg font-bold text-gray-900" x-text="formatNumber(metrics.requests_last_minute)"></span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">Last Hour</span>
+                    <span class="text-lg font-bold text-gray-900" x-text="formatNumber(metrics.requests_last_hour)"></span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">Average RPS</span>
+                    <span class="text-lg font-bold text-gray-900" x-text="formatDecimal(metrics.requests_per_second)"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Endpoints Table -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-medium text-gray-900">
+                <i class="fas fa-list mr-2"></i>Top API Endpoints
+            </h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Endpoint
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Total Calls
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Success
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Failed
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Avg Duration (ms)
+                        </th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Success Rate
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-for="endpoint in metrics.top_endpoints || []" :key="endpoint.path">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                <code x-text="endpoint.path"></code>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                <span x-text="formatNumber(endpoint.total_calls)"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600">
+                                <span x-text="formatNumber(endpoint.success)"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-red-600">
+                                <span x-text="formatNumber(endpoint.failed)"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                <span x-text="formatDecimal(endpoint.avg_duration)"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2 py-1 text-xs font-medium rounded"
+                                      :class="{
+                                          'bg-green-100 text-green-800': (endpoint.success / endpoint.total_calls) >= 0.95,
+                                          'bg-yellow-100 text-yellow-800': (endpoint.success / endpoint.total_calls) >= 0.80 && (endpoint.success / endpoint.total_calls) < 0.95,
+                                          'bg-red-100 text-red-800': (endpoint.success / endpoint.total_calls) < 0.80
+                                      }"
+                                      x-text="formatPercent(endpoint.success / endpoint.total_calls)">
+                                </span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="!metrics.top_endpoints || metrics.top_endpoints.length === 0" class="text-center py-12 bg-white rounded-lg shadow mt-6">
+        <i class="fas fa-chart-line text-6xl text-gray-300 mb-4"></i>
+        <p class="text-gray-500">No endpoint metrics available yet</p>
+    </div>
+
+    <!-- Loading state -->
+    <div x-show="loading" class="text-center py-12">
+        <i class="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
+        <p class="mt-4 text-gray-600">Loading metrics...</p>
+    </div>
+</div>
+
+<script>
+function metricsPage() {
+    return {
+        loading: true,
+        metrics: {
+            total_requests: 0,
+            successful_requests: 0,
+            failed_requests: 0,
+            requests_per_second: 0,
+            requests_last_minute: 0,
+            requests_last_hour: 0,
+            rate_limit_hits: 0,
+            bulk_operations: 0,
+            bulk_hosts_processed: 0,
+            uptime_seconds: 0,
+            top_endpoints: []
+        },
+        autoRefresh: true,
+        refreshInterval: null,
+
+        init() {
+            this.fetchMetrics();
+            this.refreshInterval = setInterval(() => {
+                if (this.autoRefresh) {
+                    this.fetchMetrics();
+                }
+            }, 5000); // Refresh every 5 seconds
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+            }
+        },
+
+        async fetchMetrics() {
+            try {
+                const response = await fetch('/api/metrics');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch metrics');
+                }
+                this.metrics = await response.json();
+                this.loading = false;
+            } catch (e) {
+                console.error('Failed to fetch metrics:', e);
+                this.loading = false;
+            }
+        },
+
+        formatNumber(num) {
+            if (!num && num !== 0) return '0';
+            return num.toLocaleString();
+        },
+
+        formatDecimal(num) {
+            if (!num && num !== 0) return '0.00';
+            return num.toFixed(2);
+        },
+
+        formatPercent(ratio) {
+            if (!ratio && ratio !== 0) return '0%';
+            return (ratio * 100).toFixed(1) + '%';
+        },
+
+        formatUptime(seconds) {
+            if (!seconds) return '0s';
+
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+
+            if (days > 0) {
+                return `${days}d ${hours}h ${minutes}m`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes}m ${secs}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${secs}s`;
+            } else {
+                return `${secs}s`;
+            }
+        }
+    };
+}
+</script>
+{{end}}

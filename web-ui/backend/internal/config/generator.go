@@ -9,6 +9,10 @@ import (
 
 // Generate generates sysmon.conf format from config
 func Generate(config *models.Config) (string, error) {
+	if config == nil {
+		return "", fmt.Errorf("config is nil")
+	}
+
 	var sb strings.Builder
 
 	// Header comment
@@ -111,6 +115,10 @@ func Generate(config *models.Config) (string, error) {
 
 // Validate validates a config
 func Validate(config *models.Config) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+
 	// Check required global settings
 	if config.Global.ClientPort <= 0 || config.Global.ClientPort > 65535 {
 		return fmt.Errorf("invalid client port: %d", config.Global.ClientPort)
@@ -135,8 +143,16 @@ func Validate(config *models.Config) error {
 		hostnames[host.Hostname] = true
 
 		// Validate contact email
-		if host.Contact != "" && !strings.Contains(host.Contact, "@") {
-			return fmt.Errorf("invalid contact email for %s: %s", host.Hostname, host.Contact)
+		if host.Contact != "" {
+			// Basic email validation: must have @ with non-empty parts before and after
+			parts := strings.Split(host.Contact, "@")
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				return fmt.Errorf("invalid contact email for %s: %s (must have format: user@domain)", host.Hostname, host.Contact)
+			}
+			// Domain part should have at least one dot
+			if !strings.Contains(parts[1], ".") {
+				return fmt.Errorf("invalid contact email domain for %s: %s (domain must contain a dot)", host.Hostname, host.Contact)
+			}
 		}
 
 		// Check that host has at least one check

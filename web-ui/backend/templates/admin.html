@@ -233,6 +233,7 @@ function adminPage() {
         killitText: '',
         sessionLog: [],
         sessionErrors: [],
+        refreshInterval: null,
 
         get hasAuth() {
             return !!getAuthKey();
@@ -245,10 +246,17 @@ function adminPage() {
             this.loadSessionErrors();
 
             // Auto-refresh session log every 5 seconds
-            setInterval(() => {
+            this.refreshInterval = setInterval(() => {
                 this.loadSessionLog();
                 this.loadSessionErrors();
             }, 5000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async loadVersion() {
@@ -278,20 +286,20 @@ function adminPage() {
         async toggleDebug() {
             try {
                 const result = await apiCall('/api/admin/debug', { method: 'POST' });
-                this.commandOutput = result.response;
-                alert('Debug logging toggled. Response: ' + result.response);
+                this.commandOutput = result?.response || 'No output received';
+                alert('Debug logging toggled. Response: ' + (result?.response || 'Success'));
             } catch (e) {
-                alert('Failed to toggle debug: ' + e.message);
+                alert('Failed to toggle debug: ' + (e?.message || e));
             }
         },
 
         async toggleSNMPDebug() {
             try {
                 const result = await apiCall('/api/admin/snmpd', { method: 'POST' });
-                this.commandOutput = result.response;
-                alert('SNMP debug logging toggled. Response: ' + result.response);
+                this.commandOutput = result?.response || 'No output received';
+                alert('SNMP debug logging toggled. Response: ' + (result?.response || 'Success'));
             } catch (e) {
-                alert('Failed to toggle SNMP debug: ' + e.message);
+                alert('Failed to toggle SNMP debug: ' + (e?.message || e));
             }
         },
 
@@ -302,28 +310,28 @@ function adminPage() {
 
             try {
                 const result = await apiCall('/api/admin/expiredns', { method: 'POST' });
-                this.commandOutput = result.response;
+                this.commandOutput = result?.response || 'DNS cache expired';
                 alert('DNS cache expired successfully');
             } catch (e) {
-                alert('Failed to expire DNS: ' + e.message);
+                alert('Failed to expire DNS: ' + (e?.message || e));
             }
         },
 
         async printQueue() {
             try {
                 const result = await apiCall('/api/admin/printq');
-                this.commandOutput = result.output;
+                this.commandOutput = result?.output || 'No queue data received';
             } catch (e) {
-                alert('Failed to get queue status: ' + e.message);
+                alert('Failed to get queue status: ' + (e?.message || e));
             }
         },
 
         async showNextFD() {
             try {
                 const result = await apiCall('/api/admin/nfd');
-                this.commandOutput = result.info;
+                this.commandOutput = result?.info || 'No FD info received';
             } catch (e) {
-                alert('Failed to get FD info: ' + e.message);
+                alert('Failed to get FD info: ' + (e?.message || e));
             }
         },
 
@@ -335,14 +343,14 @@ function adminPage() {
 
             try {
                 const result = await apiCall('/api/admin/killit', { method: 'POST' });
-                this.commandOutput = result.response;
+                this.commandOutput = result?.response || 'Shutdown initiated';
                 alert('Daemon shutdown initiated. The web UI will stop working shortly.');
 
                 // Reset confirmation
                 this.killitConfirm = false;
                 this.killitText = '';
             } catch (e) {
-                alert('Failed to shutdown daemon: ' + e.message);
+                alert('Failed to shutdown daemon: ' + (e?.message || e));
             }
         },
 

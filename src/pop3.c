@@ -94,7 +94,7 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
            it's been set up */
 
         struct pop3data *localstruct = NULL;
-        char buffer[256];
+        char buffer[PROTO_RESPONSE_SIZE + 1];
         int isopenretval = -1;
 
         /* do some variable shufflign */
@@ -153,14 +153,20 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
                                 {
 				        /* prepare the buffer */
-				        snprintf(buffer, sizeof(buffer), "USER %s", 
+				        snprintf(buffer, sizeof(buffer), "USER %s",
 						here->checkent->username);
 
 				        /* send the buffer out the socket */
@@ -176,14 +182,20 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
                                         print_err(0, "Got :%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
                                 {
                                         /* prepare the buffer */
-                                        snprintf(buffer, sizeof(buffer), "PASS %s", 
+                                        snprintf(buffer, sizeof(buffer), "PASS %s",
 						here->checkent->password);
 
                                         /* send the buffer out the socket */
@@ -199,10 +211,16 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
 		{
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
-                                        print_err(0, "Got(pop3_sent_pass):%s:", 
+                                        print_err(0, "Got(pop3_sent_pass):%s:",
 						buffer);
 				if (strncmp(buffer, "+OK", 3) == 0)
 					here->retval = SYSM_OK;
@@ -221,8 +239,14 @@ void	service_test_pop3(struct monitorent *here, time_t now_t)
                 {
                         if (data_waiting_read(here->filedes, 0))
                         {
+                                int bytes_read;
                                 memset(buffer, 0, sizeof(buffer));
-                                read(here->filedes, buffer, sizeof(buffer) - 1);
+                                bytes_read = read(here->filedes, buffer, PROTO_RESPONSE_SIZE);
+                                if (bytes_read <= 0)
+                                {
+                                        here->retval = (bytes_read == 0) ? SYSM_CONNREF : SYSM_BAD_RESP;
+                                        break;
+                                }
                                 if (debug)
                                         print_err(0, "Got2:%s:", buffer);
                                 if (strncmp(buffer, "+OK", 3) == 0)
