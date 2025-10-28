@@ -36,7 +36,7 @@
 
     <!-- Comparison View -->
     <div x-show="viewMode === 'comparison'" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
-        <template x-for="host in filteredHosts" :key="host.hostname">
+        <template x-for="host in filteredHosts" :key="'comp-' + host.hostname">
             <div class="relative group">
                 <div class="bg-white rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
                      :class="{
@@ -148,7 +148,7 @@
                 </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
-                <template x-for="host in sortedHosts" :key="host.hostname">
+                <template x-for="host in sortedHosts" :key="'table-' + host.hostname">
                     <tr class="hover:bg-gray-50 cursor-pointer" @click="selectHost(host)">
                         <td class="px-4 py-2 whitespace-nowrap">
                             <div class="flex items-center">
@@ -414,7 +414,9 @@ function hostsPage() {
                     return;
                 }
 
-                this.hosts = await response.json();
+                const data = await response.json();
+                // Ensure hosts is always an array, even if API returns null
+                this.hosts = Array.isArray(data) ? data : [];
                 this.loading = false;
             } catch (e) {
                 console.error('Failed to fetch hosts:', e);
