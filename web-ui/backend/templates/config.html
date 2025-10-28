@@ -165,16 +165,50 @@
         <!-- Config Content -->
         <div x-show="!loadingStructured" class="space-y-6">
 
-            <!-- Global Settings Section -->
+            <!-- Combined Settings Section (Global & Spawns) - Minimizable -->
             <div class="bg-white rounded-lg shadow-md">
-                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
-                     @click="sections.global = !sections.global">
-                    <h2 class="text-xl font-semibold text-gray-900">
-                        <i class="fas fa-globe mr-2"></i>Global Settings
-                    </h2>
-                    <i class="fas" :class="sections.global ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                <!-- Minimized Header -->
+                <div x-show="!settingsExpanded"
+                     @click="settingsExpanded = true"
+                     class="px-6 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-l-4 border-blue-500">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-cog text-blue-600 text-lg"></i>
+                            <span class="text-sm font-semibold text-gray-800">Global Settings & Spawn Commands</span>
+                            <span class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Click to configure</span>
+                        </div>
+                        <i class="fas fa-chevron-down text-gray-400"></i>
+                    </div>
                 </div>
-                <div x-show="sections.global" class="px-6 py-4">
+
+                <!-- Expanded View -->
+                <div x-show="settingsExpanded">
+                    <!-- Header with View Selector and Minimize Button -->
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                <button @click="settingsView = 'global'"
+                                        :class="settingsView === 'global' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                                        class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
+                                    <i class="fas fa-globe mr-2"></i>Global Settings
+                                </button>
+                                <button @click="settingsView = 'spawns'"
+                                        :class="settingsView === 'spawns' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                                        class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
+                                    <i class="fas fa-terminal mr-2"></i>Spawn Commands
+                                    <span class="ml-1 text-xs" x-text="'(' + structuredConfig.spawns.length + ')'"></span>
+                                </button>
+                            </div>
+                            <button @click="settingsExpanded = false"
+                                    class="text-gray-400 hover:text-gray-600 transition-colors"
+                                    title="Minimize">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Global Settings Content -->
+                    <div x-show="settingsView === 'global'" class="px-6 py-4">
                     <!-- Core Settings Tab Navigation -->
                     <div class="mb-4 border-b border-gray-200">
                         <nav class="-mb-px flex space-x-8">
@@ -459,20 +493,10 @@
                             </label>
                         </div>
                     </div>
-                </div>
-            </div>
+                    </div>
 
-            <!-- Spawn Commands Section -->
-            <div class="bg-white rounded-lg shadow-md">
-                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
-                     @click="sections.spawns = !sections.spawns">
-                    <h2 class="text-xl font-semibold text-gray-900">
-                        <i class="fas fa-terminal mr-2"></i>Spawn Commands
-                        <span class="text-sm font-normal text-gray-500 ml-2">(<span x-text="structuredConfig.spawns.length"></span> commands)</span>
-                    </h2>
-                    <i class="fas" :class="sections.spawns ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
-                </div>
-                <div x-show="sections.spawns" class="px-6 py-4">
+                    <!-- Spawn Commands Content -->
+                    <div x-show="settingsView === 'spawns'" class="px-6 py-4">
                     <!-- Add New Spawn -->
                     <div class="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
                         <div class="flex gap-3">
@@ -513,6 +537,7 @@
                             <i class="fas fa-terminal text-4xl text-gray-300 mb-2"></i>
                             <p>No spawn commands defined. Add one above to get started.</p>
                         </div>
+                    </div>
                     </div>
                 </div>
             </div>
@@ -1166,6 +1191,9 @@ function unifiedConfigPage() {
             spawns: true,
             hosts: true
         },
+        // Combined Settings Section (Global & Spawns)
+        settingsExpanded: false,  // Minimized by default
+        settingsView: 'global',   // 'global' or 'spawns'
         globalTab: 'core',
         expandedHosts: {},
         dependencySuggestions: {},
@@ -1482,6 +1510,17 @@ function unifiedConfigPage() {
         editHost(index) {
             // Make a deep copy of the host for editing
             this.editingHost = JSON.parse(JSON.stringify(this.structuredConfig.hosts[index]));
+
+            // Initialize UI-specific fields that aren't saved in config
+            if (!this.editingHost.activeTab) {
+                this.editingHost.activeTab = 'overview';
+            }
+
+            // Determine if using custom spawn (not in predefined spawns list)
+            const isCustomSpawn = this.editingHost.customspawn ||
+                (this.editingHost.spawn && !this.structuredConfig.spawns.some(s => s.name === this.editingHost.spawn));
+            this.editingHost.useCustomSpawn = isCustomSpawn;
+
             this.editingHostIndex = index;
             this.showHostModal = true;
         },
@@ -1498,12 +1537,33 @@ function unifiedConfigPage() {
                 return;
             }
 
+            // Create a clean copy without UI-only fields
+            const hostToSave = { ...this.editingHost };
+            delete hostToSave.activeTab;
+            delete hostToSave.useCustomSpawn;
+
+            // Handle spawn vs customspawn
+            if (this.editingHost.useCustomSpawn && this.editingHost.customspawn) {
+                hostToSave.spawn = '';
+                hostToSave.customspawn = this.editingHost.customspawn;
+            } else if (this.editingHost.spawn) {
+                hostToSave.spawn = this.editingHost.spawn;
+                hostToSave.customspawn = '';
+            }
+
+            // Remove empty/null fields to keep config clean
+            Object.keys(hostToSave).forEach(key => {
+                if (hostToSave[key] === '' || hostToSave[key] === null || hostToSave[key] === undefined) {
+                    delete hostToSave[key];
+                }
+            });
+
             if (this.editingHostIndex === -1) {
                 // Adding new host
-                this.structuredConfig.hosts.push(this.editingHost);
+                this.structuredConfig.hosts.push(hostToSave);
             } else {
                 // Updating existing host
-                this.structuredConfig.hosts[this.editingHostIndex] = this.editingHost;
+                this.structuredConfig.hosts[this.editingHostIndex] = hostToSave;
             }
 
             this.closeHostModal();

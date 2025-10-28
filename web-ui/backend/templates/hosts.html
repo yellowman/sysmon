@@ -197,9 +197,30 @@
     </div>
 
     <!-- Empty State -->
-    <div x-show="filteredHosts.length === 0 && !loading" class="text-center py-12">
+    <div x-show="filteredHosts.length === 0 && !loading && !error" class="text-center py-12">
         <i class="fas fa-server text-6xl text-gray-300 mb-4"></i>
         <p class="text-gray-500">No hosts found</p>
+    </div>
+
+    <!-- Error State -->
+    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6">
+        <div class="flex items-start">
+            <i class="fas fa-exclamation-circle text-red-500 text-2xl mr-3"></i>
+            <div class="flex-1">
+                <h3 class="text-lg font-semibold text-red-900 mb-2">Failed to Load Hosts</h3>
+                <p class="text-red-700" x-text="error"></p>
+                <p class="text-sm text-red-600 mt-2">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    Make sure the sysmon daemon is running and accessible.
+                </p>
+                <button @click="fetchHosts()" class="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+                    <i class="fas fa-sync-alt mr-2"></i>Retry
+                </button>
+            </div>
+            <button @click="error = null" class="text-red-400 hover:text-red-600">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
     </div>
 
     <!-- Loading State -->
@@ -328,6 +349,7 @@
 function hostsPage() {
     return {
         loading: true,
+        error: null,
         hosts: [],
         searchQuery: '',
         filterStatus: '',
@@ -380,11 +402,24 @@ function hostsPage() {
 
         async fetchHosts() {
             try {
+                this.loading = true;
+                this.error = null;
+
                 const response = await fetch('/api/monitoring/hosts');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: 'Failed to fetch hosts' }));
+                    this.error = errorData.message || `Server returned ${response.status}`;
+                    this.hosts = [];
+                    this.loading = false;
+                    return;
+                }
+
                 this.hosts = await response.json();
                 this.loading = false;
             } catch (e) {
                 console.error('Failed to fetch hosts:', e);
+                this.error = e.message || 'Failed to connect to server';
+                this.hosts = [];
                 this.loading = false;
             }
         },

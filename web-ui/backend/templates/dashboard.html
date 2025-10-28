@@ -27,8 +27,8 @@
                                 'fas fa-times-circle text-red-400': host.overall_status === 'CRITICAL'
                             }"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -54,8 +54,8 @@
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-check-circle text-green-400"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -81,8 +81,8 @@
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-exclamation-triangle text-yellow-400"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -108,8 +108,8 @@
                         <div class="text-xs flex items-center gap-1">
                             <i class="fas fa-times-circle text-red-400"></i>
                             <div class="flex-1">
-                                <div x-text="host.hostname" class="font-medium"></div>
-                                <div x-show="host.description" x-text="host.description" class="text-gray-400 text-[10px]"></div>
+                                <div x-text="host.description || host.hostname" class="font-medium"></div>
+                                <div x-show="host.ipv4_address" x-text="host.ipv4_address" class="text-gray-400 text-[10px]"></div>
                             </div>
                         </div>
                     </template>
@@ -205,54 +205,64 @@
     </div>
 
     <!-- Active Alerts -->
-    <div class="bg-white rounded-lg shadow mb-8" x-show="alerts.length > 0">
-        <div class="px-4 py-3 border-b border-gray-200">
+    <div class="-mx-4 sm:-mx-6 lg:-mx-8 bg-white shadow mb-8" x-show="alerts.length > 0">
+        <div class="px-4 sm:px-6 lg:px-8 py-3 border-b border-gray-200">
             <h2 class="text-base font-semibold text-gray-900">
                 <i class="fas fa-bell mr-2 text-red-500"></i>Active Alerts (<span x-text="alerts.length"></span>)
             </h2>
         </div>
-        <div class="divide-y divide-gray-100">
+        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 p-3 px-4 sm:px-6 lg:px-8">
             <template x-for="alert in alerts" :key="alert.hostname">
-                <div class="px-4 py-2 hover:bg-gray-50 text-sm">
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center gap-2 flex-1 min-w-0">
-                            <span :class="{
-                                'bg-yellow-100 text-yellow-800': alert.overall_status === 'WARNING',
-                                'bg-red-100 text-red-800': alert.overall_status === 'CRITICAL'
-                            }" class="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0" x-text="alert.overall_status"></span>
-                            <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
-                            <span class="text-xs text-gray-400 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
-                            <!-- Inline check badges -->
-                            <div class="flex gap-1 flex-wrap">
-                                <template x-for="check in alert.checks" :key="check.type">
-                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]"
-                                          :class="{
-                                              'bg-green-50 text-green-700': check.status === 'OK',
-                                              'bg-yellow-50 text-yellow-700': check.status === 'WARNING',
-                                              'bg-red-50 text-red-700': check.status === 'CRITICAL'
-                                          }">
-                                        <i :class="{
-                                            'fas fa-check': check.status === 'OK',
-                                            'fas fa-exclamation-triangle': check.status === 'WARNING',
-                                            'fas fa-times': check.status === 'CRITICAL'
-                                        }" class="text-[8px]"></i>
-                                        <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
-                                    </span>
-                                </template>
+                <div class="border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50 hover:border-gray-300 transition-all text-sm">
+                    <div class="flex flex-col gap-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-start gap-2 flex-1 min-w-0">
+                                <span :class="{
+                                    'bg-yellow-100 text-yellow-800': alert.overall_status === 'WARNING',
+                                    'bg-red-100 text-red-800': alert.overall_status === 'CRITICAL'
+                                }" class="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0" x-text="alert.overall_status"></span>
+                                <div class="flex flex-col min-w-0 flex-1">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
+                                        <span class="text-xs text-gray-500" x-show="alert.ipv4_address && alert.ipv4_address !== alert.hostname" x-text="alert.ipv4_address"></span>
+                                        <span class="text-sm text-gray-600 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
+                                    </div>
+                                    <div class="text-[10px] text-gray-400" x-show="alert.last_change_time">
+                                        <i class="fas fa-clock mr-1"></i>
+                                        <span x-text="formatTimeAgo(alert.last_change_time)"></span>
+                                    </div>
+                                    <!-- Inline check badges -->
+                                    <div class="flex gap-1 flex-wrap mt-1">
+                                        <template x-for="check in alert.checks" :key="check.type">
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]"
+                                                  :class="{
+                                                      'bg-green-50 text-green-700': check.status === 'OK',
+                                                      'bg-yellow-50 text-yellow-700': check.status === 'WARNING',
+                                                      'bg-red-50 text-red-700': check.status === 'CRITICAL'
+                                                  }">
+                                                <i :class="{
+                                                    'fas fa-check': check.status === 'OK',
+                                                    'fas fa-exclamation-triangle': check.status === 'WARNING',
+                                                    'fas fa-times': check.status === 'CRITICAL'
+                                                }" class="text-[8px]"></i>
+                                                <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="flex items-center gap-1.5 flex-shrink-0">
-                            <span class="text-xs text-gray-500 hidden sm:inline" x-show="alert.contact" x-text="alert.contact"></span>
-                            <button @click="ackHost(alert.hostname)"
-                                    class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
-                                    title="Acknowledge">
-                                <i class="fas fa-check"></i>
-                            </button>
-                            <button @click="showUpdateDialog(alert.hostname)"
-                                    class="px-2 py-1 bg-green-600 text-white text-[10px] rounded hover:bg-green-700"
-                                    title="Update">
-                                <i class="fas fa-edit"></i>
-                            </button>
+                            <div class="flex flex-col gap-1 flex-shrink-0">
+                                <button @click="ackHost(alert.hostname)"
+                                        class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
+                                        title="Acknowledge">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button @click="showUpdateDialog(alert.hostname)"
+                                        class="px-2 py-1 bg-green-600 text-white text-[10px] rounded hover:bg-green-700"
+                                        title="Update">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -490,11 +500,21 @@ function dashboard() {
 
                 // Get all hosts for tooltips
                 const hostsResponse = await fetch('/api/monitoring/hosts');
-                this.allHosts = await hostsResponse.json();
+                if (hostsResponse.ok) {
+                    this.allHosts = await hostsResponse.json();
+                } else {
+                    console.warn('Failed to fetch hosts for tooltips');
+                    this.allHosts = [];
+                }
 
                 // Get alerts
                 const alertsResponse = await fetch('/api/monitoring/alerts');
-                this.alerts = await alertsResponse.json();
+                if (alertsResponse.ok) {
+                    this.alerts = await alertsResponse.json();
+                } else {
+                    console.warn('Failed to fetch alerts');
+                    this.alerts = [];
+                }
 
                 // Get traps
                 if (data.snmp_traps) {
@@ -582,6 +602,34 @@ function dashboard() {
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
             return `${Math.floor(diff / 86400)}d ago`;
+        },
+
+        formatTimeAgo(timestamp) {
+            if (!timestamp) return '';
+            const now = new Date();
+            const then = new Date(timestamp);
+            const diffMs = now - then;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            // Format absolute time as YYYY/MM/DD HH:MM:SS
+            const year = then.getFullYear();
+            const month = String(then.getMonth() + 1).padStart(2, '0');
+            const day = String(then.getDate()).padStart(2, '0');
+            const hours = String(then.getHours()).padStart(2, '0');
+            const minutes = String(then.getMinutes()).padStart(2, '0');
+            const seconds = String(then.getSeconds()).padStart(2, '0');
+            const absoluteTime = `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+
+            // Get relative time
+            let relativeTime;
+            if (diffMins < 1) relativeTime = 'just now';
+            else if (diffMins < 60) relativeTime = `${diffMins}m ago`;
+            else if (diffHours < 24) relativeTime = `${diffHours}h ago`;
+            else relativeTime = `${diffDays}d ago`;
+
+            return `(${relativeTime}) ${absoluteTime}`;
         },
 
         copyXMLToClipboard() {
