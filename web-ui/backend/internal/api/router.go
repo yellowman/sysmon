@@ -98,7 +98,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	cache := middleware.NewCacheConfig()
 
 	// Apply middleware chain: CORS -> Metrics -> Cache -> Rate Limiting -> Handler
-	handler := r.mux
+	var handler http.Handler = r.mux
 	handler = rateLimiter.Middleware(handler)
 	handler = cache.Middleware(handler)
 	handler = metrics.Middleware(handler)
@@ -380,7 +380,7 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 	if req.URL.Query().Get("page") != "" || req.URL.Query().Get("limit") != "" {
 		params := r.parsePaginationParams(req)
 
-		total := len(traps)
+		total := len(traps.RecentTraps)
 		start := (params.Page - 1) * params.Limit
 		end := start + params.Limit
 
@@ -391,7 +391,7 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 			end = total
 		}
 
-		paginatedTraps := traps[start:end]
+		paginatedTraps := traps.RecentTraps[start:end]
 		totalPages := (total + params.Limit - 1) / params.Limit
 		if totalPages == 0 {
 			totalPages = 1
