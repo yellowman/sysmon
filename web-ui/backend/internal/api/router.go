@@ -397,12 +397,16 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 			totalPages = 1
 		}
 
+		// Return paginated traps with sources and summary (not paginated)
+		// This maintains consistency with non-paginated response structure
 		response := map[string]interface{}{
-			"data":        paginatedTraps,
-			"total":       total,
-			"page":        params.Page,
-			"limit":       params.Limit,
-			"total_pages": totalPages,
+			"data":         paginatedTraps,
+			"total":        total,
+			"page":         params.Page,
+			"limit":        params.Limit,
+			"total_pages":  totalPages,
+			"trap_sources": traps.TrapSources,
+			"summary":      traps.Summary,
 		}
 		r.sendJSON(w, response)
 	} else {
