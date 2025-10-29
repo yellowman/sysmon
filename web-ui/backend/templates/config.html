@@ -563,36 +563,27 @@
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP / Hostname</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hostname</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dependencies</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Alert</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                                     <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <template x-for="(host, index) in structuredConfig.hosts" :key="host.ip || 'host-' + index">
+                                <template x-for="(host, index) in structuredConfig.hosts" :key="host.hostname || 'host-' + index">
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <div class="text-sm font-medium text-gray-900" x-text="host.ip || 'Not set'"></div>
+                                            <div class="text-sm font-medium text-gray-900" x-text="host.hostname || 'Not set'"></div>
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <div class="text-sm text-gray-600" x-text="host.ip || '-'"></div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-900 truncate max-w-md" x-text="host.notes || '-'"></div>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap">
                                             <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded" x-text="host.type || 'ping'"></span>
-                                        </td>
-                                        <td class="px-4 py-3">
-                                            <div class="text-sm text-gray-900 truncate max-w-xs" x-text="host.notes || '-'"></div>
-                                        </td>
-                                        <td class="px-4 py-3">
-                                            <div class="text-sm text-gray-500 truncate max-w-xs" x-text="host.dependencies || '-'"></div>
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap">
-                                            <div class="text-sm text-gray-500" x-text="host.spawn || host.customspawn || '-'"></div>
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap">
-                                            <span x-show="host.paused" class="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded">PAUSED</span>
-                                            <span x-show="!host.paused" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">ACTIVE</span>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                                             <button @click="editHost(index)" class="text-blue-600 hover:text-blue-900 mr-3">
