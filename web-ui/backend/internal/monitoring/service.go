@@ -487,16 +487,31 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			host.IPv4Address = xmlObj.HostName
 		}
 
-		// Calculate last change time from DeathTime (when went down) or LastTimeUp (when came back up)
-		// Use the most recent of the two as the last change time
-		if xmlObj.ObjectState != 0 && xmlObj.DeathTime > 0 {
-			// Currently down, so DeathTime is the last change
-			changeTime := time.Unix(xmlObj.DeathTime, 0)
-			host.LastChangeTime = &changeTime
-		} else if xmlObj.ObjectState == 0 && xmlObj.LastTimeUp > 0 {
-			// Currently up, so LastTimeUp is the last change
-			changeTime := time.Unix(xmlObj.LastTimeUp, 0)
-			host.LastChangeTime = &changeTime
+		// Calculate timing information and last change time
+		currentTime := time.Now()
+
+		if xmlObj.ObjectState != 0 {
+			// Currently DOWN
+			if xmlObj.DeathTime > 0 {
+				deathTime := time.Unix(xmlObj.DeathTime, 0)
+				host.LastChangeTime = &deathTime
+				host.LastOutage = &deathTime
+				host.TimeFailed = int64(currentTime.Sub(deathTime).Seconds())
+				host.TimeUp = 0
+			}
+		} else {
+			// Currently UP
+			if xmlObj.LastTimeUp > 0 {
+				lastTimeUp := time.Unix(xmlObj.LastTimeUp, 0)
+				host.LastChangeTime = &lastTimeUp
+				host.TimeUp = int64(currentTime.Sub(lastTimeUp).Seconds())
+				host.TimeFailed = 0
+			}
+			// LastOutage is when it last went down (before coming back up)
+			if xmlObj.DeathTime > 0 {
+				lastOutage := time.Unix(xmlObj.DeathTime, 0)
+				host.LastOutage = &lastOutage
+			}
 		}
 
 		// Status logic:
