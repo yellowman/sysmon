@@ -219,6 +219,9 @@ type HostStatus struct {
 	TotalDown      int64         `json:"total_down"`          // Total times down
 	TotalChecked   int64         `json:"total_checked"`       // Total checks performed
 	LastChangeTime *time.Time    `json:"last_change_time,omitempty"` // When status last changed
+	TimeUp         int64         `json:"time_up,omitempty"`          // Seconds host has been up (0 if down)
+	TimeFailed     int64         `json:"time_failed,omitempty"`      // Seconds host has been down (0 if up)
+	LastOutage     *time.Time    `json:"last_outage,omitempty"`      // When last outage occurred
 	Checks         []CheckResult `json:"checks"`
 }
 
