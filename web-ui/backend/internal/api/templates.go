@@ -93,7 +93,8 @@ func isBrokenPipe(err error) bool {
 
 // PageData contains template data for page rendering
 type PageData struct {
-	Active string // Current active page for navigation highlighting
+	Active   string // Current active page for navigation highlighting
+	Hostname string // Hostname for host detail pages
 }
 
 // Page handlers
@@ -106,7 +107,13 @@ func (r *Router) handleHostsPage(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleHostDetailPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "hosts-detail.html", PageData{Active: "hosts"})
+	// Extract hostname from query parameter
+	hostname := req.URL.Query().Get("hostname")
+	
+	r.renderTemplate(w, "hosts-detail.html", PageData{
+		Active:   "hosts",
+		Hostname: hostname,
+	})
 }
 
 func (r *Router) handleTrapsPage(w http.ResponseWriter, req *http.Request) {

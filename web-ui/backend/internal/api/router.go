@@ -47,8 +47,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	// Live monitoring
 	r.mux.HandleFunc("/api/monitoring/status", r.handleMonitoringStatus)
 	r.mux.HandleFunc("/api/monitoring/hosts", r.handleMonitoringHosts)
+	r.mux.HandleFunc("/api/monitoring/host/", r.handleMonitoringHost)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
+	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
 	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
 	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
@@ -283,6 +285,11 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 
 	if strings.HasSuffix(filename, "/restore") {
 		// Restore backup
+		if req.Method != http.MethodPost {
+			r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed for restore")
+			return
+		}
+
 		filename = strings.TrimSuffix(filename, "/restore")
 		user, ip := r.getUserInfo(req)
 
@@ -295,7 +302,28 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	// GET backup details
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed for backup details")
+		return
+	}
+
+	// Get backup information
+	backups, err := r.config.ListBackups()
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Find the specific backup
+	for _, backup := range backups {
+		if backup.Filename == filename {
+			r.sendJSON(w, backup)
+			return
+		}
+	}
+
+	r.sendError(w, http.StatusNotFound, fmt.Sprintf("Backup %s not found", filename))
 }
 
 // Monitoring handlers
@@ -359,6 +387,51 @@ func (r *Router) handleMonitoringHosts(w http.ResponseWriter, req *http.Request)
 		// No pagination requested, return all hosts (backward compatible)
 		r.sendJSON(w, status.Hosts)
 	}
+}
+
+func (r *Router) handleMonitoringHost(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Extract hostname from URL path
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/host/")
+	hostname = strings.TrimSpace(hostname)
+
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	// Get host status
+	host, err := r.monitoring.GetHostStatus(hostname)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			r.sendError(w, http.StatusNotFound, fmt.Sprintf("Host %s not found", hostname))
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get host status: %v", err))
+		return
+	}
+
+	r.sendJSON(w, host)
+}
+
+func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	// Get statistics
+	stats, err := r.monitoring.GetStatistics()
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get statistics: %v", err))
+		return
+	}
+
+	r.sendJSON(w, stats)
 }
 
 func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request) {

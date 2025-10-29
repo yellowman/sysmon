@@ -36,7 +36,7 @@ func Generate(config *models.Config) (string, error) {
 
 	// Hosts
 	for _, host := range config.Hosts {
-		sb.WriteString(fmt.Sprintf("monitor %s\n", host.Hostname))
+		sb.WriteString(fmt.Sprintf("object %s {\n", host.Hostname))
 
 		if host.Contact != "" {
 			sb.WriteString(fmt.Sprintf("  contact %s\n", host.Contact))
@@ -107,7 +107,7 @@ func Generate(config *models.Config) (string, error) {
 			}
 		}
 
-		sb.WriteString("\n")
+		sb.WriteString("}\n\n")
 	}
 
 	return sb.String(), nil
