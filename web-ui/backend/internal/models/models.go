@@ -142,6 +142,7 @@ type Host struct {
 
 	// Per-object overrides and customization
 	QueueTime            int    `json:"queuetime,omitempty"`            // per-object check interval in seconds
+	NumFailures          int    `json:"numfailures,omitempty"`          // per-object failures before alert (overrides global)
 	PMsg                 string `json:"pmsg,omitempty"`                 // custom page message format
 	Command              string `json:"command,omitempty"`              // command to execute on failure
 	Group                string `json:"group,omitempty"`                // group/category for organization

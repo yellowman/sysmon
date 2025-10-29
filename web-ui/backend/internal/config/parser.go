@@ -3,7 +3,6 @@ package config
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"strconv"
 	"strings"
 
