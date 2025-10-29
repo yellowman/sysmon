@@ -119,91 +119,6 @@
         </div>
     </div>
 
-    <!-- Monitored Hosts -->
-    <div class="bg-white rounded-lg shadow mb-8">
-        <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-server mr-2"></i>Monitored Hosts
-            </h2>
-        </div>
-        <div class="p-4">
-            <!-- Down/Warning/Critical Hosts First -->
-            <template x-if="downAndWarningHosts.length > 0">
-                <div class="mb-6">
-                    <h3 class="text-sm font-semibold text-red-600 mb-3 flex items-center">
-                        <i class="fas fa-exclamation-circle mr-2"></i>
-                        Problem Hosts (<span x-text="downAndWarningHosts.length"></span>)
-                    </h3>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-                        <template x-for="host in downAndWarningHosts" :key="host._uniqueId">
-                            <div class="relative group">
-                                <div class="border-2 rounded p-2 cursor-pointer transition-all duration-200 hover:shadow-md"
-                                     :class="{
-                                         'border-yellow-400 bg-yellow-50': host.overall_status === 'WARNING',
-                                         'border-red-500 bg-red-50': host.overall_status === 'CRITICAL'
-                                     }">
-                                    <div class="text-xs font-bold truncate" x-text="host.hostname" :title="host.hostname"></div>
-                                    <div class="text-[10px] text-gray-500 truncate" x-text="host.description || host.ipv4_address" :title="host.description || host.ipv4_address"></div>
-                                    <div class="absolute top-1 right-1 w-2 h-2 rounded-full"
-                                         :class="{
-                                             'bg-yellow-500': host.overall_status === 'WARNING',
-                                             'bg-red-500': host.overall_status === 'CRITICAL'
-                                         }"></div>
-                                </div>
-                                <!-- Hover Tooltip -->
-                                <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
-                                    <div class="font-bold mb-2" x-text="host.hostname"></div>
-                                    <div class="space-y-1">
-                                        <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
-                                        <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
-                                        <div><span class="text-gray-400">Status:</span>
-                                            <span :class="{
-                                                'text-yellow-400': host.overall_status === 'WARNING',
-                                                'text-red-400': host.overall_status === 'CRITICAL'
-                                            }" x-text="host.overall_status"></span>
-                                        </div>
-                                        <div x-show="host.contact"><span class="text-gray-400">Contact:</span> <span x-text="host.contact"></span></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-            </template>
-
-            <!-- Healthy Hosts -->
-            <template x-if="healthyHosts.length > 0">
-                <div>
-                    <h3 class="text-sm font-semibold text-green-600 mb-3 flex items-center">
-                        <i class="fas fa-check-circle mr-2"></i>
-                        Healthy Hosts (<span x-text="healthyHosts.length"></span>)
-                    </h3>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-                        <template x-for="host in healthyHosts" :key="host._uniqueId">
-                            <div class="relative group">
-                                <div class="border border-green-200 bg-green-50 rounded p-2 cursor-pointer transition-all duration-200 hover:shadow-md hover:border-green-400">
-                                    <div class="text-xs font-bold truncate" x-text="host.hostname" :title="host.hostname"></div>
-                                    <div class="text-[10px] text-gray-500 truncate" x-text="host.description || host.ipv4_address" :title="host.description || host.ipv4_address"></div>
-                                    <div class="absolute top-1 right-1 w-2 h-2 rounded-full bg-green-500"></div>
-                                </div>
-                                <!-- Hover Tooltip -->
-                                <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
-                                    <div class="font-bold mb-2" x-text="host.hostname"></div>
-                                    <div class="space-y-1">
-                                        <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
-                                        <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
-                                        <div><span class="text-gray-400">Status:</span> <span class="text-green-400">OK</span></div>
-                                        <div x-show="host.contact"><span class="text-gray-400">Contact:</span> <span x-text="host.contact"></span></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-            </template>
-        </div>
-    </div>
-
     <!-- Active Alerts -->
     <div class="-mx-4 sm:-mx-6 lg:-mx-8 bg-white shadow mb-8" x-show="alerts.length > 0">
         <div class="px-4 sm:px-6 lg:px-8 py-3 border-b border-gray-200">
@@ -223,9 +138,8 @@
                                 }" class="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0" x-text="alert.overall_status"></span>
                                 <div class="flex flex-col min-w-0 flex-1">
                                     <div class="flex items-center gap-2 flex-wrap">
-                                        <span class="font-medium text-gray-900 truncate" x-text="alert.hostname" :title="alert.hostname"></span>
-                                        <span class="text-xs text-gray-500" x-show="alert.ipv4_address && alert.ipv4_address !== alert.hostname" x-text="alert.ipv4_address"></span>
-                                        <span class="text-sm text-gray-600 truncate" x-show="alert.description" x-text="alert.description" :title="alert.description"></span>
+                                        <span class="font-medium text-gray-900 truncate" x-text="alert.description || alert.hostname" :title="alert.description || alert.hostname"></span>
+                                        <span class="text-xs text-gray-500 truncate" x-text="alert.description ? ('(' + alert.hostname + ')') : (alert.ipv4_address && alert.ipv4_address !== alert.hostname ? '(' + alert.ipv4_address + ')' : '')"></span>
                                     </div>
                                     <div class="text-[10px] text-gray-400" x-show="alert.last_change_time">
                                         <i class="fas fa-clock mr-1"></i>
