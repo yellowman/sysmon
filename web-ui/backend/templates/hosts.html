@@ -213,85 +213,77 @@
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>
-                    <th class="px-4 py-2 w-12">
-                        <input type="checkbox"
-                               :checked="selectedHosts.length === filteredHosts.length && filteredHosts.length > 0"
-                               @change="toggleSelectAll()"
-                               class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
-                    </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         @click="sortBy('hostname')">
-                        Hostname <i class="fas fa-sort text-xs ml-1"></i>
+                        HostName <i class="fas fa-sort text-xs ml-1"></i>
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        IP Address
+                        Description
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Type
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Port
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Down N
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Up N
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Notified
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         @click="sortBy('status')">
                         Status <i class="fas fa-sort text-xs ml-1"></i>
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Checks
+                        Time Up
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Contact
+                        Time Failed
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Last Check
+                        Last Outage
+                    </th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Uptime
                     </th>
                 </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
                 <template x-for="host in sortedHosts" :key="host._uniqueId">
-                    <tr class="hover:bg-gray-50 cursor-pointer"
-                        :class="{'bg-blue-50': isSelected(host.hostname)}"
+                    <tr class="cursor-pointer transition-colors"
+                        :class="{
+                            'bg-green-50 hover:bg-green-100': host.overall_status === 'OK',
+                            'bg-yellow-50 hover:bg-yellow-100': host.overall_status === 'WARNING',
+                            'bg-red-50 hover:bg-red-100': host.overall_status === 'CRITICAL',
+                            'bg-gray-50 hover:bg-gray-100': !host.overall_status || host.paused
+                        }"
                         @click="selectHost(host)">
-                        <td class="px-4 py-2 whitespace-nowrap" @click.stop>
-                            <input type="checkbox"
-                                   :checked="isSelected(host.hostname)"
-                                   @change="toggleSelection(host.hostname)"
-                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
-                        </td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.hostname"></td>
+                        <td class="px-4 py-2 text-sm text-gray-900" x-text="host.description || '-'"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getPrimaryCheckType(host)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getPrimaryCheckPort(host)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.down_count || 0"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.up_count || 0"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">No</td>
                         <td class="px-4 py-2 whitespace-nowrap">
-                            <div class="flex items-center">
-                                <div class="w-2 h-2 rounded-full mr-2"
-                                     :class="{
-                                         'bg-green-500': host.overall_status === 'OK',
-                                         'bg-yellow-500': host.overall_status === 'WARNING',
-                                         'bg-red-500': host.overall_status === 'CRITICAL',
-                                         'bg-gray-400': host.paused
-                                     }"></div>
-                                <span class="text-sm font-medium text-gray-900" x-text="host.hostname"></span>
-                                <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 ml-2"></i>
-                            </div>
-                        </td>
-                        <td class="px-4 py-2 text-sm text-gray-500">
-                            <template x-if="host.description">
-                                <div class="font-medium" x-text="host.description"></div>
-                            </template>
-                            <template x-if="host.ipv4_address">
-                                <div class="text-xs text-gray-400" x-text="host.ipv4_address"></div>
-                            </template>
-                            <template x-if="!host.description && !host.ipv4_address">
-                                <span>-</span>
-                            </template>
-                        </td>
-                        <td class="px-4 py-2 whitespace-nowrap">
-                            <span class="px-2 py-1 text-xs font-medium rounded"
+                            <span class="text-sm font-medium"
                                   :class="{
-                                      'bg-green-100 text-green-800': host.overall_status === 'OK',
-                                      'bg-yellow-100 text-yellow-800': host.overall_status === 'WARNING',
-                                      'bg-red-100 text-red-800': host.overall_status === 'CRITICAL'
+                                      'text-green-700': host.overall_status === 'OK',
+                                      'text-yellow-700': host.overall_status === 'WARNING',
+                                      'text-red-700': host.overall_status === 'CRITICAL',
+                                      'text-gray-700': !host.overall_status
                                   }"
-                                  x-text="host.overall_status"></span>
+                                  x-text="getStatusLabel(host)"></span>
                         </td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                            <span x-text="getCheckStats(host)"></span>
-                        </td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500" x-text="host.contact || '-'"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-xs text-gray-500">
-                            <span x-text="getLastCheckTime(host)"></span>
-                        </td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatDuration(host.time_up)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatDuration(host.time_failed)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatLastOutage(host.last_outage)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getUptimePercent(host)"></td>
                     </tr>
                 </template>
             </tbody>
@@ -484,7 +476,7 @@ function hostsPage() {
         refreshInterval: null,
 
         // Pagination
-        perPage: 'all',
+        perPage: 50,  // Start with pagination enabled for performance with large host counts
         currentPage: 1,
         totalPages: 1,
         totalHosts: 0,
@@ -732,6 +724,76 @@ function hostsPage() {
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
             return `${Math.floor(diff / 86400)}d ago`;
+        },
+
+        // Get primary check type (prefer ping, otherwise first check)
+        getPrimaryCheckType(host) {
+            if (!host.checks || host.checks.length === 0) return '-';
+            const pingCheck = host.checks.find(c => c.type === 'ping');
+            return pingCheck ? pingCheck.type : host.checks[0].type;
+        },
+
+        // Get primary check port (prefer ping, otherwise first check)
+        getPrimaryCheckPort(host) {
+            if (!host.checks || host.checks.length === 0) return '-';
+            const pingCheck = host.checks.find(c => c.type === 'ping');
+            const check = pingCheck || host.checks[0];
+            return check.port || 0;
+        },
+
+        // Get status label in up/down terminology instead of OK/CRITICAL
+        getStatusLabel(host) {
+            if (!host.overall_status) return 'unknown';
+            if (host.overall_status === 'OK') return 'up';
+            if (host.overall_status === 'CRITICAL') return 'down';
+            if (host.overall_status === 'WARNING') return 'degraded';
+            return 'unknown';
+        },
+
+        // Calculate uptime percentage
+        getUptimePercent(host) {
+            if (!host.total_checked || host.total_checked === 0) return '0.00%';
+            const upCount = host.total_checked - (host.total_down || 0);
+            const percent = (upCount / host.total_checked) * 100;
+            return percent.toFixed(2) + '%';
+        },
+
+        // Format duration in seconds to human-readable format
+        formatDuration(seconds) {
+            if (!seconds || seconds === 0) return 'Never';
+
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+
+            const parts = [];
+            if (days > 0) parts.push(`${days}d`);
+            if (hours > 0) parts.push(`${hours}h`);
+            if (minutes > 0) parts.push(`${minutes}m`);
+            if (secs > 0 && days === 0) parts.push(`${secs}s`); // Only show seconds if less than a day
+
+            return parts.length > 0 ? parts.join(' ') : '0s';
+        },
+
+        // Format last outage timestamp
+        formatLastOutage(timestamp) {
+            if (!timestamp) return 'Never';
+            const date = new Date(timestamp);
+            // Handle invalid dates
+            if (isNaN(date.getTime()) || date.getFullYear() < 1980) return 'Never';
+
+            const now = new Date();
+            const diffMs = now - date;
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            // If recent (< 7 days), show relative time
+            if (diffDays < 7) {
+                return this.formatTimeAgo(timestamp);
+            }
+
+            // Otherwise show absolute date
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
         },
 
         // Bulk operations methods
