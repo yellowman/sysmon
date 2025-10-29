@@ -558,47 +558,60 @@
                     </div>
                 </div>
                 <div x-show="sections.hosts" class="px-6 py-4">
+                    <!-- Search Box -->
+                    <div class="mb-4">
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <i class="fas fa-search text-gray-400"></i>
+                            </div>
+                            <input type="text"
+                                   x-model="hostSearch"
+                                   placeholder="Search by hostname, IP, or description..."
+                                   class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                            <div x-show="hostSearch" class="absolute inset-y-0 right-0 pr-3 flex items-center">
+                                <button @click="hostSearch = ''" class="text-gray-400 hover:text-gray-600">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div x-show="hostSearch && filteredHosts.length < structuredConfig.hosts?.length"
+                             class="mt-2 text-sm text-gray-600">
+                            Showing <span x-text="filteredHosts.length"></span> of <span x-text="structuredConfig.hosts?.length || 0"></span> hosts
+                        </div>
+                    </div>
+
                     <!-- Compact Host List -->
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP / Hostname</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hostname</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dependencies</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Alert</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                                     <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <template x-for="(host, index) in structuredConfig.hosts" :key="host.ip || 'host-' + index">
+                                <template x-for="item in filteredHosts" :key="item.host.hostname || 'host-' + item.originalIndex">
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <div class="text-sm font-medium text-gray-900" x-text="host.ip || 'Not set'"></div>
+                                            <div class="text-sm font-medium text-gray-900" x-text="item.host.hostname || 'Not set'"></div>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded" x-text="host.type || 'ping'"></span>
+                                            <div class="text-sm text-gray-600" x-text="item.host.ip || '-'"></div>
                                         </td>
                                         <td class="px-4 py-3">
-                                            <div class="text-sm text-gray-900 truncate max-w-xs" x-text="host.notes || '-'"></div>
-                                        </td>
-                                        <td class="px-4 py-3">
-                                            <div class="text-sm text-gray-500 truncate max-w-xs" x-text="host.dependencies || '-'"></div>
+                                            <div class="text-sm text-gray-900 truncate max-w-md" x-text="item.host.notes || '-'"></div>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <div class="text-sm text-gray-500" x-text="host.spawn || host.customspawn || '-'"></div>
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap">
-                                            <span x-show="host.paused" class="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded">PAUSED</span>
-                                            <span x-show="!host.paused" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">ACTIVE</span>
+                                            <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded" x-text="item.host.type || 'ping'"></span>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
-                                            <button @click="editHost(index)" class="text-blue-600 hover:text-blue-900 mr-3">
+                                            <button @click="editHost(item.originalIndex)" class="text-blue-600 hover:text-blue-900 mr-3">
                                                 <i class="fas fa-edit"></i> Edit
                                             </button>
-                                            <button @click="deleteHost(index)" class="text-red-600 hover:text-red-900">
+                                            <button @click="deleteHost(item.originalIndex)" class="text-red-600 hover:text-red-900">
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         </td>
@@ -607,10 +620,18 @@
                             </tbody>
                         </table>
 
+                        <!-- No hosts message -->
                         <div x-show="structuredConfig.hosts?.length === 0" class="text-center py-12 text-gray-500">
                             <i class="fas fa-server text-6xl text-gray-300 mb-4"></i>
                             <p class="text-lg mb-2">No hosts configured</p>
                             <p class="text-sm">Click "Add Host" above to create your first monitored host.</p>
+                        </div>
+
+                        <!-- No search results message -->
+                        <div x-show="structuredConfig.hosts?.length > 0 && filteredHosts.length === 0" class="text-center py-12 text-gray-500">
+                            <i class="fas fa-search text-6xl text-gray-300 mb-4"></i>
+                            <p class="text-lg mb-2">No hosts found</p>
+                            <p class="text-sm">Try adjusting your search terms</p>
                         </div>
                     </div>
                 </div>
@@ -659,6 +680,12 @@
 
                                     <!-- Overview Tab - Most Common Fields -->
                                     <div x-show="editingHost && (!editingHost.activeTab || editingHost.activeTab === 'overview')" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Object Name</label>
+                                            <input type="text" x-model="editingHost.hostname" placeholder="my-server or leave empty to auto-generate"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                            <p class="text-xs text-gray-500 mt-1">Unique name for this host (auto-generated from IP if empty)</p>
+                                        </div>
                                         <div>
                                             <label class="block text-sm font-medium text-gray-700 mb-1">IP Address / Hostname *</label>
                                             <input type="text" x-model="editingHost.ip" required placeholder="192.168.1.1 or hostname.example.com"
@@ -1205,6 +1232,7 @@ function unifiedConfigPage() {
         showHostModal: false,
         editingHostIndex: -1,
         editingHost: null,
+        hostSearch: '',
 
         successMessage: '',
 
@@ -1460,9 +1488,29 @@ function unifiedConfigPage() {
             }
         },
 
+        get filteredHosts() {
+            if (!this.hostSearch || this.hostSearch.trim() === '') {
+                return (this.structuredConfig.hosts || []).map((host, index) => ({ host, originalIndex: index }));
+            }
+
+            const search = this.hostSearch.toLowerCase().trim();
+            return (this.structuredConfig.hosts || [])
+                .map((host, index) => ({ host, originalIndex: index }))
+                .filter(({ host }) => {
+                    const hostname = (host.hostname || '').toLowerCase();
+                    const ip = (host.ip || '').toLowerCase();
+                    const description = (host.notes || '').toLowerCase();
+
+                    return hostname.includes(search) ||
+                           ip.includes(search) ||
+                           description.includes(search);
+                });
+        },
+
         addHost() {
             // Create new host template
             this.editingHost = {
+                hostname: '',
                 ip: '',
                 type: 'ping',
                 notes: '',
@@ -1560,6 +1608,12 @@ function unifiedConfigPage() {
             delete hostToSave.activeTab;
             delete hostToSave.useCustomSpawn;
 
+            // Ensure hostname is set - auto-generate from IP if not provided
+            if (!hostToSave.hostname || hostToSave.hostname.trim() === '') {
+                // Generate hostname from IP (replace dots with dashes)
+                hostToSave.hostname = hostToSave.ip.replace(/\./g, '-');
+            }
+
             // Handle spawn vs customspawn
             if (this.editingHost.useCustomSpawn && this.editingHost.customspawn) {
                 hostToSave.spawn = '';
@@ -1570,7 +1624,12 @@ function unifiedConfigPage() {
             }
 
             // Remove empty/null fields to keep config clean
+            // EXCEPT hostname which is required for object definition
             Object.keys(hostToSave).forEach(key => {
+                if (key === 'hostname') {
+                    // Always preserve hostname field
+                    return;
+                }
                 if (hostToSave[key] === '' || hostToSave[key] === null || hostToSave[key] === undefined) {
                     delete hostToSave[key];
                 }

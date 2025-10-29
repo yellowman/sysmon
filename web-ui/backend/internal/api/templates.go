@@ -91,31 +91,36 @@ func isBrokenPipe(err error) bool {
 	return false
 }
 
+// PageData contains template data for page rendering
+type PageData struct {
+	Active string // Current active page for navigation highlighting
+}
+
 // Page handlers
 func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "dashboard.html", nil)
+	r.renderTemplate(w, "dashboard.html", PageData{Active: "dashboard"})
 }
 
 func (r *Router) handleHostsPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "hosts.html", nil)
+	r.renderTemplate(w, "hosts.html", PageData{Active: "hosts"})
 }
 
 func (r *Router) handleHostDetailPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "hosts-detail.html", nil)
+	r.renderTemplate(w, "hosts-detail.html", PageData{Active: "hosts"})
 }
 
 func (r *Router) handleTrapsPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "traps.html", nil)
+	r.renderTemplate(w, "traps.html", PageData{Active: "traps"})
 }
 
 func (r *Router) handleConfigPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "config.html", nil)
+	r.renderTemplate(w, "config.html", PageData{Active: "config"})
 }
 
 func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "admin.html", nil)
+	r.renderTemplate(w, "admin.html", PageData{Active: "admin"})
 }
 
 func (r *Router) handleMetricsPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "metrics.html", nil)
+	r.renderTemplate(w, "metrics.html", PageData{Active: "metrics"})
 }
