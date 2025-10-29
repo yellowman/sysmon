@@ -194,8 +194,8 @@ type XMLObjectStatus struct {
 	HostName        string   `xml:"HostName"`
 	ObjectPort      int      `xml:"ObjectPort"`
 	ObjectType      string   `xml:"ObjectType"`
-	ObjectMessage   string   `xml:"ObjectMessage"`
-	ObjectNotes     string   `xml:"ObjectNotes"`          // Description/notes for the object
+	ObjectMessage   string   `xml:"ObjectMessage"`        // Description from "desc" directive in config
+	ObjectNotes     string   `xml:"ObjectNotes"`          // Additional notes (rarely used)
 	ObjectContact   string   `xml:"ObjectContact"`
 	ObjectState     int      `xml:"ObjectLastcheckState"` // 0=OK, non-zero=problem
 	ObjectContacted int      `xml:"ObjectContacted"`      // 0=not alerted, 1=alerted
@@ -470,7 +470,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		// Create host status entry
 		host := models.HostStatus{
 			Hostname:      xmlObj.HostName,
-			Description:   xmlObj.ObjectNotes,
+			Description:   xmlObj.ObjectMessage, // The "desc" field from sysmon.conf
 			IPv4Address:   "", // Will be set below if hostname is an IP
 			OverallStatus: "OK",
 			StatusColor:   "green",
