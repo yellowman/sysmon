@@ -3,8 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -923,7 +923,7 @@ func (r *Router) handleOpenAPISpec(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Read OpenAPI spec file
-	specData, err := ioutil.ReadFile("./api/openapi.yaml")
+	specData, err := os.ReadFile("./api/openapi.yaml")
 	if err != nil {
 		r.sendError(w, http.StatusInternalServerError, "Failed to load API specification")
 		return

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 )
@@ -74,7 +74,7 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := ioutil.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("FCM error %d: %s", resp.StatusCode, string(respBody))
 	}
 

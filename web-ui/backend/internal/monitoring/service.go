@@ -1104,7 +1104,10 @@ func (s *Service) GetNextFD(authKey string) (string, error) {
 	}
 
 	// Read two-line response
-	line1, _ := reader.ReadString('\n')
+	line1, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read NFD response: %w", err)
+	}
 	line2, _ := reader.ReadString('\n')
 
 	return strings.TrimSpace(line1) + "\n" + strings.TrimSpace(line2), nil
