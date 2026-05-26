@@ -22,6 +22,49 @@ func ParseFile(path string) (*models.Config, error) {
 	return parseWithIncludes(content, filepath.Dir(path), 0)
 }
 
+// CollectAllContent reads the main config file and all included files,
+// returning their concatenated content for hashing.
+func CollectAllContent(path string) ([]byte, error) {
+	return collectIncludes(path, 0)
+}
+
+func collectIncludes(path string, depth int) ([]byte, error) {
+	if depth > maxIncludeDepth {
+		return nil, nil
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var all []byte
+	all = append(all, content...)
+
+	baseDir := filepath.Dir(path)
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimSuffix(line, ";")
+		if strings.HasPrefix(line, "include ") {
+			incPath := extractQuoted(strings.TrimPrefix(line, "include "))
+			if incPath == "" {
+				continue
+			}
+			if !filepath.IsAbs(incPath) {
+				incPath = filepath.Join(baseDir, incPath)
+			}
+			incContent, err := collectIncludes(incPath, depth+1)
+			if err != nil {
+				continue
+			}
+			all = append(all, incContent...)
+		}
+	}
+
+	return all, nil
+}
+
 const maxIncludeDepth = 10
 
 func parseWithIncludes(content []byte, baseDir string, depth int) (*models.Config, error) {
