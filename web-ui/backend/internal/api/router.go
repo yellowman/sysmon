@@ -66,6 +66,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// Push notifications
 	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
 	r.mux.HandleFunc("/api/push/subscriptions", r.handlePushSubscriptions)
+	r.mux.HandleFunc("/api/push/remove/", r.handlePushAdminRemove)
+	r.mux.HandleFunc("/api/push/log", r.handlePushLog)
 	r.mux.HandleFunc("/api/push/test", r.handlePushTest)
 
 	// API documentation
@@ -1141,7 +1143,9 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label)
+		_, clientIP := r.getUserInfo(req)
+		userAgent := req.Header.Get("User-Agent")
+		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, clientIP, userAgent)
 		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
@@ -1201,33 +1205,108 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	// Listing all subscriptions is an admin operation — requires authkey
 	if !r.requireAuthKey(w, req) {
 		return
 	}
 
 	subs := r.push.ListSubscriptions()
 
-	// Strip api_keys from response — admin can see devices but not impersonate them
-	type safeSubscription struct {
-		DeviceToken string `json:"device_token"`
-		Platform    string `json:"platform"`
-		Label       string `json:"label,omitempty"`
-		CreatedAt   string `json:"created_at"`
+	// Return all metadata except api_keys
+	type adminSubscription struct {
+		DeviceToken    string `json:"device_token"`
+		Platform       string `json:"platform"`
+		Label          string `json:"label,omitempty"`
+		CreatedAt      string `json:"created_at"`
+		LastSeen       string `json:"last_seen"`
+		LastPushAt     string `json:"last_push_at,omitempty"`
+		LastPushStatus string `json:"last_push_status,omitempty"`
+		PushCount      int64  `json:"push_count"`
+		FailCount      int64  `json:"fail_count"`
+		IPAddress      string `json:"ip_address,omitempty"`
+		UserAgent      string `json:"user_agent,omitempty"`
 	}
-	safeSubs := make([]safeSubscription, len(subs))
+	out := make([]adminSubscription, len(subs))
 	for i, s := range subs {
-		safeSubs[i] = safeSubscription{
-			DeviceToken: s.DeviceToken,
-			Platform:    string(s.Platform),
-			Label:       s.Label,
-			CreatedAt:   s.CreatedAt,
+		out[i] = adminSubscription{
+			DeviceToken:    s.DeviceToken,
+			Platform:       string(s.Platform),
+			Label:          s.Label,
+			CreatedAt:      s.CreatedAt,
+			LastSeen:       s.LastSeen,
+			LastPushAt:     s.LastPushAt,
+			LastPushStatus: s.LastPushStatus,
+			PushCount:      s.PushCount,
+			FailCount:      s.FailCount,
+			IPAddress:      s.IPAddress,
+			UserAgent:      s.UserAgent,
 		}
 	}
 
 	r.sendJSON(w, map[string]interface{}{
-		"subscriptions": safeSubs,
-		"count":         len(safeSubs),
+		"subscriptions": out,
+		"count":         len(out),
+	})
+}
+
+func (r *Router) handlePushAdminRemove(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodDelete {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only DELETE allowed")
+		return
+	}
+
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	if !r.requireAuthKey(w, req) {
+		return
+	}
+
+	token := strings.TrimPrefix(req.URL.Path, "/api/push/remove/")
+	token = strings.TrimSpace(token)
+	if token == "" {
+		r.sendError(w, http.StatusBadRequest, "Device token required in URL path")
+		return
+	}
+
+	if err := r.push.AdminRemove(token); err != nil {
+		r.sendError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"status":       "removed",
+		"device_token": token,
+	})
+}
+
+func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	if !r.requireAuthKey(w, req) {
+		return
+	}
+
+	limit := 100
+	if limitStr := req.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	entries := r.push.GetPushLog(limit)
+	r.sendJSON(w, map[string]interface{}{
+		"entries": entries,
+		"count":   len(entries),
 	})
 }
 

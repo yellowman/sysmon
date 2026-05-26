@@ -167,6 +167,8 @@ X-Auth-Key: <sysmon authkey>
 ```
 
 Requires the global authkey. API keys are not included in the response.
+Returns full metadata for each device: when it enrolled, when it last
+checked in, push delivery stats, source IP, and user agent.
 
 Response:
 ```json
@@ -176,7 +178,14 @@ Response:
       "device_token": "abc123...",
       "platform": "ios",
       "label": "Chris's iPhone",
-      "created_at": "2025-05-26T21:00:00Z"
+      "created_at": "2025-05-26T21:00:00Z",
+      "last_seen": "2025-05-26T22:15:00Z",
+      "last_push_at": "2025-05-26T22:14:58Z",
+      "last_push_status": "ok",
+      "push_count": 47,
+      "fail_count": 0,
+      "ip_address": "192.168.1.42",
+      "user_agent": "SysmonApp/1.0 iOS/18.0"
     }
   ],
   "count": 1
@@ -196,6 +205,45 @@ Looks up the device by its API key and sends a test push. No need to
 specify token or platform — the backend resolves them from the key.
 
 Response: `{"status": "sent"}`
+
+### Admin: remove a device (kick)
+
+```
+DELETE /api/push/remove/<device_token>
+X-Auth-Key: <sysmon authkey>
+```
+
+Forcibly removes a subscription. The device will stop receiving alerts
+immediately. Use this to kick lost/stolen devices or clean up dead tokens.
+
+Response: `{"status": "removed", "device_token": "..."}`
+
+### Admin: push notification log
+
+```
+GET /api/push/log?limit=50
+X-Auth-Key: <sysmon authkey>
+```
+
+Returns the most recent push notifications sent, newest first. Each
+entry shows which host triggered it, the status transition, and how
+many devices received it.
+
+Response:
+```json
+{
+  "entries": [
+    {
+      "timestamp": "2025-05-26T22:15:03Z",
+      "hostname": "router-core",
+      "status": "CRITICAL",
+      "prev_status": "OK",
+      "recipients": 3
+    }
+  ],
+  "count": 1
+}
+```
 
 ## Notification Payloads
 

@@ -29,11 +29,18 @@ var (
 )
 
 type Subscription struct {
-	DeviceToken string   `json:"device_token"`
-	Platform    Platform `json:"platform"`
-	Label       string   `json:"label,omitempty"`
-	APIKey      string   `json:"api_key"`
-	CreatedAt   string   `json:"created_at"`
+	DeviceToken    string   `json:"device_token"`
+	Platform       Platform `json:"platform"`
+	Label          string   `json:"label,omitempty"`
+	APIKey         string   `json:"api_key"`
+	CreatedAt      string   `json:"created_at"`
+	LastSeen       string   `json:"last_seen"`
+	LastPushAt     string   `json:"last_push_at,omitempty"`
+	LastPushStatus string   `json:"last_push_status,omitempty"`
+	PushCount      int64    `json:"push_count"`
+	FailCount      int64    `json:"fail_count"`
+	IPAddress      string   `json:"ip_address,omitempty"`
+	UserAgent      string   `json:"user_agent,omitempty"`
 }
 
 func generateAPIKey() string {
@@ -143,7 +150,7 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) Subscribe(token string, platform Platform, label string) (string, error) {
+func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, userAgent string) (string, error) {
 	if platform != PlatformIOS && platform != PlatformAndroid {
 		return "", fmt.Errorf("platform must be 'ios' or 'android'")
 	}
@@ -151,28 +158,36 @@ func (s *Service) Subscribe(token string, platform Platform, label string) (stri
 		return "", fmt.Errorf("device_token is required")
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339)
 	apiKey := ""
+
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 
-		// If token already exists, keep its api_key
+		var sub Subscription
+
+		// Preserve existing data on re-subscribe
 		if existing := b.Get([]byte(token)); existing != nil {
-			var old Subscription
-			if json.Unmarshal(existing, &old) == nil && old.APIKey != "" {
-				apiKey = old.APIKey
-			}
-		}
-		if apiKey == "" {
-			apiKey = generateAPIKey()
+			json.Unmarshal(existing, &sub)
 		}
 
-		sub := Subscription{
-			DeviceToken: token,
-			Platform:    platform,
-			Label:       label,
-			APIKey:      apiKey,
-			CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+		if sub.APIKey != "" {
+			apiKey = sub.APIKey
+		} else {
+			apiKey = generateAPIKey()
 		}
+		if sub.CreatedAt == "" {
+			sub.CreatedAt = now
+		}
+
+		sub.DeviceToken = token
+		sub.Platform = platform
+		sub.Label = label
+		sub.APIKey = apiKey
+		sub.LastSeen = now
+		sub.IPAddress = ipAddr
+		sub.UserAgent = userAgent
+
 		data, err := json.Marshal(sub)
 		if err != nil {
 			return err
@@ -180,6 +195,84 @@ func (s *Service) Subscribe(token string, platform Platform, label string) (stri
 		return b.Put([]byte(token), data)
 	})
 	return apiKey, err
+}
+
+// TouchLastSeen updates the last_seen timestamp for a device.
+func (s *Service) TouchLastSeen(token, ipAddr string) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		v := b.Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err != nil {
+			return nil
+		}
+		sub.LastSeen = time.Now().UTC().Format(time.RFC3339)
+		if ipAddr != "" {
+			sub.IPAddress = ipAddr
+		}
+		data, _ := json.Marshal(sub)
+		return b.Put([]byte(token), data)
+	})
+}
+
+// RecordPush updates push delivery stats for a device.
+func (s *Service) RecordPush(token string, success bool) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		v := b.Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err != nil {
+			return nil
+		}
+		sub.LastPushAt = time.Now().UTC().Format(time.RFC3339)
+		sub.PushCount++
+		if success {
+			sub.LastPushStatus = "ok"
+		} else {
+			sub.LastPushStatus = "failed"
+			sub.FailCount++
+		}
+		data, _ := json.Marshal(sub)
+		return b.Put([]byte(token), data)
+	})
+}
+
+// AdminRemove removes a subscription by device token (admin operation).
+func (s *Service) AdminRemove(token string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		if b.Get([]byte(token)) == nil {
+			return fmt.Errorf("device token not found")
+		}
+		return b.Delete([]byte(token))
+	})
+}
+
+// GetPushLog returns the N most recent push log entries.
+func (s *Service) GetPushLog(limit int) []pushLogEntry {
+	var entries []pushLogEntry
+	s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketPushLog)
+		c := b.Cursor()
+		// Iterate in reverse (newest first)
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var entry pushLogEntry
+			if json.Unmarshal(v, &entry) == nil {
+				entries = append(entries, entry)
+			}
+			if len(entries) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	return entries
 }
 
 // ValidateAPIKey checks if an API key is valid for a given device token.
@@ -305,6 +398,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 				err = s.fcm.Send(sub.DeviceToken, title, body, data)
 			}
 		}
+		s.RecordPush(sub.DeviceToken, err == nil)
 		if err != nil {
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
 		} else {
