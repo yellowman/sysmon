@@ -1088,11 +1088,41 @@ func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
 
 // Push notification handlers
 
+// requireAuthKey checks the X-Auth-Key header against the configured authkey.
+// Returns true if auth passes (or no authkey is configured).
+func (r *Router) requireAuthKey(w http.ResponseWriter, req *http.Request) bool {
+	snapshot, err := r.config.GetConfig()
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, "Failed to read config")
+		return false
+	}
+	configured := snapshot.Config.Global.AuthKey
+	if configured == "" {
+		return true
+	}
+	provided := req.Header.Get("X-Auth-Key")
+	if provided == "" {
+		// Also check JSON body for auth_key field (already parsed bodies won't work here,
+		// so we rely on the header)
+		provided = req.URL.Query().Get("auth_key")
+	}
+	if provided != configured {
+		r.sendError(w, http.StatusUnauthorized, "Invalid or missing auth key")
+		return false
+	}
+	return true
+}
+
 func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodPost:
 		if r.push == nil {
 			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+			return
+		}
+
+		// Subscribe requires the global authkey
+		if !r.requireAuthKey(w, req) {
 			return
 		}
 
@@ -1111,12 +1141,16 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		if err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label); err != nil {
+		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label)
+		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		r.sendJSON(w, map[string]string{"status": "subscribed"})
+		r.sendJSON(w, map[string]string{
+			"status":  "subscribed",
+			"api_key": apiKey,
+		})
 
 	case http.MethodDelete:
 		if r.push == nil {
@@ -1126,9 +1160,21 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 
 		var body struct {
 			DeviceToken string `json:"device_token"`
+			APIKey      string `json:"api_key"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+
+		if body.APIKey == "" {
+			r.sendError(w, http.StatusUnauthorized, "api_key is required")
+			return
+		}
+
+		// Verify the api_key belongs to this device token
+		if !r.push.ValidateAPIKey(body.DeviceToken, body.APIKey) {
+			r.sendError(w, http.StatusForbidden, "Invalid api_key for this device")
 			return
 		}
 
@@ -1155,10 +1201,33 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
+	// Listing all subscriptions is an admin operation — requires authkey
+	if !r.requireAuthKey(w, req) {
+		return
+	}
+
 	subs := r.push.ListSubscriptions()
+
+	// Strip api_keys from response — admin can see devices but not impersonate them
+	type safeSubscription struct {
+		DeviceToken string `json:"device_token"`
+		Platform    string `json:"platform"`
+		Label       string `json:"label,omitempty"`
+		CreatedAt   string `json:"created_at"`
+	}
+	safeSubs := make([]safeSubscription, len(subs))
+	for i, s := range subs {
+		safeSubs[i] = safeSubscription{
+			DeviceToken: s.DeviceToken,
+			Platform:    string(s.Platform),
+			Label:       s.Label,
+			CreatedAt:   s.CreatedAt,
+		}
+	}
+
 	r.sendJSON(w, map[string]interface{}{
-		"subscriptions": subs,
-		"count":         len(subs),
+		"subscriptions": safeSubs,
+		"count":         len(safeSubs),
 	})
 }
 
@@ -1174,20 +1243,26 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var body struct {
-		DeviceToken string `json:"device_token"`
-		Platform    string `json:"platform"`
+		APIKey string `json:"api_key"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
-	if body.DeviceToken == "" || body.Platform == "" {
-		r.sendError(w, http.StatusBadRequest, "device_token and platform are required")
+	if body.APIKey == "" {
+		r.sendError(w, http.StatusUnauthorized, "api_key is required")
 		return
 	}
 
-	if err := r.push.SendTest(body.DeviceToken, push.Platform(body.Platform)); err != nil {
+	// Look up the device by its API key
+	token, platform := r.push.FindTokenByAPIKey(body.APIKey)
+	if token == "" {
+		r.sendError(w, http.StatusForbidden, "Invalid api_key")
+		return
+	}
+
+	if err := r.push.SendTest(token, platform); err != nil {
 		r.sendError(w, http.StatusBadGateway, fmt.Sprintf("Push failed: %v", err))
 		return
 	}
