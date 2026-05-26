@@ -17,11 +17,15 @@ sysmon-web (Go backend)
     |-- APNs (HTTP/2) --> iOS devices
     |-- FCM  (HTTPS)  --> Android devices
     |
-    +-- SQLite database (subscriptions + push log)
+    +-- bbolt database (subscriptions + push log)
 ```
 
 The Go backend is the only component that talks to Apple/Google.
 Mobile apps register once, then receive alerts passively.
+
+Subscriptions are stored in a bbolt embedded database (the same
+key-value store used by etcd and Kubernetes). Pure Go, no cgo,
+single-file database that persists across restarts.
 
 ## Server Setup
 
@@ -66,9 +70,9 @@ Omit `push-apns-production` to use the APNs sandbox (development) gateway.
 
 ### 4. Database directory
 
-The web-ui stores subscriptions and push history in a SQLite database.
-The default path is `/var/lib/sysmon/push.db`. Make sure the directory
-exists and is writable by the sysmon-web process:
+The web-ui stores subscriptions and push history in a bbolt database
+file. The default path is `/var/lib/sysmon/push.db`. Make sure the
+directory exists and is writable by the sysmon-web process:
 
 ```sh
 mkdir -p /var/lib/sysmon
@@ -76,7 +80,8 @@ chown www-data:www-data /var/lib/sysmon
 ```
 
 The database is created automatically on first run. Subscriptions
-persist across restarts.
+persist across restarts. The file is a single bbolt B+ tree — no
+external database process needed.
 
 ### 5. Restart sysmon-web
 
@@ -283,33 +288,23 @@ class SysmonMessagingService : FirebaseMessagingService() {
   FCM NotRegistered), the token is effectively dead. The subscription
   remains in the database but pushes to it will fail silently.
 
-## Database Schema
+## Database
 
-Subscriptions and push history are stored in SQLite at
-`/var/lib/sysmon/push.db` (configurable). The schema:
+Subscriptions and push history are stored in a bbolt database at
+`/var/lib/sysmon/push.db` (configurable). bbolt is the embedded
+key-value store used by etcd and Kubernetes — pure Go, single file,
+ACID transactions, zero configuration.
 
-```sql
-CREATE TABLE subscriptions (
-    device_token TEXT PRIMARY KEY,
-    platform     TEXT NOT NULL CHECK(platform IN ('ios','android')),
-    label        TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
+Two buckets:
 
-CREATE TABLE push_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
-    hostname    TEXT NOT NULL,
-    status      TEXT NOT NULL,
-    prev_status TEXT NOT NULL,
-    recipients  INTEGER NOT NULL DEFAULT 0,
-    error       TEXT
-);
-```
+- **subscriptions** — keyed by device token, value is JSON:
+  `{"device_token":"...","platform":"ios","label":"...","created_at":"..."}`
 
-The `push_log` table records every notification sent, which host
-triggered it, and how many devices received it. Useful for debugging
-delivery issues.
+- **push_log** — keyed by auto-incrementing sequence, value is JSON:
+  `{"timestamp":"...","hostname":"...","status":"...","prev_status":"...","recipients":3}`
+
+The push log records every notification sent, which host triggered it,
+and how many devices received it. Useful for debugging delivery issues.
 
 ## Troubleshooting
 

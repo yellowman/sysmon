@@ -1,14 +1,14 @@
 package push
 
 import (
-	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	bolt "go.etcd.io/bbolt"
 
 	"sysmon-web/internal/models"
 	"sysmon-web/internal/monitoring"
@@ -21,11 +21,24 @@ const (
 	PlatformAndroid Platform = "android"
 )
 
+var (
+	bucketSubscriptions = []byte("subscriptions")
+	bucketPushLog       = []byte("push_log")
+)
+
 type Subscription struct {
 	DeviceToken string   `json:"device_token"`
 	Platform    Platform `json:"platform"`
 	Label       string   `json:"label,omitempty"`
 	CreatedAt   string   `json:"created_at"`
+}
+
+type pushLogEntry struct {
+	Timestamp  string `json:"timestamp"`
+	Hostname   string `json:"hostname"`
+	Status     string `json:"status"`
+	PrevStatus string `json:"prev_status"`
+	Recipients int    `json:"recipients"`
 }
 
 type Config struct {
@@ -40,7 +53,7 @@ type Config struct {
 type Service struct {
 	mu     sync.RWMutex
 	config Config
-	db     *sql.DB
+	db     *bolt.DB
 
 	apns *APNsClient
 	fcm  *FCMClient
@@ -51,38 +64,29 @@ type Service struct {
 }
 
 func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("open push database: %w", err)
 	}
 
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS subscriptions (
-			device_token TEXT PRIMARY KEY,
-			platform     TEXT NOT NULL CHECK(platform IN ('ios','android')),
-			label        TEXT NOT NULL DEFAULT '',
-			created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-		);
-		CREATE TABLE IF NOT EXISTS push_log (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp  TEXT NOT NULL DEFAULT (datetime('now')),
-			hostname   TEXT NOT NULL,
-			status     TEXT NOT NULL,
-			prev_status TEXT NOT NULL,
-			recipients INTEGER NOT NULL DEFAULT 0,
-			error      TEXT
-		);
-	`); err != nil {
+	err = db.Update(func(tx *bolt.Tx) error {
+		if _, err := tx.CreateBucketIfNotExists(bucketSubscriptions); err != nil {
+			return err
+		}
+		_, err := tx.CreateBucketIfNotExists(bucketPushLog)
+		return err
+	})
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("init push database: %w", err)
 	}
 
 	s := &Service{
-		config:    cfg,
-		db:        db,
+		config:     cfg,
+		db:         db,
 		monitoring: mon,
-		prevHosts: make(map[string]string),
-		stopCh:    make(chan struct{}),
+		prevHosts:  make(map[string]string),
+		stopCh:     make(chan struct{}),
 	}
 
 	if cfg.FCMServerKey != "" {
@@ -138,45 +142,43 @@ func (s *Service) Subscribe(token string, platform Platform, label string) error
 		return fmt.Errorf("device_token is required")
 	}
 
-	_, err := s.db.Exec(
-		`INSERT INTO subscriptions (device_token, platform, label) VALUES (?, ?, ?)
-		 ON CONFLICT(device_token) DO UPDATE SET platform=excluded.platform, label=excluded.label`,
-		token, string(platform), label,
-	)
-	if err != nil {
-		return fmt.Errorf("subscribe: %w", err)
+	sub := Subscription{
+		DeviceToken: token,
+		Platform:    platform,
+		Label:       label,
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
-	return nil
+	data, err := json.Marshal(sub)
+	if err != nil {
+		return err
+	}
+
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).Put([]byte(token), data)
+	})
 }
 
 func (s *Service) Unsubscribe(token string) error {
-	res, err := s.db.Exec(`DELETE FROM subscriptions WHERE device_token = ?`, token)
-	if err != nil {
-		return fmt.Errorf("unsubscribe: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("device token not found")
-	}
-	return nil
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		if b.Get([]byte(token)) == nil {
+			return fmt.Errorf("device token not found")
+		}
+		return b.Delete([]byte(token))
+	})
 }
 
 func (s *Service) ListSubscriptions() []Subscription {
-	rows, err := s.db.Query(`SELECT device_token, platform, label, created_at FROM subscriptions ORDER BY created_at`)
-	if err != nil {
-		log.Printf("push: list subscriptions: %v", err)
-		return nil
-	}
-	defer rows.Close()
-
 	var subs []Subscription
-	for rows.Next() {
-		var sub Subscription
-		if err := rows.Scan(&sub.DeviceToken, &sub.Platform, &sub.Label, &sub.CreatedAt); err != nil {
-			continue
-		}
-		subs = append(subs, sub)
-	}
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if err := json.Unmarshal(v, &sub); err == nil {
+				subs = append(subs, sub)
+			}
+			return nil
+		})
+	})
 	return subs
 }
 
@@ -185,8 +187,11 @@ func (s *Service) SendTest(token string, platform Platform) error {
 }
 
 func (s *Service) subscriberCount() int {
-	var count int
-	s.db.QueryRow(`SELECT COUNT(*) FROM subscriptions`).Scan(&count)
+	count := 0
+	s.db.View(func(tx *bolt.Tx) error {
+		count = tx.Bucket(bucketSubscriptions).Stats().KeyN
+		return nil
+	})
 	return count
 }
 
@@ -207,7 +212,7 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 	}
 }
 
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType string) {
+func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string) {
 	subs := s.ListSubscriptions()
 	sent := 0
 
@@ -235,10 +240,20 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType s
 		}
 	}
 
-	s.db.Exec(
-		`INSERT INTO push_log (hostname, status, prev_status, recipients) VALUES (?, ?, ?, ?)`,
-		hostname, status, "", sent,
-	)
+	entry := pushLogEntry{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Hostname:   hostname,
+		Status:     status,
+		PrevStatus: prevStatus,
+		Recipients: sent,
+	}
+	if data, err := json.Marshal(entry); err == nil {
+		s.db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(bucketPushLog)
+			id, _ := b.NextSequence()
+			return b.Put([]byte(fmt.Sprintf("%010d", id)), data)
+		})
+	}
 }
 
 func (s *Service) watchLoop() {
@@ -325,5 +340,5 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
 		host.Hostname, prevStatus, host.OverallStatus)
 
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, checkType)
+	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType)
 }
