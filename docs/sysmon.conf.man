@@ -1,6 +1,6 @@
 .\" Copyright 1999-2001 Jared Mauch
 .\" May be distributed under the GNU General Public License
-.\" 
+.\"
 .TH SYSMON.CONF 5 "21 June 2000" "Version 0.83" "System Administration"
 .SH NAME
 sysmon.conf \- sysmond(man) configuration file
@@ -12,9 +12,8 @@ file is the main configuration file for the
 which monitors systems and services on various machines connected to a
 network.
 
-Every rule consists of at least three fields, and at most nine.
-
 Lines starting with a hash mark (``#'') and empty lines are ignored.
+Lines starting with a semicolon (``;'') are also treated as comments.
 
 This release of
 .B sysmond
@@ -22,12 +21,22 @@ is able to understand an extended syntax.  A rule may have a replacement
 performed on it, if a variable is declared earlier in the configuration
 file.
 
+.SH ROOT
+The ``root'' directive specifies the root object of the dependency tree.
+All other objects should be reachable from this root through dependency
+chains.  Objects not reachable from the root are logged as orphans.
+
+Example:
+.nf
+  root = "my-gateway";
+.fi
+
 .SH GLOBAL SETTINGS
 There are various global settings that
-.BR sysmond 
+.BR sysmond
 can have configured.  Currently there is some
 inconsistency with some of the settings, but we expect to make
-them more standard in a newer version of 
+them more standard in a newer version of
 .BR sysmond .
 
 .SS Values that can be configured with ``set''
@@ -70,8 +79,8 @@ router.example.com ping "main router" $oncall
 
 queuetime include showupalso errorsto maxqueued replyto noheartbeat nologconnects
 pageinterval logging dnslog dnsexpire statusfile statustempdir nosubject
-numfailures minnumfailures flaptime html refresh pidfile output drop_privileges
-disable_icmp trap_port snmp-trap authkey savestate
+numfailures minnumfailures flaptime html\ refresh date pidfile
+snmp-trap authkey savestate cssfile
 
 .SS queuetime
 The ``config queuetime'' directive is used to specify the number of
@@ -80,12 +89,17 @@ and the start of the next test of the service.  This time is in seconds,
 and the default is 60.
 
 .SS include
-The ``config include'' directive is used to specify the path to another
+The ``include'' directive is used to specify the path to another
 file that should be included at that point in the current file.  This
 is useful if you have software that generates some of your configuration
 files, and you wish to have a per-router configuration file, while
 maintaining your current dependencies.  Other uses could be having an
 oncall database that is generated to allow automatic changing of shifts.
+
+Example:
+.nf
+  include "/etc/sysmon/routers.conf";
+.fi
 
 .SS showupalso
 The ``config showupalso'' directive allows all hosts (both those as
@@ -122,31 +136,28 @@ testing and development on these systems.  Disabling this feature will
 cause no adverse affect to monitoring, as the packet is sent blindly
 once on startup.
 
+.SS nologconnects
+The ``config nologconnects'' directive disables logging of client connections
+to the sysmon daemon, reducing log verbosity in environments with
+frequent client connections or monitoring systems that poll regularly.
+
 .SS pageinterval
 The ``config pageinterval'' directive allows you to configure a reminder
 interval that a host is still down.  This is an integer representing
 the number of minutes since the last e-mail message to a contact
 about the outage.  Once that timer has been reached, another message is
-sent.  This is useful for people who sleep through their pagers.
+sent.  The pageinterval can also be configured per-object (see OBJECT OPTIONS).
 
-The pageinterval can be configured globally (affecting all hosts) or
-per-object. When specified inside an object definition, it overrides
-the global setting for that specific host. This allows critical hosts
-to have more frequent re-page intervals while less important hosts can
-have longer intervals. Example:
+.SS logging
+The ``config logging'' directive allows you to specify a syslog facility
+to be logged to, or a file path.
+
 .nf
-  config pageinterval 60;  # Global: re-page every 60 minutes
-
-  object criticaldb ping mydb.example.com {
-    config pageinterval 15;  # Override: re-page every 15 minutes
-    contact oncall@example.com;
-  }
+  config logging syslog "daemon";
+  config logging file "/var/log/sysmond.log";
 .fi
 
-.SS logging 
-The ``config logging'' directive allows you to specify a syslog facility
-to be logged to.  These options vary slightly from one operating system
-to the next.  Sysmon supports logging to the following facilities:
+Supported syslog facilities:
 .IP
 .nf
 kern user mail daemon auth syslog lpr news uucp cron authpriv
@@ -173,39 +184,29 @@ specification of the file, be it "text" or "html".  The second argument is
 the path to the file that gets written.  The default is to not write a
 status file.
 
+.nf
+  config statusfile html "/usr/local/htdocs/index.html";
+.fi
+
 .SS statustempdir
 The ``config statustempdir'' directive specifies a directory where
 sysmond should write temporary status files before renaming them to
-their final location.  This is particularly useful when sysmond has
-dropped privileges using the ``drop_privileges'' directive, as it
-allows the daemon to write status files to a directory owned by the
-unprivileged user (typically ``nobody'').  The directory must exist
-and be writable by the user sysmond runs as.  If not specified,
-temporary files are created in the same directory as the final status
-file (which requires write permissions on that directory).
+their final location.  This is useful when sysmond has dropped
+privileges, as it allows the daemon to write to a directory owned by the
+unprivileged user.
 
-Example:
-.IP
 .nf
-config statustempdir /var/run/sysmon;
+  config statustempdir "/var/run/sysmon";
 .fi
-.LP
 
-After setting this directive, ensure the directory is created and has
-appropriate permissions:
-.IP
-.nf
-mkdir -p /var/run/sysmon
-chown nobody:nobody /var/run/sysmon
-chmod 755 /var/run/sysmon
-.fi
-.LP
+.SS cssfile
+The ``config cssfile'' directive specifies a CSS file URL to use for
+the HTML status page instead of the built-in inline styles.
 
 .SS nosubject
 The ``config nosubject'' directive specifies that there should be no
 subject in the messages sent to the contact address.  This is necessary
-to not consume characters for some e-mail to pager gateways such that
-the full message gets delivered.
+to not consume characters for some e-mail to pager gateways.
 
 .SS numfailures
 The ``config numfailures'' directive takes an integer argument and
@@ -214,31 +215,15 @@ down before a message is sent to the contact address.  The default is
 4.
 
 .SS minnumfailures
-The ``config minnumfailures'' directive takes an integer argument and
-specifies the minimum number of consecutive failures before a host
-appears in the status file (HTML or text) as yellow/down. This is
-useful for filtering out transient failures and reducing false alarms.
-For example, if set to 3, a host must fail at least 3 times in a row
-before appearing in the output. A host will only show as down when both
-numfailures and minnumfailures thresholds are met. The default is 1
-(show after first failure). Must be >= 1.
-Example: config minnumfailures 2;
+The ``config minnumfailures'' directive sets the minimum number of
+consecutive failures before a host appears in the status file as
+yellow/down.  Useful for filtering transient failures.  Default is 1.
+Must be >= 1.
 
 .SS flaptime
-The ``config flaptime'' directive takes an integer argument in minutes
-and controls how long a host continues to display as green/up in the
-status file after recovering from a failure. This prevents the visual
-"flapping" appearance when a host goes up and down repeatedly. For
-example, if set to 5, a host that recovers will show as green for 5
-minutes even if it goes down again during that window. During the flap
-time period, the host appears stable even if subsequent checks fail,
-reducing alert fatigue. The default is 0 (disabled). Set to 0 to
-disable this feature.
-Example: config flaptime 5;
-
-.SS sleeptime
-The ``config sleeptime'' option is now obsolete.  See the queuetime
-configuration option.
+The ``config flaptime'' directive takes an integer in minutes.
+After a host recovers, it continues to display as green for this many
+minutes, preventing visual flapping.  Default is 0 (disabled).
 
 .SS html refresh
 Supply an integer argument in seconds (default 60) to put in the
@@ -249,216 +234,197 @@ Supply a string which may contain formatting codes from strftime(3)
 (default "%x %X"), or the shorthand words "ISO" ("%F %T") or "DEC"
 ("%T %d-%b-%Y").
 
-.SS drop_privileges
-The ``config drop_privileges'' directive enables privilege dropping for
-enhanced security. When enabled, sysmond switches to a non-privileged
-user after initialization. ICMP operations are performed via the setuid
-sysmon-ping-helper binary. Cannot be used with disable_icmp.
-Example: config drop_privileges;
-
-.SS disable_icmp
-The ``config disable_icmp'' directive disables all ICMP (ping and pingv6)
-monitoring. This prevents the daemon from opening raw sockets and allows
-it to run entirely without privileges. Note that this disables all ping
-and pingv6 tests in the configuration.
-Example: config disable_icmp;
-
-.SS trap_port
-The ``config trap_port'' directive specifies the UDP port for receiving
-SNMP trap alerts. Default is 162 (standard SNMP trap port). Requires
-root privileges or CAP_NET_BIND_SERVICE capability to bind ports below 1024.
-Example: config trap_port 162;
+.SS pidfile
+The ``config pidfile'' directive specifies the path to the PID file.
 
 .SS snmp-trap
 The ``config snmp-trap'' directive enables SNMP trap monitoring globally.
-When enabled, sysmond opens a UDP socket on the trap_port (default 162)
-to receive SNMP trap PDUs. Individual objects can then use the trap_alert
-directive to enable trap monitoring for specific hosts. Traps are matched
-to objects by source IP address. Requires trap_port to be configured.
-Example: config snmp-trap;
-
-.SS nologconnects
-The ``config nologconnects'' directive disables logging of client connections
-to the sysmon daemon. When enabled, connection messages from clients are
-suppressed from the logs, reducing log verbosity in environments with
-frequent client connections or monitoring systems that poll regularly.
-Useful for reducing log noise while maintaining operational logging.
-Example: config nologconnects;
+When enabled, sysmond opens a UDP socket on port 162 to receive SNMP
+trap PDUs.  Individual objects can then use the trap_alert directive
+to enable trap monitoring for specific hosts.
 
 .SS authkey
 The ``config authkey'' directive sets an authentication key required for
-privileged client commands. Clients must send "AUTH <key>" to authenticate
-before performing certain operations. The daemon responds with "333 Good
-Authentication" on success or "444" on failure. This provides basic access
-control for administrative operations via the client protocol.
-Example: config authkey "secret_password_here";
+privileged client commands.  Clients must send "AUTH <key>" to authenticate
+before performing certain operations.
 
 .SS savestate
 The ``config savestate'' directive specifies a file path where sysmond
-will periodically save the complete monitoring state in XML format. This
-is primarily useful for debugging and understanding the internal state of
-all monitored objects. The file contains detailed information about each
-object including check counts, timestamps, and current status. Not required
-for normal operation.
-Example: config savestate "/var/log/sysmon/state.xml";
+will save the complete monitoring state in XML format on shutdown.
+
+.SH OBJECT DEFINITIONS
+Objects are defined using the following syntax:
+
+.nf
+  object name {
+      ip "hostname-or-ip";
+      type ping;
+      desc "description";
+      contact "email@example.com";
+      dep "parent-object";
+  };
+.fi
+
+The object name is used as a unique identifier in the dependency tree.
+The ``ip'' field specifies the hostname or IP address to monitor.
+The ``type'' field specifies the check type.  The ``desc'' field provides
+a description shown in status output.  The ``contact'' field specifies
+who to notify on failure.  The ``dep'' field creates a dependency on
+another object (children are not checked when parent is down).
+
+.SS Supported check types
+ping, pingv6, tcp, udp, http, https, smtp, pop3, imap, nntp, ssh,
+dns, snmp, sysmon, radius, ircd, umich_ldap
 
 .SH OBJECT OPTIONS
-Once you have declared an object, additional configuration options are
-available beyond those documented in earlier versions:
+The following directives are valid inside object definitions:
 
-.SS min_pings
-The ``min_pings'' directive specifies the minimum number of successful
-ping responses required to consider the host UP. Used for packet loss
-monitoring. Must be less than or equal to send_pings. Default is 1.
-Example: min_pings 4;
+.SS ip
+Hostname or IP address to monitor.
 
-.SS send_pings
-The ``send_pings'' directive specifies the number of ICMP echo requests
-to send during each check interval. Used for packet loss monitoring.
-Higher values provide more accurate loss statistics. Default is 5.
-Example: send_pings 5;
+.SS type
+Check type (see list above).
 
-.SS packet_loss_threshold
-The ``packet_loss_threshold'' directive specifies the packet loss
-percentage threshold (0.0-100.0). If packet loss exceeds this value,
-an alert is triggered even if the minimum number of pings succeeded.
-Default is 0.0 (disabled).
-Example: packet_loss_threshold 25.0;
+.SS port
+TCP/UDP port number for tcp, udp, and protocol-specific checks.
 
-.SS rtt_threshold
-The ``rtt_threshold'' directive specifies the round-trip time threshold
-in milliseconds. If average RTT exceeds this value, an alert is triggered.
-Used for latency monitoring.
-Example: rtt_threshold 100;
+.SS desc
+Description string shown in status output and notifications.
 
-.SS jitter_threshold
-The ``jitter_threshold'' directive specifies the jitter threshold in
-milliseconds. Jitter is the variation in RTT between consecutive packets.
-If jitter exceeds this value, an alert is triggered. Used for monitoring
-connection stability.
-Example: jitter_threshold 50;
+.SS contact
+E-mail address to notify on state changes.  Alternatively, the ``page''
+directive can be used as a synonym.
 
-.SS wakeup_check
-The ``wakeup_check'' directive enables proactive wakeup monitoring.
-When enabled, sysmond attempts to wake unreachable hosts using
-Wake-on-LAN before declaring them down. Useful for monitoring hosts
-that may be in power-saving modes.
-Example: wakeup_check;
+.SS dep
+Dependency on another object.  When the parent is down, this object
+is not checked.  The ``child'' directive is the inverse (declares that
+another object depends on this one).
 
-.SS wakeup_retries
-The ``wakeup_retries'' directive specifies the number of Wake-on-LAN
-attempts before declaring the host permanently down. Only used when
-wakeup_check is enabled. Default is 3.
-Example: wakeup_retries 3;
+.SS group
+Group name for organizing objects in status displays.
 
-.SS wakeup_check_interval
-The ``wakeup_check_interval'' directive specifies the time to wait in
-seconds between wakeup attempts. Allows time for the host to complete
-the boot process. Only used when wakeup_check is enabled. Default is 300.
-Example: wakeup_check_interval 300;
+.SS pause
+Suspend monitoring of this object.
 
-.SS trap_alert
-The ``trap_alert'' directive enables SNMP trap alert monitoring for this
-object. When enabled, sysmond listens for SNMP traps from this host and
-triggers alerts based on trap severity and content. Traps are matched to
-objects by source IP address.
-Example: trap_alert;
+.SS reverse
+Reverse logic: alert when the check succeeds instead of when it fails.
 
-.SS matched_host
-The ``matched_host'' directive associates a trap monitoring object with
-a specific host object. Used to link SNMP trap alerts with the
-corresponding monitored host. Allows trap-triggered state changes to
-affect the associated host's status.
-Example: matched_host "router1";
+.SS queuetime
+Per-object override of the global check interval in seconds.
 
-.SS snmp-type
-The ``snmp-type'' directive specifies the type of SNMP check to perform.
-Valid types are: high (alert if value exceeds threshold), low (alert if
-value is below threshold), range (alert if outside range), exact (alert
-if not matching exact value), rate (alert if counter rate exceeds threshold),
-and uptime (monitor system uptime). Must be used with corresponding
-snmp-high, snmp-low, snmp-exact, or snmp-rate directives.
-Example: snmp-type "high";
-
-.SS snmp-high
-The ``snmp-high'' directive sets the upper threshold for SNMP monitoring.
-When snmp-type is "high", alerts are triggered if the polled SNMP value
-exceeds this threshold. When snmp-type is "range", this sets the upper
-bound of the acceptable range. Value is an unsigned integer.
-Example: snmp-high 1000000;
-
-.SS snmp-low
-The ``snmp-low'' directive sets the lower threshold for SNMP monitoring.
-When snmp-type is "low", alerts are triggered if the polled SNMP value
-falls below this threshold. When snmp-type is "range", this sets the lower
-bound of the acceptable range. Value is an unsigned integer.
-Example: snmp-low 100;
-
-.SS snmp-exact
-The ``snmp-exact'' directive specifies the exact value expected from an
-SNMP query. When snmp-type is "exact", alerts are triggered if the polled
-value does not match this exact value. Useful for monitoring specific
-states or counters that should remain constant. Value is an unsigned integer.
-Example: snmp-exact 1;
-
-.SS snmp-rate
-The ``snmp-rate'' directive sets the maximum acceptable rate of change for
-an SNMP counter. When snmp-type is "rate", sysmond calculates the rate of
-change between polls and alerts if it exceeds this threshold. Use with
-snmp-octets to convert bytes/sec to bits/sec. Value is rate per second.
-Example: snmp-rate 100000;
-
-.SS snmp-octets
-The ``snmp-octets'' directive modifies SNMP rate calculations to convert
-from bytes to bits by multiplying by 8. Only affects snmp-type "rate" checks.
-Useful for monitoring network interface bandwidth where counters are in
-bytes but you want to alert on bits per second (e.g., Mbps).
-Example: snmp-octets;
-
-.SS snmp-oid-sec
-The ``snmp-oid-sec'' directive specifies a secondary SNMP OID for comparison
-monitoring. When snmp-type is "compare", the value from this OID is compared
-to the value from the primary oid. Alerts are triggered based on the comparison
-result (equal, not equal, greater than, less than, etc.). Use for monitoring
-relationships between two SNMP counters or values.
-Example: snmp-oid-sec "1.3.6.1.2.1.2.2.1.11.1";
-
-.SS dns-aa
-The ``dns-aa'' directive enables authoritative answer validation for DNS checks.
-When specified, the DNS response must have the AA (Authoritative Answer) flag
-set, indicating the response came from an authoritative nameserver. Useful
-for verifying that responses are from the correct source and not from caching
-resolvers. Only applies to DNS type monitors.
-Example: dns-aa;
-
-.SS dns-recursion
-The ``dns-recursion'' directive enables recursive DNS queries. When specified,
-DNS queries will request recursive resolution from the nameserver. When not
-specified, queries are non-recursive. Useful for testing authoritative-only
-nameservers that should not perform recursion. Only applies to DNS type monitors.
-Example: dns-recursion;
+.SS numfailures
+Per-object override of the global numfailures threshold.
 
 .SS pageinterval
-The ``pageinterval'' directive allows per-object override of the global
-page interval setting. This is an integer representing the number of
-minutes between reminder alerts for a down host. Critical hosts can be
-configured with shorter intervals for more frequent alerts, while less
-important hosts can have longer intervals. If not specified, the global
-pageinterval setting is used.
-Example: pageinterval 30;
+Per-object override of the global re-page interval in minutes.
 
-.SH EXAMPLES
-Here are some examples, which should give you an idea of how each option
-can be configured.
-.IP
+.SS contact_on
+When to contact: "up", "down", or "both".
+
+.SS spawn
+Name of a spawn command to execute on state changes, referencing a
+definition in the ``spawns'' block.
+
+.SS pmesg
+Per-object custom page message format string.  Supports the same
+substitution variables as the global pmesg (set pmesg).
+
+.SS trap_alert
+Enable SNMP trap monitoring for this object.
+
+.SS rtt_threshold
+Round-trip time threshold in milliseconds.  If average RTT exceeds
+this value, an alert is triggered.
+
+.SS jitter_threshold
+Jitter threshold in milliseconds.  If RTT variation exceeds this
+value, an alert is triggered.
+
+.SS SNMP Object Options
+
+.SS community
+SNMP community string for SNMP checks.
+
+.SS oid
+SNMP OID to query.
+
+.SS snmp-type
+Type of SNMP check: high, low, exact, rate, or uptime.
+
+.SS snmp-high
+Upper threshold for SNMP high/range checks.
+
+.SS snmp-low
+Lower threshold for SNMP low/range checks.
+
+.SS snmp-exact
+Exact value to match for SNMP exact checks.
+
+.SS snmp-rate
+Rate threshold for SNMP rate checks (per second).
+
+.SS snmp-octets
+Convert SNMP rate from bytes/sec to bits/sec (multiply by 8).
+
+.SS snmp-oid-sec
+Secondary OID for comparison monitoring.
+
+.SS snmp-upmsg
+Custom message when SNMP check passes.
+
+.SS snmp-downmsg
+Custom message when SNMP check fails.
+
+.SS DNS Object Options
+
+.SS dns-query
+Hostname to query for DNS checks.
+
+.SS dns-aa
+Require authoritative answer flag in DNS response.
+
+.SS dns-recursion
+Enable recursive DNS queries.
+
+.SS Authentication Options
+
+.SS username
+Username for authenticated protocol checks (POP3, IMAP).
+
+.SS password
+Password for authenticated protocol checks.
+
+.SS secret
+RADIUS shared secret.
+
+.SS HTTP Object Options
+
+.SS url
+URL path to request for HTTP/HTTPS checks.
+
+.SS urltext
+Text string to search for in the HTTP response body.
+
+.SS header
+HTTP header name to check in the response.
+
+.SS headerval
+Expected value for the checked HTTP header.
+
+.SH SPAWN DEFINITIONS
+Named spawn commands can be defined in a spawns block:
+
 .nf
-# 
-# insert examples here
-#
+  spawns {
+    name "pagechris" {
+      command "/usr/local/bin/page.sh %h %s %m";
+    };
+  };
 .fi
-.LP
 
-.SS Push Notifications (APNs / FCM)
+Then referenced from objects with ``spawn "pagechris";''.
+
+.SH PUSH NOTIFICATIONS (APNs / FCM)
 The following directives enable mobile push notifications via the sysmon
 web-ui backend.  The C daemon accepts and ignores these directives; they
 are consumed by the Go web-ui backend which monitors host state changes
@@ -469,7 +435,6 @@ Enable push notification support.
 .TP
 .B config push-fcm-serverkey \fI"key"\fP;
 Firebase Cloud Messaging server key for Android push notifications.
-Obtain from Firebase Console > Project Settings > Cloud Messaging.
 .TP
 .B config push-apns-certfile \fI"path"\fP;
 Path to the APNs TLS certificate in PEM format for iOS push notifications.
@@ -483,6 +448,43 @@ The iOS app bundle identifier (e.g., com.example.sysmon).
 .B config push-apns-production;
 Use the production APNs gateway.  If omitted, the sandbox (development)
 gateway is used.
+
+.SH EXAMPLES
+
+A minimal configuration:
+.nf
+
+  root = "gateway";
+
+  config statusfile html "/var/www/html/sysmon.html";
+  config logging file "/var/log/sysmond.log";
+  config sender "sysmon";
+  config dnsexpire 7200;
+
+  object gateway {
+      ip "10.1.1.1";
+      type ping;
+      desc "main router";
+      contact "admin@example.com";
+  };
+
+  object webserver {
+      ip "web.example.com";
+      type ping;
+      desc "web server";
+      dep "gateway";
+      contact "admin@example.com";
+  };
+
+  object webserver-http {
+      ip "web.example.com";
+      type http;
+      url "/health";
+      urltext "OK";
+      dep "webserver";
+      contact "admin@example.com";
+  };
+.fi
 
 .SH FILES
 .PD 0
