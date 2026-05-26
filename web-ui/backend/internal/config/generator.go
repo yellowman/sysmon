@@ -119,9 +119,6 @@ func Generate(config *models.Config) (string, error) {
 	if config.Global.ShowUpAlso {
 		sb.WriteString("config showupalso;\n")
 	}
-	if config.Global.DisableICMP {
-		sb.WriteString("config disable_icmp;\n")
-	}
 	if config.Global.NoHeartbeat {
 		sb.WriteString("config noheartbeat;\n")
 	}
@@ -216,9 +213,6 @@ func Generate(config *models.Config) (string, error) {
 		}
 		if host.Spawn != "" {
 			sb.WriteString(fmt.Sprintf("\tspawn \"%s\";\n", host.Spawn))
-		}
-		if host.Command != "" {
-			sb.WriteString(fmt.Sprintf("\tcommand \"%s\";\n", host.Command))
 		}
 		if host.PMsg != "" {
 			sb.WriteString(fmt.Sprintf("\tpmesg \"%s\";\n", host.PMsg))
