@@ -11,6 +11,7 @@ import (
 	"sysmon-web/internal/api"
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
+	"sysmon-web/internal/push"
 )
 
 func main() {
@@ -52,8 +53,30 @@ func main() {
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
 
+	// Initialize push notification service from parsed config
+	var pushService *push.Service
+	if snapshot, err := configService.GetConfig(); err == nil {
+		g := snapshot.Config.Global
+		pushCfg := push.Config{
+			Enabled:        g.PushNotifications,
+			FCMServerKey:   g.PushFCMServerKey,
+			APNsCertFile:   g.PushAPNsCertFile,
+			APNsKeyFile:    g.PushAPNsKeyFile,
+			APNsBundleID:   g.PushAPNsBundleID,
+			APNsProduction: g.PushAPNsProduction,
+		}
+		svc, err := push.NewService(pushCfg, "/var/lib/sysmon/push-subscriptions.json", monitoringService)
+		if err != nil {
+			log.Printf("WARNING: push notification init failed: %v", err)
+		} else {
+			pushService = svc
+			pushService.Start()
+			defer pushService.Stop()
+		}
+	}
+
 	// Create API router
-	handler := api.NewRouter(configService, monitoringService)
+	handler := api.NewRouter(configService, monitoringService, pushService)
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {

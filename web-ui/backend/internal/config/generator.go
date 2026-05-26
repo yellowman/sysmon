@@ -32,6 +32,24 @@ func Generate(config *models.Config) (string, error) {
 	if config.Global.DisableICMP {
 		sb.WriteString("disableicmp\n")
 	}
+	if config.Global.PushNotifications {
+		sb.WriteString("config push-notifications;\n")
+	}
+	if config.Global.PushFCMServerKey != "" {
+		sb.WriteString(fmt.Sprintf("config push-fcm-serverkey \"%s\";\n", config.Global.PushFCMServerKey))
+	}
+	if config.Global.PushAPNsCertFile != "" {
+		sb.WriteString(fmt.Sprintf("config push-apns-certfile \"%s\";\n", config.Global.PushAPNsCertFile))
+	}
+	if config.Global.PushAPNsKeyFile != "" {
+		sb.WriteString(fmt.Sprintf("config push-apns-keyfile \"%s\";\n", config.Global.PushAPNsKeyFile))
+	}
+	if config.Global.PushAPNsBundleID != "" {
+		sb.WriteString(fmt.Sprintf("config push-apns-bundleid \"%s\";\n", config.Global.PushAPNsBundleID))
+	}
+	if config.Global.PushAPNsProduction {
+		sb.WriteString("config push-apns-production;\n")
+	}
 	sb.WriteString("\n")
 
 	// Hosts

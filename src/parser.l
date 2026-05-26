@@ -1150,6 +1150,42 @@ config\ flaptime\ [^;]+;          {
 
 };
 
+config\ push-notifications{WS}*;	{
+  fixup_lineno();
+  if (debug)
+    print_err(0, "push-notifications enabled (handled by web-ui)");
+};
+
+config\ push-fcm-serverkey\ [^;]+;	{
+  fixup_lineno();
+  if (debug)
+    print_err(0, "push-fcm-serverkey set (handled by web-ui)");
+};
+
+config\ push-apns-certfile\ [^;]+;	{
+  fixup_lineno();
+  if (debug)
+    print_err(0, "push-apns-certfile set (handled by web-ui)");
+};
+
+config\ push-apns-keyfile\ [^;]+;	{
+  fixup_lineno();
+  if (debug)
+    print_err(0, "push-apns-keyfile set (handled by web-ui)");
+};
+
+config\ push-apns-bundleid\ [^;]+;	{
+  fixup_lineno();
+  if (debug)
+    print_err(0, "push-apns-bundleid set (handled by web-ui)");
+};
+
+config\ push-apns-production{WS}*;	{
+  fixup_lineno();
+  if (debug)
+    print_err(0, "push-apns-production set (handled by web-ui)");
+};
+
 config\ pmesg\ [^;]+;          {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
