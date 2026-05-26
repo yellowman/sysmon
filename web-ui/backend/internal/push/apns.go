@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 )
@@ -98,7 +98,7 @@ func (c *APNsClient) Send(deviceToken string, title, subtitle, body string) erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := ioutil.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("APNs error %d: %s", resp.StatusCode, string(respBody))
 	}
 

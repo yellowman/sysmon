@@ -220,19 +220,29 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 		return
 	}
 
+	s.mu.Lock()
+	var changes []struct {
+		host       models.HostStatus
+		prevStatus string
+	}
+
 	for _, host := range status.Hosts {
 		prevStatus, known := s.prevHosts[host.Hostname]
 		s.prevHosts[host.Hostname] = host.OverallStatus
 
-		if initialSeed || !known {
+		if initialSeed || !known || prevStatus == host.OverallStatus {
 			continue
 		}
 
-		if prevStatus == host.OverallStatus {
-			continue
-		}
+		changes = append(changes, struct {
+			host       models.HostStatus
+			prevStatus string
+		}{host, prevStatus})
+	}
+	s.mu.Unlock()
 
-		s.sendStateChange(host, prevStatus)
+	for _, c := range changes {
+		s.sendStateChange(c.host, c.prevStatus)
 	}
 }
 
