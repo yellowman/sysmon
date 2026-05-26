@@ -20,9 +20,11 @@ type Service struct {
 	sysmonAddr string
 	sessionLog *SessionLogger
 
-	cacheMu     sync.Mutex
+	cacheMu      sync.Mutex
 	cachedStatus *models.SysmonStatus
 	cacheTime    time.Time
+	fetching     bool
+	fetchDone    chan struct{}
 }
 
 // SessionLogEntry represents a single logged operation
@@ -277,25 +279,45 @@ type XMLObjectStatus struct {
 const statusCacheTTL = 1 * time.Second
 
 func (s *Service) GetStatus() (*models.SysmonStatus, error) {
-	s.cacheMu.Lock()
-	if s.cachedStatus != nil && time.Since(s.cacheTime) < statusCacheTTL {
-		cached := s.cachedStatus
+	for {
+		s.cacheMu.Lock()
+
+		// Cache hit
+		if s.cachedStatus != nil && time.Since(s.cacheTime) < statusCacheTTL {
+			cached := s.cachedStatus
+			s.cacheMu.Unlock()
+			return cached, nil
+		}
+
+		// Another goroutine is already fetching — wait for it
+		if s.fetching {
+			done := s.fetchDone
+			s.cacheMu.Unlock()
+			<-done
+			continue // re-check cache
+		}
+
+		// We're the one who fetches
+		s.fetching = true
+		s.fetchDone = make(chan struct{})
 		s.cacheMu.Unlock()
-		return cached, nil
+
+		status, err := s.fetchStatus()
+
+		s.cacheMu.Lock()
+		if err == nil {
+			s.cachedStatus = status
+			s.cacheTime = time.Now()
+		}
+		s.fetching = false
+		close(s.fetchDone)
+		s.cacheMu.Unlock()
+
+		if err != nil {
+			return nil, err
+		}
+		return status, nil
 	}
-	s.cacheMu.Unlock()
-
-	status, err := s.fetchStatus()
-	if err != nil {
-		return nil, err
-	}
-
-	s.cacheMu.Lock()
-	s.cachedStatus = status
-	s.cacheTime = time.Now()
-	s.cacheMu.Unlock()
-
-	return status, nil
 }
 
 func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
@@ -380,25 +402,26 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 
 	// Read object names from STATAL response
 	objectNames := []string{}
+	daemonPaused := false
 	for {
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
 			return nil, fmt.Errorf("error reading STATAL response: %w", err)
 		}
 
-		// Check for response codes
 		if resp.Code != "" {
 			if resp.IsError {
 				return nil, fmt.Errorf("STATAL command failed: %s", resp.Message)
 			}
-			// Code 333 = end of output
 			if resp.Code == "333" {
+				// "333 Paused Currently" or "333 Not currently Paused"
+				if strings.Contains(resp.Message, "Paused Currently") {
+					daemonPaused = true
+				}
 				break
 			}
 		}
 
-		// It's a data line (no response code)
-		// STATAL returns just the unique_name (object identifier), one per line
 		objectName := strings.TrimSpace(resp.Message)
 		if objectName != "" {
 			objectNames = append(objectNames, objectName)
@@ -407,6 +430,7 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	s.sessionLog.Log("STATAL", fmt.Sprintf("Retrieved %d objects (all hosts)", len(objectNames)), false, "")
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
+	daemonInfo.Paused = daemonPaused
 	status := &models.SysmonStatus{
 		Daemon: daemonInfo,
 		Hosts:  []models.HostStatus{},

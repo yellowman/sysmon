@@ -212,6 +212,7 @@ type DaemonInfo struct {
 	PID            int       `json:"pid"`
 	ConfigFile     string    `json:"config_file"`
 	ConfigLoadTime time.Time `json:"config_load_time"`
+	Paused         bool      `json:"paused"`
 }
 
 // HostStatus represents the status of a monitored host
