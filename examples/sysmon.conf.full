@@ -867,6 +867,35 @@ object example-kitchen-sink {
 
 
 # =============================================================================
+# PUSH NOTIFICATIONS (APNs / FCM)
+# =============================================================================
+#
+# Enable push notifications to iOS and Android devices via the sysmon web-ui.
+# The web-ui backend reads these settings from sysmon.conf and sends
+# notifications when host state changes are detected.
+#
+# Mobile apps register device tokens via POST /api/push/subscribe.
+#
+
+# Enable push notification support
+#config push-notifications;
+
+# --- FCM (Android) ---
+# Firebase Cloud Messaging server key from Firebase Console > Project Settings > Cloud Messaging
+#config push-fcm-serverkey "AAAAxxxxxxx:APA91bxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+# --- APNs (iOS) ---
+# Certificate-based authentication. Export from Apple Developer portal.
+# Convert .p12 to PEM:  openssl pkcs12 -in cert.p12 -out apns-cert.pem -clcerts -nokeys
+#                        openssl pkcs12 -in cert.p12 -out apns-key.pem -nocerts -nodes
+#config push-apns-certfile "/etc/sysmon/apns-cert.pem";
+#config push-apns-keyfile "/etc/sysmon/apns-key.pem";
+#config push-apns-bundleid "com.example.sysmon";
+
+# Use production APNs gateway (omit for sandbox/development)
+#config push-apns-production;
+
+# =============================================================================
 # END OF CONFIGURATION
 # =============================================================================
 #

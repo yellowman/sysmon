@@ -19,6 +19,12 @@ import (
 type Service struct {
 	sysmonAddr string
 	sessionLog *SessionLogger
+
+	cacheMu      sync.Mutex
+	cachedStatus *models.SysmonStatus
+	cacheTime    time.Time
+	fetching     bool
+	fetchDone    chan struct{}
 }
 
 // SessionLogEntry represents a single logged operation
@@ -194,23 +200,127 @@ type XMLObjectStatus struct {
 	HostName        string   `xml:"HostName"`
 	ObjectPort      int      `xml:"ObjectPort"`
 	ObjectType      string   `xml:"ObjectType"`
-	ObjectMessage   string   `xml:"ObjectMessage"`        // Description from "desc" directive in config
-	ObjectNotes     string   `xml:"ObjectNotes"`          // Additional notes (rarely used)
+	ObjectMessage   string   `xml:"ObjectMessage"`
+	ObjectNotes     string   `xml:"ObjectNotes"`
 	ObjectContact   string   `xml:"ObjectContact"`
-	ObjectState     int      `xml:"ObjectLastcheckState"` // 0=OK, non-zero=problem
-	ObjectContacted int      `xml:"ObjectContacted"`      // 0=not alerted, 1=alerted
+	ObjectGroup     string   `xml:"ObjectGroup"`
+	ObjectState     int      `xml:"ObjectLastcheckState"`
+	ObjectContacted int      `xml:"ObjectContacted"`
+	ObjectContactedAt int64  `xml:"ObjectContactedAt"`
+	ObjectContactOnUp int    `xml:"ObjectContactOnUp"`
 	TotalChecked    int64    `xml:"ObjectTotalChecked"`
 	TotalDown       int64    `xml:"ObjectTotalDown"`
-	DownCt          int64    `xml:"ObjectDownCt"`          // Current consecutive down count
-	UpCt            int64    `xml:"ObjectUpCt"`            // Current consecutive up count
+	DownCt          int64    `xml:"ObjectDownCt"`
+	UpCt            int64    `xml:"ObjectUpCt"`
+	MaxDown         int64    `xml:"ObjectMaxDown"`
+	QueueInterval   int64    `xml:"ObjectQueueInterval"`
 	SendPings       int      `xml:"ObjectSendPings"`
 	MinPings        int      `xml:"ObjectMinPings"`
-	DeathTime       int64    `xml:"ObjectOutageTime"`      // When it went down (Unix timestamp)
-	LastTimeUp      int64    `xml:"ObjectLastTimeUp"`      // When it last came back up (Unix timestamp)
+	Reversed        int      `xml:"ObjectReversed"`
+	Queued          int      `xml:"ObjectQueued"`
+	LastChecked     int64    `xml:"ObjectLastChecked"`
+	CheckStarted    int64    `xml:"ObjectCheckStarted"`
+	DeathTime       int64    `xml:"ObjectOutageTime"`
+	LastTimeUp      int64    `xml:"ObjectLastTimeUp"`
+	UniqueID        string   `xml:"ObjectUniqueID"`
+	URL             string   `xml:"ObjectURL"`
+	URLText         string   `xml:"ObjectURLText"`
+	ExecCmd         string   `xml:"ObjectExecCmd"`
+	PageMessage     string   `xml:"ObjectPageMessage"`
+
+	// Thresholds
+	PacketLossThreshold int  `xml:"ObjectPacketLossThreshold"`
+	RTTThreshold        int  `xml:"ObjectRTTThreshold"`
+	JitterThreshold     int  `xml:"ObjectJitterThreshold"`
+	WakeupRetries       int  `xml:"ObjectWakeupRetries"`
+
+	// Debug/diagnostic
+	TraceEnabled int `xml:"ObjectTraceEnabled"`
+	Acked        int `xml:"ObjectAcked"`
+
+	// Next queue time
+	NextQueueTime int64 `xml:"ObjectNextQueueTime"`
+
+	// Auth
+	AuthUsername string `xml:"ObjectAuthUsername"`
+	AuthPassword string `xml:"ObjectAuthPassword"`
+	RadiusSecret string `xml:"ObjectRadiusSecret"`
+	Header       string `xml:"ObjectHeader"`
+	HeaderValue  string `xml:"ObjectHeaderValue"`
+
+	// SNMP
+	SNMPCommunity  string `xml:"ObjectSNMPCommunity"`
+	SNMPOID        string `xml:"ObjectSNMPoid"`
+	SNMPType       string `xml:"ObjectSNMPType"`
+	SNMPLow        int64  `xml:"ObjectSNMPLowThresh"`
+	SNMPHigh       int64  `xml:"ObjectSNMPHighThresh"`
+	SNMPExact      int64  `xml:"ObjectSNMPExactThresh"`
+	SNMPSysUpTime  int64  `xml:"ObjectSNMPObjectSysUpTime"`
+	SNMPRate       int64  `xml:"ObjectSNMPRate"`
+	SNMPOctets     int    `xml:"ObjectSNMPOctets"`
+	SNMPLastResp   int64  `xml:"ObjectSNMPLastResponseTime"`
+
+	// DNS
+	DNSQuery     string `xml:"ObjectDNSQuery"`
+	DNSRequireAA int    `xml:"ObjectDNSRequireAA"`
+	DNSRecursion int    `xml:"ObjectDNSRecursion"`
+
+	// Runtime check state (from queue entry)
+	CheckQueuedAt    string `xml:"CheckQueuedAt"`
+	CheckLastServiced string `xml:"CheckLastServiced"`
+	CheckFD          int    `xml:"CheckFileDescriptor"`
+	CheckStartedFlag int    `xml:"CheckStarted"`
+	CheckReturnValue int    `xml:"CheckReturnValue"`
+	CheckWakeupCount int    `xml:"CheckWakeupCount"`
+	CheckWakeupTime  int64  `xml:"CheckLastWakeupTime"`
 }
 
 // GetStatus gets the complete sysmon status via TCP protocol
+const statusCacheTTL = 1 * time.Second
+
 func (s *Service) GetStatus() (*models.SysmonStatus, error) {
+	for {
+		s.cacheMu.Lock()
+
+		// Cache hit
+		if s.cachedStatus != nil && time.Since(s.cacheTime) < statusCacheTTL {
+			cached := s.cachedStatus
+			s.cacheMu.Unlock()
+			return cached, nil
+		}
+
+		// Another goroutine is already fetching — wait for it
+		if s.fetching {
+			done := s.fetchDone
+			s.cacheMu.Unlock()
+			<-done
+			continue // re-check cache
+		}
+
+		// We're the one who fetches
+		s.fetching = true
+		s.fetchDone = make(chan struct{})
+		s.cacheMu.Unlock()
+
+		status, err := s.fetchStatus()
+
+		s.cacheMu.Lock()
+		if err == nil {
+			s.cachedStatus = status
+			s.cacheTime = time.Now()
+		}
+		s.fetching = false
+		close(s.fetchDone)
+		s.cacheMu.Unlock()
+
+		if err != nil {
+			return nil, err
+		}
+		return status, nil
+	}
+}
+
+func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -218,8 +328,8 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	}
 	defer conn.Close()
 
-	// Set connection timeout - keep it short for responsive monitoring UI
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	// Allow enough time for large host counts (SHOWOBJ per host)
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -292,25 +402,26 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 	// Read object names from STATAL response
 	objectNames := []string{}
+	daemonPaused := false
 	for {
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
 			return nil, fmt.Errorf("error reading STATAL response: %w", err)
 		}
 
-		// Check for response codes
 		if resp.Code != "" {
 			if resp.IsError {
 				return nil, fmt.Errorf("STATAL command failed: %s", resp.Message)
 			}
-			// Code 333 = end of output
 			if resp.Code == "333" {
+				// "333 Paused Currently" or "333 Not currently Paused"
+				if strings.Contains(resp.Message, "Paused Currently") {
+					daemonPaused = true
+				}
 				break
 			}
 		}
 
-		// It's a data line (no response code)
-		// STATAL returns just the unique_name (object identifier), one per line
 		objectName := strings.TrimSpace(resp.Message)
 		if objectName != "" {
 			objectNames = append(objectNames, objectName)
@@ -319,6 +430,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	s.sessionLog.Log("STATAL", fmt.Sprintf("Retrieved %d objects (all hosts)", len(objectNames)), false, "")
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
+	daemonInfo.Paused = daemonPaused
 	status := &models.SysmonStatus{
 		Daemon: daemonInfo,
 		Hosts:  []models.HostStatus{},
@@ -469,11 +581,13 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 		// Create host status entry
 		host := models.HostStatus{
+			ObjectName:    xmlObj.Object,
 			Hostname:      xmlObj.HostName,
-			Description:   xmlObj.ObjectMessage, // The "desc" field from sysmon.conf
-			IPv4Address:   "", // Will be set below if hostname is an IP
+			Description:   xmlObj.ObjectMessage,
+			IPv4Address:   "",
 			OverallStatus: "OK",
 			StatusColor:   "green",
+			Contact:       xmlObj.ObjectContact,
 			DownCount:     xmlObj.DownCt,
 			UpCount:       xmlObj.UpCt,
 			TotalDown:     xmlObj.TotalDown,
@@ -1027,8 +1141,10 @@ func (s *Service) ToggleSNMPDebug(authKey string) (string, error) {
 }
 
 // ExpireDNS expires the DNS cache
+// ExpireDNS expires the daemon's DNS cache.
+// sysmond calls expire_dns() and sends no response.
 func (s *Service) ExpireDNS(authKey string) (string, error) {
-	return s.sendSimpleCommand("EXPIREDNS", authKey)
+	return s.sendFireAndForget("EXPIREDNS", authKey)
 }
 
 // PrintQueue prints the internal queue status
@@ -1056,22 +1172,17 @@ func (s *Service) PrintQueue(authKey string) (string, error) {
 		return "", fmt.Errorf("failed to send PRINTQ command: %w", err)
 	}
 
-	// Read multi-line response until we get a prompt or timeout
+	// sysmond sends queue lines then closes with no terminator code,
+	// so we read until EOF or the connection deadline fires.
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	var output strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
-
-		// Process line first (ReadString can return data + error)
-		output.WriteString(line)
-
-		// Stop if we see end marker
-		if strings.Contains(line, "333") || strings.Contains(line, "444") {
-			break
+		if line != "" {
+			output.WriteString(line)
 		}
-
-		// Then check error
 		if err != nil {
-			break // End of output
+			break
 		}
 	}
 
@@ -1104,15 +1215,47 @@ func (s *Service) GetNextFD(authKey string) (string, error) {
 	}
 
 	// Read two-line response
-	line1, _ := reader.ReadString('\n')
+	line1, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read NFD response: %w", err)
+	}
 	line2, _ := reader.ReadString('\n')
 
 	return strings.TrimSpace(line1) + "\n" + strings.TrimSpace(line2), nil
 }
 
-// KillDaemon gracefully shuts down the daemon
+// KillDaemon gracefully shuts down the daemon.
+// sysmond sets stop_daemon=TRUE and sends no response, so we
+// send the command and return immediately.
 func (s *Service) KillDaemon(authKey string) (string, error) {
-	return s.sendSimpleCommand("KILLIT", authKey)
+	return s.sendFireAndForget("KILLIT", authKey)
+}
+
+// sendFireAndForget sends a command that produces no response from sysmond.
+func (s *Service) sendFireAndForget(command string, authKey string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return "", err
+	}
+
+	_, err = conn.Write([]byte(command + "\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send %s command: %w", command, err)
+	}
+
+	return fmt.Sprintf("%s command sent", command), nil
 }
 
 // sendSimpleCommand sends a command that returns a single line response
@@ -1314,8 +1457,9 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 			break
 		}
 
-		// Check for error responses
-		if strings.Contains(line, "403") {
+		// Check for error responses (match at line start to avoid false positives on XML content)
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "403") || strings.HasPrefix(trimmedLine, "444") {
 			return "", fmt.Errorf("object not found or MODE xml not enabled")
 		}
 
@@ -1419,8 +1563,8 @@ func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperati
 		response = strings.TrimSpace(response)
 		s.sessionLog.Log(fmt.Sprintf("ACK %s", hostname), response, false, "")
 
-		// Check if command succeeded
-		if strings.HasPrefix(response, "OK") || strings.Contains(response, "acknowledged") {
+		// sysmond responds with "333 ..." on success
+		if strings.HasPrefix(response, "333") {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  true,
@@ -1502,8 +1646,8 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 
 	// Process each hostname
 	for i, hostname := range hostnames {
-		// Send UPDATE command
-		cmd := fmt.Sprintf("UPDATE %s %s\n", hostname, note)
+		// Send UPD command (matches sysmond protocol)
+		cmd := fmt.Sprintf("UPD %s %s\n", hostname, note)
 		_, err := conn.Write([]byte(cmd))
 		if err != nil {
 			results[i] = BulkOperationResult{
@@ -1514,7 +1658,7 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 			continue
 		}
 
-		s.sessionLog.Log(fmt.Sprintf("UPDATE %s %s", hostname, note), "", false, "")
+		s.sessionLog.Log(fmt.Sprintf("UPD %s %s", hostname, note), "", false, "")
 
 		// Read response
 		response, err := reader.ReadString('\n')
@@ -1528,10 +1672,10 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 		}
 
 		response = strings.TrimSpace(response)
-		s.sessionLog.Log(fmt.Sprintf("UPDATE %s", hostname), response, false, "")
+		s.sessionLog.Log(fmt.Sprintf("UPD %s", hostname), response, false, "")
 
-		// Check if command succeeded
-		if strings.HasPrefix(response, "OK") || strings.Contains(response, "updated") {
+		// sysmond responds with "333 ..." on success
+		if strings.HasPrefix(response, "333") {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  true,
@@ -1633,8 +1777,8 @@ func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey strin
 		response = strings.TrimSpace(response)
 		s.sessionLog.Log(fmt.Sprintf("TRACE %s", hostname), response, false, "")
 
-		// Check if command succeeded
-		if strings.HasPrefix(response, "OK") || strings.Contains(response, "trace") {
+		// sysmond responds with "333 ..." on success
+		if strings.HasPrefix(response, "333") {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  true,

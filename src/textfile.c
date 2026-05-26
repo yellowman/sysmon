@@ -3,6 +3,45 @@
 #include "config.h"
 
 /*
+ * Copy a file when rename() fails (e.g. cross-device)
+ * Returns 0 on success, -1 on failure
+ */
+static int
+copy_file(const char *src, const char *dst)
+{
+	FILE *in, *out;
+	char buf[4096];
+	size_t n;
+
+	in = fopen(src, "r");
+	if (in == NULL)
+		return -1;
+
+	out = fopen(dst, "w");
+	if (out == NULL)
+	{
+		fclose(in);
+		return -1;
+	}
+
+	while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+	{
+		if (fwrite(buf, 1, n, out) != n)
+		{
+			fclose(in);
+			fclose(out);
+			return -1;
+		}
+	}
+
+	fclose(in);
+	if (fclose(out) != 0)
+		return -1;
+
+	return 0;
+}
+
+/*
  * dump the currently broken network devices/services to the filename
  * specified
  *
@@ -15,9 +54,8 @@ void
 dump_to_file(char *filename, int html, time_t now)
 {
 	FILE *fh; /* filehandle for writing out status */
-	
+
 	char newfname[512], updated_at[128];
-	char *tempdir;
 	char *basename_ptr;
 
         struct tm *ltm;
@@ -71,11 +109,10 @@ dump_to_file(char *filename, int html, time_t now)
 	}
 
 	fh = fopen(newfname, "w");
-	
+
 	if (fh == NULL)
 	{
-		if (debug)
-			perror("dump_to_file:fopen");
+		print_err(1, "dump_to_file:fopen(%s) failed: %s", newfname, strerror(errno));
 		return;
 	}
 
@@ -162,7 +199,29 @@ dump_to_file(char *filename, int html, time_t now)
 
 	chmod(newfname, 0444);
 
-	rename(newfname, filename);
+	if (rename(newfname, filename) != 0)
+	{
+		if (errno == EXDEV)
+		{
+			/* Cross-device rename; fall back to copy + unlink */
+			if (copy_file(newfname, filename) == 0)
+			{
+				chmod(filename, 0444);
+				unlink(newfname);
+			}
+			else
+			{
+				print_err(1, "dump_to_file: copy %s to %s failed", newfname, filename);
+				unlink(newfname);
+			}
+		}
+		else
+		{
+			print_err(1, "dump_to_file: rename %s to %s failed: %s",
+				newfname, filename, strerror(errno));
+			unlink(newfname);
+		}
+	}
 
 	return;
 }

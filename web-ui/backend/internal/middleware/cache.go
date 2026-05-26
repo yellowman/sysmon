@@ -124,18 +124,6 @@ func (crw *cacheResponseWriter) WriteHeader(code int) {
 }
 
 func (crw *cacheResponseWriter) flush() {
-	// Copy headers from original response
-	for k, v := range crw.ResponseWriter.Header() {
-		if k != "Etag" && k != "Cache-Control" {
-			for _, val := range v {
-				crw.ResponseWriter.Header().Add(k, val)
-			}
-		}
-	}
-
-	// Write status code
 	crw.ResponseWriter.WriteHeader(crw.statusCode)
-
-	// Write body
 	crw.ResponseWriter.Write(crw.body.Bytes())
 }

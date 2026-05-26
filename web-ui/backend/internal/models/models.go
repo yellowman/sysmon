@@ -4,6 +4,7 @@ import "time"
 
 // Config represents the complete sysmon configuration
 type Config struct {
+	Root     string         `json:"root,omitempty"` // Root object name for dependency tree
 	Global   GlobalSettings `json:"global"`
 	Hosts    []Host         `json:"hosts"`
 	Contacts []Contact      `json:"contacts"`
@@ -64,6 +65,14 @@ type GlobalSettings struct {
 	SNMPTrap        bool   `json:"snmptrap,omitempty"`        // enable SNMP trap monitoring
 	AuthKey         string `json:"authkey,omitempty"`         // authentication key for clients
 	SaveState       string `json:"savestate,omitempty"`       // path to save state XML file
+
+	// Push notification settings
+	PushNotifications bool   `json:"pushnotifications,omitempty"` // enable push notifications
+	PushFCMServerKey  string `json:"push_fcm_serverkey,omitempty"`
+	PushAPNsCertFile  string `json:"push_apns_certfile,omitempty"`
+	PushAPNsKeyFile   string `json:"push_apns_keyfile,omitempty"`
+	PushAPNsBundleID  string `json:"push_apns_bundleid,omitempty"`
+	PushAPNsProduction bool  `json:"push_apns_production,omitempty"`
 
 	// Include paths
 	Includes []string `json:"includes,omitempty"` // included config files
@@ -203,10 +212,12 @@ type DaemonInfo struct {
 	PID            int       `json:"pid"`
 	ConfigFile     string    `json:"config_file"`
 	ConfigLoadTime time.Time `json:"config_load_time"`
+	Paused         bool      `json:"paused"`
 }
 
 // HostStatus represents the status of a monitored host
 type HostStatus struct {
+	ObjectName     string        `json:"object_name"`           // Unique sysmon object name
 	Hostname       string        `json:"hostname"`
 	Description    string        `json:"description,omitempty"` // Notes/description from config
 	IPv4Address    string        `json:"ipv4_address,omitempty"`
