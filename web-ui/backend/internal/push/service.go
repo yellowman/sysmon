@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -254,8 +255,8 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 		checkType = host.Checks[0].Type
 	}
 
-	switch host.OverallStatus {
-	case "critical", "down":
+	switch strings.ToUpper(host.OverallStatus) {
+	case "CRITICAL", "WARNING":
 		title = fmt.Sprintf("%s DOWN", host.Hostname)
 		if host.Description != "" {
 			subtitle = host.Description
@@ -264,7 +265,7 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 		if checkType != "" {
 			body = fmt.Sprintf("%s %s check failed", host.Hostname, checkType)
 		}
-	case "healthy", "up", "ok":
+	case "OK":
 		title = fmt.Sprintf("%s RECOVERED", host.Hostname)
 		if host.Description != "" {
 			subtitle = host.Description
