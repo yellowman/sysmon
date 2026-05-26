@@ -19,6 +19,10 @@ import (
 type Service struct {
 	sysmonAddr string
 	sessionLog *SessionLogger
+
+	cacheMu     sync.Mutex
+	cachedStatus *models.SysmonStatus
+	cacheTime    time.Time
 }
 
 // SessionLogEntry represents a single logged operation
@@ -210,7 +214,31 @@ type XMLObjectStatus struct {
 }
 
 // GetStatus gets the complete sysmon status via TCP protocol
+const statusCacheTTL = 1 * time.Second
+
 func (s *Service) GetStatus() (*models.SysmonStatus, error) {
+	s.cacheMu.Lock()
+	if s.cachedStatus != nil && time.Since(s.cacheTime) < statusCacheTTL {
+		cached := s.cachedStatus
+		s.cacheMu.Unlock()
+		return cached, nil
+	}
+	s.cacheMu.Unlock()
+
+	status, err := s.fetchStatus()
+	if err != nil {
+		return nil, err
+	}
+
+	s.cacheMu.Lock()
+	s.cachedStatus = status
+	s.cacheTime = time.Now()
+	s.cacheMu.Unlock()
+
+	return status, nil
+}
+
+func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
