@@ -88,6 +88,14 @@ func Parse(content []byte) (*models.Config, error) {
 			continue
 		}
 
+		// Parse root directive: root = "name";
+		if strings.HasPrefix(line, "root") {
+			val := strings.TrimPrefix(line, "root")
+			val = strings.TrimLeft(val, " =")
+			config.Root = extractQuoted(val)
+			continue
+		}
+
 		// Parse global config directives
 		if strings.HasPrefix(line, "config ") {
 			line = strings.TrimPrefix(line, "config ")
@@ -193,10 +201,10 @@ func Parse(content []byte) (*models.Config, error) {
 				}
 			} else if strings.HasPrefix(line, "statustempdir ") {
 				config.Global.StatusTempDir = extractQuoted(strings.TrimPrefix(line, "statustempdir "))
-			} else if strings.HasPrefix(line, "sender ") {
-				config.Global.Sender = extractQuoted(strings.TrimPrefix(line, "sender "))
-			} else if strings.HasPrefix(line, "from ") {
-				config.Global.From = extractQuoted(strings.TrimPrefix(line, "from "))
+			} else if strings.HasPrefix(line, "sender ") || strings.HasPrefix(line, "from ") {
+				val := strings.TrimPrefix(line, "sender ")
+				val = strings.TrimPrefix(val, "from ")
+				config.Global.Sender = extractQuoted(val)
 			} else if strings.HasPrefix(line, "subject ") {
 				config.Global.Subject = extractQuoted(strings.TrimPrefix(line, "subject "))
 			} else if strings.HasPrefix(line, "replyto ") {
@@ -214,9 +222,19 @@ func Parse(content []byte) (*models.Config, error) {
 			} else if strings.HasPrefix(line, "outputjson ") {
 				config.Global.OutputJSON = extractQuoted(strings.TrimPrefix(line, "outputjson "))
 			} else if strings.HasPrefix(line, "logging ") {
-				config.Global.Logging = strings.TrimSpace(strings.TrimPrefix(line, "logging "))
-			} else if strings.HasPrefix(line, "dateformat ") {
-				config.Global.DateFormat = extractQuoted(strings.TrimPrefix(line, "dateformat "))
+				val := strings.TrimPrefix(line, "logging ")
+				if strings.HasPrefix(val, "file ") {
+					config.Global.Logging = "file " + extractQuoted(strings.TrimPrefix(val, "file "))
+				} else if strings.HasPrefix(val, "syslog ") {
+					config.Global.Logging = "syslog " + extractQuoted(strings.TrimPrefix(val, "syslog "))
+				} else {
+					config.Global.Logging = strings.TrimSpace(val)
+				}
+			} else if strings.HasPrefix(line, "date ") || strings.HasPrefix(line, "dateformat ") {
+				val := line
+				val = strings.TrimPrefix(val, "dateformat ")
+				val = strings.TrimPrefix(val, "date ")
+				config.Global.DateFormat = extractQuoted(val)
 			} else if strings.HasPrefix(line, "pmesg ") || strings.HasPrefix(line, "pmesg=") {
 				config.Global.PMsg = extractQuoted(strings.TrimPrefix(strings.TrimPrefix(line, "pmesg "), "pmesg="))
 			} else if strings.HasPrefix(line, "upcolor ") {
@@ -394,10 +412,18 @@ func Parse(content []byte) (*models.Config, error) {
 						currentHost.WakeupCheckInterval = val
 					}
 				}
-			} else if strings.HasPrefix(line, "snmp-community ") || strings.HasPrefix(line, "snmpcommunity ") {
-				currentHost.SNMPCommunity = extractQuoted(strings.TrimPrefix(strings.TrimPrefix(line, "snmp-community "), "snmpcommunity "))
-			} else if strings.HasPrefix(line, "snmp-oid ") || strings.HasPrefix(line, "snmpoid ") {
-				currentHost.SNMPOID = extractQuoted(strings.TrimPrefix(strings.TrimPrefix(line, "snmp-oid "), "snmpoid "))
+			} else if strings.HasPrefix(line, "community ") || strings.HasPrefix(line, "snmp-community ") || strings.HasPrefix(line, "snmpcommunity ") {
+				val := line
+				for _, p := range []string{"snmp-community ", "snmpcommunity ", "community "} {
+					val = strings.TrimPrefix(val, p)
+				}
+				currentHost.SNMPCommunity = extractQuoted(val)
+			} else if strings.HasPrefix(line, "oid ") || strings.HasPrefix(line, "snmp-oid ") || strings.HasPrefix(line, "snmpoid ") {
+				val := line
+				for _, p := range []string{"snmp-oid ", "snmpoid ", "oid "} {
+					val = strings.TrimPrefix(val, p)
+				}
+				currentHost.SNMPOID = extractQuoted(val)
 			} else if strings.HasPrefix(line, "snmp-oid-sec ") {
 				currentHost.SNMPOIDSec = extractQuoted(strings.TrimPrefix(line, "snmp-oid-sec "))
 			} else if strings.HasPrefix(line, "snmp-upmsg ") {

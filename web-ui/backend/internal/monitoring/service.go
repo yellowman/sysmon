@@ -306,8 +306,8 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	}
 	defer conn.Close()
 
-	// Set connection timeout - keep it short for responsive monitoring UI
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	// Allow enough time for large host counts (SHOWOBJ per host)
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	reader := bufio.NewReader(conn)
 
 	// Read welcome banner first
@@ -1116,8 +1116,10 @@ func (s *Service) ToggleSNMPDebug(authKey string) (string, error) {
 }
 
 // ExpireDNS expires the DNS cache
+// ExpireDNS expires the daemon's DNS cache.
+// sysmond calls expire_dns() and sends no response.
 func (s *Service) ExpireDNS(authKey string) (string, error) {
-	return s.sendSimpleCommand("EXPIREDNS", authKey)
+	return s.sendFireAndForget("EXPIREDNS", authKey)
 }
 
 // PrintQueue prints the internal queue status
@@ -1145,22 +1147,17 @@ func (s *Service) PrintQueue(authKey string) (string, error) {
 		return "", fmt.Errorf("failed to send PRINTQ command: %w", err)
 	}
 
-	// Read multi-line response until we get a prompt or timeout
+	// sysmond sends queue lines then closes with no terminator code,
+	// so we read until EOF or the connection deadline fires.
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	var output strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
-
-		// Process line first (ReadString can return data + error)
-		output.WriteString(line)
-
-		// Stop if we see end marker
-		if strings.Contains(line, "333") || strings.Contains(line, "444") {
-			break
+		if line != "" {
+			output.WriteString(line)
 		}
-
-		// Then check error
 		if err != nil {
-			break // End of output
+			break
 		}
 	}
 
@@ -1202,9 +1199,38 @@ func (s *Service) GetNextFD(authKey string) (string, error) {
 	return strings.TrimSpace(line1) + "\n" + strings.TrimSpace(line2), nil
 }
 
-// KillDaemon gracefully shuts down the daemon
+// KillDaemon gracefully shuts down the daemon.
+// sysmond sets stop_daemon=TRUE and sends no response, so we
+// send the command and return immediately.
 func (s *Service) KillDaemon(authKey string) (string, error) {
-	return s.sendSimpleCommand("KILLIT", authKey)
+	return s.sendFireAndForget("KILLIT", authKey)
+}
+
+// sendFireAndForget sends a command that produces no response from sysmond.
+func (s *Service) sendFireAndForget(command string, authKey string) (string, error) {
+	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	reader := bufio.NewReader(conn)
+
+	if err := readWelcomeBanner(reader); err != nil {
+		return "", err
+	}
+
+	if err := authenticate(conn, reader, authKey); err != nil {
+		return "", err
+	}
+
+	_, err = conn.Write([]byte(command + "\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to send %s command: %w", command, err)
+	}
+
+	return fmt.Sprintf("%s command sent", command), nil
 }
 
 // sendSimpleCommand sends a command that returns a single line response
@@ -1406,8 +1432,9 @@ func (s *Service) GetObjectXML(hostname string) (string, error) {
 			break
 		}
 
-		// Check for error responses
-		if strings.Contains(line, "403") {
+		// Check for error responses (match at line start to avoid false positives on XML content)
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "403") || strings.HasPrefix(trimmedLine, "444") {
 			return "", fmt.Errorf("object not found or MODE xml not enabled")
 		}
 

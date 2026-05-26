@@ -4,6 +4,7 @@ import "time"
 
 // Config represents the complete sysmon configuration
 type Config struct {
+	Root     string         `json:"root,omitempty"` // Root object name for dependency tree
 	Global   GlobalSettings `json:"global"`
 	Hosts    []Host         `json:"hosts"`
 	Contacts []Contact      `json:"contacts"`
