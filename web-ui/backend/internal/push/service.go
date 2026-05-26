@@ -1,13 +1,14 @@
 package push
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"sysmon-web/internal/models"
 	"sysmon-web/internal/monitoring"
@@ -24,7 +25,7 @@ type Subscription struct {
 	DeviceToken string   `json:"device_token"`
 	Platform    Platform `json:"platform"`
 	Label       string   `json:"label,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	CreatedAt   string   `json:"created_at"`
 }
 
 type Config struct {
@@ -37,30 +38,51 @@ type Config struct {
 }
 
 type Service struct {
-	mu            sync.RWMutex
-	config        Config
-	subscriptions []Subscription
-	storeFile     string
+	mu     sync.RWMutex
+	config Config
+	db     *sql.DB
 
 	apns *APNsClient
 	fcm  *FCMClient
 
 	monitoring *monitoring.Service
-	prevHosts  map[string]string // object_name -> last known status
+	prevHosts  map[string]string
 	stopCh     chan struct{}
 }
 
-func NewService(cfg Config, storeFile string, mon *monitoring.Service) (*Service, error) {
-	s := &Service{
-		config:     cfg,
-		storeFile:  storeFile,
-		monitoring: mon,
-		prevHosts:  make(map[string]string),
-		stopCh:     make(chan struct{}),
+func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open push database: %w", err)
 	}
 
-	if err := s.loadSubscriptions(); err != nil {
-		log.Printf("push: no existing subscriptions file (%s), starting fresh", err)
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS subscriptions (
+			device_token TEXT PRIMARY KEY,
+			platform     TEXT NOT NULL CHECK(platform IN ('ios','android')),
+			label        TEXT NOT NULL DEFAULT '',
+			created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE TABLE IF NOT EXISTS push_log (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp  TEXT NOT NULL DEFAULT (datetime('now')),
+			hostname   TEXT NOT NULL,
+			status     TEXT NOT NULL,
+			prev_status TEXT NOT NULL,
+			recipients INTEGER NOT NULL DEFAULT 0,
+			error      TEXT
+		);
+	`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init push database: %w", err)
+	}
+
+	s := &Service{
+		config:    cfg,
+		db:        db,
+		monitoring: mon,
+		prevHosts: make(map[string]string),
+		stopCh:    make(chan struct{}),
 	}
 
 	if cfg.FCMServerKey != "" {
@@ -82,6 +104,9 @@ func NewService(cfg Config, storeFile string, mon *monitoring.Service) (*Service
 		}
 	}
 
+	count := s.subscriberCount()
+	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
+
 	return s, nil
 }
 
@@ -95,61 +120,74 @@ func (s *Service) Start() {
 		return
 	}
 	go s.watchLoop()
-	log.Printf("push: state change watcher started")
+	log.Printf("push: state change watcher started (1s poll interval)")
 }
 
 func (s *Service) Stop() {
 	close(s.stopCh)
+	if s.db != nil {
+		s.db.Close()
+	}
 }
 
 func (s *Service) Subscribe(token string, platform Platform, label string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, sub := range s.subscriptions {
-		if sub.DeviceToken == token {
-			return fmt.Errorf("device already subscribed")
-		}
-	}
-
 	if platform != PlatformIOS && platform != PlatformAndroid {
 		return fmt.Errorf("platform must be 'ios' or 'android'")
 	}
+	if token == "" {
+		return fmt.Errorf("device_token is required")
+	}
 
-	s.subscriptions = append(s.subscriptions, Subscription{
-		DeviceToken: token,
-		Platform:    platform,
-		Label:       label,
-		CreatedAt:   time.Now(),
-	})
-
-	return s.saveSubscriptions()
+	_, err := s.db.Exec(
+		`INSERT INTO subscriptions (device_token, platform, label) VALUES (?, ?, ?)
+		 ON CONFLICT(device_token) DO UPDATE SET platform=excluded.platform, label=excluded.label`,
+		token, string(platform), label,
+	)
+	if err != nil {
+		return fmt.Errorf("subscribe: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) Unsubscribe(token string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for i, sub := range s.subscriptions {
-		if sub.DeviceToken == token {
-			s.subscriptions = append(s.subscriptions[:i], s.subscriptions[i+1:]...)
-			return s.saveSubscriptions()
-		}
+	res, err := s.db.Exec(`DELETE FROM subscriptions WHERE device_token = ?`, token)
+	if err != nil {
+		return fmt.Errorf("unsubscribe: %w", err)
 	}
-	return fmt.Errorf("device token not found")
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("device token not found")
+	}
+	return nil
 }
 
 func (s *Service) ListSubscriptions() []Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT device_token, platform, label, created_at FROM subscriptions ORDER BY created_at`)
+	if err != nil {
+		log.Printf("push: list subscriptions: %v", err)
+		return nil
+	}
+	defer rows.Close()
 
-	result := make([]Subscription, len(s.subscriptions))
-	copy(result, s.subscriptions)
-	return result
+	var subs []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(&sub.DeviceToken, &sub.Platform, &sub.Label, &sub.CreatedAt); err != nil {
+			continue
+		}
+		subs = append(subs, sub)
+	}
+	return subs
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
 	return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
+}
+
+func (s *Service) subscriberCount() int {
+	var count int
+	s.db.QueryRow(`SELECT COUNT(*) FROM subscriptions`).Scan(&count)
+	return count
 }
 
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
@@ -170,10 +208,8 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 }
 
 func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType string) {
-	s.mu.RLock()
-	subs := make([]Subscription, len(s.subscriptions))
-	copy(subs, s.subscriptions)
-	s.mu.RUnlock()
+	subs := s.ListSubscriptions()
+	sent := 0
 
 	for _, sub := range subs {
 		var err error
@@ -194,15 +230,21 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType s
 		}
 		if err != nil {
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
+		} else {
+			sent++
 		}
 	}
+
+	s.db.Exec(
+		`INSERT INTO push_log (hostname, status, prev_status, recipients) VALUES (?, ?, ?, ?)`,
+		hostname, status, "", sent,
+	)
 }
 
 func (s *Service) watchLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// Seed initial state
 	s.pollAndNotify(true)
 
 	for {
@@ -280,24 +322,8 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 		body = fmt.Sprintf("status changed from %s to %s", prevStatus, host.OverallStatus)
 	}
 
-	log.Printf("push: %s status %s -> %s, notifying %d subscribers",
-		host.Hostname, prevStatus, host.OverallStatus, len(s.subscriptions))
+	log.Printf("push: %s status %s -> %s, notifying subscribers",
+		host.Hostname, prevStatus, host.OverallStatus)
 
 	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, checkType)
-}
-
-func (s *Service) loadSubscriptions() error {
-	data, err := os.ReadFile(s.storeFile)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, &s.subscriptions)
-}
-
-func (s *Service) saveSubscriptions() error {
-	data, err := json.MarshalIndent(s.subscriptions, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.storeFile, data, 0600)
 }
