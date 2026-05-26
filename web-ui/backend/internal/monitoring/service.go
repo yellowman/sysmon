@@ -198,19 +198,79 @@ type XMLObjectStatus struct {
 	HostName        string   `xml:"HostName"`
 	ObjectPort      int      `xml:"ObjectPort"`
 	ObjectType      string   `xml:"ObjectType"`
-	ObjectMessage   string   `xml:"ObjectMessage"`        // Description from "desc" directive in config
-	ObjectNotes     string   `xml:"ObjectNotes"`          // Additional notes (rarely used)
+	ObjectMessage   string   `xml:"ObjectMessage"`
+	ObjectNotes     string   `xml:"ObjectNotes"`
 	ObjectContact   string   `xml:"ObjectContact"`
-	ObjectState     int      `xml:"ObjectLastcheckState"` // 0=OK, non-zero=problem
-	ObjectContacted int      `xml:"ObjectContacted"`      // 0=not alerted, 1=alerted
+	ObjectGroup     string   `xml:"ObjectGroup"`
+	ObjectState     int      `xml:"ObjectLastcheckState"`
+	ObjectContacted int      `xml:"ObjectContacted"`
+	ObjectContactedAt int64  `xml:"ObjectContactedAt"`
+	ObjectContactOnUp int    `xml:"ObjectContactOnUp"`
 	TotalChecked    int64    `xml:"ObjectTotalChecked"`
 	TotalDown       int64    `xml:"ObjectTotalDown"`
-	DownCt          int64    `xml:"ObjectDownCt"`          // Current consecutive down count
-	UpCt            int64    `xml:"ObjectUpCt"`            // Current consecutive up count
+	DownCt          int64    `xml:"ObjectDownCt"`
+	UpCt            int64    `xml:"ObjectUpCt"`
+	MaxDown         int64    `xml:"ObjectMaxDown"`
+	QueueInterval   int64    `xml:"ObjectQueueInterval"`
 	SendPings       int      `xml:"ObjectSendPings"`
 	MinPings        int      `xml:"ObjectMinPings"`
-	DeathTime       int64    `xml:"ObjectOutageTime"`      // When it went down (Unix timestamp)
-	LastTimeUp      int64    `xml:"ObjectLastTimeUp"`      // When it last came back up (Unix timestamp)
+	Reversed        int      `xml:"ObjectReversed"`
+	Queued          int      `xml:"ObjectQueued"`
+	LastChecked     int64    `xml:"ObjectLastChecked"`
+	CheckStarted    int64    `xml:"ObjectCheckStarted"`
+	DeathTime       int64    `xml:"ObjectOutageTime"`
+	LastTimeUp      int64    `xml:"ObjectLastTimeUp"`
+	UniqueID        string   `xml:"ObjectUniqueID"`
+	URL             string   `xml:"ObjectURL"`
+	URLText         string   `xml:"ObjectURLText"`
+	ExecCmd         string   `xml:"ObjectExecCmd"`
+	PageMessage     string   `xml:"ObjectPageMessage"`
+
+	// Thresholds
+	PacketLossThreshold int  `xml:"ObjectPacketLossThreshold"`
+	RTTThreshold        int  `xml:"ObjectRTTThreshold"`
+	JitterThreshold     int  `xml:"ObjectJitterThreshold"`
+	WakeupRetries       int  `xml:"ObjectWakeupRetries"`
+
+	// Debug/diagnostic
+	TraceEnabled int `xml:"ObjectTraceEnabled"`
+	Acked        int `xml:"ObjectAcked"`
+
+	// Next queue time
+	NextQueueTime int64 `xml:"ObjectNextQueueTime"`
+
+	// Auth
+	AuthUsername string `xml:"ObjectAuthUsername"`
+	AuthPassword string `xml:"ObjectAuthPassword"`
+	RadiusSecret string `xml:"ObjectRadiusSecret"`
+	Header       string `xml:"ObjectHeader"`
+	HeaderValue  string `xml:"ObjectHeaderValue"`
+
+	// SNMP
+	SNMPCommunity  string `xml:"ObjectSNMPCommunity"`
+	SNMPOID        string `xml:"ObjectSNMPoid"`
+	SNMPType       string `xml:"ObjectSNMPType"`
+	SNMPLow        int64  `xml:"ObjectSNMPLowThresh"`
+	SNMPHigh       int64  `xml:"ObjectSNMPHighThresh"`
+	SNMPExact      int64  `xml:"ObjectSNMPExactThresh"`
+	SNMPSysUpTime  int64  `xml:"ObjectSNMPObjectSysUpTime"`
+	SNMPRate       int64  `xml:"ObjectSNMPRate"`
+	SNMPOctets     int    `xml:"ObjectSNMPOctets"`
+	SNMPLastResp   int64  `xml:"ObjectSNMPLastResponseTime"`
+
+	// DNS
+	DNSQuery     string `xml:"ObjectDNSQuery"`
+	DNSRequireAA int    `xml:"ObjectDNSRequireAA"`
+	DNSRecursion int    `xml:"ObjectDNSRecursion"`
+
+	// Runtime check state (from queue entry)
+	CheckQueuedAt    string `xml:"CheckQueuedAt"`
+	CheckLastServiced string `xml:"CheckLastServiced"`
+	CheckFD          int    `xml:"CheckFileDescriptor"`
+	CheckStartedFlag int    `xml:"CheckStarted"`
+	CheckReturnValue int    `xml:"CheckReturnValue"`
+	CheckWakeupCount int    `xml:"CheckWakeupCount"`
+	CheckWakeupTime  int64  `xml:"CheckLastWakeupTime"`
 }
 
 // GetStatus gets the complete sysmon status via TCP protocol
@@ -498,10 +558,11 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 		// Create host status entry
 		host := models.HostStatus{
 			Hostname:      xmlObj.HostName,
-			Description:   xmlObj.ObjectMessage, // The "desc" field from sysmon.conf
-			IPv4Address:   "", // Will be set below if hostname is an IP
+			Description:   xmlObj.ObjectMessage,
+			IPv4Address:   "",
 			OverallStatus: "OK",
 			StatusColor:   "green",
+			Contact:       xmlObj.ObjectContact,
 			DownCount:     xmlObj.DownCt,
 			UpCount:       xmlObj.UpCt,
 			TotalDown:     xmlObj.TotalDown,
@@ -1450,8 +1511,8 @@ func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperati
 		response = strings.TrimSpace(response)
 		s.sessionLog.Log(fmt.Sprintf("ACK %s", hostname), response, false, "")
 
-		// Check if command succeeded
-		if strings.HasPrefix(response, "OK") || strings.Contains(response, "acknowledged") {
+		// sysmond responds with "333 ..." on success
+		if strings.HasPrefix(response, "333") {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  true,
@@ -1533,8 +1594,8 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 
 	// Process each hostname
 	for i, hostname := range hostnames {
-		// Send UPDATE command
-		cmd := fmt.Sprintf("UPDATE %s %s\n", hostname, note)
+		// Send UPD command (matches sysmond protocol)
+		cmd := fmt.Sprintf("UPD %s %s\n", hostname, note)
 		_, err := conn.Write([]byte(cmd))
 		if err != nil {
 			results[i] = BulkOperationResult{
@@ -1545,7 +1606,7 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 			continue
 		}
 
-		s.sessionLog.Log(fmt.Sprintf("UPDATE %s %s", hostname, note), "", false, "")
+		s.sessionLog.Log(fmt.Sprintf("UPD %s %s", hostname, note), "", false, "")
 
 		// Read response
 		response, err := reader.ReadString('\n')
@@ -1559,10 +1620,10 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 		}
 
 		response = strings.TrimSpace(response)
-		s.sessionLog.Log(fmt.Sprintf("UPDATE %s", hostname), response, false, "")
+		s.sessionLog.Log(fmt.Sprintf("UPD %s", hostname), response, false, "")
 
-		// Check if command succeeded
-		if strings.HasPrefix(response, "OK") || strings.Contains(response, "updated") {
+		// sysmond responds with "333 ..." on success
+		if strings.HasPrefix(response, "333") {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  true,
@@ -1664,8 +1725,8 @@ func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey strin
 		response = strings.TrimSpace(response)
 		s.sessionLog.Log(fmt.Sprintf("TRACE %s", hostname), response, false, "")
 
-		// Check if command succeeded
-		if strings.HasPrefix(response, "OK") || strings.Contains(response, "trace") {
+		// sysmond responds with "333 ..." on success
+		if strings.HasPrefix(response, "333") {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  true,
