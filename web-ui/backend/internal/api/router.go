@@ -3,8 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,23 +13,26 @@ import (
 	"sysmon-web/internal/middleware"
 	"sysmon-web/internal/models"
 	"sysmon-web/internal/monitoring"
+	"sysmon-web/internal/push"
 )
 
 // Router holds the API handlers
 type Router struct {
 	config     *config.Service
 	monitoring *monitoring.Service
+	push       *push.Service
 	mux        *http.ServeMux
 	metrics    *middleware.MetricsCollector
 }
 
 // NewRouter creates a new API router
-func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
+func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service) http.Handler {
 	metrics := middleware.NewMetricsCollector()
 
 	r := &Router{
 		config:     cfg,
 		monitoring: mon,
+		push:       pushSvc,
 		mux:        http.NewServeMux(),
 		metrics:    metrics,
 	}
@@ -57,6 +60,11 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service) http.Handler {
 	r.mux.HandleFunc("/api/monitoring/bulk/ack", r.handleBulkAck)
 	r.mux.HandleFunc("/api/monitoring/bulk/update", r.handleBulkUpdate)
 	r.mux.HandleFunc("/api/monitoring/bulk/trace", r.handleBulkTrace)
+
+	// Push notifications
+	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
+	r.mux.HandleFunc("/api/push/subscriptions", r.handlePushSubscriptions)
+	r.mux.HandleFunc("/api/push/test", r.handlePushTest)
 
 	// API documentation
 	r.mux.HandleFunc("/api/docs", r.handleAPIDocs)
@@ -915,7 +923,7 @@ func (r *Router) handleOpenAPISpec(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Read OpenAPI spec file
-	specData, err := ioutil.ReadFile("./api/openapi.yaml")
+	specData, err := os.ReadFile("./api/openapi.yaml")
 	if err != nil {
 		r.sendError(w, http.StatusInternalServerError, "Failed to load API specification")
 		return
@@ -1011,6 +1019,115 @@ func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(xmlData))
+}
+
+// Push notification handlers
+
+func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodPost:
+		if r.push == nil {
+			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+			return
+		}
+
+		var body struct {
+			DeviceToken string `json:"device_token"`
+			Platform    string `json:"platform"`
+			Label       string `json:"label"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+
+		if body.DeviceToken == "" || body.Platform == "" {
+			r.sendError(w, http.StatusBadRequest, "device_token and platform are required")
+			return
+		}
+
+		if err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label); err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		r.sendJSON(w, map[string]string{"status": "subscribed"})
+
+	case http.MethodDelete:
+		if r.push == nil {
+			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+			return
+		}
+
+		var body struct {
+			DeviceToken string `json:"device_token"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+
+		if err := r.push.Unsubscribe(body.DeviceToken); err != nil {
+			r.sendError(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		r.sendJSON(w, map[string]string{"status": "unsubscribed"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	subs := r.push.ListSubscriptions()
+	r.sendJSON(w, map[string]interface{}{
+		"subscriptions": subs,
+		"count":         len(subs),
+	})
+}
+
+func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	var body struct {
+		DeviceToken string `json:"device_token"`
+		Platform    string `json:"platform"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if body.DeviceToken == "" || body.Platform == "" {
+		r.sendError(w, http.StatusBadRequest, "device_token and platform are required")
+		return
+	}
+
+	if err := r.push.SendTest(body.DeviceToken, push.Platform(body.Platform)); err != nil {
+		r.sendError(w, http.StatusBadGateway, fmt.Sprintf("Push failed: %v", err))
+		return
+	}
+
+	r.sendJSON(w, map[string]string{"status": "sent"})
 }
 
 // Helper functions

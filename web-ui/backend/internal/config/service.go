@@ -38,23 +38,21 @@ func (s *Service) GetConfig() (*models.ConfigSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Read file
-	content, err := os.ReadFile(s.configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-
 	// Get file modification time
 	stat, err := os.Stat(s.configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat config: %w", err)
 	}
 
-	// Calculate version (SHA256 hash)
-	version := fmt.Sprintf("%x", sha256.Sum256(content))
+	// Hash main config + all included files for version
+	allContent, err := CollectAllContent(s.configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
+	}
+	version := fmt.Sprintf("%x", sha256.Sum256(allContent))
 
-	// Parse config
-	config, err := Parse(content)
+	// Parse config with include resolution
+	config, err := ParseFile(s.configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
