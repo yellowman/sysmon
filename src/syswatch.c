@@ -107,6 +107,8 @@ void set_defaults()
 	/* Set global variables to some sort of defaults */
 
 	numfailures = 4;
+	minnumfailures = 1;
+	flaptime = 0;
 	inactivetime = 300;
 	globtimeout = 30;
 	globtimeoutlen = 35;
@@ -118,6 +120,7 @@ void set_defaults()
 	dnslog = 900;
 	dnsexpire = 3600;
 	heartbeat = TRUE;
+	html = -1;
 	if (errorsto != NULL)
 	{
 		free(errorsto);
