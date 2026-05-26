@@ -250,7 +250,7 @@ func Generate(config *models.Config) (string, error) {
 			sb.WriteString(fmt.Sprintf("\turl \"%s\";\n", host.URL))
 		}
 		if host.URLText != "" {
-			sb.WriteString(fmt.Sprintf("\turl-text \"%s\";\n", host.URLText))
+			sb.WriteString(fmt.Sprintf("\turltext \"%s\";\n", host.URLText))
 		}
 
 		// Auth settings
