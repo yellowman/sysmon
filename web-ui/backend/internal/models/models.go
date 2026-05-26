@@ -65,6 +65,14 @@ type GlobalSettings struct {
 	AuthKey         string `json:"authkey,omitempty"`         // authentication key for clients
 	SaveState       string `json:"savestate,omitempty"`       // path to save state XML file
 
+	// Push notification settings
+	PushNotifications bool   `json:"pushnotifications,omitempty"` // enable push notifications
+	PushFCMServerKey  string `json:"push_fcm_serverkey,omitempty"`
+	PushAPNsCertFile  string `json:"push_apns_certfile,omitempty"`
+	PushAPNsKeyFile   string `json:"push_apns_keyfile,omitempty"`
+	PushAPNsBundleID  string `json:"push_apns_bundleid,omitempty"`
+	PushAPNsProduction bool  `json:"push_apns_production,omitempty"`
+
 	// Include paths
 	Includes []string `json:"includes,omitempty"` // included config files
 }

@@ -458,6 +458,32 @@ can be configured.
 .fi
 .LP
 
+.SS Push Notifications (APNs / FCM)
+The following directives enable mobile push notifications via the sysmon
+web-ui backend.  The C daemon accepts and ignores these directives; they
+are consumed by the Go web-ui backend which monitors host state changes
+and sends push alerts to subscribed iOS and Android devices.
+.TP
+.B config push-notifications;
+Enable push notification support.
+.TP
+.B config push-fcm-serverkey \fI"key"\fP;
+Firebase Cloud Messaging server key for Android push notifications.
+Obtain from Firebase Console > Project Settings > Cloud Messaging.
+.TP
+.B config push-apns-certfile \fI"path"\fP;
+Path to the APNs TLS certificate in PEM format for iOS push notifications.
+.TP
+.B config push-apns-keyfile \fI"path"\fP;
+Path to the APNs TLS private key in PEM format.
+.TP
+.B config push-apns-bundleid \fI"bundle-id"\fP;
+The iOS app bundle identifier (e.g., com.example.sysmon).
+.TP
+.B config push-apns-production;
+Use the production APNs gateway.  If omitted, the sandbox (development)
+gateway is used.
+
 .SH FILES
 .PD 0
 .TP

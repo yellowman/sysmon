@@ -225,6 +225,18 @@ func Parse(content []byte) (*models.Config, error) {
 				config.Global.DownColor = extractQuoted(strings.TrimPrefix(line, "downcolor "))
 			} else if strings.HasPrefix(line, "recentcolor ") {
 				config.Global.RecentColor = extractQuoted(strings.TrimPrefix(line, "recentcolor "))
+			} else if line == "push-notifications" {
+				config.Global.PushNotifications = true
+			} else if strings.HasPrefix(line, "push-fcm-serverkey ") {
+				config.Global.PushFCMServerKey = extractQuoted(strings.TrimPrefix(line, "push-fcm-serverkey "))
+			} else if strings.HasPrefix(line, "push-apns-certfile ") {
+				config.Global.PushAPNsCertFile = extractQuoted(strings.TrimPrefix(line, "push-apns-certfile "))
+			} else if strings.HasPrefix(line, "push-apns-keyfile ") {
+				config.Global.PushAPNsKeyFile = extractQuoted(strings.TrimPrefix(line, "push-apns-keyfile "))
+			} else if strings.HasPrefix(line, "push-apns-bundleid ") {
+				config.Global.PushAPNsBundleID = extractQuoted(strings.TrimPrefix(line, "push-apns-bundleid "))
+			} else if line == "push-apns-production" {
+				config.Global.PushAPNsProduction = true
 			}
 			continue
 		}
