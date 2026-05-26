@@ -1,6 +1,8 @@
 package push
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -30,7 +32,14 @@ type Subscription struct {
 	DeviceToken string   `json:"device_token"`
 	Platform    Platform `json:"platform"`
 	Label       string   `json:"label,omitempty"`
+	APIKey      string   `json:"api_key"`
 	CreatedAt   string   `json:"created_at"`
+}
+
+func generateAPIKey() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 type pushLogEntry struct {
@@ -134,28 +143,91 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) Subscribe(token string, platform Platform, label string) error {
+func (s *Service) Subscribe(token string, platform Platform, label string) (string, error) {
 	if platform != PlatformIOS && platform != PlatformAndroid {
-		return fmt.Errorf("platform must be 'ios' or 'android'")
+		return "", fmt.Errorf("platform must be 'ios' or 'android'")
 	}
 	if token == "" {
-		return fmt.Errorf("device_token is required")
+		return "", fmt.Errorf("device_token is required")
 	}
 
-	sub := Subscription{
-		DeviceToken: token,
-		Platform:    platform,
-		Label:       label,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	data, err := json.Marshal(sub)
-	if err != nil {
-		return err
-	}
+	apiKey := ""
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
 
-	return s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketSubscriptions).Put([]byte(token), data)
+		// If token already exists, keep its api_key
+		if existing := b.Get([]byte(token)); existing != nil {
+			var old Subscription
+			if json.Unmarshal(existing, &old) == nil && old.APIKey != "" {
+				apiKey = old.APIKey
+			}
+		}
+		if apiKey == "" {
+			apiKey = generateAPIKey()
+		}
+
+		sub := Subscription{
+			DeviceToken: token,
+			Platform:    platform,
+			Label:       label,
+			APIKey:      apiKey,
+			CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+		}
+		data, err := json.Marshal(sub)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(token), data)
 	})
+	return apiKey, err
+}
+
+// ValidateAPIKey checks if an API key is valid for a given device token.
+// If token is empty, checks if the API key belongs to any subscription.
+func (s *Service) ValidateAPIKey(token, apiKey string) bool {
+	if apiKey == "" {
+		return false
+	}
+	valid := false
+	s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		if token != "" {
+			v := b.Get([]byte(token))
+			if v != nil {
+				var sub Subscription
+				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
+					valid = true
+				}
+			}
+		} else {
+			b.ForEach(func(k, v []byte) error {
+				var sub Subscription
+				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
+					valid = true
+				}
+				return nil
+			})
+		}
+		return nil
+	})
+	return valid
+}
+
+// FindTokenByAPIKey returns the device token associated with an API key.
+func (s *Service) FindTokenByAPIKey(apiKey string) (string, Platform) {
+	var token string
+	var platform Platform
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
+				token = sub.DeviceToken
+				platform = sub.Platform
+			}
+			return nil
+		})
+	})
+	return token, platform
 }
 
 func (s *Service) Unsubscribe(token string) error {

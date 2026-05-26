@@ -100,10 +100,26 @@ push: state change watcher started (1s poll interval)
 All endpoints are on the sysmon web-ui base URL
 (e.g., `https://sysmon.example.com`).
 
+### Authentication
+
+Push endpoints use two layers of auth:
+
+1. **Global authkey** (from `config authkey` in sysmon.conf) — required to
+   subscribe new devices and list all subscriptions. This is the same key
+   used for admin operations in the web UI. Pass it via `X-Auth-Key` header.
+
+2. **Per-device API key** — returned on subscribe, unique to each device.
+   Required for unsubscribe and test. This prevents one device from
+   managing another device's subscription. The app must store this key.
+
+If no authkey is configured in sysmon.conf, subscribe and list are open
+(per-device API keys still apply for unsubscribe/test).
+
 ### Subscribe a device
 
 ```
 POST /api/push/subscribe
+X-Auth-Key: <sysmon authkey>
 Content-Type: application/json
 
 {
@@ -117,9 +133,15 @@ Content-Type: application/json
 - `platform` (required): `"ios"` or `"android"`.
 - `label` (optional): Human-readable name for identifying the device.
 
-If the token already exists, the platform and label are updated (upsert).
+If the token already exists, platform and label are updated but the
+same API key is returned.
 
-Response: `{"status": "subscribed"}`
+Response:
+```json
+{"status": "subscribed", "api_key": "a1b2c3d4e5f6..."}
+```
+
+**The app must store `api_key`** — it's needed for unsubscribe and test.
 
 ### Unsubscribe a device
 
@@ -127,16 +149,24 @@ Response: `{"status": "subscribed"}`
 DELETE /api/push/subscribe
 Content-Type: application/json
 
-{"device_token": "<token>"}
+{
+  "device_token": "<token>",
+  "api_key": "<api_key from subscribe>"
+}
 ```
+
+The API key must match the one issued for this device token.
 
 Response: `{"status": "unsubscribed"}`
 
-### List subscriptions
+### List subscriptions (admin)
 
 ```
 GET /api/push/subscriptions
+X-Auth-Key: <sysmon authkey>
 ```
+
+Requires the global authkey. API keys are not included in the response.
 
 Response:
 ```json
@@ -146,7 +176,7 @@ Response:
       "device_token": "abc123...",
       "platform": "ios",
       "label": "Chris's iPhone",
-      "created_at": "2025-05-26 21:00:00"
+      "created_at": "2025-05-26T21:00:00Z"
     }
   ],
   "count": 1
@@ -159,14 +189,11 @@ Response:
 POST /api/push/test
 Content-Type: application/json
 
-{
-  "device_token": "<token>",
-  "platform": "ios" or "android"
-}
+{"api_key": "<api_key from subscribe>"}
 ```
 
-Sends a test push with title "sysmon test" and body "push notifications
-are working". Use this to verify end-to-end delivery after subscribing.
+Looks up the device by its API key and sends a test push. No need to
+specify token or platform — the backend resolves them from the key.
 
 Response: `{"status": "sent"}`
 
@@ -231,16 +258,26 @@ UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound
 // 2. Register token with sysmon
 func application(_ app: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
     let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+    let sysmonURL = "https://sysmon.example.com"
+    let authKey = "your-sysmon-authkey"  // from config authkey in sysmon.conf
 
-    var req = URLRequest(url: URL(string: "https://sysmon.example.com/api/push/subscribe")!)
+    var req = URLRequest(url: URL(string: "\(sysmonURL)/api/push/subscribe")!)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.httpBody = try? JSONEncoder().encode([
+    req.setValue(authKey, forHTTPHeaderField: "X-Auth-Key")
+    req.httpBody = try? JSONSerialization.data(withJSONObject: [
         "device_token": token,
         "platform": "ios",
         "label": UIDevice.current.name
     ])
-    URLSession.shared.dataTask(with: req).resume()
+
+    URLSession.shared.dataTask(with: req) { data, _, _ in
+        guard let data = data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let apiKey = json["api_key"] else { return }
+        // Store apiKey in Keychain — needed for unsubscribe and test
+        UserDefaults.standard.set(apiKey, forKey: "sysmon_api_key")
+    }.resume()
 }
 
 // 3. That's it. Notifications arrive via APNs automatically.
@@ -258,8 +295,20 @@ class SysmonMessagingService : FirebaseMessagingService() {
             put("platform", "android")
             put("label", Build.MODEL)
         }
-        // POST to https://sysmon.example.com/api/push/subscribe
-        // with json.toString() as body
+
+        val url = URL("https://sysmon.example.com/api/push/subscribe")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.setRequestProperty("X-Auth-Key", "your-sysmon-authkey")
+        conn.doOutput = true
+        conn.outputStream.write(json.toString().toByteArray())
+
+        val response = JSONObject(conn.inputStream.bufferedReader().readText())
+        val apiKey = response.getString("api_key")
+        // Store apiKey in SharedPreferences — needed for unsubscribe and test
+        getSharedPreferences("sysmon", MODE_PRIVATE)
+            .edit().putString("api_key", apiKey).apply()
     }
 
     // Notifications with a "notification" payload are shown automatically
@@ -276,17 +325,20 @@ class SysmonMessagingService : FirebaseMessagingService() {
 
 ## Token Lifecycle
 
-- **Registration**: Call `POST /api/push/subscribe` on every app launch.
-  Tokens may change at any time (OS refresh, reinstall). The endpoint
-  uses upsert, so re-registering the same token just updates the label.
+- **Registration**: Call `POST /api/push/subscribe` with `X-Auth-Key`
+  on every app launch. The endpoint uses upsert — re-registering the
+  same token returns the same `api_key` and updates the label.
+
+- **Store the api_key**: The app must persist the `api_key` returned
+  by subscribe (Keychain on iOS, SharedPreferences on Android). It's
+  needed for unsubscribe and test.
 
 - **Token refresh**: When the OS issues a new token, subscribe with the
-  new token. The old token will silently fail on the next push attempt.
-  Optionally unsubscribe the old token first.
+  new token (same authkey). You get a new api_key for the new token.
+  Optionally unsubscribe the old token using its old api_key.
 
-- **Uninstall**: When a push fails with a permanent error (APNs 410 Gone,
-  FCM NotRegistered), the token is effectively dead. The subscription
-  remains in the database but pushes to it will fail silently.
+- **Uninstall**: The subscription remains in the database but pushes
+  to a dead token will fail silently (APNs 410 Gone, FCM NotRegistered).
 
 ## Database
 
