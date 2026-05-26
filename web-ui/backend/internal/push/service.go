@@ -198,7 +198,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType s
 }
 
 func (s *Service) watchLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	// Seed initial state
