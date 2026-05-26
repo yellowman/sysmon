@@ -65,7 +65,7 @@ func main() {
 			APNsBundleID:   g.PushAPNsBundleID,
 			APNsProduction: g.PushAPNsProduction,
 		}
-		svc, err := push.NewService(pushCfg, "/var/lib/sysmon/push-subscriptions.json", monitoringService)
+		svc, err := push.NewService(pushCfg, "/var/lib/sysmon/push.db", monitoringService)
 		if err != nil {
 			log.Printf("WARNING: push notification init failed: %v", err)
 		} else {
