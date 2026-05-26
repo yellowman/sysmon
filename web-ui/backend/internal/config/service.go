@@ -53,8 +53,8 @@ func (s *Service) GetConfig() (*models.ConfigSnapshot, error) {
 	// Calculate version (SHA256 hash)
 	version := fmt.Sprintf("%x", sha256.Sum256(content))
 
-	// Parse config
-	config, err := Parse(content)
+	// Parse config with include resolution
+	config, err := ParseFile(s.configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}

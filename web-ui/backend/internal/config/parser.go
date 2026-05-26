@@ -3,11 +3,71 @@ package config
 import (
 	"bufio"
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"sysmon-web/internal/models"
 )
+
+// ParseFile parses a sysmon.conf file, resolving include directives
+// relative to the file's directory.
+func ParseFile(path string) (*models.Config, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseWithIncludes(content, filepath.Dir(path), 0)
+}
+
+const maxIncludeDepth = 10
+
+func parseWithIncludes(content []byte, baseDir string, depth int) (*models.Config, error) {
+	if depth > maxIncludeDepth {
+		return nil, fmt.Errorf("include depth exceeded (max %d)", maxIncludeDepth)
+	}
+
+	config, err := Parse(content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Scan for include directives and merge included configs
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimSuffix(line, ";")
+
+		if strings.HasPrefix(line, "include ") {
+			includePath := extractQuoted(strings.TrimPrefix(line, "include "))
+			if includePath == "" {
+				continue
+			}
+
+			if !filepath.IsAbs(includePath) {
+				includePath = filepath.Join(baseDir, includePath)
+			}
+
+			includeContent, err := os.ReadFile(includePath)
+			if err != nil {
+				continue // skip missing includes like the C parser does
+			}
+
+			included, err := parseWithIncludes(includeContent, filepath.Dir(includePath), depth+1)
+			if err != nil {
+				continue
+			}
+
+			config.Hosts = append(config.Hosts, included.Hosts...)
+			config.Spawns = append(config.Spawns, included.Spawns...)
+			config.Contacts = append(config.Contacts, included.Contacts...)
+		}
+	}
+
+	return config, nil
+}
 
 // Parse parses sysmon.conf format
 func Parse(content []byte) (*models.Config, error) {
@@ -482,6 +542,33 @@ func Parse(content []byte) (*models.Config, error) {
 				currentHost.Header = extractQuoted(strings.TrimPrefix(line, "header "))
 			} else if strings.HasPrefix(line, "headerval ") {
 				currentHost.HeaderVal = extractQuoted(strings.TrimPrefix(line, "headerval "))
+			} else if strings.HasPrefix(line, "page ") {
+				currentHost.Contact = extractQuoted(strings.TrimPrefix(line, "page "))
+			} else if strings.HasPrefix(line, "child ") {
+				// child is inverse of dep — store as dependency for display
+				currentHost.Dependencies = extractQuoted(strings.TrimPrefix(line, "child "))
+			} else if strings.HasPrefix(line, "also-notify ") {
+				// additional contact — append to existing contact
+				extra := extractQuoted(strings.TrimPrefix(line, "also-notify "))
+				if currentHost.Contact != "" && extra != "" {
+					currentHost.Contact = currentHost.Contact + "," + extra
+				} else if extra != "" {
+					currentHost.Contact = extra
+				}
+			} else if strings.HasPrefix(line, "pmesg ") {
+				currentHost.PMsg = extractQuoted(strings.TrimPrefix(line, "pmesg "))
+			} else if strings.HasPrefix(line, "rtt_samples ") {
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "rtt_samples "))); err == nil {
+					currentHost.RTTSamples = val
+				}
+			} else if strings.HasPrefix(line, "pkt_loss_tolerance ") {
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pkt_loss_tolerance "))); err == nil {
+					currentHost.PktLossTolerance = val
+				}
+			} else if strings.HasPrefix(line, "pkt_loss_history_hours ") {
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pkt_loss_history_hours "))); err == nil {
+					currentHost.PktLossHistoryHours = val
+				}
 			}
 		}
 	}
