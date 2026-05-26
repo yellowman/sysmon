@@ -204,11 +204,7 @@ func Parse(content []byte) (*models.Config, error) {
 			line = strings.TrimPrefix(line, "config ")
 
 			// Boolean flags
-			if line == "drop_privileges" || line == "dropprivileges" {
-				config.Global.DropPrivileges = true
-			} else if line == "disable_icmp" || line == "disableicmp" {
-				config.Global.DisableICMP = true
-			} else if line == "noheartbeat" {
+			if line == "noheartbeat" {
 				config.Global.NoHeartbeat = true
 			} else if line == "nologconnects" {
 				config.Global.NoLogConnects = true
@@ -252,13 +248,6 @@ func Parse(content []byte) (*models.Config, error) {
 				if len(parts) >= 2 {
 					if val, err := strconv.Atoi(parts[1]); err == nil {
 						config.Global.ClientPort = val
-					}
-				}
-			} else if strings.HasPrefix(line, "trap_port ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.Atoi(parts[1]); err == nil {
-						config.Global.SNMPTrapPort = val
 					}
 				}
 			} else if strings.HasPrefix(line, "maxqueued ") {
@@ -449,10 +438,6 @@ func Parse(content []byte) (*models.Config, error) {
 				}
 			} else if strings.HasPrefix(line, "contact_on ") {
 				currentHost.ContactOn = extractQuoted(strings.TrimPrefix(line, "contact_on "))
-			} else if strings.HasPrefix(line, "command ") {
-				currentHost.Command = extractQuoted(strings.TrimPrefix(line, "command "))
-			} else if strings.HasPrefix(line, "customspawn ") {
-				currentHost.CustomSpawn = extractQuoted(strings.TrimPrefix(line, "customspawn "))
 			} else if strings.HasPrefix(line, "numfailures ") {
 				parts := strings.Fields(line)
 				if len(parts) >= 2 {
@@ -462,29 +447,6 @@ func Parse(content []byte) (*models.Config, error) {
 				}
 			} else if line == "trap_alert" || line == "trapalert" {
 				currentHost.TrapAlert = true
-			} else if strings.HasPrefix(line, "matched_host ") {
-				currentHost.MatchedHost = extractQuoted(strings.TrimPrefix(line, "matched_host "))
-			} else if strings.HasPrefix(line, "send_pings ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.Atoi(parts[1]); err == nil {
-						currentHost.SendPings = val
-					}
-				}
-			} else if strings.HasPrefix(line, "min_pings ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.Atoi(parts[1]); err == nil {
-						currentHost.MinPings = val
-					}
-				}
-			} else if strings.HasPrefix(line, "packet_loss_threshold ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.ParseFloat(parts[1], 64); err == nil {
-						currentHost.PacketLossThreshold = val
-					}
-				}
 			} else if strings.HasPrefix(line, "rtt_threshold ") {
 				parts := strings.Fields(line)
 				if len(parts) >= 2 {
@@ -497,22 +459,6 @@ func Parse(content []byte) (*models.Config, error) {
 				if len(parts) >= 2 {
 					if val, err := strconv.Atoi(parts[1]); err == nil {
 						currentHost.JitterThreshold = val
-					}
-				}
-			} else if line == "wakeup_check" {
-				currentHost.WakeupCheck = true
-			} else if strings.HasPrefix(line, "wakeup_retries ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.Atoi(parts[1]); err == nil {
-						currentHost.WakeupRetries = val
-					}
-				}
-			} else if strings.HasPrefix(line, "wakeup_check_interval ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.Atoi(parts[1]); err == nil {
-						currentHost.WakeupCheckInterval = val
 					}
 				}
 			} else if strings.HasPrefix(line, "community ") || strings.HasPrefix(line, "snmp-community ") || strings.HasPrefix(line, "snmpcommunity ") {
