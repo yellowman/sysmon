@@ -217,6 +217,7 @@ type DaemonInfo struct {
 
 // HostStatus represents the status of a monitored host
 type HostStatus struct {
+	ObjectName     string        `json:"object_name"`           // Unique sysmon object name
 	Hostname       string        `json:"hostname"`
 	Description    string        `json:"description,omitempty"` // Notes/description from config
 	IPv4Address    string        `json:"ipv4_address,omitempty"`

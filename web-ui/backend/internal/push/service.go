@@ -46,7 +46,7 @@ type Service struct {
 	fcm  *FCMClient
 
 	monitoring *monitoring.Service
-	prevHosts  map[string]string // hostname -> last known status
+	prevHosts  map[string]string // object_name -> last known status
 	stopCh     chan struct{}
 }
 
@@ -228,8 +228,12 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	}
 
 	for _, host := range status.Hosts {
-		prevStatus, known := s.prevHosts[host.Hostname]
-		s.prevHosts[host.Hostname] = host.OverallStatus
+		key := host.ObjectName
+		if key == "" {
+			key = host.Hostname
+		}
+		prevStatus, known := s.prevHosts[key]
+		s.prevHosts[key] = host.OverallStatus
 
 		if initialSeed || !known || prevStatus == host.OverallStatus {
 			continue

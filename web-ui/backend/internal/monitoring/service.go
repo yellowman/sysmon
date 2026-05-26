@@ -581,6 +581,7 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 
 		// Create host status entry
 		host := models.HostStatus{
+			ObjectName:    xmlObj.Object,
 			Hostname:      xmlObj.HostName,
 			Description:   xmlObj.ObjectMessage,
 			IPv4Address:   "",
