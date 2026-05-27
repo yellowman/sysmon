@@ -102,6 +102,10 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "dashboard.html", PageData{Active: "dashboard"})
 }
 
+func (r *Router) handleLoginPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "login.html", PageData{Active: ""})
+}
+
 func (r *Router) handleHostsPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "hosts.html", PageData{Active: "hosts"})
 }

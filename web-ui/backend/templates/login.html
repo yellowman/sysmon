@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sysmon - Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } } }
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-50 antialiased min-h-screen flex items-center justify-center">
+    <div x-data="{username:'',password:'',error:'',loading:false}" class="w-full max-w-sm">
+        <div class="text-center mb-8">
+            <h1 class="text-2xl font-extrabold tracking-tight text-gray-900">sys<span class="text-blue-600">mon</span></h1>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide uppercase">Network Monitoring</p>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-xl p-6">
+            <div x-show="error" class="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700" x-text="error"></div>
+
+            <form @submit.prevent="
+                loading = true; error = '';
+                fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                }).then(async r => {
+                    const data = await r.json();
+                    if (!r.ok) { error = data.message || 'Login failed'; loading = false; return; }
+                    sessionStorage.setItem('sysmon_token', data.token);
+                    sessionStorage.setItem('sysmon_user', data.username);
+                    sessionStorage.setItem('sysmon_role', data.role);
+                    window.location.href = '/';
+                }).catch(e => { error = 'Connection failed'; loading = false; })
+            ">
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Username</label>
+                    <input type="text" x-model="username" required autofocus
+                           class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+                </div>
+                <div class="mb-5">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Password</label>
+                    <input type="password" x-model="password" required
+                           class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+                </div>
+                <button type="submit" :disabled="loading || !username || !password"
+                        class="w-full py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 disabled:opacity-50 tracking-wide">
+                    <span x-show="!loading">Sign in</span>
+                    <span x-show="loading">Signing in...</span>
+                </button>
+            </form>
+        </div>
+
+        <p class="text-center text-[10px] text-gray-300 mt-6 tracking-wide uppercase">Default: admin / sysmon</p>
+    </div>
+</body>
+</html>
