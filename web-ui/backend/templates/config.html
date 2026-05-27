@@ -1266,11 +1266,13 @@
 </div>
 
 <script>
-function authFetch(url, opts = {}) {
+async function authFetch(url, opts = {}) {
     opts.headers = opts.headers || {};
     const t = sessionStorage.getItem('sysmon_token');
     if (t) opts.headers['Authorization'] = 'Bearer ' + t;
-    return fetch(url, opts);
+    const resp = await fetch(url, opts);
+    if (resp.status === 401) { window.location.href = '/login.html'; }
+    return resp;
 }
 function unifiedConfigPage() {
     return {
@@ -1528,10 +1530,13 @@ function unifiedConfigPage() {
                 });
 
                 if (response.ok) {
-                    // Reset change tracking after successful save
+                    const result = await response.json();
+                    if (result.version) this.structuredConfigVersion = result.version;
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
                     this.structuredHasChanges = false;
                     this.showSuccess('Configuration saved successfully! Reload sysmon to apply changes.');
+                } else if (response.status === 401) {
+                    window.location.href = '/login.html';
                 } else {
                     const error = await response.text();
                     alert('Failed to save configuration: ' + error);
