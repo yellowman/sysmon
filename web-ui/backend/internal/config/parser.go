@@ -447,6 +447,27 @@ func Parse(content []byte) (*models.Config, error) {
 				}
 			} else if line == "trap_alert" || line == "trapalert" {
 				currentHost.TrapAlert = true
+			} else if strings.HasPrefix(line, "send_pings ") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					if val, err := strconv.Atoi(parts[1]); err == nil {
+						currentHost.SendPings = val
+					}
+				}
+			} else if strings.HasPrefix(line, "min_pings ") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					if val, err := strconv.Atoi(parts[1]); err == nil {
+						currentHost.MinPings = val
+					}
+				}
+			} else if strings.HasPrefix(line, "packet_loss_threshold ") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					if val, err := strconv.ParseFloat(parts[1], 64); err == nil {
+						currentHost.PacketLossThreshold = val
+					}
+				}
 			} else if strings.HasPrefix(line, "rtt_threshold ") {
 				parts := strings.Fields(line)
 				if len(parts) >= 2 {
