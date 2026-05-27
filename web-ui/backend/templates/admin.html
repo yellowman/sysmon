@@ -93,11 +93,12 @@
             <div x-show="pushSubs.length === 0 && !pushSubsError" class="text-center text-gray-500 py-8">
                 <i class="fas fa-bell-slash text-4xl mb-2"></i>
                 <p>No devices subscribed to push notifications</p>
-                <p class="text-xs mt-1">Devices register via <span class="font-mono">POST /api/push/subscribe</span></p>
+                <p class="text-xs mt-1">Configure push in <a href="/config.html" class="text-blue-600 hover:underline">Configuration</a> &gt; Push tab</p>
+                <p class="text-xs text-gray-400 mt-0.5">Devices register via <span class="font-mono">POST /api/push/subscribe</span></p>
             </div>
-            <div x-show="pushSubsError" class="text-center text-yellow-600 py-4">
-                <i class="fas fa-lock mr-1"></i>
-                <span x-text="pushSubsError"></span>
+            <div x-show="pushSubsError" class="text-center py-6">
+                <i class="fas fa-exclamation-circle text-2xl text-amber-400 mb-2"></i>
+                <p class="text-sm text-gray-700" x-text="pushSubsError"></p>
             </div>
             <div x-show="pushSubs.length > 0" class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200">
@@ -495,11 +496,7 @@ function adminPage() {
                 const result = await apiCall('/api/push/subscriptions');
                 this.pushSubs = result.subscriptions || [];
             } catch (e) {
-                if (e.message.includes('auth') || e.message.includes('Auth')) {
-                    this.pushSubsError = 'Authentication required to view subscribers';
-                } else if (e.message.includes('not configured')) {
-                    this.pushSubsError = 'Push notifications not configured';
-                }
+                this.pushSubsError = e.message || 'Failed to load subscribers';
                 this.pushSubs = [];
             }
         },
