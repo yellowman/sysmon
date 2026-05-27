@@ -127,7 +127,7 @@
             </div>
         </div>
         <div class="divide-y divide-gray-200">
-            <template x-for="trap in traps.slice(0, 5)" :key="trap.timestamp">
+            <template x-for="(trap, idx) in traps.slice(0, 5)" :key="idx + '-' + trap.timestamp">
                 <div class="px-6 py-4 hover:bg-gray-50">
                     <div class="flex items-center justify-between">
                         <div>
@@ -311,7 +311,7 @@ function dashboard() {
 
         async fetchData() {
             try {
-                this.loading = true;
+                if (!this.stats.total_hosts) this.loading = true;
                 this.error = null;
 
                 const response = await fetch('/api/monitoring/status');

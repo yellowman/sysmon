@@ -132,8 +132,10 @@
 
         <!-- Audit Log Tab -->
         <div x-show="activeTab === 'audit'">
-            <div class="bg-white rounded-lg shadow p-6">
-                <p class="text-gray-500 text-sm">Audit log display coming soon...</p>
+            <div class="bg-white rounded-lg shadow p-6 text-center py-12">
+                <i class="fas fa-clipboard-list text-4xl text-gray-300 mb-3"></i>
+                <p class="text-gray-500">Audit log is available at the configured audit log path</p>
+                <p class="text-xs text-gray-400 mt-1">See <span class="font-mono">-audit</span> flag in sysmon-web startup</p>
             </div>
         </div>
     </div>
@@ -943,7 +945,7 @@
                                         </div>
 
                                         <!-- No type-specific fields message -->
-                                        <div x-show="!['ping', 'pingv4', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
+                                        <div x-show="!['ping', 'pingv4', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp', 'tcp', 'udp', 'snmp', 'nntp', 'ircd'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
                                             <i class="fas fa-info-circle text-4xl text-gray-300 mb-2"></i>
                                             <p>No additional type-specific settings for <span x-text="editingHost.type" class="font-semibold"></span> check type.</p>
                                             <p class="text-sm mt-1">Configure port number in Overview tab if needed.</p>
