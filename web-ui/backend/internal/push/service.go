@@ -383,10 +383,13 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 
 	for _, sub := range subs {
 		var err error
+		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
 			if s.apns != nil {
 				err = s.apns.Send(sub.DeviceToken, title, subtitle, body)
+			} else {
+				skipped = true
 			}
 		case PlatformAndroid:
 			if s.fcm != nil {
@@ -396,7 +399,14 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 					Type:     checkType,
 				}
 				err = s.fcm.Send(sub.DeviceToken, title, body, data)
+			} else {
+				skipped = true
 			}
+		default:
+			skipped = true
+		}
+		if skipped {
+			continue
 		}
 		s.RecordPush(sub.DeviceToken, err == nil)
 		if err != nil {
