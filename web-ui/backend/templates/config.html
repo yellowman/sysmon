@@ -1266,6 +1266,12 @@
 </div>
 
 <script>
+function authFetch(url, opts = {}) {
+    opts.headers = opts.headers || {};
+    const t = sessionStorage.getItem('sysmon_token');
+    if (t) opts.headers['Authorization'] = 'Bearer ' + t;
+    return fetch(url, opts);
+}
 function unifiedConfigPage() {
     return {
         // Mode control
@@ -1355,7 +1361,7 @@ function unifiedConfigPage() {
         // RAW EDITOR METHODS
         async fetchConfigRaw() {
             try {
-                const response = await fetch('/api/config/raw');
+                const response = await authFetch('/api/config/raw');
                 if (!response.ok) {
                     throw new Error(`Failed to load config: ${response.statusText}`);
                 }
@@ -1376,7 +1382,7 @@ function unifiedConfigPage() {
             this.versionConflict = false;
 
             try {
-                const response = await fetch('/api/config/raw', {
+                const response = await authFetch('/api/config/raw', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1416,7 +1422,7 @@ function unifiedConfigPage() {
 
             this.reloading = true;
             try {
-                const response = await fetch('/api/config/reload', { method: 'POST' });
+                const response = await authFetch('/api/config/reload', { method: 'POST' });
                 if (!response.ok) {
                     throw new Error(`Reload failed: ${response.statusText}`);
                 }
@@ -1430,7 +1436,7 @@ function unifiedConfigPage() {
 
         async fetchBackups() {
             try {
-                const response = await fetch('/api/backups');
+                const response = await authFetch('/api/backups');
                 if (!response.ok) {
                     throw new Error(`Failed to fetch backups: ${response.statusText}`);
                 }
@@ -1444,7 +1450,7 @@ function unifiedConfigPage() {
             if (!confirm(`Restore backup ${filename}? This will replace the current configuration.`)) return;
 
             try {
-                const response = await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
+                const response = await authFetch(`/api/backups/${filename}/restore`, { method: 'POST' });
                 if (!response.ok) {
                     throw new Error(`Restore failed: ${response.statusText}`);
                 }
@@ -1465,7 +1471,7 @@ function unifiedConfigPage() {
         async loadConfigStructured() {
             this.loadingStructured = true;
             try {
-                const response = await fetch('/api/config');
+                const response = await authFetch('/api/config');
                 if (response.ok) {
                     const snapshot = await response.json();
                     this.structuredConfig = snapshot.config || {};
@@ -1511,7 +1517,7 @@ function unifiedConfigPage() {
 
             this.savingStructured = true;
             try {
-                const response = await fetch('/api/config', {
+                const response = await authFetch('/api/config', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

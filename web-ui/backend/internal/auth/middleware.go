@@ -12,8 +12,8 @@ func RequireAuth(authSvc *Service, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Login endpoint is always open
-		if path == "/api/auth/login" {
+		// Login endpoint and login page are always open
+		if path == "/api/auth/login" || path == "/login.html" {
 			next.ServeHTTP(w, r)
 			return
 		}

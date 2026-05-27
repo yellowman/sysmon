@@ -40,10 +40,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 		metrics:    metrics,
 	}
 
-	// Configuration endpoints (file-based)
+	// Configuration endpoints (GET open to all, writes require admin)
 	r.mux.HandleFunc("/api/config", r.handleConfig)
-	r.mux.HandleFunc("/api/config/validate", r.handleConfigValidate)
-	r.mux.HandleFunc("/api/config/reload", r.handleConfigReload)
+	r.mux.HandleFunc("/api/config/validate", auth.RequireAdmin(r.handleConfigValidate))
+	r.mux.HandleFunc("/api/config/reload", auth.RequireAdmin(r.handleConfigReload))
 	r.mux.HandleFunc("/api/config/raw", r.handleConfigRaw)
 
 	// Backups
@@ -83,14 +83,14 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// XML passthrough endpoint (for host detail - kept for compatibility)
 	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
 
-	// Admin/debug endpoints
+	// Admin/debug endpoints (all require admin role)
 	r.mux.HandleFunc("/api/admin/version", r.handleAdminVersion)
-	r.mux.HandleFunc("/api/admin/debug", r.handleAdminDebug)
-	r.mux.HandleFunc("/api/admin/snmpd", r.handleAdminSNMPDebug)
-	r.mux.HandleFunc("/api/admin/expiredns", r.handleAdminExpireDNS)
+	r.mux.HandleFunc("/api/admin/debug", auth.RequireAdmin(r.handleAdminDebug))
+	r.mux.HandleFunc("/api/admin/snmpd", auth.RequireAdmin(r.handleAdminSNMPDebug))
+	r.mux.HandleFunc("/api/admin/expiredns", auth.RequireAdmin(r.handleAdminExpireDNS))
 	r.mux.HandleFunc("/api/admin/printq", r.handleAdminPrintQ)
 	r.mux.HandleFunc("/api/admin/nfd", r.handleAdminNFD)
-	r.mux.HandleFunc("/api/admin/killit", r.handleAdminKillit)
+	r.mux.HandleFunc("/api/admin/killit", auth.RequireAdmin(r.handleAdminKillit))
 	r.mux.HandleFunc("/api/admin/session-log", r.handleAdminSessionLog)
 	r.mux.HandleFunc("/api/admin/session-errors", r.handleAdminSessionErrors)
 
@@ -144,6 +144,9 @@ func (r *Router) handleConfig(w http.ResponseWriter, req *http.Request) {
 		r.sendJSON(w, snapshot)
 
 	case http.MethodPut:
+		if !r.requireAdmin(w, req) {
+			return
+		}
 		var update models.ConfigUpdate
 		if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON")
@@ -223,6 +226,9 @@ func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
 		})
 
 	case http.MethodPut:
+		if !r.requireAdmin(w, req) {
+			return
+		}
 		var data struct {
 			Content string `json:"content"`
 			Version string `json:"version"`
@@ -307,6 +313,9 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 	if strings.HasSuffix(filename, "/restore") {
 		if req.Method != http.MethodPost {
 			r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed for restore")
+			return
+		}
+		if !r.requireAdmin(w, req) {
 			return
 		}
 
@@ -1268,11 +1277,6 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		// Subscribe requires the global authkey
-		if !r.requireAdmin(w, req) {
-			return
-		}
-
 		var body struct {
 			DeviceToken string `json:"device_token"`
 			Platform    string `json:"platform"`
@@ -1521,7 +1525,7 @@ func (r *Router) sendErrorWithDetails(w http.ResponseWriter, status int, message
 
 func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 	// Try to get user from auth headers (if implemented)
-	user = req.Header.Get("X-User")
+	user = req.Header.Get("X-Session-User")
 	if user == "" {
 		user = "anonymous"
 	}
