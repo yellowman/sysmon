@@ -50,6 +50,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// Live monitoring
 	r.mux.HandleFunc("/api/monitoring/status", r.handleMonitoringStatus)
 	r.mux.HandleFunc("/api/monitoring/hosts", r.handleMonitoringHosts)
+	r.mux.HandleFunc("/api/monitoring/host/", r.handleMonitoringHost)
+	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
@@ -64,6 +66,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// Push notifications
 	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
 	r.mux.HandleFunc("/api/push/subscriptions", r.handlePushSubscriptions)
+	r.mux.HandleFunc("/api/push/remove/", r.handlePushAdminRemove)
+	r.mux.HandleFunc("/api/push/log", r.handlePushLog)
 	r.mux.HandleFunc("/api/push/test", r.handlePushTest)
 
 	// API documentation
@@ -290,7 +294,11 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if strings.HasSuffix(filename, "/restore") {
-		// Restore backup
+		if req.Method != http.MethodPost {
+			r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed for restore")
+			return
+		}
+
 		filename = strings.TrimSuffix(filename, "/restore")
 		user, ip := r.getUserInfo(req)
 
@@ -303,7 +311,25 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	backups, err := r.config.ListBackups()
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	for _, backup := range backups {
+		if backup.Filename == filename {
+			r.sendJSON(w, backup)
+			return
+		}
+	}
+
+	r.sendError(w, http.StatusNotFound, fmt.Sprintf("Backup %s not found", filename))
 }
 
 // Monitoring handlers
@@ -367,6 +393,47 @@ func (r *Router) handleMonitoringHosts(w http.ResponseWriter, req *http.Request)
 		// No pagination requested, return all hosts (backward compatible)
 		r.sendJSON(w, status.Hosts)
 	}
+}
+
+func (r *Router) handleMonitoringHost(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/host/")
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+
+	host, err := r.monitoring.GetHostStatus(hostname)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			r.sendError(w, http.StatusNotFound, fmt.Sprintf("Host %s not found", hostname))
+			return
+		}
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get host status: %v", err))
+		return
+	}
+
+	r.sendJSON(w, host)
+}
+
+func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	stats, err := r.monitoring.GetStatistics()
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to get statistics: %v", err))
+		return
+	}
+
+	r.sendJSON(w, stats)
 }
 
 func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request) {
@@ -1023,11 +1090,41 @@ func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
 
 // Push notification handlers
 
+// requireAuthKey checks the X-Auth-Key header against the configured authkey.
+// Returns true if auth passes (or no authkey is configured).
+func (r *Router) requireAuthKey(w http.ResponseWriter, req *http.Request) bool {
+	snapshot, err := r.config.GetConfig()
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, "Failed to read config")
+		return false
+	}
+	configured := snapshot.Config.Global.AuthKey
+	if configured == "" {
+		return true
+	}
+	provided := req.Header.Get("X-Auth-Key")
+	if provided == "" {
+		// Also check JSON body for auth_key field (already parsed bodies won't work here,
+		// so we rely on the header)
+		provided = req.URL.Query().Get("auth_key")
+	}
+	if provided != configured {
+		r.sendError(w, http.StatusUnauthorized, "Invalid or missing auth key")
+		return false
+	}
+	return true
+}
+
 func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodPost:
 		if r.push == nil {
 			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+			return
+		}
+
+		// Subscribe requires the global authkey
+		if !r.requireAuthKey(w, req) {
 			return
 		}
 
@@ -1046,12 +1143,18 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		if err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label); err != nil {
+		_, clientIP := r.getUserInfo(req)
+		userAgent := req.Header.Get("User-Agent")
+		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, clientIP, userAgent)
+		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		r.sendJSON(w, map[string]string{"status": "subscribed"})
+		r.sendJSON(w, map[string]string{
+			"status":  "subscribed",
+			"api_key": apiKey,
+		})
 
 	case http.MethodDelete:
 		if r.push == nil {
@@ -1061,9 +1164,21 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 
 		var body struct {
 			DeviceToken string `json:"device_token"`
+			APIKey      string `json:"api_key"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+
+		if body.APIKey == "" {
+			r.sendError(w, http.StatusUnauthorized, "api_key is required")
+			return
+		}
+
+		// Verify the api_key belongs to this device token
+		if !r.push.ValidateAPIKey(body.DeviceToken, body.APIKey) {
+			r.sendError(w, http.StatusForbidden, "Invalid api_key for this device")
 			return
 		}
 
@@ -1090,10 +1205,108 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
+	if !r.requireAuthKey(w, req) {
+		return
+	}
+
 	subs := r.push.ListSubscriptions()
+
+	// Return all metadata except api_keys
+	type adminSubscription struct {
+		DeviceToken    string `json:"device_token"`
+		Platform       string `json:"platform"`
+		Label          string `json:"label,omitempty"`
+		CreatedAt      string `json:"created_at"`
+		LastSeen       string `json:"last_seen"`
+		LastPushAt     string `json:"last_push_at,omitempty"`
+		LastPushStatus string `json:"last_push_status,omitempty"`
+		PushCount      int64  `json:"push_count"`
+		FailCount      int64  `json:"fail_count"`
+		IPAddress      string `json:"ip_address,omitempty"`
+		UserAgent      string `json:"user_agent,omitempty"`
+	}
+	out := make([]adminSubscription, len(subs))
+	for i, s := range subs {
+		out[i] = adminSubscription{
+			DeviceToken:    s.DeviceToken,
+			Platform:       string(s.Platform),
+			Label:          s.Label,
+			CreatedAt:      s.CreatedAt,
+			LastSeen:       s.LastSeen,
+			LastPushAt:     s.LastPushAt,
+			LastPushStatus: s.LastPushStatus,
+			PushCount:      s.PushCount,
+			FailCount:      s.FailCount,
+			IPAddress:      s.IPAddress,
+			UserAgent:      s.UserAgent,
+		}
+	}
+
 	r.sendJSON(w, map[string]interface{}{
-		"subscriptions": subs,
-		"count":         len(subs),
+		"subscriptions": out,
+		"count":         len(out),
+	})
+}
+
+func (r *Router) handlePushAdminRemove(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodDelete {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only DELETE allowed")
+		return
+	}
+
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	if !r.requireAuthKey(w, req) {
+		return
+	}
+
+	token := strings.TrimPrefix(req.URL.Path, "/api/push/remove/")
+	token = strings.TrimSpace(token)
+	if token == "" {
+		r.sendError(w, http.StatusBadRequest, "Device token required in URL path")
+		return
+	}
+
+	if err := r.push.AdminRemove(token); err != nil {
+		r.sendError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"status":       "removed",
+		"device_token": token,
+	})
+}
+
+func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	if !r.requireAuthKey(w, req) {
+		return
+	}
+
+	limit := 100
+	if limitStr := req.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	entries := r.push.GetPushLog(limit)
+	r.sendJSON(w, map[string]interface{}{
+		"entries": entries,
+		"count":   len(entries),
 	})
 }
 
@@ -1109,20 +1322,26 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var body struct {
-		DeviceToken string `json:"device_token"`
-		Platform    string `json:"platform"`
+		APIKey string `json:"api_key"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
-	if body.DeviceToken == "" || body.Platform == "" {
-		r.sendError(w, http.StatusBadRequest, "device_token and platform are required")
+	if body.APIKey == "" {
+		r.sendError(w, http.StatusUnauthorized, "api_key is required")
 		return
 	}
 
-	if err := r.push.SendTest(body.DeviceToken, push.Platform(body.Platform)); err != nil {
+	// Look up the device by its API key
+	token, platform := r.push.FindTokenByAPIKey(body.APIKey)
+	if token == "" {
+		r.sendError(w, http.StatusForbidden, "Invalid api_key")
+		return
+	}
+
+	if err := r.push.SendTest(token, platform); err != nil {
 		r.sendError(w, http.StatusBadGateway, fmt.Sprintf("Push failed: %v", err))
 		return
 	}

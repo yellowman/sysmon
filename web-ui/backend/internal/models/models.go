@@ -58,8 +58,6 @@ type GlobalSettings struct {
 
 	// System settings
 	MaxQueued       int    `json:"maxqueued,omitempty"`       // max simultaneous checks
-	DropPrivileges  bool   `json:"dropprivileges,omitempty"`  // drop privileges after init
-	DisableICMP     bool   `json:"disableicmp,omitempty"`     // disable all ICMP checks
 	NoHeartbeat     bool   `json:"noheartbeat,omitempty"`     // disable registration packet
 	NoLogConnects   bool   `json:"nologconnects,omitempty"`   // don't log client connections
 	SNMPTrap        bool   `json:"snmptrap,omitempty"`        // enable SNMP trap monitoring
@@ -94,31 +92,24 @@ type Host struct {
 	Paused   bool   `json:"paused"`                  // pause monitoring
 
 	// Alert settings
-	Spawn         string `json:"spawn,omitempty"`          // Named spawn command to use
-	CustomSpawn   string `json:"customspawn,omitempty"`    // Direct spawn command (for backward compat)
-	PageInterval  int    `json:"pageinterval,omitempty"`   // per-host page interval override
-	ContactOn     string `json:"contacton,omitempty"`      // when to contact (up/down/both)
+	Spawn        string `json:"spawn,omitempty"`
+	PageInterval int    `json:"pageinterval,omitempty"`
+	ContactOn    string `json:"contacton,omitempty"`
 
 	// Check configuration
-	Type string `json:"type,omitempty"`           // Main check type (icmp, tcp, http, etc.)
-	Port int    `json:"port,omitempty"`           // Port for TCP/UDP checks
+	Type string `json:"type,omitempty"`
+	Port int    `json:"port,omitempty"`
 
-	// Packet loss and ping settings
-	MinPings             int     `json:"minpings,omitempty"`             // min successful pings required
-	SendPings            int     `json:"sendpings,omitempty"`            // number of pings to send
-	PacketLossThreshold  float64 `json:"packetlossthreshold,omitempty"`  // packet loss % threshold
-	RTTThreshold         int     `json:"rttthreshold,omitempty"`         // RTT threshold in ms
-	JitterThreshold      int     `json:"jitterthreshold,omitempty"`      // jitter threshold in ms
-	RTTSamples           int     `json:"rttsamples,omitempty"`           // number of RTT samples
-
-	// Wake-on-LAN settings
-	WakeupCheck         bool `json:"wakeupcheck,omitempty"`         // enable wakeup monitoring
-	WakeupRetries       int  `json:"wakeupretries,omitempty"`       // number of wakeup attempts
-	WakeupCheckInterval int  `json:"wakeupcheckinterval,omitempty"` // time between wakeup attempts
+	// Ping/threshold settings (read-only from sysmond, not configurable via sysmon.conf)
+	MinPings             int     `json:"minpings,omitempty"`
+	SendPings            int     `json:"sendpings,omitempty"`
+	PacketLossThreshold  float64 `json:"packetlossthreshold,omitempty"`
+	RTTThreshold         int     `json:"rttthreshold,omitempty"`
+	JitterThreshold      int     `json:"jitterthreshold,omitempty"`
+	RTTSamples           int     `json:"rttsamples,omitempty"`
 
 	// SNMP trap settings
-	TrapAlert   bool   `json:"trapalert,omitempty"`   // enable SNMP trap monitoring
-	MatchedHost string `json:"matchedhost,omitempty"` // associated host for trap matching
+	TrapAlert bool `json:"trapalert,omitempty"`
 
 	// SNMP monitoring settings
 	SNMPCommunity string  `json:"snmpcommunity,omitempty"` // SNMP community string (e.g., "public")

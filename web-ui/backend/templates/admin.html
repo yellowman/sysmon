@@ -6,21 +6,15 @@
 <div x-data="adminPage()" x-init="init()">
     <!-- Header -->
     <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">
-            <i class="fas fa-tools mr-2"></i>Admin & Diagnostics
-        </h1>
-        <p class="text-sm text-gray-600 mt-1">
-            System administration and debugging tools (requires authentication)
-        </p>
+        <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Administration</h1>
+        <p class="text-xs text-gray-400 mt-1 tracking-wide">System diagnostics, push subscribers, and daemon control</p>
     </div>
 
     <!-- System Information -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <!-- Version Info -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                <i class="fas fa-info-circle mr-2"></i>System Information
-            </h2>
+        <div class="card p-6">
+            <h2 class="section-title mb-4">System Information</h2>
             <div class="space-y-3">
                 <div class="flex justify-between items-center">
                     <span class="text-sm text-gray-600">Daemon Version:</span>
@@ -38,10 +32,8 @@
         </div>
 
         <!-- Debug Controls -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                <i class="fas fa-bug mr-2"></i>Debug Logging
-            </h2>
+        <div class="card p-6">
+            <h2 class="section-title mb-4">Debug Logging</h2>
             <div class="space-y-3">
                 <button @click="toggleDebug()"
                         class="w-full px-4 py-3 bg-yellow-600 text-white rounded hover:bg-yellow-700 flex items-center justify-between">
@@ -62,11 +54,9 @@
     </div>
 
     <!-- Diagnostic Commands -->
-    <div class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-wrench mr-2"></i>Diagnostic Commands
-            </h2>
+    <div class="card mb-6">
+        <div class="card-header">
+            <h2 class="section-title">Diagnostics</h2>
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
             <button @click="expireDNS()"
@@ -87,12 +77,154 @@
         </div>
     </div>
 
+    <!-- Push Notification Subscribers -->
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Push Subscribers</h2>
+            <div class="flex items-center space-x-2">
+                <span class="text-xs text-gray-500" x-text="pushSubs.length + ' device(s)'"></span>
+                <button @click="loadPushSubs()"
+                        class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+                    <i class="fas fa-sync-alt mr-1"></i>Refresh
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div x-show="pushSubs.length === 0 && !pushSubsError" class="text-center text-gray-500 py-8">
+                <i class="fas fa-bell-slash text-4xl mb-2"></i>
+                <p>No devices subscribed to push notifications</p>
+                <p class="text-xs mt-1">Devices register via <span class="font-mono">POST /api/push/subscribe</span></p>
+            </div>
+            <div x-show="pushSubsError" class="text-center text-yellow-600 py-4">
+                <i class="fas fa-lock mr-1"></i>
+                <span x-text="pushSubsError"></span>
+            </div>
+            <div x-show="pushSubs.length > 0" class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Platform</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enrolled</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Seen</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Push Stats</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <template x-for="sub in pushSubs" :key="sub.device_token">
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3">
+                                    <div class="text-sm font-medium text-gray-900" x-text="sub.label || 'Unnamed device'"></div>
+                                    <div class="text-xs text-gray-400 font-mono truncate max-w-[200px]" x-text="sub.device_token" :title="sub.device_token"></div>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span :class="{
+                                        'bg-gray-800 text-white': sub.platform === 'ios',
+                                        'bg-green-600 text-white': sub.platform === 'android'
+                                    }" class="px-2 py-1 rounded text-xs font-medium">
+                                        <i :class="sub.platform === 'ios' ? 'fab fa-apple' : 'fab fa-android'" class="mr-1"></i>
+                                        <span x-text="sub.platform === 'ios' ? 'iOS' : 'Android'"></span>
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-xs text-gray-600" x-text="formatTime(sub.created_at)"></td>
+                                <td class="px-4 py-3">
+                                    <div class="text-xs text-gray-600" x-text="formatTime(sub.last_seen)"></div>
+                                    <div class="text-xs" :class="getLastSeenColor(sub.last_seen)" x-text="formatRelativeTime(sub.last_seen)"></div>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center space-x-3">
+                                        <div class="text-xs">
+                                            <span class="text-green-600 font-medium" x-text="sub.push_count || 0"></span>
+                                            <span class="text-gray-400">sent</span>
+                                        </div>
+                                        <div class="text-xs" x-show="sub.fail_count > 0">
+                                            <span class="text-red-600 font-medium" x-text="sub.fail_count"></span>
+                                            <span class="text-gray-400">failed</span>
+                                        </div>
+                                    </div>
+                                    <div x-show="sub.last_push_at" class="text-xs mt-1">
+                                        <span :class="sub.last_push_status === 'ok' ? 'text-green-500' : 'text-red-500'">
+                                            <i :class="sub.last_push_status === 'ok' ? 'fas fa-check-circle' : 'fas fa-times-circle'"></i>
+                                        </span>
+                                        <span class="text-gray-400" x-text="formatRelativeTime(sub.last_push_at)"></span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="text-xs text-gray-600 font-mono" x-text="sub.ip_address || '-'"></div>
+                                    <div class="text-xs text-gray-400 truncate max-w-[150px]" x-text="sub.user_agent || ''" :title="sub.user_agent"></div>
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <button @click="kickDevice(sub)"
+                                            class="px-2 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200 transition-colors">
+                                        <i class="fas fa-user-slash mr-1"></i>Kick
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Push Notification Log -->
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Push Log</h2>
+            <div class="flex items-center space-x-2">
+                <span class="text-xs text-gray-500" x-text="pushLog.length + ' entries'"></span>
+                <button @click="loadPushLog()"
+                        class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+                    <i class="fas fa-sync-alt mr-1"></i>Refresh
+                </button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div x-show="pushLog.length === 0" class="text-center text-gray-500 py-6">
+                <i class="fas fa-inbox text-3xl mb-2"></i>
+                <p>No push notifications sent yet</p>
+            </div>
+            <div x-show="pushLog.length > 0" class="space-y-2 max-h-80 overflow-y-auto">
+                <template x-for="(entry, idx) in pushLog" :key="idx">
+                    <div class="flex items-center justify-between border-l-4 pl-3 py-2"
+                         :class="{
+                             'border-red-500 bg-red-50': entry.status === 'CRITICAL',
+                             'border-yellow-500 bg-yellow-50': entry.status === 'WARNING',
+                             'border-green-500 bg-green-50': entry.status === 'OK',
+                             'border-gray-400 bg-gray-50': !['CRITICAL','WARNING','OK'].includes(entry.status)
+                         }">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-medium text-gray-900" x-text="entry.hostname"></span>
+                                <span class="px-1.5 py-0.5 rounded text-xs font-medium"
+                                      :class="{
+                                          'bg-red-100 text-red-800': entry.status === 'CRITICAL',
+                                          'bg-yellow-100 text-yellow-800': entry.status === 'WARNING',
+                                          'bg-green-100 text-green-800': entry.status === 'OK'
+                                      }"
+                                      x-text="entry.prev_status + ' → ' + entry.status"></span>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-0.5" x-text="formatTime(entry.timestamp)"></div>
+                        </div>
+                        <div class="flex-shrink-0 text-right ml-4">
+                            <div class="text-sm font-medium" :class="entry.recipients > 0 ? 'text-green-600' : 'text-gray-400'">
+                                <i class="fas fa-paper-plane mr-1"></i>
+                                <span x-text="entry.recipients"></span>
+                            </div>
+                            <div class="text-xs text-gray-400">delivered</div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
     <!-- Command Output -->
-    <div x-show="commandOutput" class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-terminal mr-2"></i>Command Output
-            </h2>
+    <div x-show="commandOutput" class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Output</h2>
             <button @click="commandOutput = ''"
                     class="text-gray-400 hover:text-gray-600">
                 <i class="fas fa-times"></i>
@@ -104,15 +236,13 @@
     </div>
 
     <!-- Recent Errors -->
-    <div x-show="sessionErrors.length > 0" class="bg-red-50 border border-red-200 rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-red-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-red-900">
-                <i class="fas fa-exclamation-circle mr-2"></i>Recent Protocol Errors
-            </h2>
+    <div x-show="sessionErrors.length > 0" class="card mb-6 border-red-200 bg-red-50/50">
+        <div class="card-header flex justify-between items-center border-red-100">
+            <h2 class="section-title text-red-600">Protocol Errors</h2>
             <span class="text-xs text-red-600" x-text="sessionErrors.length + ' error(s)'"></span>
         </div>
         <div class="p-6 space-y-3">
-            <template x-for="error in sessionErrors" :key="error.timestamp + '-' + error.command">
+            <template x-for="(error, idx) in sessionErrors" :key="idx">
                 <div class="bg-white border border-red-300 rounded p-3">
                     <div class="flex justify-between items-start mb-2">
                         <span class="font-mono text-xs font-semibold text-red-700" x-text="error.command"></span>
@@ -128,11 +258,9 @@
     </div>
 
     <!-- Session Log -->
-    <div class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-history mr-2"></i>Protocol Session Log
-            </h2>
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Session Log</h2>
             <div class="flex items-center space-x-2">
                 <span class="text-xs text-gray-500" x-text="sessionLog.length + ' entries'"></span>
                 <button @click="loadSessionLog()"
@@ -143,7 +271,7 @@
         </div>
         <div class="p-6">
             <div class="space-y-2 max-h-96 overflow-y-auto">
-                <template x-for="entry in sessionLog" :key="entry.timestamp + '-' + entry.command">
+                <template x-for="(entry, idx) in sessionLog" :key="idx">
                     <div class="border-l-4 pl-3 py-2"
                          :class="entry.is_error ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'">
                         <div class="flex justify-between items-start">
@@ -233,6 +361,9 @@ function adminPage() {
         killitText: '',
         sessionLog: [],
         sessionErrors: [],
+        pushSubs: [],
+        pushSubsError: '',
+        pushLog: [],
         refreshInterval: null,
 
         get hasAuth() {
@@ -244,11 +375,13 @@ function adminPage() {
             this.loadUptime();
             this.loadSessionLog();
             this.loadSessionErrors();
+            this.loadPushSubs();
+            this.loadPushLog();
 
-            // Auto-refresh session log every 5 seconds
             this.refreshInterval = setInterval(() => {
                 this.loadSessionLog();
                 this.loadSessionErrors();
+                this.loadPushSubs();
             }, 5000);
         },
 
@@ -352,6 +485,54 @@ function adminPage() {
             } catch (e) {
                 alert('Failed to shutdown daemon: ' + (e?.message || e));
             }
+        },
+
+        async loadPushSubs() {
+            try {
+                this.pushSubsError = '';
+                const result = await apiCall('/api/push/subscriptions');
+                this.pushSubs = result.subscriptions || [];
+            } catch (e) {
+                if (e.message.includes('auth') || e.message.includes('Auth')) {
+                    this.pushSubsError = 'Authentication required to view subscribers';
+                } else if (e.message.includes('not configured')) {
+                    this.pushSubsError = 'Push notifications not configured';
+                }
+                this.pushSubs = [];
+            }
+        },
+
+        async loadPushLog() {
+            try {
+                const result = await apiCall('/api/push/log?limit=50');
+                this.pushLog = result.entries || [];
+            } catch (e) {
+                this.pushLog = [];
+            }
+        },
+
+        async kickDevice(sub) {
+            const name = sub.label || 'this device';
+            if (!confirm(`Remove ${name} (${sub.platform})?\n\nThis device will stop receiving push notifications immediately.`)) {
+                return;
+            }
+            try {
+                await apiCall('/api/push/remove/' + encodeURIComponent(sub.device_token), {
+                    method: 'DELETE'
+                });
+                this.pushSubs = this.pushSubs.filter(s => s.device_token !== sub.device_token);
+            } catch (e) {
+                alert('Failed to remove device: ' + e.message);
+            }
+        },
+
+
+        getLastSeenColor(ts) {
+            if (!ts) return 'text-gray-400';
+            const seconds = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+            if (seconds < 300) return 'text-green-500';
+            if (seconds < 3600) return 'text-yellow-500';
+            return 'text-red-500';
         },
 
         async loadSessionLog() {

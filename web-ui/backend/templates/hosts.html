@@ -5,20 +5,32 @@
 {{define "content"}}
 <div x-data="hostsPage()" x-init="init()">
     <!-- Header -->
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">
-            <i class="fas fa-server mr-2"></i>Monitored Hosts
-        </h1>
-        <div class="flex space-x-4 items-center">
+    <div class="mb-6">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Monitored Hosts</h1>
+            <!-- View Toggle -->
+            <div class="flex bg-gray-100 rounded-lg p-0.5">
+                <button @click="viewMode = 'comparison'"
+                        :class="viewMode === 'comparison' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-md transition-all tracking-wide">
+                    <i class="fas fa-th mr-1"></i><span class="hidden sm:inline">Cards</span>
+                </button>
+                <button @click="viewMode = 'table'"
+                        :class="viewMode === 'table' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-md transition-all tracking-wide">
+                    <i class="fas fa-table mr-1"></i><span class="hidden sm:inline">Table</span>
+                </button>
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-3 items-center">
             <input type="text" x-model="searchQuery" placeholder="Search hosts..."
-                class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            <select x-model="filterStatus" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                class="flex-1 min-w-[180px] px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm">
+            <select x-model="filterStatus" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
                 <option value="">All Status</option>
                 <option value="OK">OK</option>
                 <option value="WARNING">WARNING</option>
                 <option value="CRITICAL">CRITICAL</option>
             </select>
-            <!-- Per Page Selector -->
             <div class="flex items-center space-x-2">
                 <span class="text-sm text-gray-600">Show:</span>
                 <select x-model="perPage" @change="changePerPage()" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
@@ -28,19 +40,6 @@
                     <option value="100">100</option>
                     <option value="200">200</option>
                 </select>
-            </div>
-            <!-- View Toggle -->
-            <div class="flex border border-gray-300 rounded-lg overflow-hidden">
-                <button @click="viewMode = 'comparison'"
-                        :class="viewMode === 'comparison' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'"
-                        class="px-4 py-2 text-sm font-medium transition-colors">
-                    <i class="fas fa-th mr-1"></i>Comparison
-                </button>
-                <button @click="viewMode = 'table'"
-                        :class="viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'"
-                        class="px-4 py-2 text-sm font-medium border-l border-gray-300 transition-colors">
-                    <i class="fas fa-table mr-1"></i>Table
-                </button>
             </div>
         </div>
     </div>
@@ -200,7 +199,7 @@
                         </div>
                         <span x-show="host.last_change_time" class="text-gray-500" :title="'Last status change: ' + formatTime(host.last_change_time)">
                             <i class="fas fa-clock mr-1"></i>
-                            <span x-text="formatTimeAgo(host.last_change_time)"></span>
+                            <span x-text="formatRelativeTime(host.last_change_time)"></span>
                         </span>
                     </div>
                 </div>
@@ -209,7 +208,7 @@
     </div>
 
     <!-- Table View -->
-    <div x-show="viewMode === 'table'" class="bg-white rounded-lg shadow overflow-hidden">
+    <div x-show="viewMode === 'table'" class="bg-white rounded-lg shadow overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>
@@ -233,7 +232,7 @@
                         Up N
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Notified
+                        Contact
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         @click="sortBy('status')">
@@ -269,7 +268,7 @@
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getPrimaryCheckPort(host)"></td>
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.down_count || 0"></td>
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.up_count || 0"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">No</td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 truncate max-w-[120px]" x-text="host.contact || '-'" :title="host.contact"></td>
                         <td class="px-4 py-2 whitespace-nowrap">
                             <span class="text-sm font-medium"
                                   :class="{
@@ -280,9 +279,9 @@
                                   }"
                                   x-text="getStatusLabel(host)"></span>
                         </td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatDuration(host.time_up)"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatDuration(host.time_failed)"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatLastOutage(host.last_outage)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatUptime(host.time_up)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatUptime(host.time_failed)"></td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatRelativeTime(host.last_outage) || 'Never'"></td>
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getUptimePercent(host)"></td>
                     </tr>
                 </template>
@@ -422,7 +421,7 @@
                         <div x-show="selectedHost.last_change_time" class="mb-4 text-sm text-gray-600">
                             <i class="fas fa-clock mr-1"></i>
                             Last status change: <span x-text="formatTime(selectedHost.last_change_time)"></span>
-                            (<span x-text="formatTimeAgo(selectedHost.last_change_time)"></span>)
+                            (<span x-text="formatRelativeTime(selectedHost.last_change_time)"></span>)
                         </div>
 
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">Check Results</h3>
@@ -560,8 +559,10 @@ function hostsPage() {
 
                 let url = '/api/monitoring/hosts';
 
-                // Add pagination parameters if not showing all
-                if (this.perPage !== 'all') {
+                // When search or filter is active, fetch all hosts for client-side filtering.
+                // Otherwise use server-side pagination.
+                const hasClientFilter = this.searchQuery || this.filterStatus;
+                if (this.perPage !== 'all' && !hasClientFilter) {
                     url += `?page=${this.currentPage}&limit=${this.limit}`;
                 }
 
@@ -577,7 +578,7 @@ function hostsPage() {
                 const data = await response.json();
 
                 // Handle paginated response
-                if (this.perPage !== 'all' && data.data) {
+                if (this.perPage !== 'all' && !hasClientFilter && data.data) {
                     this.hosts = Array.isArray(data.data) ? data.data : [];
                     this.totalHosts = data.total || 0;
                     this.totalPages = data.total_pages || 1;
@@ -659,25 +660,6 @@ function hostsPage() {
             }
         },
 
-        formatTime(timestamp) {
-            return new Date(timestamp).toLocaleString();
-        },
-
-        formatTimeAgo(timestamp) {
-            if (!timestamp) return '';
-            const now = new Date();
-            const then = new Date(timestamp);
-            const diffMs = now - then;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
-
-            if (diffMins < 1) return 'just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
-            return then.toLocaleDateString();
-        },
 
         sortBy(field) {
             if (this.sortField === field) {
@@ -692,38 +674,6 @@ function hostsPage() {
             const ok = host.checks.filter(c => c.status === 'OK').length;
             const total = host.checks.length;
             return `${ok}/${total}`;
-        },
-
-        getCheckStats(host) {
-            const ok = host.checks.filter(c => c.status === 'OK').length;
-            const warning = host.checks.filter(c => c.status === 'WARNING').length;
-            const critical = host.checks.filter(c => c.status === 'CRITICAL').length;
-            return `${ok} OK, ${warning} WARN, ${critical} CRIT`;
-        },
-
-        getLastCheckTime(host) {
-            if (!host.checks || host.checks.length === 0) return 'Never';
-
-            // Filter out invalid timestamps before using Math.max
-            const validTimes = host.checks
-                .map(c => new Date(c.last_check_time).getTime())
-                .filter(t => !isNaN(t) && t > 0);
-
-            if (validTimes.length === 0) return 'Never';
-
-            const latest = new Date(Math.max(...validTimes));
-
-            // Handle invalid/epoch dates (year < 1980 is likely invalid)
-            if (latest.getFullYear() < 1980) return 'Never';
-
-            const now = new Date();
-            const diff = Math.floor((now - latest) / 1000);
-
-            if (diff < 0) return 'just now'; // Future date, clock skew
-            if (diff < 60) return `${diff}s ago`;
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            return `${Math.floor(diff / 86400)}d ago`;
         },
 
         // Get primary check type (prefer ping, otherwise first check)
@@ -758,43 +708,6 @@ function hostsPage() {
             return percent.toFixed(2) + '%';
         },
 
-        // Format duration in seconds to human-readable format
-        formatDuration(seconds) {
-            if (!seconds || seconds === 0) return 'Never';
-
-            const days = Math.floor(seconds / 86400);
-            const hours = Math.floor((seconds % 86400) / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            const secs = Math.floor(seconds % 60);
-
-            const parts = [];
-            if (days > 0) parts.push(`${days}d`);
-            if (hours > 0) parts.push(`${hours}h`);
-            if (minutes > 0) parts.push(`${minutes}m`);
-            if (secs > 0 && days === 0) parts.push(`${secs}s`); // Only show seconds if less than a day
-
-            return parts.length > 0 ? parts.join(' ') : '0s';
-        },
-
-        // Format last outage timestamp
-        formatLastOutage(timestamp) {
-            if (!timestamp) return 'Never';
-            const date = new Date(timestamp);
-            // Handle invalid dates
-            if (isNaN(date.getTime()) || date.getFullYear() < 1980) return 'Never';
-
-            const now = new Date();
-            const diffMs = now - date;
-            const diffDays = Math.floor(diffMs / 86400000);
-
-            // If recent (< 7 days), show relative time
-            if (diffDays < 7) {
-                return this.formatTimeAgo(timestamp);
-            }
-
-            // Otherwise show absolute date
-            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-        },
 
         // Bulk operations methods
         isSelected(hostname) {
@@ -807,14 +720,6 @@ function hostsPage() {
                 this.selectedHosts.push(hostname);
             } else {
                 this.selectedHosts.splice(index, 1);
-            }
-        },
-
-        toggleSelectAll() {
-            if (this.selectedHosts.length === this.filteredHosts.length) {
-                this.selectedHosts = [];
-            } else {
-                this.selectedHosts = this.filteredHosts.map(h => h.hostname);
             }
         },
 

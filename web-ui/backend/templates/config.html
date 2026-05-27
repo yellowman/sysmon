@@ -132,8 +132,10 @@
 
         <!-- Audit Log Tab -->
         <div x-show="activeTab === 'audit'">
-            <div class="bg-white rounded-lg shadow p-6">
-                <p class="text-gray-500 text-sm">Audit log display coming soon...</p>
+            <div class="bg-white rounded-lg shadow p-6 text-center py-12">
+                <i class="fas fa-clipboard-list text-4xl text-gray-300 mb-3"></i>
+                <p class="text-gray-500">Audit log is available at the configured audit log path</p>
+                <p class="text-xs text-gray-400 mt-1">See <span class="font-mono">-audit</span> flag in sysmon-web startup</p>
             </div>
         </div>
     </div>
@@ -186,17 +188,28 @@
                     <!-- Header with View Selector and Minimize Button -->
                     <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
                         <div class="flex justify-between items-center">
-                            <div class="flex items-center gap-3">
+                            <div class="flex items-center gap-2 flex-wrap">
                                 <button @click="settingsView = 'global'"
                                         :class="settingsView === 'global' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
                                         class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
-                                    <i class="fas fa-globe mr-2"></i>Global Settings
+                                    <i class="fas fa-globe mr-2"></i>Global
                                 </button>
                                 <button @click="settingsView = 'spawns'"
                                         :class="settingsView === 'spawns' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
                                         class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
-                                    <i class="fas fa-terminal mr-2"></i>Spawn Commands
-                                    <span class="ml-1 text-xs" x-text="'(' + (structuredConfig.spawns?.length || 0) + ')'"></span>
+                                    <i class="fas fa-terminal mr-2"></i>Spawns
+                                    <span class="ml-1 text-xs opacity-75" x-text="'(' + (structuredConfig.spawns?.length || 0) + ')'"></span>
+                                </button>
+                                <button @click="settingsView = 'contacts'"
+                                        :class="settingsView === 'contacts' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                                        class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
+                                    <i class="fas fa-address-book mr-2"></i>Contacts
+                                    <span class="ml-1 text-xs opacity-75" x-text="'(' + (structuredConfig.contacts?.length || 0) + ')'"></span>
+                                </button>
+                                <button @click="settingsView = 'push'"
+                                        :class="settingsView === 'push' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                                        class="px-4 py-2 rounded-lg font-medium text-sm transition-all">
+                                    <i class="fas fa-mobile-alt mr-2"></i>Push
                                 </button>
                             </div>
                             <button @click="settingsExpanded = false"
@@ -228,7 +241,17 @@
                     </div>
 
                     <!-- Core Settings Tab -->
-                    <div x-show="globalTab === 'core'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div x-show="globalTab === 'core'" class="space-y-4">
+                        <!-- Root Object -->
+                        <div class="bg-gradient-to-r from-slate-50 to-gray-50 border border-gray-200 rounded-lg p-4">
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Root Object</label>
+                            <div class="flex gap-3 items-center">
+                                <input type="text" x-model="structuredConfig.root" placeholder="e.g. my-gateway"
+                                       class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                                <span class="text-xs text-gray-400 whitespace-nowrap">Base of the dependency tree</span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Check Interval (seconds)</label>
                             <input type="number" x-model="structuredConfig.global.checkinterval" placeholder="60"
@@ -283,6 +306,7 @@
                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                             <p class="text-xs text-gray-500 mt-1">DNS stats logging (default: 900)</p>
                         </div>
+                    </div>
                     </div>
 
                     <!-- Alert Settings Tab -->
@@ -453,22 +477,6 @@
                             <p class="text-xs text-gray-500 mt-1">Logging facility</p>
                         </div>
                         <div class="flex items-center">
-                            <input type="checkbox" x-model="structuredConfig.global.dropprivileges" id="dropprivileges"
-                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
-                            <label for="dropprivileges" class="ml-2 block text-sm text-gray-900">
-                                Drop Privileges
-                                <p class="text-xs text-gray-500">Run as unprivileged user</p>
-                            </label>
-                        </div>
-                        <div class="flex items-center">
-                            <input type="checkbox" x-model="structuredConfig.global.disableicmp" id="disableicmp"
-                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
-                            <label for="disableicmp" class="ml-2 block text-sm text-gray-900">
-                                Disable ICMP
-                                <p class="text-xs text-gray-500">Disable ping monitoring</p>
-                            </label>
-                        </div>
-                        <div class="flex items-center">
                             <input type="checkbox" x-model="structuredConfig.global.noheartbeat" id="noheartbeat"
                                    class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
                             <label for="noheartbeat" class="ml-2 block text-sm text-gray-900">
@@ -538,6 +546,108 @@
                             <p>No spawn commands defined. Add one above to get started.</p>
                         </div>
                     </div>
+
+                    <!-- Contacts Content -->
+                    <div x-show="settingsView === 'contacts'" class="px-6 py-4">
+                        <div class="flex justify-between items-center mb-4">
+                            <p class="text-sm text-gray-600">Email contacts referenced by host <code class="bg-gray-100 px-1 rounded">contact</code> directives.</p>
+                            <button @click="structuredConfig.contacts = structuredConfig.contacts || []; structuredConfig.contacts.push({id: Date.now().toString(), email: '', name: ''})"
+                                    class="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
+                                <i class="fas fa-plus mr-1"></i>Add Contact
+                            </button>
+                        </div>
+                        <div class="space-y-2">
+                            <template x-for="(contact, index) in (structuredConfig.contacts || [])" :key="contact.id || index">
+                                <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-3 group">
+                                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                        <i class="fas fa-user text-xs"></i>
+                                    </div>
+                                    <input type="text" x-model="contact.name" placeholder="Name (optional)"
+                                           class="w-40 px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                                    <input type="email" x-model="contact.email" placeholder="email@example.com"
+                                           class="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
+                                    <button @click="structuredConfig.contacts.splice(index, 1)"
+                                            class="px-2 py-1 text-red-500 hover:bg-red-100 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <i class="fas fa-trash text-xs"></i>
+                                    </button>
+                                </div>
+                            </template>
+                            <div x-show="!structuredConfig.contacts || structuredConfig.contacts.length === 0" class="text-center py-8 text-gray-400">
+                                <i class="fas fa-address-book text-3xl mb-2"></i>
+                                <p class="text-sm">No contacts defined. Contacts are referenced by the <code class="bg-gray-100 px-1 rounded">contact</code> field in host objects.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Push Notifications Content -->
+                    <div x-show="settingsView === 'push'" class="px-6 py-4">
+                        <div class="space-y-5">
+                            <!-- Enable toggle -->
+                            <div class="flex items-center justify-between bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 border border-indigo-100">
+                                <div>
+                                    <h4 class="text-sm font-semibold text-gray-900">Push Notifications</h4>
+                                    <p class="text-xs text-gray-500 mt-0.5">Send alerts to iOS and Android devices when host state changes</p>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" x-model="structuredConfig.global.pushnotifications" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
+                            <div x-show="structuredConfig.global.pushnotifications" class="space-y-4">
+                                <!-- FCM -->
+                                <div class="border border-gray-200 rounded-lg p-4">
+                                    <div class="flex items-center gap-2 mb-3">
+                                        <i class="fab fa-android text-green-600"></i>
+                                        <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-gray-600 mb-1">Server Key</label>
+                                        <input type="password" x-model="structuredConfig.global.push_fcm_serverkey" placeholder="AAAAxxxxxxx:APA91b..."
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-400 mt-1">Firebase Console > Project Settings > Cloud Messaging</p>
+                                    </div>
+                                </div>
+
+                                <!-- APNs -->
+                                <div class="border border-gray-200 rounded-lg p-4">
+                                    <div class="flex items-center gap-2 mb-3">
+                                        <i class="fab fa-apple text-gray-800"></i>
+                                        <h4 class="text-sm font-semibold text-gray-800">APNs (iOS)</h4>
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-600 mb-1">Certificate File</label>
+                                            <input type="text" x-model="structuredConfig.global.push_apns_certfile" placeholder="/etc/sysmon/apns-cert.pem"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-600 mb-1">Key File</label>
+                                            <input type="text" x-model="structuredConfig.global.push_apns_keyfile" placeholder="/etc/sysmon/apns-key.pem"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-600 mb-1">Bundle ID</label>
+                                            <input type="text" x-model="structuredConfig.global.push_apns_bundleid" placeholder="com.example.sysmon"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
+                                        </div>
+                                        <div class="flex items-center pt-5">
+                                            <input type="checkbox" x-model="structuredConfig.global.push_apns_production" id="apns-production"
+                                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                            <label for="apns-production" class="ml-2 text-sm text-gray-700">Production gateway</label>
+                                            <span class="ml-2 text-xs text-gray-400">(uncheck for sandbox)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div x-show="!structuredConfig.global.pushnotifications" class="text-center py-4 text-gray-400 text-sm">
+                                <i class="fas fa-bell-slash text-2xl mb-2"></i>
+                                <p>Enable push notifications to configure APNs and FCM credentials</p>
+                            </div>
+                        </div>
+                    </div>
+
                     </div>
                 </div>
             </div>
@@ -754,10 +864,10 @@
                                             <!-- Custom spawn input -->
                                             <div x-show="editingHost.useCustomSpawn" class="space-y-2">
                                                 <div class="flex gap-2">
-                                                    <input type="text" x-model="editingHost.customspawn" placeholder="Enter custom spawn command"
+                                                    <input type="text" x-model="editingHost.spawn" placeholder="Enter spawn command"
                                                            @click="$event.target.select()"
                                                            class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
-                                                    <button @click="editingHost.useCustomSpawn = false; editingHost.customspawn = ''"
+                                                    <button @click="editingHost.useCustomSpawn = false; editingHost.spawn = ''"
                                                             class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                                                             title="Switch back to predefined spawns">
                                                         <i class="fas fa-list"></i>
@@ -943,7 +1053,7 @@
                                         </div>
 
                                         <!-- No type-specific fields message -->
-                                        <div x-show="!['ping', 'pingv4', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
+                                        <div x-show="!['ping', 'pingv4', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp', 'tcp', 'udp', 'snmp', 'nntp', 'ircd'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
                                             <i class="fas fa-info-circle text-4xl text-gray-300 mb-2"></i>
                                             <p>No additional type-specific settings for <span x-text="editingHost.type" class="font-semibold"></span> check type.</p>
                                             <p class="text-sm mt-1">Configure port number in Overview tab if needed.</p>
@@ -1093,30 +1203,6 @@
                                         </div>
 
                                         <div class="bg-gray-50 p-4 rounded-lg">
-                                            <h4 class="font-semibold text-gray-700 mb-3">Wake-on-LAN Settings</h4>
-                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                <div class="flex items-center">
-                                                    <input type="checkbox" x-model="editingHost.wakeupcheck" :id="'wakeup-' + editingHostIndex"
-                                                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
-                                                    <label :for="'wakeup-' + editingHostIndex" class="ml-2 block text-sm text-gray-900">
-                                                        Enable Wakeup Check
-                                                        <p class="text-xs text-gray-500">Try Wake-on-LAN before alerting</p>
-                                                    </label>
-                                                </div>
-                                                <div x-show="editingHost.wakeupcheck">
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Wakeup Retries</label>
-                                                    <input type="number" x-model="editingHost.wakeupretries" placeholder="3"
-                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                </div>
-                                                <div x-show="editingHost.wakeupcheck">
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Check Interval (sec)</label>
-                                                    <input type="number" x-model="editingHost.wakeupcheckinterval" placeholder="300"
-                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div class="bg-gray-50 p-4 rounded-lg">
                                             <h4 class="font-semibold text-gray-700 mb-3">SNMP Trap Settings</h4>
                                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div class="flex items-center">
@@ -1126,12 +1212,6 @@
                                                         Enable Trap Alerts
                                                         <p class="text-xs text-gray-500">Monitor SNMP traps from this host</p>
                                                     </label>
-                                                </div>
-                                                <div x-show="editingHost.trapalert">
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Matched Host</label>
-                                                    <input type="text" x-model="editingHost.matchedhost" placeholder=""
-                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">Associate traps with this host</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -1209,8 +1289,10 @@ function unifiedConfigPage() {
         loadingStructured: true,
         savingStructured: false,
         structuredConfig: {
+            root: '',
             global: {},
             spawns: [],
+            contacts: [],
             hosts: []
         },
         sections: {
@@ -1517,7 +1599,6 @@ function unifiedConfigPage() {
                 dependencies: '',
                 spawn: '',
                 useCustomSpawn: false,
-                customspawn: '',
                 paused: false,
                 contact: '',
                 pageinterval: null,
@@ -1559,11 +1640,7 @@ function unifiedConfigPage() {
                 // Advanced
                 queuetime: null,
                 group: '',
-                wakeupcheck: false,
-                wakeupretries: null,
-                wakeupcheckinterval: null,
                 trapalert: false,
-                matchedhost: '',
                 reverse: false,
                 command: '',
                 activeTab: 'overview'
@@ -1582,9 +1659,8 @@ function unifiedConfigPage() {
                 this.editingHost.activeTab = 'overview';
             }
 
-            // Determine if using custom spawn (not in predefined spawns list)
-            const isCustomSpawn = this.editingHost.customspawn ||
-                (this.editingHost.spawn && !this.structuredConfig.spawns.some(s => s.name === this.editingHost.spawn));
+            const isCustomSpawn = this.editingHost.spawn &&
+                !this.structuredConfig.spawns.some(s => s.name === this.editingHost.spawn);
             this.editingHost.useCustomSpawn = isCustomSpawn;
 
             this.editingHostIndex = index;
@@ -1614,14 +1690,6 @@ function unifiedConfigPage() {
                 hostToSave.hostname = hostToSave.ip.replace(/\./g, '-');
             }
 
-            // Handle spawn vs customspawn
-            if (this.editingHost.useCustomSpawn && this.editingHost.customspawn) {
-                hostToSave.spawn = '';
-                hostToSave.customspawn = this.editingHost.customspawn;
-            } else if (this.editingHost.spawn) {
-                hostToSave.spawn = this.editingHost.spawn;
-                hostToSave.customspawn = '';
-            }
 
             // Remove empty/null fields to keep config clean
             // EXCEPT hostname which is required for object definition

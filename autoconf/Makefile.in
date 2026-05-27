@@ -12,7 +12,8 @@ CC              = @CC@
 LEX		= @LEX@
 CFILE           = @sysconfdir@/sysmon.conf
 INCLUDES	= -I/usr/local/include
-CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' @SNP@ $(INCLUDES)
+HELPER_PATH     = $(libexecdir)/sysmon-ping-helper
+CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ $(INCLUDES)
 #@IPV6@
 
 LIBS		= @LIBS@
@@ -24,6 +25,9 @@ exec_prefix = @exec_prefix@
 
 # Directory in which to install scripts.
 bindir = @bindir@
+
+# Directory in which to install helper programs.
+libexecdir = @libexecdir@
 
 # Directory in which to install library files.
 datadir = @datadir@
@@ -50,6 +54,10 @@ sysmond: $(DAEMON_OBJECTS)
 	-$(RM) sysmond core sysmond.core
 	$(CC) $(LDFLAGS) -o sysmond $(DAEMON_OBJECTS) $(LIBS)
 
+sysmon-ping-helper: sysmon-ping-helper.o
+	-$(RM) sysmon-ping-helper
+	$(CC) $(LDFLAGS) -o sysmon-ping-helper sysmon-ping-helper.o
+
 register:
 	grep SYSM_VERS config.h | mail -s"Sysmon Registration" jared@puck.nether.net
 
@@ -61,12 +69,22 @@ install:	all
 	cp sysmon sysmond @bindir@
 	@echo "creating directory @sysconfdir@"
 	-mkdir -p @sysconfdir@
+	@echo "installing ping helper into $(libexecdir)"
+	-mkdir -p $(libexecdir)
+	@if [ -f sysmon-ping-helper ]; then \
+		cp sysmon-ping-helper $(libexecdir)/sysmon-ping-helper; \
+		chown root $(libexecdir)/sysmon-ping-helper; \
+		chmod 4755 $(libexecdir)/sysmon-ping-helper; \
+		echo "sysmon-ping-helper installed setuid root at $(libexecdir)/sysmon-ping-helper"; \
+	else \
+		echo "sysmon-ping-helper not built (optional - needed for privilege dropping with ICMP)"; \
+	fi
 
 strip:
 	-strip @PROGS@
 
 clean:
-	-$(RM) *.o @PROGS@ core sysmond.core sysmon.core
+	-$(RM) *.o @PROGS@ sysmon-ping-helper core sysmond.core sysmon.core
 
 heartbeat.o: 	config.h Makefile heartbeat.c
 syswatch.o:	config.h Makefile syswatch.c
@@ -96,6 +114,8 @@ snmp.o:		config.h Makefile snmp.c
 pingv6.o:	config.h Makefile pingv6.c
 logging.o:	config.h Makefile logging.c
 ssh.o:		config.h Makefile ssh.c
+
+sysmon-ping-helper.o: sysmon-ping-helper.c ping-helper.h
 
 parser.c: parser.l
 	-$(RM) parser.c

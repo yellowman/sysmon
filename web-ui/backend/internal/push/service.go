@@ -1,13 +1,16 @@
 package push
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"sysmon-web/internal/models"
 	"sysmon-web/internal/monitoring"
@@ -20,11 +23,38 @@ const (
 	PlatformAndroid Platform = "android"
 )
 
+var (
+	bucketSubscriptions = []byte("subscriptions")
+	bucketPushLog       = []byte("push_log")
+)
+
 type Subscription struct {
-	DeviceToken string   `json:"device_token"`
-	Platform    Platform `json:"platform"`
-	Label       string   `json:"label,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	DeviceToken    string   `json:"device_token"`
+	Platform       Platform `json:"platform"`
+	Label          string   `json:"label,omitempty"`
+	APIKey         string   `json:"api_key"`
+	CreatedAt      string   `json:"created_at"`
+	LastSeen       string   `json:"last_seen"`
+	LastPushAt     string   `json:"last_push_at,omitempty"`
+	LastPushStatus string   `json:"last_push_status,omitempty"`
+	PushCount      int64    `json:"push_count"`
+	FailCount      int64    `json:"fail_count"`
+	IPAddress      string   `json:"ip_address,omitempty"`
+	UserAgent      string   `json:"user_agent,omitempty"`
+}
+
+func generateAPIKey() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+type pushLogEntry struct {
+	Timestamp  string `json:"timestamp"`
+	Hostname   string `json:"hostname"`
+	Status     string `json:"status"`
+	PrevStatus string `json:"prev_status"`
+	Recipients int    `json:"recipients"`
 }
 
 type Config struct {
@@ -37,30 +67,43 @@ type Config struct {
 }
 
 type Service struct {
-	mu            sync.RWMutex
-	config        Config
-	subscriptions []Subscription
-	storeFile     string
+	mu     sync.RWMutex
+	config Config
+	db     *bolt.DB
 
 	apns *APNsClient
 	fcm  *FCMClient
 
 	monitoring *monitoring.Service
-	prevHosts  map[string]string // object_name -> last known status
+	prevHosts  map[string]string
 	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
-func NewService(cfg Config, storeFile string, mon *monitoring.Service) (*Service, error) {
+func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
+	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		return nil, fmt.Errorf("open push database: %w", err)
+	}
+
+	err = db.Update(func(tx *bolt.Tx) error {
+		if _, err := tx.CreateBucketIfNotExists(bucketSubscriptions); err != nil {
+			return err
+		}
+		_, err := tx.CreateBucketIfNotExists(bucketPushLog)
+		return err
+	})
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init push database: %w", err)
+	}
+
 	s := &Service{
 		config:     cfg,
-		storeFile:  storeFile,
+		db:         db,
 		monitoring: mon,
 		prevHosts:  make(map[string]string),
 		stopCh:     make(chan struct{}),
-	}
-
-	if err := s.loadSubscriptions(); err != nil {
-		log.Printf("push: no existing subscriptions file (%s), starting fresh", err)
 	}
 
 	if cfg.FCMServerKey != "" {
@@ -82,6 +125,9 @@ func NewService(cfg Config, storeFile string, mon *monitoring.Service) (*Service
 		}
 	}
 
+	count := s.subscriberCount()
+	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
+
 	return s, nil
 }
 
@@ -94,62 +140,227 @@ func (s *Service) Start() {
 		log.Printf("push: no FCM or APNs credentials configured, watcher not started")
 		return
 	}
+	s.wg.Add(1)
 	go s.watchLoop()
-	log.Printf("push: state change watcher started")
+	log.Printf("push: state change watcher started (1s poll interval)")
 }
 
 func (s *Service) Stop() {
 	close(s.stopCh)
+	s.wg.Wait()
+	if s.db != nil {
+		s.db.Close()
+	}
 }
 
-func (s *Service) Subscribe(token string, platform Platform, label string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, sub := range s.subscriptions {
-		if sub.DeviceToken == token {
-			return fmt.Errorf("device already subscribed")
-		}
-	}
-
+func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, userAgent string) (string, error) {
 	if platform != PlatformIOS && platform != PlatformAndroid {
-		return fmt.Errorf("platform must be 'ios' or 'android'")
+		return "", fmt.Errorf("platform must be 'ios' or 'android'")
+	}
+	if token == "" {
+		return "", fmt.Errorf("device_token is required")
 	}
 
-	s.subscriptions = append(s.subscriptions, Subscription{
-		DeviceToken: token,
-		Platform:    platform,
-		Label:       label,
-		CreatedAt:   time.Now(),
-	})
+	now := time.Now().UTC().Format(time.RFC3339)
+	apiKey := ""
 
-	return s.saveSubscriptions()
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+
+		var sub Subscription
+
+		// Preserve existing data on re-subscribe
+		if existing := b.Get([]byte(token)); existing != nil {
+			json.Unmarshal(existing, &sub)
+		}
+
+		if sub.APIKey != "" {
+			apiKey = sub.APIKey
+		} else {
+			apiKey = generateAPIKey()
+		}
+		if sub.CreatedAt == "" {
+			sub.CreatedAt = now
+		}
+
+		sub.DeviceToken = token
+		sub.Platform = platform
+		sub.Label = label
+		sub.APIKey = apiKey
+		sub.LastSeen = now
+		sub.IPAddress = ipAddr
+		sub.UserAgent = userAgent
+
+		data, err := json.Marshal(sub)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(token), data)
+	})
+	return apiKey, err
+}
+
+// TouchLastSeen updates the last_seen timestamp for a device.
+func (s *Service) TouchLastSeen(token, ipAddr string) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		v := b.Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err != nil {
+			return nil
+		}
+		sub.LastSeen = time.Now().UTC().Format(time.RFC3339)
+		if ipAddr != "" {
+			sub.IPAddress = ipAddr
+		}
+		data, _ := json.Marshal(sub)
+		return b.Put([]byte(token), data)
+	})
+}
+
+// RecordPush updates push delivery stats for a device.
+func (s *Service) RecordPush(token string, success bool) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		v := b.Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err != nil {
+			return nil
+		}
+		sub.LastPushAt = time.Now().UTC().Format(time.RFC3339)
+		if success {
+			sub.PushCount++
+			sub.LastPushStatus = "ok"
+		} else {
+			sub.FailCount++
+			sub.LastPushStatus = "failed"
+		}
+		data, _ := json.Marshal(sub)
+		return b.Put([]byte(token), data)
+	})
+}
+
+// AdminRemove removes a subscription by device token (admin operation).
+func (s *Service) AdminRemove(token string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		if b.Get([]byte(token)) == nil {
+			return fmt.Errorf("device token not found")
+		}
+		return b.Delete([]byte(token))
+	})
+}
+
+// GetPushLog returns the N most recent push log entries.
+func (s *Service) GetPushLog(limit int) []pushLogEntry {
+	var entries []pushLogEntry
+	s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketPushLog)
+		c := b.Cursor()
+		// Iterate in reverse (newest first)
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var entry pushLogEntry
+			if json.Unmarshal(v, &entry) == nil {
+				entries = append(entries, entry)
+			}
+			if len(entries) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	return entries
+}
+
+// ValidateAPIKey checks if an API key is valid for a given device token.
+// If token is empty, checks if the API key belongs to any subscription.
+func (s *Service) ValidateAPIKey(token, apiKey string) bool {
+	if apiKey == "" {
+		return false
+	}
+	valid := false
+	s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		if token != "" {
+			v := b.Get([]byte(token))
+			if v != nil {
+				var sub Subscription
+				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
+					valid = true
+				}
+			}
+		} else {
+			b.ForEach(func(k, v []byte) error {
+				var sub Subscription
+				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
+					valid = true
+				}
+				return nil
+			})
+		}
+		return nil
+	})
+	return valid
+}
+
+// FindTokenByAPIKey returns the device token associated with an API key.
+func (s *Service) FindTokenByAPIKey(apiKey string) (string, Platform) {
+	var token string
+	var platform Platform
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
+				token = sub.DeviceToken
+				platform = sub.Platform
+			}
+			return nil
+		})
+	})
+	return token, platform
 }
 
 func (s *Service) Unsubscribe(token string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for i, sub := range s.subscriptions {
-		if sub.DeviceToken == token {
-			s.subscriptions = append(s.subscriptions[:i], s.subscriptions[i+1:]...)
-			return s.saveSubscriptions()
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSubscriptions)
+		if b.Get([]byte(token)) == nil {
+			return fmt.Errorf("device token not found")
 		}
-	}
-	return fmt.Errorf("device token not found")
+		return b.Delete([]byte(token))
+	})
 }
 
 func (s *Service) ListSubscriptions() []Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	result := make([]Subscription, len(s.subscriptions))
-	copy(result, s.subscriptions)
-	return result
+	var subs []Subscription
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if err := json.Unmarshal(v, &sub); err == nil {
+				subs = append(subs, sub)
+			}
+			return nil
+		})
+	})
+	return subs
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
 	return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
+}
+
+func (s *Service) subscriberCount() int {
+	count := 0
+	s.db.View(func(tx *bolt.Tx) error {
+		count = tx.Bucket(bucketSubscriptions).Stats().KeyN
+		return nil
+	})
+	return count
 }
 
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
@@ -169,18 +380,19 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 	}
 }
 
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType string) {
-	s.mu.RLock()
-	subs := make([]Subscription, len(s.subscriptions))
-	copy(subs, s.subscriptions)
-	s.mu.RUnlock()
+func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string) {
+	subs := s.ListSubscriptions()
+	sent := 0
 
 	for _, sub := range subs {
 		var err error
+		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
 			if s.apns != nil {
 				err = s.apns.Send(sub.DeviceToken, title, subtitle, body)
+			} else {
+				skipped = true
 			}
 		case PlatformAndroid:
 			if s.fcm != nil {
@@ -190,19 +402,44 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, checkType s
 					Type:     checkType,
 				}
 				err = s.fcm.Send(sub.DeviceToken, title, body, data)
+			} else {
+				skipped = true
 			}
+		default:
+			skipped = true
 		}
+		if skipped {
+			continue
+		}
+		s.RecordPush(sub.DeviceToken, err == nil)
 		if err != nil {
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
+		} else {
+			sent++
 		}
+	}
+
+	entry := pushLogEntry{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Hostname:   hostname,
+		Status:     status,
+		PrevStatus: prevStatus,
+		Recipients: sent,
+	}
+	if data, err := json.Marshal(entry); err == nil {
+		s.db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(bucketPushLog)
+			id, _ := b.NextSequence()
+			return b.Put([]byte(fmt.Sprintf("%010d", id)), data)
+		})
 	}
 }
 
 func (s *Service) watchLoop() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// Seed initial state
 	s.pollAndNotify(true)
 
 	for {
@@ -280,24 +517,8 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 		body = fmt.Sprintf("status changed from %s to %s", prevStatus, host.OverallStatus)
 	}
 
-	log.Printf("push: %s status %s -> %s, notifying %d subscribers",
-		host.Hostname, prevStatus, host.OverallStatus, len(s.subscriptions))
+	log.Printf("push: %s status %s -> %s, notifying subscribers",
+		host.Hostname, prevStatus, host.OverallStatus)
 
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, checkType)
-}
-
-func (s *Service) loadSubscriptions() error {
-	data, err := os.ReadFile(s.storeFile)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, &s.subscriptions)
-}
-
-func (s *Service) saveSubscriptions() error {
-	data, err := json.MarshalIndent(s.subscriptions, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.storeFile, data, 0600)
+	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType)
 }

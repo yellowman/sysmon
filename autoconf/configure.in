@@ -405,7 +405,7 @@ else
 fi
 
 if test "$enable_daemon" = yes; then
-	PROGS="$PROGS sysmond"
+	PROGS="$PROGS sysmond sysmon-ping-helper"
 else
 	AC_MSG_WARN(daemon not compiled on user request)
 fi

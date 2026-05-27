@@ -6,17 +6,15 @@
 <div x-data="trapsPage()" x-init="init()">
     <!-- Header with Summary -->
     <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900 mb-4">
-            <i class="fas fa-exchange-alt mr-2"></i>SNMP Traps
-        </h1>
+        <h1 class="text-xl font-extrabold tracking-tight text-gray-900 mb-4">SNMP Traps</h1>
 
         <!-- Summary Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-lg shadow p-4">
-                <div class="text-sm text-gray-600">Total (Last Hour)</div>
-                <div class="text-2xl font-bold text-gray-900" x-text="summary.total_traps_hour || 0"></div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div class="card p-4">
+                <div class="stat-label">Last Hour</div>
+                <div class="stat-value text-gray-900 mt-1" x-text="summary.total_traps_hour || 0"></div>
             </div>
-            <div class="bg-white rounded-lg shadow p-4">
+            <div class="card p-4">
                 <div class="text-sm text-gray-600">Unique Sources</div>
                 <div class="text-2xl font-bold text-gray-900" x-text="sources.length"></div>
             </div>
@@ -31,7 +29,7 @@
         </div>
 
         <!-- Filters -->
-        <div class="flex space-x-4">
+        <div class="flex flex-wrap gap-3">
             <select x-model="filterSource" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                 <option value="">All Sources</option>
                 <template x-for="source in sources" :key="source.source_ip">
@@ -62,7 +60,7 @@
     <!-- Traps List -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="divide-y divide-gray-200">
-            <template x-for="trap in filteredTraps" :key="trap.timestamp">
+            <template x-for="(trap, idx) in filteredTraps" :key="idx + '-' + trap.source_ip + '-' + trap.timestamp">
                 <div class="px-6 py-4 hover:bg-gray-50 cursor-pointer" @click="selectedTrap = trap">
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
@@ -80,7 +78,7 @@
                                     <span :class="{
                                         'bg-blue-100 text-blue-800': trap.decoded?.severity === 'informational',
                                         'bg-yellow-100 text-yellow-800': trap.decoded?.severity === 'warning',
-                                        'bg-orange-100 text-orange-800': trap.decoded?.severity === 'error',
+                                        'bg-red-100 text-red-800': trap.decoded?.severity === 'error',
                                         'bg-red-100 text-red-800': trap.decoded?.severity === 'critical'
                                     }" class="px-2 py-1 rounded text-xs font-medium" x-text="trap.decoded?.trap_name"></span>
                                     <span class="text-xs text-gray-500" x-text="trap.decoded?.category"></span>
@@ -116,8 +114,18 @@
             </template>
         </div>
 
+        <!-- Error State -->
+        <div x-show="error && !loading" class="px-6 py-12 text-center">
+            <i class="fas fa-exclamation-circle text-4xl text-red-400 mb-3"></i>
+            <p class="text-red-700 font-medium">Failed to load traps</p>
+            <p class="text-sm text-red-500 mt-1" x-text="error"></p>
+            <button @click="fetchTraps()" class="mt-4 px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                <i class="fas fa-sync-alt mr-1"></i>Retry
+            </button>
+        </div>
+
         <!-- Empty State -->
-        <div x-show="filteredTraps.length === 0 && !loading" class="px-6 py-12 text-center text-gray-500">
+        <div x-show="!error && filteredTraps.length === 0 && !loading" class="px-6 py-12 text-center text-gray-500">
             <i class="fas fa-inbox text-6xl text-gray-300 mb-4"></i>
             <p>No traps found</p>
         </div>
@@ -204,7 +212,7 @@
                                     <span :class="{
                                         'bg-blue-100 text-blue-800': selectedTrap.decoded?.severity === 'informational',
                                         'bg-yellow-100 text-yellow-800': selectedTrap.decoded?.severity === 'warning',
-                                        'bg-orange-100 text-orange-800': selectedTrap.decoded?.severity === 'error',
+                                        'bg-red-100 text-red-800': selectedTrap.decoded?.severity === 'error',
                                         'bg-red-100 text-red-800': selectedTrap.decoded?.severity === 'critical'
                                     }" class="px-2 py-1 rounded text-sm font-medium" x-text="selectedTrap.decoded?.trap_name"></span>
                                 </div>
@@ -273,6 +281,7 @@
 function trapsPage() {
     return {
         loading: true,
+        error: null,
         traps: [],
         sources: [],
         summary: {},
@@ -360,8 +369,9 @@ function trapsPage() {
                     this.currentPage = 1;
                 }
                 this.loading = false;
+                this.error = null;
             } catch (e) {
-                console.error('Failed to fetch traps:', e);
+                this.error = e.message;
                 this.loading = false;
             }
         },
@@ -382,16 +392,6 @@ function trapsPage() {
             this.fetchTraps();
         },
 
-        formatRelativeTime(timestamp) {
-            const now = new Date();
-            const then = new Date(timestamp);
-            const diff = Math.floor((now - then) / 1000);
-
-            if (diff < 60) return `${diff}s ago`;
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            return `${Math.floor(diff / 86400)}d ago`;
-        }
     };
 }
 </script>
