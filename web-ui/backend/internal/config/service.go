@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -230,7 +231,12 @@ func (s *Service) RestoreBackup(filename, user, ip string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	backupPath := filepath.Join(s.backupDir, filename)
+	// Prevent path traversal
+	cleaned := filepath.Base(filename)
+	if cleaned != filename || strings.Contains(filename, "..") {
+		return fmt.Errorf("invalid backup filename")
+	}
+	backupPath := filepath.Join(s.backupDir, cleaned)
 
 	// Read backup
 	content, err := os.ReadFile(backupPath)

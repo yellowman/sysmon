@@ -10,6 +10,10 @@ import (
 // Allows /api/auth/login and static assets through without auth.
 func RequireAuth(authSvc *Service, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Strip auth headers to prevent client spoofing
+		r.Header.Del("X-Session-User")
+		r.Header.Del("X-Session-Role")
+
 		path := r.URL.Path
 
 		// Login endpoint and login page are always open

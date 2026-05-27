@@ -178,7 +178,22 @@ func (s *Service) ChangePassword(username, newPassword string) error {
 		json.Unmarshal(v, &u)
 		u.PassHash = string(hash)
 		data, _ := json.Marshal(u)
-		return b.Put([]byte(username), data)
+		b.Put([]byte(username), data)
+
+		// Revoke all sessions so user must re-login with new password
+		sb := tx.Bucket(bucketSessions)
+		var toDelete [][]byte
+		sb.ForEach(func(k, v []byte) error {
+			var sess Session
+			if json.Unmarshal(v, &sess) == nil && sess.Username == username {
+				toDelete = append(toDelete, k)
+			}
+			return nil
+		})
+		for _, k := range toDelete {
+			sb.Delete(k)
+		}
+		return nil
 	})
 }
 
