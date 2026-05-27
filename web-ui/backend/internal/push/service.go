@@ -234,12 +234,12 @@ func (s *Service) RecordPush(token string, success bool) {
 			return nil
 		}
 		sub.LastPushAt = time.Now().UTC().Format(time.RFC3339)
-		sub.PushCount++
 		if success {
+			sub.PushCount++
 			sub.LastPushStatus = "ok"
 		} else {
-			sub.LastPushStatus = "failed"
 			sub.FailCount++
+			sub.LastPushStatus = "failed"
 		}
 		data, _ := json.Marshal(sub)
 		return b.Put([]byte(token), data)
