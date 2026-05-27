@@ -1,26 +1,20 @@
 /* sysmon-ping-helper.c
  *
- * Setuid root helper for sending raw socket packets (ICMP, ICMPv6)
+ * Setuid root helper for sending raw ICMP/ICMPv6 packets.
  *
- * This program is intentionally minimal to reduce attack surface.
- * It ONLY sends raw packets - no parsing, no network operations.
- *
- * Security model:
- * - Runs setuid root (only way to send raw packets on most systems)
- * - Reads packet data from stdin (controlled by parent sysmond)
- * - Sends one packet (IPv4/IPv6, ICMP/ICMPv6)
- * - Drops privileges immediately
- * - Exits
- *
- * Communication protocol:
- * - Parent writes struct ping_helper_request to stdin
- * - Helper reads request, sends packet, exits with status
+ * Security design:
+ * - Sanitize environment and file descriptors immediately on entry
+ * - Read one request from stdin (pipe from parent sysmond)
+ * - Validate all fields before use
+ * - Create raw socket, drop to real UID, then send
+ * - Exit immediately — no loops, no interactive input
  *
  * Exit codes:
  *   0 - Success
- *   1 - Invalid request
+ *   1 - Invalid request / validation failure
  *   2 - Socket creation failed
  *   3 - Send failed
+ *   4 - Security check failed
  */
 
 #include <stdio.h>
@@ -28,6 +22,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -38,27 +33,59 @@
 
 #include "ping-helper.h"
 
-/* Drop privileges to nobody/daemon */
-static void drop_privileges(void)
+static void sanitize_environment(void)
+{
+	/* Clear dangerous environment variables that affect dynamic linking */
+	unsetenv("LD_PRELOAD");
+	unsetenv("LD_LIBRARY_PATH");
+	unsetenv("LD_AUDIT");
+	unsetenv("LD_DEBUG");
+	unsetenv("LD_DEBUG_OUTPUT");
+	unsetenv("LD_PROFILE");
+	unsetenv("LD_SHOW_AUXV");
+	unsetenv("LD_DYNAMIC_WEAK");
+	unsetenv("TMPDIR");
+	unsetenv("IFS");
+}
+
+static void sanitize_fds(void)
+{
+	int fd;
+
+	/* Close all file descriptors except stdin (0).
+	 * stdout and stderr are reopened to /dev/null so fprintf
+	 * calls don't write to attacker-controlled descriptors. */
+	for (fd = 3; fd < 256; fd++)
+		close(fd);
+
+	/* Reopen stdout and stderr to /dev/null */
+	fd = open("/dev/null", O_WRONLY);
+	if (fd >= 0) {
+		if (fd != STDOUT_FILENO)
+			dup2(fd, STDOUT_FILENO);
+		if (fd != STDERR_FILENO)
+			dup2(fd, STDERR_FILENO);
+		if (fd > STDERR_FILENO)
+			close(fd);
+	}
+}
+
+static void drop_to_real_uid(void)
 {
 	uid_t real_uid = getuid();
+	gid_t real_gid = getgid();
 
-	/* If we're not setuid, nothing to do */
-	if (geteuid() == real_uid) {
+	if (geteuid() == real_uid)
 		return;
-	}
 
-	/* Drop to real UID (the user who ran sysmond) */
-	if (setuid(real_uid) != 0) {
-		perror("setuid");
-		exit(1);
-	}
+	if (setgid(real_gid) != 0)
+		_exit(4);
+	if (setuid(real_uid) != 0)
+		_exit(4);
 
-	/* Verify drop worked */
-	if (geteuid() == 0 || getuid() == 0) {
-		fprintf(stderr, "CRITICAL: Failed to drop root privileges!\n");
-		exit(1);
-	}
+	/* Verify */
+	if (geteuid() == 0 || getegid() == 0)
+		_exit(4);
 }
 
 int main(int argc, char **argv)
@@ -67,81 +94,69 @@ int main(int argc, char **argv)
 	int icmp_fd;
 	ssize_t bytes_read;
 	ssize_t bytes_sent;
-
-	/* Validate we're running correctly */
-	if (geteuid() != 0) {
-		fprintf(stderr, "ping-helper: Must be setuid root or run as root\n");
-		fprintf(stderr, "ping-helper: Current euid=%d\n", geteuid());
-		exit(2);
-	}
-
-	/* Read request from stdin (from parent sysmond) */
-	bytes_read = read(STDIN_FILENO, &req, sizeof(req));
-	if (bytes_read != sizeof(req)) {
-		fprintf(stderr, "ping-helper: Invalid request size: %zd (expected %zu)\n",
-		        bytes_read, sizeof(req));
-		exit(1);
-	}
-
-	/* Validate request */
-	if (req.packet_len < 8 || req.packet_len > MAX_PING_PACKET_SIZE) {
-		fprintf(stderr, "ping-helper: Invalid packet length: %d\n", req.packet_len);
-		exit(1);
-	}
-
-	if (req.address_family != HELPER_AF_INET && req.address_family != HELPER_AF_INET6) {
-		fprintf(stderr, "ping-helper: Invalid address family: %d\n", req.address_family);
-		exit(1);
-	}
-
-	/* Determine socket parameters based on address family */
 	int socket_family;
 	int socket_protocol;
 	struct sockaddr *dest_addr;
 	socklen_t dest_len;
 
+	/* --- SECURITY: sanitize before anything else --- */
+	sanitize_environment();
+	sanitize_fds();
+
+	/* Must be setuid root */
+	if (geteuid() != 0)
+		_exit(2);
+
+	/* Reject command-line arguments (not expected) */
+	if (argc > 1)
+		_exit(1);
+
+	/* Read exactly one request from stdin */
+	bytes_read = read(STDIN_FILENO, &req, sizeof(req));
+	if (bytes_read != (ssize_t)sizeof(req))
+		_exit(1);
+
+	/* Validate address family */
+	if (req.address_family != HELPER_AF_INET &&
+	    req.address_family != HELPER_AF_INET6)
+		_exit(1);
+
+	/* Validate packet length */
+	if (req.packet_len < 8 || req.packet_len > MAX_PING_PACKET_SIZE)
+		_exit(1);
+
+	/* Validate sockaddr fields match address family */
 	if (req.address_family == HELPER_AF_INET) {
+		if (req.dest.v4.sin_family != AF_INET)
+			_exit(1);
 		socket_family = AF_INET;
 		socket_protocol = IPPROTO_ICMP;
 		dest_addr = (struct sockaddr *)&req.dest.v4;
 		dest_len = sizeof(req.dest.v4);
-	} else {  /* HELPER_AF_INET6 */
+	} else {
+		if (req.dest.v6.sin6_family != AF_INET6)
+			_exit(1);
 		socket_family = AF_INET6;
 		socket_protocol = IPPROTO_ICMPV6;
 		dest_addr = (struct sockaddr *)&req.dest.v6;
 		dest_len = sizeof(req.dest.v6);
 	}
 
-	/* Create raw ICMP/ICMPv6 socket (requires root/CAP_NET_RAW) */
-	icmp_fd = socket(socket_family, SOCK_RAW, socket_protocol);
-	if (icmp_fd < 0) {
-		perror("ping-helper: socket");
-		exit(2);
-	}
+	/* Create raw socket while still root */
+	icmp_fd = socket(socket_family, SOCK_RAW | SOCK_CLOEXEC, socket_protocol);
+	if (icmp_fd < 0)
+		_exit(2);
 
-	/* Send the ICMP/ICMPv6 packet */
+	/* --- DROP PRIVILEGES BEFORE SENDING --- */
+	drop_to_real_uid();
+
+	/* Send the packet (now running as unprivileged user) */
 	bytes_sent = sendto(icmp_fd, req.packet, req.packet_len, 0,
 	                    dest_addr, dest_len);
-
-	if (bytes_sent < 0) {
-		perror("ping-helper: sendto");
-		close(icmp_fd);
-		exit(3);
-	}
-
-	if (bytes_sent != req.packet_len) {
-		fprintf(stderr, "ping-helper: Partial send: %zd/%d bytes\n",
-		        bytes_sent, req.packet_len);
-		close(icmp_fd);
-		exit(3);
-	}
-
-	/* Close socket */
 	close(icmp_fd);
 
-	/* Drop privileges before exit (defense in depth) */
-	drop_privileges();
+	if (bytes_sent != req.packet_len)
+		_exit(3);
 
-	/* Success */
-	exit(0);
+	_exit(0);
 }

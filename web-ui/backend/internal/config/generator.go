@@ -225,6 +225,9 @@ func Generate(config *models.Config) (string, error) {
 		if host.MinPings > 0 {
 			sb.WriteString(fmt.Sprintf("\tmin_pings %d;\n", host.MinPings))
 		}
+		if host.PacketLossThreshold > 0 {
+			sb.WriteString(fmt.Sprintf("\tpacket_loss_threshold %.1f;\n", host.PacketLossThreshold))
+		}
 
 		// SNMP settings
 		if host.SNMPCommunity != "" {
