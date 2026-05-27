@@ -143,7 +143,7 @@
                                 <td class="px-4 py-3 text-xs text-gray-600" x-text="formatTime(sub.created_at)"></td>
                                 <td class="px-4 py-3">
                                     <div class="text-xs text-gray-600" x-text="formatTime(sub.last_seen)"></div>
-                                    <div class="text-xs" :class="getLastSeenColor(sub.last_seen)" x-text="timeAgo(sub.last_seen)"></div>
+                                    <div class="text-xs" :class="getLastSeenColor(sub.last_seen)" x-text="formatRelativeTime(sub.last_seen)"></div>
                                 </td>
                                 <td class="px-4 py-3">
                                     <div class="flex items-center space-x-3">
@@ -160,7 +160,7 @@
                                         <span :class="sub.last_push_status === 'ok' ? 'text-green-500' : 'text-red-500'">
                                             <i :class="sub.last_push_status === 'ok' ? 'fas fa-check-circle' : 'fas fa-times-circle'"></i>
                                         </span>
-                                        <span class="text-gray-400" x-text="timeAgo(sub.last_push_at)"></span>
+                                        <span class="text-gray-400" x-text="formatRelativeTime(sub.last_push_at)"></span>
                                     </div>
                                 </td>
                                 <td class="px-4 py-3">
@@ -546,27 +546,6 @@ function adminPage() {
             }
         },
 
-        formatTime(ts) {
-            if (!ts) return '-';
-            try {
-                return new Date(ts).toLocaleString();
-            } catch (e) {
-                return ts;
-            }
-        },
-
-        timeAgo(ts) {
-            if (!ts) return '';
-            try {
-                const seconds = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-                if (seconds < 60) return seconds + 's ago';
-                if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
-                if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
-                return Math.floor(seconds / 86400) + 'd ago';
-            } catch (e) {
-                return '';
-            }
-        },
 
         getLastSeenColor(ts) {
             if (!ts) return 'text-gray-400';
