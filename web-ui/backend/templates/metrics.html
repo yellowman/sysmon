@@ -237,7 +237,7 @@ function metricsPage() {
 
         async fetchMetrics() {
             try {
-                if (!this.metrics.total_requests) this.loading = true;
+                if (this.metrics.total_requests === undefined) this.loading = true;
                 const response = await fetch('/api/metrics');
                 if (!response.ok) throw new Error('Failed to fetch metrics');
                 this.metrics = await response.json();
