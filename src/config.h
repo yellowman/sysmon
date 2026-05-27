@@ -776,7 +776,7 @@ void start_test_rtt(struct monitorent *);
 void service_test_rtt(struct monitorent *, struct timeval *);
 void stop_test_rtt(struct monitorent *);
 unsigned short int generate_ident();
-unsigned short in_cksum();
+unsigned short in_cksum(u_short *, int);
 
 
 /* pingv6.c */
@@ -877,7 +877,7 @@ char *get_ip(struct my_hostent *);
 char *get_hostname(struct my_hostent *);
 void warn_dnscache_lameness();
 
-void client_poll();
+void client_poll(void);
 int test_udp(char*, int);
 int test_tcp(char*, int);
 

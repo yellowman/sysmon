@@ -488,13 +488,6 @@ func Parse(content []byte) (*models.Config, error) {
 						currentHost.MinPings = val
 					}
 				}
-			} else if strings.HasPrefix(line, "packet_loss_threshold ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.ParseFloat(parts[1], 64); err == nil {
-						currentHost.PacketLossThreshold = val
-					}
-				}
 			} else if strings.HasPrefix(line, "rtt_threshold ") {
 				parts := strings.Fields(line)
 				if len(parts) >= 2 {
