@@ -343,11 +343,7 @@ function trapsPage() {
                     url += `?page=${this.currentPage}&limit=${this.limit}`;
                 }
 
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch traps: ${response.statusText}`);
-                }
-                const data = await response.json();
+                const data = await apiCall(url);
 
                 // Handle paginated response
                 if (this.perPage !== 'all' && data.data) {

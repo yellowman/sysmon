@@ -370,7 +370,10 @@ function hostDetail() {
                 this.error = null;
 
                 // Fetch XML data for this host
-                const response = await fetch(`/api/xml/object/${encodeURIComponent(this.hostname)}`);
+                const fetchOpts = {};
+                const token = sessionStorage.getItem('sysmon_token');
+                if (token) fetchOpts.headers = { 'Authorization': 'Bearer ' + token };
+                const response = await fetch(`/api/xml/object/${encodeURIComponent(this.hostname)}`, fetchOpts);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }

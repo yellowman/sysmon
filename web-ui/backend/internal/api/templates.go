@@ -41,6 +41,15 @@ func InitTemplates(dir string) error {
 		templateCache[page] = tmpl
 	}
 
+	// Parse standalone templates (no base template)
+	for _, page := range []string{"login.html"} {
+		tmpl, err := template.ParseFiles(filepath.Join(templateDir, page))
+		if err != nil {
+			return err
+		}
+		templateCache[page] = tmpl
+	}
+
 	return nil
 }
 
@@ -52,10 +61,15 @@ func (r *Router) renderTemplate(w http.ResponseWriter, tmpl string, data interfa
 		return
 	}
 
-	// Render to buffer first to catch errors before writing to response
-	// This prevents sending a 200 OK status when template execution fails
 	var buf bytes.Buffer
-	err := t.ExecuteTemplate(&buf, "base", data)
+	var err error
+
+	// Standalone templates (login.html) don't define "base"
+	if t.Lookup("base") != nil {
+		err = t.ExecuteTemplate(&buf, "base", data)
+	} else {
+		err = t.Execute(&buf, data)
+	}
 	if err != nil {
 		log.Printf("Error executing template %s: %v", tmpl, err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

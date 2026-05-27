@@ -532,16 +532,7 @@ function hostsPage() {
                     url += `?page=${this.currentPage}&limit=${this.limit}`;
                 }
 
-                const response = await fetch(url);
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ message: 'Failed to fetch hosts' }));
-                    this.error = errorData.message || `Server returned ${response.status}`;
-                    this.hosts = [];
-                    this.loading = false;
-                    return;
-                }
-
-                const data = await response.json();
+                const data = await apiCall(url);
 
                 // Handle paginated response
                 if (this.perPage !== 'all' && !hasClientFilter && data.data) {
@@ -704,23 +695,11 @@ function hostsPage() {
             }
 
             try {
-                const response = await fetch('/api/monitoring/bulk/ack', {
+                const result = await apiCall('/api/monitoring/bulk/ack', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Auth-Key': getAuthKey()
-                    },
-                    body: JSON.stringify({
-                        hostnames: this.selectedHosts
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostnames: this.selectedHosts })
                 });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to acknowledge hosts');
-                }
-
-                const result = await response.json();
                 alert(`Acknowledged ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
@@ -745,24 +724,11 @@ function hostsPage() {
             }
 
             try {
-                const response = await fetch('/api/monitoring/bulk/update', {
+                const result = await apiCall('/api/monitoring/bulk/update', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Auth-Key': getAuthKey()
-                    },
-                    body: JSON.stringify({
-                        hostnames: this.selectedHosts,
-                        note: this.bulkNote
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostnames: this.selectedHosts, note: this.bulkNote })
                 });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to update hosts');
-                }
-
-                const result = await response.json();
                 alert(`Updated ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
@@ -788,24 +754,11 @@ function hostsPage() {
             }
 
             try {
-                const response = await fetch('/api/monitoring/bulk/trace', {
+                const result = await apiCall('/api/monitoring/bulk/trace', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Auth-Key': getAuthKey()
-                    },
-                    body: JSON.stringify({
-                        hostnames: this.selectedHosts,
-                        enable: true
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostnames: this.selectedHosts, enable: true })
                 });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to toggle trace');
-                }
-
-                const result = await response.json();
                 alert(`Toggled trace for ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
