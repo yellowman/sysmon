@@ -877,7 +877,6 @@ char *get_ip(struct my_hostent *);
 char *get_hostname(struct my_hostent *);
 void warn_dnscache_lameness();
 
-void client_poll(void);
 int test_udp(char*, int);
 int test_tcp(char*, int);
 
