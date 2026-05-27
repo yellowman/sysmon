@@ -252,8 +252,9 @@ function dashboard() {
                 this.stats = data.statistics;
 
                 // Get alerts
-                this.alerts = await apiCall('/api/monitoring/alerts'); else {
-                    console.warn('Failed to fetch alerts');
+                try {
+                    this.alerts = await apiCall('/api/monitoring/alerts');
+                } catch (e) {
                     this.alerts = [];
                 }
 
