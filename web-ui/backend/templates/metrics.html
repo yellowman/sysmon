@@ -195,12 +195,19 @@
         <i class="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
         <p class="mt-4 text-gray-600">Loading metrics...</p>
     </div>
+
+    <div x-show="error && !loading" class="card p-6 text-center">
+        <i class="fas fa-exclamation-circle text-3xl text-red-400 mb-3"></i>
+        <p class="text-sm text-red-700 font-medium" x-text="error"></p>
+        <button @click="fetchMetrics()" class="mt-3 px-4 py-2 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 tracking-wide uppercase">Retry</button>
+    </div>
 </div>
 
 <script>
 function metricsPage() {
     return {
         loading: true,
+        error: null,
         metrics: {
             total_requests: 0,
             successful_requests: 0,
@@ -238,8 +245,10 @@ function metricsPage() {
                 const response = await fetch('/api/metrics');
                 if (!response.ok) throw new Error('Failed to fetch metrics');
                 this.metrics = await response.json();
+                this.error = null;
                 this.loading = false;
             } catch (e) {
+                this.error = e.message;
                 this.loading = false;
             }
         },
