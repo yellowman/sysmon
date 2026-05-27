@@ -403,7 +403,9 @@ function adminPage() {
 
         async loadUptime() {
             try {
-                const status = await fetch('/api/monitoring/status').then(r => r.json());
+                const resp = await fetch('/api/monitoring/status');
+                if (!resp.ok) throw new Error('status fetch failed');
+                const status = await resp.json();
                 if (status.daemon && status.daemon.uptime_seconds) {
                     const seconds = status.daemon.uptime_seconds;
                     const days = Math.floor(seconds / 86400);
@@ -537,7 +539,9 @@ function adminPage() {
 
         async loadSessionLog() {
             try {
-                const result = await fetch('/api/admin/session-log?limit=50').then(r => r.json());
+                const resp = await fetch('/api/admin/session-log?limit=50');
+                if (!resp.ok) return;
+                const result = await resp.json();
                 this.sessionLog = result.entries || [];
             } catch (e) {
                 console.error('Failed to load session log:', e);
@@ -546,7 +550,9 @@ function adminPage() {
 
         async loadSessionErrors() {
             try {
-                const result = await fetch('/api/admin/session-errors?limit=5').then(r => r.json());
+                const resp = await fetch('/api/admin/session-errors?limit=5');
+                if (!resp.ok) return;
+                const result = await resp.json();
                 this.sessionErrors = result.errors || [];
             } catch (e) {
                 console.error('Failed to load session errors:', e);
