@@ -58,8 +58,6 @@ type GlobalSettings struct {
 
 	// System settings
 	MaxQueued       int    `json:"maxqueued,omitempty"`       // max simultaneous checks
-	DropPrivileges  bool   `json:"dropprivileges,omitempty"`  // drop privileges after init
-	DisableICMP     bool   `json:"disableicmp,omitempty"`     // disable all ICMP checks
 	NoHeartbeat     bool   `json:"noheartbeat,omitempty"`     // disable registration packet
 	NoLogConnects   bool   `json:"nologconnects,omitempty"`   // don't log client connections
 	SNMPTrap        bool   `json:"snmptrap,omitempty"`        // enable SNMP trap monitoring
