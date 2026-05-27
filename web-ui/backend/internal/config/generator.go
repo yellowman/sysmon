@@ -119,9 +119,6 @@ func Generate(config *models.Config) (string, error) {
 	if config.Global.ShowUpAlso {
 		sb.WriteString("config showupalso;\n")
 	}
-	if config.Global.DisableICMP {
-		sb.WriteString("config disable_icmp;\n")
-	}
 	if config.Global.NoHeartbeat {
 		sb.WriteString("config noheartbeat;\n")
 	}
@@ -153,6 +150,16 @@ func Generate(config *models.Config) (string, error) {
 	}
 
 	sb.WriteString("\n")
+
+	// Contact directory (names stored as structured comments for round-trip)
+	if len(config.Contacts) > 0 {
+		for _, c := range config.Contacts {
+			if c.Name != "" && c.Email != "" {
+				sb.WriteString(fmt.Sprintf("#@contact \"%s\" \"%s\"\n", c.Email, c.Name))
+			}
+		}
+		sb.WriteString("\n")
+	}
 
 	// Spawn definitions
 	for _, spawn := range config.Spawns {
@@ -217,9 +224,6 @@ func Generate(config *models.Config) (string, error) {
 		if host.Spawn != "" {
 			sb.WriteString(fmt.Sprintf("\tspawn \"%s\";\n", host.Spawn))
 		}
-		if host.Command != "" {
-			sb.WriteString(fmt.Sprintf("\tcommand \"%s\";\n", host.Command))
-		}
 		if host.PMsg != "" {
 			sb.WriteString(fmt.Sprintf("\tpmesg \"%s\";\n", host.PMsg))
 		}
@@ -230,6 +234,9 @@ func Generate(config *models.Config) (string, error) {
 		}
 		if host.MinPings > 0 {
 			sb.WriteString(fmt.Sprintf("\tmin_pings %d;\n", host.MinPings))
+		}
+		if host.PacketLossThreshold > 0 {
+			sb.WriteString(fmt.Sprintf("\tpacket_loss_threshold %.1f;\n", host.PacketLossThreshold))
 		}
 
 		// SNMP settings

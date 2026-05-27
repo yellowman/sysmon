@@ -2,11 +2,8 @@
 #
 # sysmon.conf.full - Comprehensive Reference Configuration
 #
-# This file demonstrates EVERY configuration option and directive available
-# in sysmon. Each feature is shown in a dedicated example object/section.
-#
-# This is NOT meant to be used as-is - it's a reference guide showing all
-# available options. Copy relevant sections to your actual configuration.
+# This file demonstrates every configuration option available in sysmon.
+# Each section shows real directives verified against the C parser (parser.l).
 #
 # For a simple starting point, see sysmon.conf.dist
 #
@@ -16,20 +13,13 @@ root = "example-root";
 # =============================================================================
 # SECTION 1: GENERIC VARIABLES (set/replace)
 # =============================================================================
-# Variables can be defined and reused throughout the config with $variable_name
+# Variables defined with "set" are substituted via $variable_name
 
 set oncall = "oncall@example.com";
 set netadmin = "networkadmin@example.com";
-set dbadmin = "dbadmin@example.com";
-set router_ip = "192.168.1.1";
-
-# Email template variables
 set sender = "sysmon@example.com";
-set from = "sysmon@example.com";
 set subject = "Sysmon Alert: %h %s";
 set pmesg = "Host %h is %s - %m";
-
-# HTML color variables
 set upcolor = "#00FF00";
 set downcolor = "#FF0000";
 set recentcolor = "#FFFF00";
@@ -39,868 +29,426 @@ set recentcolor = "#FFFF00";
 # SECTION 2: GLOBAL CONFIG OPTIONS
 # =============================================================================
 
-# --- Timing Options ---
+# --- Timing ---
 config queuetime 300;           # Seconds between checks (default: 60)
 config numfailures 4;           # Failures before alerting (default: 4)
-config minnumfailures 2;        # Min failures before showing as down (default: 1)
+config minnumfailures 2;        # Min failures before showing in status (default: 1)
 config flaptime 5;              # Minutes to show stable after recovery (default: 0)
 config pageinterval 60;         # Minutes between re-alerts (default: none)
 
-# --- Queue Management ---
+# --- Queue ---
 config maxqueued 50;            # Max simultaneous checks (default: 100)
 
-# --- DNS Options ---
+# --- DNS ---
 config dnsexpire 7200;          # DNS cache TTL in seconds (default: 1500)
-config dnslog 900;              # DNS cache log interval in seconds (default: 900)
+config dnslog 900;              # DNS cache log interval (default: 900)
 
-# --- Logging Options ---
-# Facilities: kern, user, mail, daemon, auth, syslog, lpr, news, uucp, cron,
-#             authpriv, local0-local7, none
-config logging daemon;
+# --- Logging ---
+# Two forms: syslog facility or file path
+config logging file "/var/log/sysmond.log";
+# config logging syslog "daemon";
 
-# --- Status File Options ---
+# --- Status File ---
 config statusfile html "/usr/local/htdocs/sysmon.html";
 config statustempdir "/var/run/sysmon";
 config showupalso;              # Show UP hosts in status file
-config html refresh 30;         # HTML refresh interval in seconds
+config html refresh 30;         # HTML auto-refresh in seconds
 config date "ISO";              # Date format: ISO, DEC, or strftime(3) codes
+# config cssfile "/path/to/custom.css";
 
-# --- Email Options ---
+# --- Email ---
+config sender "sysmon@example.com";
 config replyto "noc@example.com";
 config errorsto "noc-errors@example.com";
-# config nosubject;             # Disable subject line for pager gateways
+# config nosubject;             # Disable subject for pager gateways
 
-# --- Security Options ---
+# --- Security ---
 config authkey "MySecretKey123";
-config drop_privileges;         # Drop to unprivileged user after init
-# config disable_icmp;          # Disable all ICMP checks
 config noheartbeat;             # Disable registration packet
 config nologconnects;           # Don't log client connections
 
-# --- SNMP Trap Options ---
-config trap_port 162;           # UDP port for SNMP traps
-config snmp-trap;               # Enable SNMP trap monitoring
+# --- SNMP Traps ---
+config snmp-trap;               # Enable SNMP trap monitoring (port 162)
 
-# --- Debugging Options ---
-config savestate "/var/log/sysmon/state.xml";  # Save state to XML file
+# --- State ---
+config savestate "/var/log/sysmon/state.xml";
+# config pidfile "/var/run/sysmond.pid";
 
 # --- Include Files ---
-# config include "/etc/sysmon.d/routers.conf";
-# config include "/etc/sysmon.d/servers.conf";
+# include "/etc/sysmon.d/routers.conf";
+# include "/etc/sysmon.d/servers.conf";
 
 
 # =============================================================================
 # SECTION 3: NAMED SPAWN COMMANDS
 # =============================================================================
-# Define reusable alert commands
 # Placeholders: %I=IP, %U=unique_name, %h=hostname, %s=status, %w=when,
-#               %t=type, %m=message
+#               %t=type, %m=message, %G=group, %c=downcount, %C=upcount
 
 spawns {
     name "sendalert" {
         command "/usr/local/bin/send-alert.sh %I %U %s %w %t";
-    }
+    };
 
     name "pagerduty" {
         command "/usr/local/bin/pagerduty-trigger %h %s";
-    }
+    };
 
     name "slack" {
         command "/usr/local/bin/slack-notify '%h is %s: %m'";
-    }
-
-    name "email-oncall" {
-        command "/usr/bin/mail -s 'ALERT: %h %s' $oncall";
-    }
-}
+    };
+};
 
 
 # =============================================================================
-# SECTION 4: BASIC PING MONITORING
+# SECTION 4: BASIC MONITORING EXAMPLES
 # =============================================================================
 
 object example-root {
     ip "192.168.1.1";
     type ping;
-    desc "Root object for dependency tree";
+    desc "Root object - dependency tree root";
     contact $netadmin;
 };
 
-object example-basic-ping {
+object example-ping {
     ip "192.168.1.10";
     type ping;
-    desc "Basic ping monitoring - minimal options";
+    desc "Basic ping monitoring";
     dep "example-root";
     contact $netadmin;
 };
 
 
 # =============================================================================
-# SECTION 5: ADVANCED PING OPTIONS
+# SECTION 5: PING WITH THRESHOLDS
 # =============================================================================
+# NOTE: rtt_threshold and jitter_threshold are configurable per-object.
+# send_pings and min_pings are hardcoded defaults (not configurable).
 
-object example-packet-loss {
+object example-rtt {
     ip "192.168.1.20";
     type ping;
-    desc "Packet loss monitoring";
+    desc "RTT latency monitoring";
     dep "example-root";
     contact $oncall;
-
-    send_pings 10;              # Send 10 pings per check
-    min_pings 8;                # Require 8 successful responses
-    packet_loss_threshold 15.0; # Alert if >15% packet loss
+    rtt_threshold 50;           # Alert if average RTT >50ms
 };
 
-object example-rtt-monitoring {
+object example-jitter {
     ip "192.168.1.21";
     type ping;
-    desc "Round-trip time (latency) monitoring";
+    desc "Jitter monitoring";
     dep "example-root";
     contact $oncall;
-
-    rtt_threshold 50;           # Alert if average RTT >50ms
-    send_pings 5;
-};
-
-object example-jitter-monitoring {
-    ip "192.168.1.22";
-    type ping;
-    desc "Jitter (RTT variation) monitoring";
-    dep "example-root";
-    contact $oncall;
-
     jitter_threshold 20;        # Alert if jitter >20ms
-    send_pings 5;
-};
-
-object example-combined-ping {
-    ip "192.168.1.23";
-    type ping;
-    desc "Combined: packet loss + RTT + jitter";
-    dep "example-root";
-    contact $oncall;
-
-    send_pings 10;
-    min_pings 9;
-    packet_loss_threshold 10.0;
-    rtt_threshold 100;
-    jitter_threshold 30;
 };
 
 
 # =============================================================================
-# SECTION 6: WAKE-ON-LAN MONITORING
+# SECTION 6: TCP PORT MONITORING
 # =============================================================================
 
-object example-wakeup-check {
-    ip "192.168.1.30";
-    type ping;
-    desc "Wake-on-LAN monitoring for sleeping hosts";
-    dep "example-root";
-    contact $netadmin;
-
-    wakeup_check;               # Attempt to wake host before declaring down
-    wakeup_retries 3;           # Try waking 3 times
-    wakeup_check_interval 120;  # Wait 2 minutes between wake attempts
-};
-
-
-# =============================================================================
-# SECTION 7: TCP PORT MONITORING
-# =============================================================================
-
-object example-tcp-port {
+object example-tcp {
     ip "192.168.1.40";
     type tcp;
     port 8080;
-    desc "TCP port connection test";
+    desc "TCP port check";
     dep "example-root";
     contact $netadmin;
 };
 
 
 # =============================================================================
-# SECTION 8: HTTP MONITORING
+# SECTION 7: HTTP/HTTPS MONITORING
 # =============================================================================
 
-object example-http-basic {
+object example-http {
     ip "192.168.1.50";
     type http;
-    port 80;
-    desc "Basic HTTP monitoring";
+    desc "Basic HTTP check";
     dep "example-root";
     contact $netadmin;
 };
 
-object example-https-basic {
+object example-https {
     ip "192.168.1.51";
     type https;
-    port 443;
-    desc "Basic HTTPS monitoring";
+    desc "HTTPS check";
     dep "example-root";
     contact $netadmin;
 };
 
-object example-http-url-path {
+object example-http-content {
     ip "192.168.1.52";
     type http;
-    port 80;
-    desc "HTTP with specific URL path";
+    desc "HTTP with URL path and content check";
     dep "example-root";
     contact $netadmin;
-
-    url "/health";              # Check specific URL path
+    url "/health";
+    urltext "OK";               # Response body must contain "OK"
 };
 
-object example-http-content-check {
+object example-http-header {
     ip "192.168.1.53";
     type http;
-    port 80;
-    desc "HTTP with content validation";
+    desc "HTTP header validation";
     dep "example-root";
     contact $netadmin;
-
-    url "/status";
-    urltext "OK";               # Response must contain "OK"
-};
-
-object example-http-header-check {
-    ip "192.168.1.54";
-    type http;
-    port 80;
-    desc "HTTP with header validation";
-    dep "example-root";
-    contact $netadmin;
-
-    header "X-Service-Status";  # Check for specific header
-    headerval "healthy";        # Header value must match
+    header "X-Service-Status";
+    headerval "healthy";
 };
 
 
 # =============================================================================
-# SECTION 9: EMAIL SERVICE MONITORING
+# SECTION 8: EMAIL MONITORING
 # =============================================================================
 
 object example-smtp {
     ip "192.168.1.60";
     type smtp;
-    desc "SMTP mail server monitoring";
+    desc "SMTP server";
     dep "example-root";
     contact "mailadmin@example.com";
 };
 
-object example-pop3-basic {
+object example-pop3 {
     ip "192.168.1.61";
     type pop3;
-    desc "POP3 mail server monitoring";
+    desc "POP3 with auth";
     dep "example-root";
     contact "mailadmin@example.com";
+    username "testuser";
+    password "testpass";
 };
 
-object example-pop3-auth {
+object example-imap {
     ip "192.168.1.62";
-    type pop3;
-    desc "POP3 with authentication";
-    dep "example-root";
-    contact "mailadmin@example.com";
-
-    username "testuser";
-    password "testpass";
-};
-
-object example-imap-basic {
-    ip "192.168.1.63";
     type imap;
-    desc "IMAP mail server monitoring";
+    desc "IMAP with auth";
     dep "example-root";
     contact "mailadmin@example.com";
-};
-
-object example-imap-auth {
-    ip "192.168.1.64";
-    type imap;
-    desc "IMAP with authentication";
-    dep "example-root";
-    contact "mailadmin@example.com";
-
     username "testuser";
     password "testpass";
 };
 
 
 # =============================================================================
-# SECTION 10: DNS MONITORING
+# SECTION 9: DNS MONITORING
 # =============================================================================
 
-object example-dns-basic {
+object example-dns {
     ip "192.168.1.70";
     type dns;
-    desc "Basic DNS server monitoring";
+    desc "DNS server check";
     dep "example-root";
     contact $netadmin;
-};
-
-object example-dns-query {
-    ip "192.168.1.71";
-    type dns;
-    desc "DNS with specific query";
-    dep "example-root";
-    contact $netadmin;
-
-    dns-query "example.com";    # Specific hostname to query
-};
-
-object example-dns-authoritative {
-    ip "192.168.1.72";
-    type dns;
-    desc "DNS requiring authoritative answer";
-    dep "example-root";
-    contact $netadmin;
-
-    dns-aa;                     # Require AA flag in response
-};
-
-object example-dns-recursive {
-    ip "192.168.1.73";
-    type dns;
-    desc "DNS with recursive queries";
-    dep "example-root";
-    contact $netadmin;
-
-    dns-recursion;              # Enable recursive queries
 };
 
 object example-dns-full {
-    ip "192.168.1.74";
+    ip "192.168.1.71";
     type dns;
-    desc "DNS with all options";
+    desc "DNS with query, AA, and recursion";
     dep "example-root";
     contact $netadmin;
-
-    dns-query "test.example.com";
-    dns-aa;
-    dns-recursion;
+    dns-query "example.com";
+    dns-aa;                     # Require authoritative answer
+    dns-recursion;              # Use recursive query
 };
 
 
 # =============================================================================
-# SECTION 11: SSH MONITORING
+# SECTION 10: SSH / RADIUS
 # =============================================================================
 
 object example-ssh {
     ip "192.168.1.80";
     type ssh;
-    port 22;
-    desc "SSH server monitoring";
+    desc "SSH server";
     dep "example-root";
     contact $netadmin;
 };
-
-
-# =============================================================================
-# SECTION 12: RADIUS MONITORING
-# =============================================================================
 
 object example-radius {
     ip "192.168.1.90";
     type radius;
-    desc "RADIUS authentication server";
+    desc "RADIUS server";
     dep "example-root";
     contact $netadmin;
-
     username "testuser";
     password "testpass";
-    secret "sharedsecret";      # RADIUS shared secret
+    secret "sharedsecret";
 };
 
 
 # =============================================================================
-# SECTION 13: SNMP MONITORING - HIGH THRESHOLD
+# SECTION 11: SNMP MONITORING
 # =============================================================================
 
-object example-snmp-high-cpu {
+object example-snmp-high {
     ip "192.168.1.100";
     type snmp;
-    desc "SNMP CPU monitoring (high threshold)";
+    desc "SNMP CPU high threshold";
     dep "example-root";
     contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.4.1.9.2.1.56.0";  # Cisco CPU 5-min average
-    snmp-type "high";                    # Alert if exceeds threshold
-    snmp-high 80;                        # Alert if >80%
+    community "public";
+    oid "1.3.6.1.4.1.9.2.1.56.0";
+    snmp-type "high";
+    snmp-high 80;
 };
 
-object example-snmp-high-memory {
+object example-snmp-low {
     ip "192.168.1.101";
     type snmp;
-    desc "SNMP memory monitoring (high threshold)";
+    desc "SNMP disk low threshold";
     dep "example-root";
     contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.4.1.9.9.48.1.1.1.5.1";  # Cisco memory used
-    snmp-type "high";
-    snmp-high 90;                              # Alert if >90%
+    community "public";
+    oid "1.3.6.1.2.1.25.2.3.1.6.1";
+    snmp-type "low";
+    snmp-low 1000000;
 };
 
-
-# =============================================================================
-# SECTION 14: SNMP MONITORING - LOW THRESHOLD
-# =============================================================================
-
-object example-snmp-low-disk {
-    ip "192.168.1.110";
+object example-snmp-exact {
+    ip "192.168.1.102";
     type snmp;
-    desc "SNMP disk space monitoring (low threshold)";
+    desc "SNMP interface status exact match";
     dep "example-root";
     contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.25.2.3.1.6.1";  # hrStorageSize
-    snmp-type "low";                       # Alert if below threshold
-    snmp-low 1000000;                      # Alert if <1GB available
-};
-
-
-# =============================================================================
-# SECTION 15: SNMP MONITORING - RANGE
-# =============================================================================
-
-object example-snmp-range-temperature {
-    ip "192.168.1.120";
-    type snmp;
-    desc "SNMP temperature monitoring (range)";
-    dep "example-root";
-    contact $oncall;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.4.1.9.9.13.1.3.1.3.1";  # Temperature sensor
-    snmp-type "range";                         # Alert if outside range
-    snmp-low 15;                               # Min temp: 15°C
-    snmp-high 30;                              # Max temp: 30°C
-};
-
-
-# =============================================================================
-# SECTION 16: SNMP MONITORING - EXACT MATCH
-# =============================================================================
-
-object example-snmp-exact-ups {
-    ip "192.168.1.130";
-    type snmp;
-    desc "SNMP UPS status (exact match)";
-    dep "example-root";
-    contact $oncall;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.33.1.4.1.0";  # UPS output source
-    snmp-type "exact";                   # Must match exact value
-    snmp-exact 3;                        # 3 = normal (utility power)
-};
-
-object example-snmp-exact-port-status {
-    ip "192.168.1.131";
-    type snmp;
-    desc "SNMP interface status (exact match)";
-    dep "example-root";
-    contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.2.2.1.8.1";   # ifOperStatus
+    community "public";
+    oid "1.3.6.1.2.1.2.2.1.8.1";
     snmp-type "exact";
-    snmp-exact 1;                        # 1 = up
+    snmp-exact 1;               # 1 = ifOperStatus up
 };
 
-
-# =============================================================================
-# SECTION 17: SNMP MONITORING - RATE
-# =============================================================================
-
-object example-snmp-rate-bandwidth {
-    ip "192.168.1.140";
+object example-snmp-rate {
+    ip "192.168.1.103";
     type snmp;
-    desc "SNMP bandwidth monitoring (rate)";
+    desc "SNMP bandwidth rate";
     dep "example-root";
     contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.31.1.1.1.6.1";  # ifHCInOctets (bytes counter)
-    snmp-type "rate";                      # Monitor rate of change
-    snmp-rate 125000000;                   # Alert if >1 Gbps (125 MB/s)
-};
-
-object example-snmp-rate-bandwidth-bits {
-    ip "192.168.1.141";
-    type snmp;
-    desc "SNMP bandwidth with bytes-to-bits conversion";
-    dep "example-root";
-    contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.31.1.1.1.6.1";
+    community "public";
+    oid "1.3.6.1.2.1.31.1.1.1.6.1";
     snmp-type "rate";
-    snmp-rate 125000000;
-    snmp-octets;                           # Convert bytes to bits (*8)
+    snmp-rate 125000000;        # 1 Gbps in bytes/sec
+    snmp-octets;                # Convert bytes to bits (*8)
 };
-
-
-# =============================================================================
-# SECTION 18: SNMP MONITORING - UPTIME
-# =============================================================================
 
 object example-snmp-uptime {
-    ip "192.168.1.150";
+    ip "192.168.1.104";
     type snmp;
-    desc "SNMP system uptime monitoring";
+    desc "SNMP uptime monitoring";
     dep "example-root";
     contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.1.3.0";  # sysUpTime
-    snmp-type "uptime";             # Monitor uptime
-};
-
-
-# =============================================================================
-# SECTION 19: SNMP MONITORING - OID COMPARISON
-# =============================================================================
-
-object example-snmp-compare {
-    ip "192.168.1.160";
-    type snmp;
-    desc "SNMP OID comparison monitoring";
-    dep "example-root";
-    contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.2.2.1.10.1";      # ifInOctets
-    snmp-oid-sec "1.3.6.1.2.1.2.2.1.16.1";  # ifOutOctets
-    snmp-type "compare";                     # Compare two OIDs
-};
-
-
-# =============================================================================
-# SECTION 20: SNMP MONITORING - CUSTOM MESSAGES
-# =============================================================================
-
-object example-snmp-custom-messages {
-    ip "192.168.1.170";
-    type snmp;
-    desc "SNMP with custom up/down messages";
-    dep "example-root";
-    contact $netadmin;
-
-    snmp-community "public";
-    snmp-oid "1.3.6.1.2.1.1.3.0";
+    community "public";
+    oid "1.3.6.1.2.1.1.3.0";
     snmp-type "uptime";
+};
 
-    snmp-upmsg "System is running normally";
+object example-snmp-custom-msgs {
+    ip "192.168.1.105";
+    type snmp;
+    desc "SNMP with custom messages";
+    dep "example-root";
+    contact $netadmin;
+    community "public";
+    oid "1.3.6.1.2.1.1.3.0";
+    snmp-type "uptime";
+    snmp-upmsg "System running normally";
     snmp-downmsg "System uptime check failed";
 };
 
-
-# =============================================================================
-# SECTION 21: SNMP TRAP MONITORING
-# =============================================================================
-
-object example-trap-basic {
-    ip "192.168.1.180";
-    type trap;
-    desc "Basic SNMP trap monitoring";
-    contact $oncall;
-
-    trap_alert;                  # Enable trap monitoring
+object example-snmp-compare {
+    ip "192.168.1.106";
+    type snmp;
+    desc "SNMP OID comparison";
+    dep "example-root";
+    contact $netadmin;
+    community "public";
+    oid "1.3.6.1.2.1.2.2.1.10.1";
+    snmp-oid-sec "1.3.6.1.2.1.2.2.1.16.1";
 };
 
-object example-trap-matched {
-    ip "192.168.1.181";
-    type trap;
-    desc "SNMP trap linked to monitored host";
-    contact $oncall;
 
+# =============================================================================
+# SECTION 12: SNMP TRAP MONITORING
+# =============================================================================
+
+object example-trap {
+    ip "192.168.1.110";
+    type ping;
+    desc "Host with trap alerts";
+    dep "example-root";
+    contact $oncall;
     trap_alert;
-    matched_host "example-root"; # Link traps to another object
 };
 
 
 # =============================================================================
-# SECTION 22: PER-OBJECT OVERRIDES
+# SECTION 13: PER-OBJECT OVERRIDES
 # =============================================================================
 
-object example-custom-pageinterval {
-    ip "192.168.1.190";
+object example-overrides {
+    ip "192.168.1.120";
     type ping;
-    desc "Critical host with custom page interval";
+    desc "Custom intervals and thresholds";
     dep "example-root";
     contact $oncall;
-
-    pageinterval 15;             # Re-alert every 15 minutes (overrides global)
+    queuetime 60;               # Check every 60 seconds
+    numfailures 2;              # Alert after 2 failures
+    pageinterval 15;            # Re-alert every 15 minutes
+    contact_on "both";          # Alert on down AND recovery
+    spawn "pagerduty";
+    pmesg "CRITICAL: %h is %s";
 };
 
-object example-custom-queuetime {
-    ip "192.168.1.191";
+
+# =============================================================================
+# SECTION 14: DEPENDENCIES, GROUPS, SPECIAL OPTIONS
+# =============================================================================
+
+object example-grouped {
+    ip "192.168.1.130";
     type ping;
-    desc "Host with custom check interval";
+    desc "Grouped host";
     dep "example-root";
     contact $netadmin;
-
-    queuetime 60;                # Check every 60 seconds (overrides global)
+    group "production";
 };
-
-object example-custom-numfailures {
-    ip "192.168.1.192";
-    type ping;
-    desc "Host with fewer failures before alert";
-    dep "example-root";
-    contact $oncall;
-
-    numfailures 2;               # Alert after 2 failures (instead of global 4)
-};
-
-
-# =============================================================================
-# SECTION 23: SPAWN COMMANDS
-# =============================================================================
-
-object example-spawn-named {
-    ip "192.168.1.200";
-    type ping;
-    desc "Using named spawn command";
-    dep "example-root";
-    contact $netadmin;
-
-    spawn "pagerduty";           # Use named spawn from spawns {} block
-};
-
-object example-spawn-inline {
-    ip "192.168.1.201";
-    type ping;
-    desc "Using inline spawn command";
-    dep "example-root";
-    contact $netadmin;
-
-    spawn "/usr/local/bin/alert.sh %I %U %s";  # Inline command
-};
-
-
-# =============================================================================
-# SECTION 24: CONTACT OPTIONS
-# =============================================================================
-
-object example-contact-down {
-    ip "192.168.1.210";
-    type ping;
-    desc "Alert only when down";
-    dep "example-root";
-
-    contact $netadmin;
-    contact_on "down";           # Alert only on failure (default)
-};
-
-object example-contact-up {
-    ip "192.168.1.211";
-    type ping;
-    desc "Alert only when coming back up";
-    dep "example-root";
-
-    contact $netadmin;
-    contact_on "up";             # Alert only on recovery
-};
-
-object example-contact-both {
-    ip "192.168.1.212";
-    type ping;
-    desc "Alert on both down and up";
-    dep "example-root";
-
-    contact $oncall;
-    contact_on "both";           # Alert on failure AND recovery
-};
-
-
-# =============================================================================
-# SECTION 25: DEPENDENCY EXAMPLES
-# =============================================================================
-
-object example-no-dependency {
-    ip "192.168.1.220";
-    type ping;
-    desc "Host with no dependencies (root-level)";
-    contact $netadmin;
-};
-
-object example-single-dependency {
-    ip "192.168.1.221";
-    type ping;
-    desc "Host with single dependency";
-    dep "example-root";
-    contact $netadmin;
-};
-
-object example-multiple-dependencies {
-    ip "192.168.1.222";
-    type ping;
-    desc "Host with multiple dependencies";
-    dep "example-root,example-no-dependency";
-    contact $netadmin;
-};
-
-
-# =============================================================================
-# SECTION 26: PAUSED MONITORING
-# =============================================================================
-
-object example-paused {
-    ip "192.168.1.230";
-    type ping;
-    desc "Paused/disabled host (maintenance mode)";
-    dep "example-root";
-    contact $netadmin;
-
-    pause;                       # Disable monitoring for this host
-};
-
-
-# =============================================================================
-# SECTION 27: GROUP ORGANIZATION
-# =============================================================================
-
-object example-grouped-routers {
-    ip "192.168.1.240";
-    type ping;
-    desc "Router in network group";
-    dep "example-root";
-    contact $netadmin;
-
-    group "routers";             # Organize into logical groups
-};
-
-object example-grouped-servers {
-    ip "192.168.1.241";
-    type ping;
-    desc "Server in application group";
-    dep "example-root";
-    contact $netadmin;
-
-    group "servers";
-};
-
-
-# =============================================================================
-# SECTION 28: REVERSE LOGIC
-# =============================================================================
 
 object example-reverse {
-    ip "192.168.1.250";
+    ip "192.168.1.131";
     type ping;
     desc "Alert when UP (reverse logic)";
     dep "example-root";
     contact $netadmin;
-
-    reverse;                     # Alert when host is UP instead of DOWN
+    reverse;
 };
 
-
-# =============================================================================
-# SECTION 29: PACKET LOSS TOLERANCE (LEGACY)
-# =============================================================================
-
-object example-pktloss-tolerance {
-    ip "192.168.1.260";
+object example-paused {
+    ip "192.168.1.132";
     type ping;
-    desc "Legacy packet loss tolerance (count, not percentage)";
+    desc "Monitoring paused (maintenance)";
     dep "example-root";
     contact $netadmin;
-
-    pkt_loss_tolerance 2;        # Allow 2 lost packets before alert
-    pkt_loss_history_hours 24;   # Track loss over 24 hours
-};
-
-
-# =============================================================================
-# SECTION 30: CUSTOM COMMANDS
-# =============================================================================
-
-object example-custom-command {
-    ip "192.168.1.270";
-    type ping;
-    desc "Host with custom failure command";
-    dep "example-root";
-    contact $netadmin;
-
-    command "/usr/local/bin/on-failure.sh %h";  # Run on failure
-};
-
-
-# =============================================================================
-# SECTION 31: COMBINED EXAMPLE - ALL FEATURES
-# =============================================================================
-
-object example-kitchen-sink {
-    ip "192.168.1.255";
-    type ping;
-    desc "Example combining multiple features";
-    dep "example-root,example-no-dependency";
-    contact $oncall;
-    contact_on "both";
-
-    # Advanced ping options
-    send_pings 10;
-    min_pings 8;
-    packet_loss_threshold 20.0;
-    rtt_threshold 75;
-    jitter_threshold 25;
-
-    # Per-object overrides
-    queuetime 120;
-    pageinterval 30;
-    numfailures 3;
-
-    # Organization
-    group "critical-infrastructure";
-
-    # Alerting
-    spawn "pagerduty";
-    command "/usr/local/bin/critical-alert.sh %I %h %s";
+    pause;
 };
 
 
 # =============================================================================
 # PUSH NOTIFICATIONS (APNs / FCM)
 # =============================================================================
-#
-# Enable push notifications to iOS and Android devices via the sysmon web-ui.
-# The web-ui backend reads these settings from sysmon.conf and sends
-# notifications when host state changes are detected.
-#
-# Mobile apps register device tokens via POST /api/push/subscribe.
-#
+# These directives are consumed by the sysmon web-ui backend, not sysmond.
+# The C daemon accepts and ignores them.
 
-# Enable push notification support
 #config push-notifications;
-
-# --- FCM (Android) ---
-# Firebase Cloud Messaging server key from Firebase Console > Project Settings > Cloud Messaging
 #config push-fcm-serverkey "AAAAxxxxxxx:APA91bxxxxxxxxxxxxxxxxxxxxxxxxx";
-
-# --- APNs (iOS) ---
-# Certificate-based authentication. Export from Apple Developer portal.
-# Convert .p12 to PEM:  openssl pkcs12 -in cert.p12 -out apns-cert.pem -clcerts -nokeys
-#                        openssl pkcs12 -in cert.p12 -out apns-key.pem -nocerts -nodes
 #config push-apns-certfile "/etc/sysmon/apns-cert.pem";
 #config push-apns-keyfile "/etc/sysmon/apns-key.pem";
 #config push-apns-bundleid "com.example.sysmon";
-
-# Use production APNs gateway (omit for sandbox/development)
 #config push-apns-production;
+
 
 # =============================================================================
 # END OF CONFIGURATION
 # =============================================================================
-#
-# This file demonstrates every configuration option available in sysmon.
-# Copy relevant sections to your production configuration as needed.
-#
-# For more information, see: man sysmon.conf
-#

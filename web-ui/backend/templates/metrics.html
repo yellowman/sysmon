@@ -6,15 +6,12 @@
 <div x-data="metricsPage()" x-init="init()">
     <!-- Header -->
     <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">
-            <i class="fas fa-chart-line mr-2"></i>API Metrics Dashboard
-        </h1>
-        <div class="text-sm text-gray-500">
-            Auto-refresh: <span x-text="autoRefresh ? 'ON' : 'OFF'"></span>
-            <button @click="autoRefresh = !autoRefresh" class="ml-2 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
-                Toggle
-            </button>
-        </div>
+        <h1 class="text-xl font-extrabold tracking-tight text-gray-900">API Metrics</h1>
+        <button @click="autoRefresh = !autoRefresh"
+                :class="autoRefresh ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'"
+                class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors tracking-wide uppercase">
+            <i class="fas fa-sync-alt mr-1"></i><span x-text="autoRefresh ? 'Live' : 'Paused'"></span>
+        </button>
     </div>
 
     <!-- Stats Cards -->
@@ -172,11 +169,12 @@
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span class="px-2 py-1 text-xs font-medium rounded"
                                       :class="{
-                                          'bg-green-100 text-green-800': (endpoint.success / endpoint.total_calls) >= 0.95,
-                                          'bg-yellow-100 text-yellow-800': (endpoint.success / endpoint.total_calls) >= 0.80 && (endpoint.success / endpoint.total_calls) < 0.95,
-                                          'bg-red-100 text-red-800': (endpoint.success / endpoint.total_calls) < 0.80
+                                          'bg-green-100 text-green-800': endpoint.total_calls > 0 && (endpoint.success / endpoint.total_calls) >= 0.95,
+                                          'bg-yellow-100 text-yellow-800': endpoint.total_calls > 0 && (endpoint.success / endpoint.total_calls) >= 0.80 && (endpoint.success / endpoint.total_calls) < 0.95,
+                                          'bg-red-100 text-red-800': endpoint.total_calls > 0 && (endpoint.success / endpoint.total_calls) < 0.80,
+                                          'bg-gray-100 text-gray-600': !endpoint.total_calls
                                       }"
-                                      x-text="formatPercent(endpoint.success / endpoint.total_calls)">
+                                      x-text="endpoint.total_calls ? formatPercent(endpoint.success / endpoint.total_calls) : 'N/A'">
                                 </span>
                             </td>
                         </tr>
@@ -187,7 +185,7 @@
     </div>
 
     <!-- Empty state -->
-    <div x-show="!metrics.top_endpoints || metrics.top_endpoints.length === 0" class="text-center py-12 bg-white rounded-lg shadow mt-6">
+    <div x-show="!loading && (!metrics.top_endpoints || metrics.top_endpoints.length === 0)" class="text-center py-12 bg-white rounded-lg shadow mt-6">
         <i class="fas fa-chart-line text-6xl text-gray-300 mb-4"></i>
         <p class="text-gray-500">No endpoint metrics available yet</p>
     </div>
@@ -236,14 +234,12 @@ function metricsPage() {
 
         async fetchMetrics() {
             try {
+                if (this.metrics.total_requests === undefined) this.loading = true;
                 const response = await fetch('/api/metrics');
-                if (!response.ok) {
-                    throw new Error('Failed to fetch metrics');
-                }
+                if (!response.ok) throw new Error('Failed to fetch metrics');
                 this.metrics = await response.json();
                 this.loading = false;
             } catch (e) {
-                console.error('Failed to fetch metrics:', e);
                 this.loading = false;
             }
         },
@@ -263,24 +259,6 @@ function metricsPage() {
             return (ratio * 100).toFixed(1) + '%';
         },
 
-        formatUptime(seconds) {
-            if (!seconds) return '0s';
-
-            const days = Math.floor(seconds / 86400);
-            const hours = Math.floor((seconds % 86400) / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            const secs = Math.floor(seconds % 60);
-
-            if (days > 0) {
-                return `${days}d ${hours}h ${minutes}m`;
-            } else if (hours > 0) {
-                return `${hours}h ${minutes}m ${secs}s`;
-            } else if (minutes > 0) {
-                return `${minutes}m ${secs}s`;
-            } else {
-                return `${secs}s`;
-            }
-        }
     };
 }
 </script>
