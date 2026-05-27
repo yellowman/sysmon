@@ -237,7 +237,7 @@
                         <td class="cel mono" x-text="getPrimaryCheckPort(host) || ''"></td>
                         <td class="cel mono text-right" x-text="host.down_count || 0"></td>
                         <td class="cel mono text-right" x-text="host.up_count || 0"></td>
-                        <td class="cel" x-text="host.overall_status === 'CRITICAL' ? 'Yes' : (host.overall_status === 'WARNING' ? 'No' : 'No')"></td>
+                        <td class="cel" x-text="host.overall_status === 'CRITICAL' ? 'Yes' : 'No'"></td>
                         <td class="cel font-semibold"
                             :class="{
                                 'text-emerald-700': host.overall_status === 'OK',
