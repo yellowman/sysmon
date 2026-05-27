@@ -1288,6 +1288,7 @@ function unifiedConfigPage() {
         // Structured editor state
         loadingStructured: true,
         savingStructured: false,
+        structuredConfigVersion: '',
         structuredConfig: {
             root: '',
             global: {},
@@ -1301,7 +1302,7 @@ function unifiedConfigPage() {
             hosts: true
         },
         // Combined Settings Section (Global & Spawns)
-        settingsExpanded: false,  // Minimized by default
+        settingsExpanded: true,
         settingsView: 'global',   // 'global' or 'spawns'
         globalTab: 'core',
         expandedHosts: {},
@@ -1466,8 +1467,12 @@ function unifiedConfigPage() {
             try {
                 const response = await fetch('/api/config');
                 if (response.ok) {
-                    this.structuredConfig = await response.json();
-                    // Ensure required properties exist and are arrays
+                    const snapshot = await response.json();
+                    this.structuredConfig = snapshot.config || {};
+                    this.structuredConfigVersion = snapshot.version || '';
+                    if (!this.structuredConfig.root) {
+                        this.structuredConfig.root = '';
+                    }
                     if (!this.structuredConfig.global) {
                         this.structuredConfig.global = {};
                     }
@@ -1476,6 +1481,9 @@ function unifiedConfigPage() {
                     }
                     if (!Array.isArray(this.structuredConfig.spawns)) {
                         this.structuredConfig.spawns = [];
+                    }
+                    if (!Array.isArray(this.structuredConfig.contacts)) {
+                        this.structuredConfig.contacts = [];
                     }
                     // Save original for change detection
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
@@ -1506,7 +1514,11 @@ function unifiedConfigPage() {
                 const response = await fetch('/api/config', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.structuredConfig)
+                    body: JSON.stringify({
+                        version: this.structuredConfigVersion || '',
+                        config: this.structuredConfig,
+                        comment: 'Updated via structured editor'
+                    })
                 });
 
                 if (response.ok) {
