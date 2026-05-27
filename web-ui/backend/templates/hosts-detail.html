@@ -47,15 +47,12 @@
     <div x-show="!loading && !error && host" class="space-y-6">
 
         <!-- Main Status Card -->
-        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div class="px-8 py-6 section-header">
+        <div class="card overflow-hidden">
+            <div class="px-6 py-5">
                 <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-4">
-                        <i class="fas fa-server text-4xl text-blue-600"></i>
-                        <div>
-                            <h1 class="text-3xl font-bold text-gray-900" x-text="host.HostName"></h1>
-                            <p class="text-sm text-gray-600"><span x-text="host.ObjectType"></span> check on port <span x-text="host.ObjectPort || 'N/A'"></span></p>
-                        </div>
+                    <div>
+                        <h1 class="text-2xl font-extrabold tracking-tight text-gray-900" x-text="host.HostName"></h1>
+                        <p class="text-xs text-gray-400 mt-1 mono"><span x-text="host.ObjectType"></span><span x-show="host.ObjectPort"> : <span x-text="host.ObjectPort"></span></span></p>
                     </div>
                     <div>
                         <span :class="{
