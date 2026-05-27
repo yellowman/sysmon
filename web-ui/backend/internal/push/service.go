@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +83,10 @@ type Service struct {
 }
 
 func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
+	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
+		os.MkdirAll(dir, 0755)
+	}
+
 	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("open push database: %w", err)

@@ -55,7 +55,9 @@ func main() {
 
 	// Initialize push notification service from parsed config
 	var pushService *push.Service
-	if snapshot, err := configService.GetConfig(); err == nil {
+	if snapshot, err := configService.GetConfig(); err != nil {
+		log.Printf("WARNING: could not read config for push init: %v", err)
+	} else {
 		g := snapshot.Config.Global
 		pushCfg := push.Config{
 			Enabled:        g.PushNotifications,
