@@ -135,8 +135,35 @@ func Parse(content []byte) (*models.Config, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		// Skip comments and empty lines
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+		// Skip empty lines and regular comments
+		if line == "" || strings.HasPrefix(line, ";") {
+			continue
+		}
+
+		// Parse structured comment: #@contact "email" "name"
+		if strings.HasPrefix(line, "#@contact ") {
+			parts := strings.SplitN(line, "\"", 5)
+			if len(parts) >= 4 {
+				email := parts[1]
+				name := parts[3]
+				found := false
+				for i := range config.Contacts {
+					if config.Contacts[i].Email == email {
+						config.Contacts[i].Name = name
+						found = true
+						break
+					}
+				}
+				if !found {
+					config.Contacts = append(config.Contacts, models.Contact{
+						ID: generateID(email), Email: email, Name: name,
+					})
+				}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
 
