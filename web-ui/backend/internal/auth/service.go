@@ -120,7 +120,22 @@ func (s *Service) DeleteUser(username string) error {
 		if b.Get([]byte(username)) == nil {
 			return fmt.Errorf("user %s not found", username)
 		}
-		return b.Delete([]byte(username))
+		b.Delete([]byte(username))
+
+		// Revoke all sessions for this user
+		sb := tx.Bucket(bucketSessions)
+		var toDelete [][]byte
+		sb.ForEach(func(k, v []byte) error {
+			var sess Session
+			if json.Unmarshal(v, &sess) == nil && sess.Username == username {
+				toDelete = append(toDelete, k)
+			}
+			return nil
+		})
+		for _, k := range toDelete {
+			sb.Delete(k)
+		}
+		return nil
 	})
 }
 
@@ -181,7 +196,22 @@ func (s *Service) ChangeRole(username, newRole string) error {
 		json.Unmarshal(v, &u)
 		u.Role = newRole
 		data, _ := json.Marshal(u)
-		return b.Put([]byte(username), data)
+		b.Put([]byte(username), data)
+
+		// Revoke sessions so user must re-login with new role
+		sb := tx.Bucket(bucketSessions)
+		var toDelete [][]byte
+		sb.ForEach(func(k, sv []byte) error {
+			var sess Session
+			if json.Unmarshal(sv, &sess) == nil && sess.Username == username {
+				toDelete = append(toDelete, k)
+			}
+			return nil
+		})
+		for _, k := range toDelete {
+			sb.Delete(k)
+		}
+		return nil
 	})
 }
 
