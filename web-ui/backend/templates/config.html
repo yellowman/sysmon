@@ -756,10 +756,10 @@
                                             <!-- Custom spawn input -->
                                             <div x-show="editingHost.useCustomSpawn" class="space-y-2">
                                                 <div class="flex gap-2">
-                                                    <input type="text" x-model="editingHost.customspawn" placeholder="Enter custom spawn command"
+                                                    <input type="text" x-model="editingHost.spawn" placeholder="Enter spawn command"
                                                            @click="$event.target.select()"
                                                            class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
-                                                    <button @click="editingHost.useCustomSpawn = false; editingHost.customspawn = ''"
+                                                    <button @click="editingHost.useCustomSpawn = false; editingHost.spawn = ''"
                                                             class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                                                             title="Switch back to predefined spawns">
                                                         <i class="fas fa-list"></i>
@@ -1489,7 +1489,6 @@ function unifiedConfigPage() {
                 dependencies: '',
                 spawn: '',
                 useCustomSpawn: false,
-                customspawn: '',
                 paused: false,
                 contact: '',
                 pageinterval: null,
@@ -1531,11 +1530,7 @@ function unifiedConfigPage() {
                 // Advanced
                 queuetime: null,
                 group: '',
-                wakeupcheck: false,
-                wakeupretries: null,
-                wakeupcheckinterval: null,
                 trapalert: false,
-                matchedhost: '',
                 reverse: false,
                 command: '',
                 activeTab: 'overview'
@@ -1554,9 +1549,8 @@ function unifiedConfigPage() {
                 this.editingHost.activeTab = 'overview';
             }
 
-            // Determine if using custom spawn (not in predefined spawns list)
-            const isCustomSpawn = this.editingHost.customspawn ||
-                (this.editingHost.spawn && !this.structuredConfig.spawns.some(s => s.name === this.editingHost.spawn));
+            const isCustomSpawn = this.editingHost.spawn &&
+                !this.structuredConfig.spawns.some(s => s.name === this.editingHost.spawn);
             this.editingHost.useCustomSpawn = isCustomSpawn;
 
             this.editingHostIndex = index;
@@ -1586,14 +1580,6 @@ function unifiedConfigPage() {
                 hostToSave.hostname = hostToSave.ip.replace(/\./g, '-');
             }
 
-            // Handle spawn vs customspawn
-            if (this.editingHost.useCustomSpawn && this.editingHost.customspawn) {
-                hostToSave.spawn = '';
-                hostToSave.customspawn = this.editingHost.customspawn;
-            } else if (this.editingHost.spawn) {
-                hostToSave.spawn = this.editingHost.spawn;
-                hostToSave.customspawn = '';
-            }
 
             // Remove empty/null fields to keep config clean
             // EXCEPT hostname which is required for object definition
