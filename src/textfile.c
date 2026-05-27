@@ -203,7 +203,8 @@ dump_to_file(char *filename, int html, time_t now)
 	{
 		if (errno == EXDEV)
 		{
-			/* Cross-device rename; fall back to copy + unlink */
+			/* Cross-device rename; remove destination first (may be 0444 from previous cycle) */
+			unlink(filename);
 			if (copy_file(newfname, filename) == 0)
 			{
 				chmod(filename, 0444);
