@@ -226,9 +226,9 @@
                 <template x-for="host in sortedHosts" :key="host._uniqueId">
                     <tr class="border-b border-gray-100 cursor-pointer"
                         :class="{
-                            'bg-[#eeffee] hover:bg-[#d5f5d5]': host.overall_status === 'OK',
-                            'bg-[#fff8e0] hover:bg-[#fff0b8]': host.overall_status === 'WARNING',
-                            'bg-[#ffe8e0] hover:bg-[#ffd4c8]': host.overall_status === 'CRITICAL'
+                            'hover:bg-gray-50': host.overall_status === 'OK',
+                            'bg-amber-50/50 hover:bg-amber-50': host.overall_status === 'WARNING',
+                            'bg-red-50/50 hover:bg-red-50': host.overall_status === 'CRITICAL'
                         }"
                         @click="selectHost(host)">
                         <td class="cel mono font-medium text-gray-900" x-text="host.hostname"></td>
