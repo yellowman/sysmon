@@ -197,17 +197,16 @@ dump_to_file(char *filename, int html, time_t now)
 
 	fclose(fh); /* close the file handle -- don't leak it */
 
-	chmod(newfname, 0444);
+	chmod(newfname, 0644);
 
 	if (rename(newfname, filename) != 0)
 	{
 		if (errno == EXDEV)
 		{
-			/* Cross-device rename; remove destination first (may be 0444 from previous cycle) */
-			unlink(filename);
+			/* Cross-device rename; fall back to copy + unlink */
 			if (copy_file(newfname, filename) == 0)
 			{
-				chmod(filename, 0444);
+				chmod(filename, 0644);
 				unlink(newfname);
 			}
 			else
