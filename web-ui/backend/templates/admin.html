@@ -260,7 +260,7 @@
             <span class="text-xs text-red-600" x-text="sessionErrors.length + ' error(s)'"></span>
         </div>
         <div class="p-6 space-y-3">
-            <template x-for="error in sessionErrors" :key="error.timestamp + '-' + error.command">
+            <template x-for="(error, idx) in sessionErrors" :key="idx">
                 <div class="bg-white border border-red-300 rounded p-3">
                     <div class="flex justify-between items-start mb-2">
                         <span class="font-mono text-xs font-semibold text-red-700" x-text="error.command"></span>
@@ -291,7 +291,7 @@
         </div>
         <div class="p-6">
             <div class="space-y-2 max-h-96 overflow-y-auto">
-                <template x-for="entry in sessionLog" :key="entry.timestamp + '-' + entry.command">
+                <template x-for="(entry, idx) in sessionLog" :key="idx">
                     <div class="border-l-4 pl-3 py-2"
                          :class="entry.is_error ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'">
                         <div class="flex justify-between items-start">

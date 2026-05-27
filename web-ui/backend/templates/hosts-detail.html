@@ -172,12 +172,13 @@
                 <!-- Uptime Percentage -->
                 <div class="mt-6">
                     <div class="text-sm text-gray-600 mb-2">Uptime</div>
-                    <div class="w-full bg-gray-200 rounded-full h-6">
-                        <div :style="'width: ' + calculateUptime() + '%'"
+                    <div x-show="calculateUptime() >= 0" class="w-full bg-gray-200 rounded-full h-6">
+                        <div :style="'width: ' + Math.max(calculateUptime(), 1) + '%'"
                              class="bg-gradient-to-r from-green-400 to-green-600 h-6 rounded-full flex items-center justify-center text-white text-sm font-bold">
                             <span x-text="calculateUptime().toFixed(2) + '%'"></span>
                         </div>
                     </div>
+                    <div x-show="calculateUptime() < 0" class="text-sm text-gray-400">No check data yet</div>
                 </div>
             </div>
         </div>
@@ -346,8 +347,8 @@ function hostDetail() {
         hostname: '',
         sections: {
             config: true,
-            stats: false,
-            thresholds: false,
+            stats: true,
+            thresholds: true,
             runtime: false,
             debug: false
         },
@@ -421,7 +422,7 @@ function hostDetail() {
 
         calculateUptime() {
             if (!this.host || !this.host.ObjectTotalChecked || this.host.ObjectTotalChecked === 0) {
-                return 100;
+                return -1;
             }
             const upChecks = this.host.ObjectTotalChecked - this.host.ObjectTotalDown;
             return (upChecks / this.host.ObjectTotalChecked) * 100;

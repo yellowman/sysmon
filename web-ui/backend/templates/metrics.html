@@ -172,11 +172,12 @@
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span class="px-2 py-1 text-xs font-medium rounded"
                                       :class="{
-                                          'bg-green-100 text-green-800': (endpoint.success / endpoint.total_calls) >= 0.95,
-                                          'bg-yellow-100 text-yellow-800': (endpoint.success / endpoint.total_calls) >= 0.80 && (endpoint.success / endpoint.total_calls) < 0.95,
-                                          'bg-red-100 text-red-800': (endpoint.success / endpoint.total_calls) < 0.80
+                                          'bg-green-100 text-green-800': endpoint.total_calls > 0 && (endpoint.success / endpoint.total_calls) >= 0.95,
+                                          'bg-yellow-100 text-yellow-800': endpoint.total_calls > 0 && (endpoint.success / endpoint.total_calls) >= 0.80 && (endpoint.success / endpoint.total_calls) < 0.95,
+                                          'bg-red-100 text-red-800': endpoint.total_calls > 0 && (endpoint.success / endpoint.total_calls) < 0.80,
+                                          'bg-gray-100 text-gray-600': !endpoint.total_calls
                                       }"
-                                      x-text="formatPercent(endpoint.success / endpoint.total_calls)">
+                                      x-text="endpoint.total_calls ? formatPercent(endpoint.success / endpoint.total_calls) : 'N/A'">
                                 </span>
                             </td>
                         </tr>
@@ -187,7 +188,7 @@
     </div>
 
     <!-- Empty state -->
-    <div x-show="!metrics.top_endpoints || metrics.top_endpoints.length === 0" class="text-center py-12 bg-white rounded-lg shadow mt-6">
+    <div x-show="!loading && (!metrics.top_endpoints || metrics.top_endpoints.length === 0)" class="text-center py-12 bg-white rounded-lg shadow mt-6">
         <i class="fas fa-chart-line text-6xl text-gray-300 mb-4"></i>
         <p class="text-gray-500">No endpoint metrics available yet</p>
     </div>
@@ -236,14 +237,12 @@ function metricsPage() {
 
         async fetchMetrics() {
             try {
+                if (!this.metrics.total_requests) this.loading = true;
                 const response = await fetch('/api/metrics');
-                if (!response.ok) {
-                    throw new Error('Failed to fetch metrics');
-                }
+                if (!response.ok) throw new Error('Failed to fetch metrics');
                 this.metrics = await response.json();
                 this.loading = false;
             } catch (e) {
-                console.error('Failed to fetch metrics:', e);
                 this.loading = false;
             }
         },
