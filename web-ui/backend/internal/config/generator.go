@@ -151,6 +151,16 @@ func Generate(config *models.Config) (string, error) {
 
 	sb.WriteString("\n")
 
+	// Contact directory (names stored as structured comments for round-trip)
+	if len(config.Contacts) > 0 {
+		for _, c := range config.Contacts {
+			if c.Name != "" && c.Email != "" {
+				sb.WriteString(fmt.Sprintf("#@contact \"%s\" \"%s\"\n", c.Email, c.Name))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
 	// Spawn definitions
 	for _, spawn := range config.Spawns {
 		sb.WriteString("spawns {\n")
