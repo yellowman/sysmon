@@ -525,7 +525,7 @@ func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Get auth key from header or body
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 
 	err := r.monitoring.AckHost(hostname, authKey)
 	if err != nil {
@@ -558,8 +558,7 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 
 	// Parse JSON body for note and optional auth key
 	var body struct {
-		Note    string `json:"note"`
-		AuthKey string `json:"auth_key,omitempty"`
+		Note string `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -571,11 +570,7 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
+	authKey := r.getSysmonAuthKey()
 
 	err := r.monitoring.UpdateHostStatus(hostname, body.Note, authKey)
 	if err != nil {
@@ -608,7 +603,7 @@ func (r *Router) handleMonitoringTrace(w http.ResponseWriter, req *http.Request)
 	}
 
 	// Get auth key from header
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 
 	enabled, err := r.monitoring.ToggleTrace(hostname, authKey)
 	if err != nil {
@@ -635,7 +630,7 @@ func (r *Router) handleAdminVersion(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	version, err := r.monitoring.GetVersion(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -657,7 +652,7 @@ func (r *Router) handleAdminDebug(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.ToggleDebug(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -679,7 +674,7 @@ func (r *Router) handleAdminSNMPDebug(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.ToggleSNMPDebug(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -701,7 +696,7 @@ func (r *Router) handleAdminExpireDNS(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.ExpireDNS(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -723,7 +718,7 @@ func (r *Router) handleAdminPrintQ(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.PrintQueue(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -745,7 +740,7 @@ func (r *Router) handleAdminNFD(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.GetNextFD(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -767,7 +762,7 @@ func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.KillDaemon(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -839,7 +834,6 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
-		AuthKey   string   `json:"auth_key,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -851,11 +845,7 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
+	authKey := r.getSysmonAuthKey()
 
 	// Call bulk acknowledge
 	results := r.monitoring.BulkAckHosts(body.Hostnames, authKey)
@@ -889,8 +879,7 @@ func (r *Router) handleBulkUpdate(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
-		Note      string   `json:"note"`
-		AuthKey   string   `json:"auth_key,omitempty"`
+		Note string `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -907,11 +896,7 @@ func (r *Router) handleBulkUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
+	authKey := r.getSysmonAuthKey()
 
 	// Call bulk update
 	results := r.monitoring.BulkUpdateHosts(body.Hostnames, body.Note, authKey)
@@ -947,7 +932,6 @@ func (r *Router) handleBulkTrace(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Hostnames []string `json:"hostnames"`
 		Enable    bool     `json:"enable"`
-		AuthKey   string   `json:"auth_key,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -959,13 +943,7 @@ func (r *Router) handleBulkTrace(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
-
-	// Call bulk trace toggle
+	authKey := r.getSysmonAuthKey()
 	results := r.monitoring.BulkToggleTrace(body.Hostnames, body.Enable, authKey)
 
 	// Count successes and failures
@@ -1542,9 +1520,12 @@ func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 	return user, ip
 }
 
-func (r *Router) getAuthKey(req *http.Request) string {
-	// Get auth key from X-Auth-Key header
-	return req.Header.Get("X-Auth-Key")
+func (r *Router) getSysmonAuthKey() string {
+	snapshot, err := r.config.GetConfig()
+	if err != nil {
+		return ""
+	}
+	return snapshot.Config.Global.AuthKey
 }
 
 // Pagination helpers
