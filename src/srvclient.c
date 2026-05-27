@@ -12,7 +12,7 @@ int deny_severity = DENYSEVERITY;
 #endif /* HAVE_TCPD_H */
 #endif
 
-void client_poll();
+void client_poll(void);
 
 void send_stat_start(struct clientstatus client, struct all_elements_list *head, int obj)
 {
