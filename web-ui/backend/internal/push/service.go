@@ -77,6 +77,7 @@ type Service struct {
 	monitoring *monitoring.Service
 	prevHosts  map[string]string
 	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
 func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
@@ -139,12 +140,14 @@ func (s *Service) Start() {
 		log.Printf("push: no FCM or APNs credentials configured, watcher not started")
 		return
 	}
+	s.wg.Add(1)
 	go s.watchLoop()
 	log.Printf("push: state change watcher started (1s poll interval)")
 }
 
 func (s *Service) Stop() {
 	close(s.stopCh)
+	s.wg.Wait()
 	if s.db != nil {
 		s.db.Close()
 	}
@@ -433,6 +436,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 }
 
 func (s *Service) watchLoop() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
