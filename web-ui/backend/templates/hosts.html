@@ -234,7 +234,7 @@
                         Up N
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Notified
+                        Contact
                     </th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                         @click="sortBy('status')">
@@ -270,7 +270,7 @@
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getPrimaryCheckPort(host)"></td>
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.down_count || 0"></td>
                         <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.up_count || 0"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">No</td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 truncate max-w-[120px]" x-text="host.contact || '-'" :title="host.contact"></td>
                         <td class="px-4 py-2 whitespace-nowrap">
                             <span class="text-sm font-medium"
                                   :class="{
@@ -695,38 +695,6 @@ function hostsPage() {
             return `${ok}/${total}`;
         },
 
-        getCheckStats(host) {
-            const ok = host.checks.filter(c => c.status === 'OK').length;
-            const warning = host.checks.filter(c => c.status === 'WARNING').length;
-            const critical = host.checks.filter(c => c.status === 'CRITICAL').length;
-            return `${ok} OK, ${warning} WARN, ${critical} CRIT`;
-        },
-
-        getLastCheckTime(host) {
-            if (!host.checks || host.checks.length === 0) return 'Never';
-
-            // Filter out invalid timestamps before using Math.max
-            const validTimes = host.checks
-                .map(c => new Date(c.last_check_time).getTime())
-                .filter(t => !isNaN(t) && t > 0);
-
-            if (validTimes.length === 0) return 'Never';
-
-            const latest = new Date(Math.max(...validTimes));
-
-            // Handle invalid/epoch dates (year < 1980 is likely invalid)
-            if (latest.getFullYear() < 1980) return 'Never';
-
-            const now = new Date();
-            const diff = Math.floor((now - latest) / 1000);
-
-            if (diff < 0) return 'just now'; // Future date, clock skew
-            if (diff < 60) return `${diff}s ago`;
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            return `${Math.floor(diff / 86400)}d ago`;
-        },
-
         // Get primary check type (prefer ping, otherwise first check)
         getPrimaryCheckType(host) {
             if (!host.checks || host.checks.length === 0) return '-';
@@ -808,14 +776,6 @@ function hostsPage() {
                 this.selectedHosts.push(hostname);
             } else {
                 this.selectedHosts.splice(index, 1);
-            }
-        },
-
-        toggleSelectAll() {
-            if (this.selectedHosts.length === this.filteredHosts.length) {
-                this.selectedHosts = [];
-            } else {
-                this.selectedHosts = this.filteredHosts.map(h => h.hostname);
             }
         },
 
