@@ -723,19 +723,19 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 }
 
 // GetHostStatus gets status for a specific host
-func (s *Service) GetHostStatus(hostname string) (*models.HostStatus, error) {
+func (s *Service) GetHostStatus(name string) (*models.HostStatus, error) {
 	status, err := s.GetStatus()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, host := range status.Hosts {
-		if host.Hostname == hostname {
+		if host.ObjectName == name || host.Hostname == name {
 			return &host, nil
 		}
 	}
 
-	return nil, fmt.Errorf("host %s not found", hostname)
+	return nil, fmt.Errorf("host %s not found", name)
 }
 
 // GetTraps gets all SNMP traps
