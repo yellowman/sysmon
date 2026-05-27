@@ -69,11 +69,77 @@
                 <span><i class="fas fa-list mr-2"></i>Show Queue Status</span>
                 <i class="fas fa-chevron-right"></i>
             </button>
-            <button x-show="hasAuth" @click="showNextFD()"
+            <button @click="showNextFD()"
                     class="px-4 py-3 bg-cyan-600 text-white rounded hover:bg-cyan-700 flex items-center justify-between">
                 <span><i class="fas fa-file-alt mr-2"></i>Show FD Info</span>
                 <i class="fas fa-chevron-right"></i>
             </button>
+        </div>
+    </div>
+
+    <!-- User Management -->
+    <div class="card mb-6" x-show="currentRole === 'admin'">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Users</h2>
+            <button @click="showAddUser = !showAddUser"
+                    class="px-3 py-1 bg-gray-900 text-white text-xs rounded hover:bg-gray-800">
+                <i class="fas fa-plus mr-1"></i>Add User
+            </button>
+        </div>
+        <div class="p-6">
+            <!-- Add User Form -->
+            <div x-show="showAddUser" class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div>
+                        <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Username</label>
+                        <input type="text" x-model="newUser.username" placeholder="username"
+                               class="px-3 py-1.5 border border-gray-200 rounded text-sm w-40 mono">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Password</label>
+                        <input type="password" x-model="newUser.password" placeholder="password"
+                               class="px-3 py-1.5 border border-gray-200 rounded text-sm w-40">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Role</label>
+                        <select x-model="newUser.role" class="px-3 py-1.5 border border-gray-200 rounded text-sm">
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <button @click="createUser()" class="px-4 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">Create</button>
+                    <button @click="showAddUser = false" class="px-3 py-1.5 text-gray-500 text-sm hover:text-gray-700">Cancel</button>
+                </div>
+            </div>
+
+            <!-- User List -->
+            <div class="space-y-2">
+                <template x-for="user in users" :key="user.username">
+                    <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 group">
+                        <div class="flex items-center gap-3">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                                 :class="user.role === 'admin' ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-600'">
+                                <span x-text="user.username.charAt(0).toUpperCase()"></span>
+                            </div>
+                            <div>
+                                <span class="text-sm font-medium text-gray-900 mono" x-text="user.username"></span>
+                                <span class="ml-2 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                      :class="user.role === 'admin' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'"
+                                      x-text="user.role"></span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span class="text-[10px] text-gray-400" x-show="user.last_login" x-text="'Last login: ' + formatRelativeTime(user.last_login)"></span>
+                            <button @click="if(confirm('Delete user ' + user.username + '?')) deleteUser(user.username)"
+                                    class="px-2 py-1 text-red-500 hover:bg-red-50 rounded text-xs"
+                                    x-show="user.username !== currentUser">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="users.length === 0" class="text-center py-6 text-gray-400 text-sm">No users found</div>
+            </div>
         </div>
     </div>
 
@@ -360,6 +426,11 @@ function adminPage() {
         commandOutput: '',
         killitConfirm: false,
         killitText: '',
+        currentUser: sessionStorage.getItem('sysmon_user') || '',
+        currentRole: sessionStorage.getItem('sysmon_role') || '',
+        users: [],
+        showAddUser: false,
+        newUser: { username: '', password: '', role: 'user' },
         sessionLog: [],
         sessionErrors: [],
         pushSubs: [],
@@ -367,9 +438,6 @@ function adminPage() {
         pushLog: [],
         refreshInterval: null,
 
-        get hasAuth() {
-            return !!getAuthKey();
-        },
 
         init() {
             this.loadVersion();
@@ -378,6 +446,7 @@ function adminPage() {
             this.loadSessionErrors();
             this.loadPushSubs();
             this.loadPushLog();
+            this.loadUsers();
 
             this.refreshInterval = setInterval(() => {
                 this.loadSessionLog();
@@ -487,6 +556,43 @@ function adminPage() {
                 this.killitText = '';
             } catch (e) {
                 alert('Failed to shutdown daemon: ' + (e?.message || e));
+            }
+        },
+
+        async loadUsers() {
+            try {
+                const result = await apiCall('/api/auth/users');
+                this.users = result.users || [];
+            } catch (e) {
+                this.users = [];
+            }
+        },
+
+        async createUser() {
+            if (!this.newUser.username || !this.newUser.password) {
+                alert('Username and password required');
+                return;
+            }
+            try {
+                await apiCall('/api/auth/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.newUser)
+                });
+                this.newUser = { username: '', password: '', role: 'user' };
+                this.showAddUser = false;
+                this.loadUsers();
+            } catch (e) {
+                alert('Failed to create user: ' + e.message);
+            }
+        },
+
+        async deleteUser(username) {
+            try {
+                await apiCall('/api/auth/users/' + encodeURIComponent(username), { method: 'DELETE' });
+                this.loadUsers();
+            } catch (e) {
+                alert('Failed to delete user: ' + e.message);
             }
         },
 

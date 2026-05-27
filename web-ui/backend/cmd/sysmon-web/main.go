@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"sysmon-web/internal/api"
+	"sysmon-web/internal/auth"
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
@@ -77,8 +78,15 @@ func main() {
 		}
 	}
 
+	// Initialize auth service
+	authService, err := auth.NewService("/var/lib/sysmon/auth.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize auth: %v", err)
+	}
+	defer authService.Close()
+
 	// Create API router
-	handler := api.NewRouter(configService, monitoringService, pushService)
+	handler := api.NewRouter(configService, monitoringService, pushService, authService)
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {
