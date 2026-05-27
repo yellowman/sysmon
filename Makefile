@@ -6,7 +6,10 @@
 all: src/Makefile
 	(cd src; make )
 
-clean: 
+sysmon-ping-helper: src/Makefile
+	(cd src; make sysmon-ping-helper)
+
+clean:
 	-(cd src ; make clean)
 	rm -f src/Makefile
 	rm -f src/defines.h
