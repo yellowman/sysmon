@@ -6,21 +6,15 @@
 <div x-data="adminPage()" x-init="init()">
     <!-- Header -->
     <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">
-            <i class="fas fa-tools mr-2"></i>Admin & Diagnostics
-        </h1>
-        <p class="text-sm text-gray-600 mt-1">
-            System administration and debugging tools (requires authentication)
-        </p>
+        <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Administration</h1>
+        <p class="text-xs text-gray-400 mt-1 tracking-wide">System diagnostics, push subscribers, and daemon control</p>
     </div>
 
     <!-- System Information -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <!-- Version Info -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                <i class="fas fa-info-circle mr-2"></i>System Information
-            </h2>
+        <div class="card p-6">
+            <h2 class="section-title mb-4">System Information</h2>
             <div class="space-y-3">
                 <div class="flex justify-between items-center">
                     <span class="text-sm text-gray-600">Daemon Version:</span>
@@ -38,10 +32,8 @@
         </div>
 
         <!-- Debug Controls -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                <i class="fas fa-bug mr-2"></i>Debug Logging
-            </h2>
+        <div class="card p-6">
+            <h2 class="section-title mb-4">Debug Logging</h2>
             <div class="space-y-3">
                 <button @click="toggleDebug()"
                         class="w-full px-4 py-3 bg-yellow-600 text-white rounded hover:bg-yellow-700 flex items-center justify-between">
@@ -62,11 +54,9 @@
     </div>
 
     <!-- Diagnostic Commands -->
-    <div class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-wrench mr-2"></i>Diagnostic Commands
-            </h2>
+    <div class="card mb-6">
+        <div class="card-header">
+            <h2 class="section-title">Diagnostics</h2>
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
             <button @click="expireDNS()"
@@ -88,11 +78,9 @@
     </div>
 
     <!-- Push Notification Subscribers -->
-    <div class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-mobile-alt mr-2"></i>Push Notification Subscribers
-            </h2>
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Push Subscribers</h2>
             <div class="flex items-center space-x-2">
                 <span class="text-xs text-gray-500" x-text="pushSubs.length + ' device(s)'"></span>
                 <button @click="loadPushSubs()"
@@ -182,11 +170,9 @@
     </div>
 
     <!-- Push Notification Log -->
-    <div class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-bell mr-2"></i>Push Notification Log
-            </h2>
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Push Log</h2>
             <div class="flex items-center space-x-2">
                 <span class="text-xs text-gray-500" x-text="pushLog.length + ' entries'"></span>
                 <button @click="loadPushLog()"
@@ -236,11 +222,9 @@
     </div>
 
     <!-- Command Output -->
-    <div x-show="commandOutput" class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-terminal mr-2"></i>Command Output
-            </h2>
+    <div x-show="commandOutput" class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Output</h2>
             <button @click="commandOutput = ''"
                     class="text-gray-400 hover:text-gray-600">
                 <i class="fas fa-times"></i>
@@ -252,11 +236,9 @@
     </div>
 
     <!-- Recent Errors -->
-    <div x-show="sessionErrors.length > 0" class="bg-red-50 border border-red-200 rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-red-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-red-900">
-                <i class="fas fa-exclamation-circle mr-2"></i>Recent Protocol Errors
-            </h2>
+    <div x-show="sessionErrors.length > 0" class="card mb-6 border-red-200 bg-red-50/50">
+        <div class="card-header flex justify-between items-center border-red-100">
+            <h2 class="section-title text-red-600">Protocol Errors</h2>
             <span class="text-xs text-red-600" x-text="sessionErrors.length + ' error(s)'"></span>
         </div>
         <div class="p-6 space-y-3">
@@ -276,11 +258,9 @@
     </div>
 
     <!-- Session Log -->
-    <div class="bg-white rounded-lg shadow mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-gray-900">
-                <i class="fas fa-history mr-2"></i>Protocol Session Log
-            </h2>
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Session Log</h2>
             <div class="flex items-center space-x-2">
                 <span class="text-xs text-gray-500" x-text="sessionLog.length + ' entries'"></span>
                 <button @click="loadSessionLog()"

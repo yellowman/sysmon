@@ -6,15 +6,12 @@
 <div x-data="metricsPage()" x-init="init()">
     <!-- Header -->
     <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">
-            <i class="fas fa-chart-line mr-2"></i>API Metrics Dashboard
-        </h1>
-        <div class="text-sm text-gray-500">
-            Auto-refresh: <span x-text="autoRefresh ? 'ON' : 'OFF'"></span>
-            <button @click="autoRefresh = !autoRefresh" class="ml-2 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
-                Toggle
-            </button>
-        </div>
+        <h1 class="text-xl font-extrabold tracking-tight text-gray-900">API Metrics</h1>
+        <button @click="autoRefresh = !autoRefresh"
+                :class="autoRefresh ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'"
+                class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors tracking-wide uppercase">
+            <i class="fas fa-sync-alt mr-1"></i><span x-text="autoRefresh ? 'Live' : 'Paused'"></span>
+        </button>
     </div>
 
     <!-- Stats Cards -->

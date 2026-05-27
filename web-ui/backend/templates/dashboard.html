@@ -5,95 +5,74 @@
 {{define "content"}}
 <div x-data="dashboard()" x-init="init()">
     <!-- Daemon Status Bar -->
-    <div x-show="daemon && daemon.version" class="bg-gray-800 text-white rounded-lg px-4 py-2 mb-4 flex flex-wrap items-center justify-between text-sm">
-        <div class="flex items-center gap-4">
-            <span><i class="fas fa-heartbeat mr-1 text-green-400"></i>sysmon <span class="font-mono" x-text="daemon.version"></span></span>
-            <span class="text-gray-400">PID <span x-text="daemon.pid"></span></span>
-            <span class="text-gray-400">Up <span x-text="formatUptime(daemon.uptime_seconds)"></span></span>
+    <div x-show="daemon && daemon.version" class="flex flex-wrap items-center justify-between mb-6 pb-4 border-b border-gray-200">
+        <div class="flex items-center gap-5">
+            <span class="text-sm font-semibold text-gray-900">sysmon <span class="mono text-gray-500" x-text="daemon.version"></span></span>
+            <span class="text-xs text-gray-400 mono">PID <span x-text="daemon.pid"></span></span>
+            <span class="text-xs text-gray-400">Uptime <span class="font-medium text-gray-600" x-text="formatUptime(daemon.uptime_seconds)"></span></span>
         </div>
         <div class="flex items-center gap-3">
-            <span x-show="daemon.paused" class="px-2 py-0.5 bg-yellow-500 text-black rounded text-xs font-bold"><i class="fas fa-pause mr-1"></i>PAUSED</span>
-            <span class="text-gray-500 text-xs" x-text="'Polled ' + new Date().toLocaleTimeString()"></span>
+            <span x-show="daemon.paused" class="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-semibold tracking-wide uppercase"><i class="fas fa-pause mr-1"></i>Paused</span>
+            <span class="text-xs text-gray-300" x-text="new Date().toLocaleTimeString()"></span>
         </div>
     </div>
 
     <!-- Error State -->
-    <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
-        <div class="flex items-start gap-3">
-            <i class="fas fa-exclamation-circle text-red-500 text-xl mt-0.5"></i>
+    <div x-show="error" class="card p-6 mb-6 border-red-200">
+        <div class="flex items-start gap-4">
+            <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-exclamation text-red-600"></i>
+            </div>
             <div>
-                <p class="text-red-800 font-medium" x-text="typeof error === 'string' ? error : error?.message"></p>
-                <button @click="fetchData()" class="mt-3 px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
-                    <i class="fas fa-sync-alt mr-1"></i>Retry
+                <p class="text-sm font-semibold text-red-900" x-text="typeof error === 'string' ? error : error?.message"></p>
+                <button @click="fetchData()" class="mt-3 px-4 py-2 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 tracking-wide uppercase">
+                    Retry
                 </button>
             </div>
         </div>
     </div>
 
     <!-- Loading -->
-    <div x-show="loading" class="text-center py-12 mb-6">
-        <i class="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
-        <p class="text-gray-500">Connecting to sysmon daemon...</p>
+    <div x-show="loading" class="text-center py-20 mb-6">
+        <div class="inline-block w-8 h-8 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin"></div>
+        <p class="mt-4 text-xs text-gray-400 tracking-wide uppercase">Connecting to daemon</p>
     </div>
 
     <!-- Status Overview Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" x-show="!loading && !error">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8" x-show="!loading && !error">
         <!-- Total Hosts -->
-        <div class="bg-white rounded-lg shadow p-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs font-medium text-gray-600">Total Hosts</p>
-                    <p class="text-2xl font-bold text-gray-900" x-text="stats.total_hosts">-</p>
-                </div>
-                <i class="fas fa-server text-3xl text-blue-500"></i>
-            </div>
+        <div class="card p-5">
+            <p class="stat-label">Monitored</p>
+            <p class="stat-value text-gray-900 mt-1" x-text="stats.total_hosts">-</p>
         </div>
 
         <!-- Healthy Hosts -->
-        <div class="bg-white rounded-lg shadow p-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs font-medium text-gray-600">Healthy</p>
-                    <p class="text-2xl font-bold text-green-600" x-text="stats.healthy_hosts">-</p>
-                </div>
-                <i class="fas fa-check-circle text-3xl text-green-500"></i>
-            </div>
+        <div class="card p-5">
+            <p class="stat-label">Healthy</p>
+            <p class="stat-value text-emerald-600 mt-1" x-text="stats.healthy_hosts">-</p>
         </div>
 
         <!-- Warning Hosts -->
-        <div class="bg-white rounded-lg shadow p-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs font-medium text-gray-600">Warnings</p>
-                    <p class="text-2xl font-bold text-yellow-600" x-text="stats.warning_hosts">-</p>
-                </div>
-                <i class="fas fa-exclamation-triangle text-3xl text-yellow-500"></i>
-            </div>
+        <div class="card p-5">
+            <p class="stat-label">Warning</p>
+            <p class="stat-value text-amber-500 mt-1" x-text="stats.warning_hosts">-</p>
         </div>
 
         <!-- Critical Hosts -->
-        <div class="bg-white rounded-lg shadow p-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-xs font-medium text-gray-600">Critical</p>
-                    <p class="text-2xl font-bold text-red-600" x-text="stats.critical_hosts">-</p>
-                </div>
-                <i class="fas fa-times-circle text-3xl text-red-500"></i>
-            </div>
+        <div class="card p-5" :class="stats.critical_hosts > 0 ? 'ring-1 ring-red-200 bg-red-50' : ''">
+            <p class="stat-label">Critical</p>
+            <p class="stat-value mt-1" :class="stats.critical_hosts > 0 ? 'text-red-600' : 'text-gray-300'" x-text="stats.critical_hosts">-</p>
         </div>
     </div>
 
     <!-- Active Alerts -->
-    <div class="-mx-4 sm:-mx-6 lg:-mx-8 bg-white shadow mb-8" x-show="alerts.length > 0">
-        <div class="px-4 sm:px-6 lg:px-8 py-3 border-b border-gray-200">
-            <h2 class="text-base font-semibold text-gray-900">
-                <i class="fas fa-bell mr-2 text-red-500"></i>Active Alerts (<span x-text="alerts.length"></span>)
-            </h2>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 p-3 px-4 sm:px-6 lg:px-8">
+    <div class="mb-8" x-show="alerts.length > 0">
+        <h2 class="section-title mb-3">Active Alerts <span class="text-red-500" x-text="alerts.length"></span></h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
             <template x-for="alert in alerts" :key="alert.object_name || alert.hostname">
                 <a :href="'/host-detail.html?hostname=' + encodeURIComponent(alert.object_name || alert.hostname)"
-                   class="block border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50 hover:border-gray-300 transition-all text-sm no-underline">
+                   class="card block px-4 py-3 hover:shadow-md transition-shadow no-underline"
+                   :class="alert.overall_status === 'CRITICAL' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400'">
                     <div class="flex flex-col gap-2">
                         <div class="flex items-start justify-between gap-2">
                             <div class="flex items-start gap-2 flex-1 min-w-0">
@@ -151,10 +130,10 @@
     </div>
 
     <!-- Recent SNMP Traps -->
-    <div class="bg-white rounded-lg shadow" x-show="traps.length > 0">
-        <div class="px-6 py-4 border-b border-gray-200">
+    <div class="card" x-show="traps.length > 0">
+        <div class="card-header">
             <div class="flex justify-between items-center">
-                <h2 class="text-lg font-semibold text-gray-900">
+                <h2 class="section-title">
                     <i class="fas fa-exchange-alt mr-2"></i>Recent SNMP Traps
                 </h2>
                 <a href="/traps.html" class="text-sm text-blue-600 hover:text-blue-800">View All →</a>
