@@ -68,9 +68,9 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 
 	// Push notifications
 	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
-	r.mux.HandleFunc("/api/push/subscriptions", r.handlePushSubscriptions)
-	r.mux.HandleFunc("/api/push/remove/", r.handlePushAdminRemove)
-	r.mux.HandleFunc("/api/push/log", r.handlePushLog)
+	r.mux.HandleFunc("/api/push/subscriptions", auth.RequireAdmin(r.handlePushSubscriptions))
+	r.mux.HandleFunc("/api/push/remove/", auth.RequireAdmin(r.handlePushAdminRemove))
+	r.mux.HandleFunc("/api/push/log", auth.RequireAdmin(r.handlePushLog))
 	r.mux.HandleFunc("/api/push/test", r.handlePushTest)
 
 	// API documentation
@@ -1235,15 +1235,6 @@ func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) 
 
 // Push notification handlers
 
-// requireAdmin checks that the current session has admin role.
-func (r *Router) requireAdmin(w http.ResponseWriter, req *http.Request) bool {
-	role := req.Header.Get("X-Session-Role")
-	if role != "admin" {
-		r.sendError(w, http.StatusForbidden, "Admin access required")
-		return false
-	}
-	return true
-}
 
 func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
@@ -1330,10 +1321,6 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	if !r.requireAdmin(w, req) {
-		return
-	}
-
 	subs := r.push.ListSubscriptions()
 
 	// Return all metadata except api_keys
@@ -1384,10 +1371,6 @@ func (r *Router) handlePushAdminRemove(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	if !r.requireAdmin(w, req) {
-		return
-	}
-
 	token := strings.TrimPrefix(req.URL.Path, "/api/push/remove/")
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -1414,10 +1397,6 @@ func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
 
 	if r.push == nil {
 		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
-		return
-	}
-
-	if !r.requireAdmin(w, req) {
 		return
 	}
 
