@@ -1,6 +1,10 @@
 import UIKit
 import UserNotifications
 
+extension Notification.Name {
+    static let sysmonPushTapped = Notification.Name("SysmonPushTapped")
+}
+
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -10,9 +14,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        DeviceTokenStore.shared.update(token)
-        Task { await Session.shared?.registerPushToken(token) }
+        let newToken = deviceToken.map { String(format: "%02x", $0) }.joined()
+        let previousToken = DeviceTokenStore.shared.token
+        DeviceTokenStore.shared.update(newToken)
+        Task {
+            await Session.shared?.registerPushToken(newToken, replacing: previousToken)
+        }
     }
 
     func application(_ application: UIApplication,
@@ -28,6 +35,14 @@ class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound, .list])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Tapped a notification — route to the Alerts tab.
+        NotificationCenter.default.post(name: .sysmonPushTapped, object: nil)
+        completionHandler()
     }
 }
 

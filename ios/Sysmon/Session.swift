@@ -26,6 +26,7 @@ class Session: ObservableObject {
         didSet { UserDefaults.standard.set(role, forKey: "sysmon_role") }
     }
     @Published var pushStatus: String?
+    @Published var loginNote: String?
 
     init() {
         self.serverURL = UserDefaults.standard.string(forKey: "sysmon_server_url") ?? ""
@@ -33,6 +34,24 @@ class Session: ObservableObject {
         self.role = UserDefaults.standard.string(forKey: "sysmon_role")
         self.token = KeychainHelper.load("sysmon_token")
         Session.shared = self
+
+        // After app reinstall, the Keychain entry persists while
+        // UserDefaults is wiped. Treat that mismatched state as logged
+        // out so the app doesn't get stuck calling APIs against an
+        // empty server URL.
+        if token != nil && serverURL.isEmpty {
+            self.token = nil
+            self.username = nil
+            self.role = nil
+            return
+        }
+
+        // Refresh APNs registration on cold launch so the system
+        // delivers the current device token (which may have rotated
+        // since last run) via AppDelegate.didRegister.
+        if token != nil {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
     }
 
     // Normalize a user-entered server URL: trim, default to https://, drop trailing slash.
@@ -46,6 +65,7 @@ class Session: ObservableObject {
     }
 
     func login(username: String, password: String) async throws {
+        loginNote = nil
         let api = API(baseURL: serverURL, token: nil)
         let resp: LoginResponse = try await api.post("/api/auth/login",
             body: ["username": username, "password": password])
@@ -84,6 +104,7 @@ class Session: ObservableObject {
         token = nil
         username = nil
         role = nil
+        loginNote = "Session expired — please sign in again"
     }
 
     func requestPushPermission() async {
@@ -96,9 +117,15 @@ class Session: ObservableObject {
         }
     }
 
-    func registerPushToken(_ deviceToken: String) async {
+    func registerPushToken(_ deviceToken: String, replacing previous: String? = nil) async {
         guard let auth = token, !serverURL.isEmpty else { return }
         let api = API(baseURL: serverURL, token: auth)
+
+        // Clean up the previous subscription if APNs rotated the token.
+        if let previous, previous != deviceToken {
+            _ = try? await api.unsubscribePush(deviceToken: previous)
+        }
+
         do {
             try await api.subscribePush(deviceToken: deviceToken,
                                         label: UIDevice.current.name)

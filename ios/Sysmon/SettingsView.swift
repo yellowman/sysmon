@@ -14,7 +14,7 @@ struct SettingsView: View {
                     section("ACCOUNT") {
                         row("Username", session.username ?? "—")
                         row("Role", (session.role ?? "—").uppercased())
-                        row("Server", session.serverURL)
+                        row("Server", session.serverURL.isEmpty ? "—" : session.serverURL)
                     }
 
                     section("DEVICE") {
@@ -22,6 +22,16 @@ struct SettingsView: View {
                             deviceTokens.token.map { String($0.prefix(16)) + "…" } ?? "Not registered")
                         if let push = session.pushStatus {
                             Text(push).font(.system(size: 11)).foregroundColor(.gray)
+                            if push.localizedCaseInsensitiveContains("denied") {
+                                Button("Open iOS Settings") {
+                                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                }
+                                .font(.system(size: 11, weight: .semibold))
+                                .tracking(0.5)
+                                .padding(.top, 2)
+                            }
                         }
                         if let msg = statusMessage {
                             Text(msg).font(.system(size: 11)).foregroundColor(.gray)
@@ -58,6 +68,13 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: statusMessage) { msg in
+                guard msg != nil else { return }
+                Task {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    statusMessage = nil
+                }
+            }
         }
     }
 
