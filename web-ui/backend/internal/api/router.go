@@ -1226,6 +1226,10 @@ func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) 
 			}
 		}
 		if body.Role != "" {
+			if body.Role != "admin" && username == req.Header.Get("X-Session-User") {
+				r.sendError(w, http.StatusBadRequest, "Cannot demote your own account")
+				return
+			}
 			if err := r.auth.ChangeRole(username, body.Role); err != nil {
 				r.sendError(w, http.StatusBadRequest, err.Error())
 				return
@@ -1621,11 +1625,7 @@ func (r *Router) paginateSlice(data interface{}, params PaginationParams) Pagina
 
 func (r *Router) addCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		origin := req.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
