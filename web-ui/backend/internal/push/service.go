@@ -35,6 +35,7 @@ type Subscription struct {
 	Platform       Platform `json:"platform"`
 	Label          string   `json:"label,omitempty"`
 	APIKey         string   `json:"api_key"`
+	Owner          string   `json:"owner,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 	LastSeen       string   `json:"last_seen"`
 	LastPushAt     string   `json:"last_push_at,omitempty"`
@@ -159,7 +160,7 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, userAgent string) (string, error) {
+func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
 	if platform != PlatformIOS && platform != PlatformAndroid {
 		return "", fmt.Errorf("platform must be 'ios' or 'android'")
 	}
@@ -178,6 +179,10 @@ func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, user
 		// Preserve existing data on re-subscribe
 		if existing := b.Get([]byte(token)); existing != nil {
 			json.Unmarshal(existing, &sub)
+			// Don't let one user hijack another user's device token
+			if sub.Owner != "" && sub.Owner != owner {
+				return fmt.Errorf("device_token already registered to another account")
+			}
 		}
 
 		if sub.APIKey != "" {
@@ -193,6 +198,7 @@ func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, user
 		sub.Platform = platform
 		sub.Label = label
 		sub.APIKey = apiKey
+		sub.Owner = owner
 		sub.LastSeen = now
 		sub.IPAddress = ipAddr
 		sub.UserAgent = userAgent
@@ -354,6 +360,38 @@ func (s *Service) ListSubscriptions() []Subscription {
 		})
 	})
 	return subs
+}
+
+// ListSubscriptionsByOwner returns only subscriptions owned by the given user.
+func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
+	var subs []Subscription
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if err := json.Unmarshal(v, &sub); err == nil && sub.Owner == owner {
+				subs = append(subs, sub)
+			}
+			return nil
+		})
+	})
+	return subs
+}
+
+// IsOwner checks if the given user owns the subscription with the given token.
+func (s *Service) IsOwner(token, owner string) bool {
+	owned := false
+	s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err == nil && sub.Owner == owner {
+			owned = true
+		}
+		return nil
+	})
+	return owned
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {

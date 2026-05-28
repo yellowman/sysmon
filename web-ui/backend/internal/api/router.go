@@ -68,6 +68,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 
 	// Push notifications
 	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
+	r.mux.HandleFunc("/api/push/me", r.handlePushMe)
 	r.mux.HandleFunc("/api/push/subscriptions", auth.RequireAdmin(r.handlePushSubscriptions))
 	r.mux.HandleFunc("/api/push/remove/", auth.RequireAdmin(r.handlePushAdminRemove))
 	r.mux.HandleFunc("/api/push/log", auth.RequireAdmin(r.handlePushLog))
@@ -1236,6 +1237,46 @@ func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) 
 // Push notification handlers
 
 
+// handlePushMe returns the current user's own push subscriptions.
+func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+	if r.push == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
+		return
+	}
+
+	owner := req.Header.Get("X-Session-User")
+	subs := r.push.ListSubscriptionsByOwner(owner)
+
+	// Strip api_keys — the app already has its own
+	type safeSub struct {
+		DeviceToken    string `json:"device_token"`
+		Platform       string `json:"platform"`
+		Label          string `json:"label,omitempty"`
+		CreatedAt      string `json:"created_at"`
+		LastSeen       string `json:"last_seen"`
+		LastPushAt     string `json:"last_push_at,omitempty"`
+		LastPushStatus string `json:"last_push_status,omitempty"`
+		PushCount      int64  `json:"push_count"`
+	}
+	out := make([]safeSub, len(subs))
+	for i, s := range subs {
+		out[i] = safeSub{
+			DeviceToken: s.DeviceToken, Platform: string(s.Platform), Label: s.Label,
+			CreatedAt: s.CreatedAt, LastSeen: s.LastSeen,
+			LastPushAt: s.LastPushAt, LastPushStatus: s.LastPushStatus,
+			PushCount: s.PushCount,
+		}
+	}
+	r.sendJSON(w, map[string]interface{}{
+		"subscriptions": out,
+		"count":         len(out),
+	})
+}
+
 func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodPost:
@@ -1261,7 +1302,8 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 
 		_, clientIP := r.getUserInfo(req)
 		userAgent := req.Header.Get("User-Agent")
-		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, clientIP, userAgent)
+		owner := req.Header.Get("X-Session-User")
+		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, owner, clientIP, userAgent)
 		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
@@ -1280,21 +1322,27 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 
 		var body struct {
 			DeviceToken string `json:"device_token"`
-			APIKey      string `json:"api_key"`
+			APIKey      string `json:"api_key,omitempty"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
 			return
 		}
 
-		if body.APIKey == "" {
-			r.sendError(w, http.StatusUnauthorized, "api_key is required")
+		if body.DeviceToken == "" {
+			r.sendError(w, http.StatusBadRequest, "device_token is required")
 			return
 		}
 
-		// Verify the api_key belongs to this device token
-		if !r.push.ValidateAPIKey(body.DeviceToken, body.APIKey) {
-			r.sendError(w, http.StatusForbidden, "Invalid api_key for this device")
+		// Allow unsubscribe via api_key OR by being the owner of the subscription.
+		// Admins can also unsubscribe any device.
+		owner := req.Header.Get("X-Session-User")
+		role := req.Header.Get("X-Session-Role")
+		allowed := role == "admin" ||
+			r.push.IsOwner(body.DeviceToken, owner) ||
+			(body.APIKey != "" && r.push.ValidateAPIKey(body.DeviceToken, body.APIKey))
+		if !allowed {
+			r.sendError(w, http.StatusForbidden, "Not authorized to unsubscribe this device")
 			return
 		}
 
