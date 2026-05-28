@@ -247,32 +247,14 @@ function dashboard() {
                 if (this.stats.total_hosts === undefined) this.loading = true;
                 this.error = null;
 
-                const response = await fetch('/api/monitoring/status');
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    // If error has debug details (XML parse error), store them
-                    if (errorData.details) {
-                        this.error = {
-                            message: errorData.message || 'Failed to fetch status',
-                            details: errorData.details
-                        };
-                    } else {
-                        this.error = errorData.message || 'Failed to fetch status';
-                    }
-                    this.loading = false;
-                    return;
-                }
-
-                const data = await response.json();
+                const data = await apiCall('/api/monitoring/status');
                 this.daemon = data.daemon;
                 this.stats = data.statistics;
 
                 // Get alerts
-                const alertsResponse = await fetch('/api/monitoring/alerts');
-                if (alertsResponse.ok) {
-                    this.alerts = await alertsResponse.json();
-                } else {
-                    console.warn('Failed to fetch alerts');
+                try {
+                    this.alerts = await apiCall('/api/monitoring/alerts');
+                } catch (e) {
                     this.alerts = [];
                 }
 

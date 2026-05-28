@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"sysmon-web/internal/auth"
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/middleware"
 	"sysmon-web/internal/models"
@@ -21,31 +22,33 @@ type Router struct {
 	config     *config.Service
 	monitoring *monitoring.Service
 	push       *push.Service
+	auth       *auth.Service
 	mux        *http.ServeMux
 	metrics    *middleware.MetricsCollector
 }
 
 // NewRouter creates a new API router
-func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service) http.Handler {
+func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, authSvc *auth.Service) http.Handler {
 	metrics := middleware.NewMetricsCollector()
 
 	r := &Router{
 		config:     cfg,
 		monitoring: mon,
 		push:       pushSvc,
+		auth:       authSvc,
 		mux:        http.NewServeMux(),
 		metrics:    metrics,
 	}
 
-	// Configuration endpoints (file-based)
-	r.mux.HandleFunc("/api/config", r.handleConfig)
-	r.mux.HandleFunc("/api/config/validate", r.handleConfigValidate)
-	r.mux.HandleFunc("/api/config/reload", r.handleConfigReload)
-	r.mux.HandleFunc("/api/config/raw", r.handleConfigRaw)
+	// Configuration endpoints (admin only — config contains secrets)
+	r.mux.HandleFunc("/api/config", auth.RequireAdmin(r.handleConfig))
+	r.mux.HandleFunc("/api/config/validate", auth.RequireAdmin(r.handleConfigValidate))
+	r.mux.HandleFunc("/api/config/reload", auth.RequireAdmin(r.handleConfigReload))
+	r.mux.HandleFunc("/api/config/raw", auth.RequireAdmin(r.handleConfigRaw))
 
-	// Backups
-	r.mux.HandleFunc("/api/backups", r.handleBackups)
-	r.mux.HandleFunc("/api/backups/", r.handleBackupDetail)
+	// Backups (admin only)
+	r.mux.HandleFunc("/api/backups", auth.RequireAdmin(r.handleBackups))
+	r.mux.HandleFunc("/api/backups/", auth.RequireAdmin(r.handleBackupDetail))
 
 	// Live monitoring
 	r.mux.HandleFunc("/api/monitoring/status", r.handleMonitoringStatus)
@@ -54,14 +57,14 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
-	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
-	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
-	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
+	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
+	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
+	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
 
-	// Bulk operations
-	r.mux.HandleFunc("/api/monitoring/bulk/ack", r.handleBulkAck)
-	r.mux.HandleFunc("/api/monitoring/bulk/update", r.handleBulkUpdate)
-	r.mux.HandleFunc("/api/monitoring/bulk/trace", r.handleBulkTrace)
+	// Bulk operations (admin only)
+	r.mux.HandleFunc("/api/monitoring/bulk/ack", auth.RequireAdmin(r.handleBulkAck))
+	r.mux.HandleFunc("/api/monitoring/bulk/update", auth.RequireAdmin(r.handleBulkUpdate))
+	r.mux.HandleFunc("/api/monitoring/bulk/trace", auth.RequireAdmin(r.handleBulkTrace))
 
 	// Push notifications
 	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
@@ -80,19 +83,27 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// XML passthrough endpoint (for host detail - kept for compatibility)
 	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
 
-	// Admin/debug endpoints
-	r.mux.HandleFunc("/api/admin/version", r.handleAdminVersion)
-	r.mux.HandleFunc("/api/admin/debug", r.handleAdminDebug)
-	r.mux.HandleFunc("/api/admin/snmpd", r.handleAdminSNMPDebug)
-	r.mux.HandleFunc("/api/admin/expiredns", r.handleAdminExpireDNS)
-	r.mux.HandleFunc("/api/admin/printq", r.handleAdminPrintQ)
-	r.mux.HandleFunc("/api/admin/nfd", r.handleAdminNFD)
-	r.mux.HandleFunc("/api/admin/killit", r.handleAdminKillit)
-	r.mux.HandleFunc("/api/admin/session-log", r.handleAdminSessionLog)
-	r.mux.HandleFunc("/api/admin/session-errors", r.handleAdminSessionErrors)
+	// Admin/debug endpoints (all require admin role)
+	r.mux.HandleFunc("/api/admin/version", auth.RequireAdmin(r.handleAdminVersion))
+	r.mux.HandleFunc("/api/admin/debug", auth.RequireAdmin(r.handleAdminDebug))
+	r.mux.HandleFunc("/api/admin/snmpd", auth.RequireAdmin(r.handleAdminSNMPDebug))
+	r.mux.HandleFunc("/api/admin/expiredns", auth.RequireAdmin(r.handleAdminExpireDNS))
+	r.mux.HandleFunc("/api/admin/printq", auth.RequireAdmin(r.handleAdminPrintQ))
+	r.mux.HandleFunc("/api/admin/nfd", auth.RequireAdmin(r.handleAdminNFD))
+	r.mux.HandleFunc("/api/admin/killit", auth.RequireAdmin(r.handleAdminKillit))
+	r.mux.HandleFunc("/api/admin/session-log", auth.RequireAdmin(r.handleAdminSessionLog))
+	r.mux.HandleFunc("/api/admin/session-errors", auth.RequireAdmin(r.handleAdminSessionErrors))
+
+	// Auth endpoints
+	r.mux.HandleFunc("/api/auth/login", r.handleAuthLogin)
+	r.mux.HandleFunc("/api/auth/logout", r.handleAuthLogout)
+	r.mux.HandleFunc("/api/auth/me", r.handleAuthMe)
+	r.mux.HandleFunc("/api/auth/users", auth.RequireAdmin(r.handleAuthUsers))
+	r.mux.HandleFunc("/api/auth/users/", auth.RequireAdmin(r.handleAuthUserAction))
 
 	// HTML pages
 	r.mux.HandleFunc("/", r.handleDashboard)
+	r.mux.HandleFunc("/login.html", r.handleLoginPage)
 	r.mux.HandleFunc("/hosts.html", r.handleHostsPage)
 	r.mux.HandleFunc("/host-detail.html", r.handleHostDetailPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
@@ -109,12 +120,15 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// Create cache middleware
 	cache := middleware.NewCacheConfig()
 
-	// Apply middleware chain: Recovery -> CORS -> Metrics -> Cache -> Rate Limiting -> Handler
-	// Recovery must be outermost to catch panics from all other middleware
+	// Apply middleware chain
 	var handler http.Handler = r.mux
 	handler = rateLimiter.Middleware(handler)
 	handler = cache.Middleware(handler)
 	handler = metrics.Middleware(handler)
+
+	// Limit request body size to 1MB
+	handler = http.MaxBytesHandler(handler, 1<<20)
+	handler = auth.RequireAuth(authSvc, handler)
 	handler = r.addCORS(handler)
 	handler = middleware.Recovery(handler)
 
@@ -505,7 +519,7 @@ func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Get auth key from header or body
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 
 	err := r.monitoring.AckHost(hostname, authKey)
 	if err != nil {
@@ -538,8 +552,7 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 
 	// Parse JSON body for note and optional auth key
 	var body struct {
-		Note    string `json:"note"`
-		AuthKey string `json:"auth_key,omitempty"`
+		Note string `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -551,11 +564,7 @@ func (r *Router) handleMonitoringUpdate(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
+	authKey := r.getSysmonAuthKey()
 
 	err := r.monitoring.UpdateHostStatus(hostname, body.Note, authKey)
 	if err != nil {
@@ -588,7 +597,7 @@ func (r *Router) handleMonitoringTrace(w http.ResponseWriter, req *http.Request)
 	}
 
 	// Get auth key from header
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 
 	enabled, err := r.monitoring.ToggleTrace(hostname, authKey)
 	if err != nil {
@@ -615,7 +624,7 @@ func (r *Router) handleAdminVersion(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	version, err := r.monitoring.GetVersion(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -637,7 +646,7 @@ func (r *Router) handleAdminDebug(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.ToggleDebug(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -659,7 +668,7 @@ func (r *Router) handleAdminSNMPDebug(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.ToggleSNMPDebug(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -681,7 +690,7 @@ func (r *Router) handleAdminExpireDNS(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.ExpireDNS(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -703,7 +712,7 @@ func (r *Router) handleAdminPrintQ(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.PrintQueue(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -725,7 +734,7 @@ func (r *Router) handleAdminNFD(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.GetNextFD(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -747,7 +756,7 @@ func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getAuthKey(req)
+	authKey := r.getSysmonAuthKey()
 	response, err := r.monitoring.KillDaemon(authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
@@ -819,7 +828,6 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
-		AuthKey   string   `json:"auth_key,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -831,11 +839,7 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
+	authKey := r.getSysmonAuthKey()
 
 	// Call bulk acknowledge
 	results := r.monitoring.BulkAckHosts(body.Hostnames, authKey)
@@ -869,8 +873,7 @@ func (r *Router) handleBulkUpdate(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
-		Note      string   `json:"note"`
-		AuthKey   string   `json:"auth_key,omitempty"`
+		Note string `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -887,11 +890,7 @@ func (r *Router) handleBulkUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
+	authKey := r.getSysmonAuthKey()
 
 	// Call bulk update
 	results := r.monitoring.BulkUpdateHosts(body.Hostnames, body.Note, authKey)
@@ -927,7 +926,6 @@ func (r *Router) handleBulkTrace(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Hostnames []string `json:"hostnames"`
 		Enable    bool     `json:"enable"`
-		AuthKey   string   `json:"auth_key,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -939,13 +937,7 @@ func (r *Router) handleBulkTrace(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Use auth key from body if provided, otherwise from header
-	authKey := body.AuthKey
-	if authKey == "" {
-		authKey = req.Header.Get("X-Auth-Key")
-	}
-
-	// Call bulk trace toggle
+	authKey := r.getSysmonAuthKey()
 	results := r.monitoring.BulkToggleTrace(body.Hostnames, body.Enable, authKey)
 
 	// Count successes and failures
@@ -1088,28 +1080,166 @@ func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(xmlData))
 }
 
+// Auth handlers
+
+func (r *Router) handleAuthLogin(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	session, err := r.auth.Login(body.Username, body.Password)
+	if err != nil {
+		r.sendError(w, http.StatusUnauthorized, "Invalid credentials")
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sysmon_session",
+		Value:    session.Token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400,
+	})
+
+	r.sendJSON(w, map[string]string{
+		"token":    session.Token,
+		"username": session.Username,
+		"role":     session.Role,
+	})
+}
+
+func (r *Router) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sess := r.auth.GetSessionFromRequest(req)
+	if sess != nil {
+		r.auth.Logout(sess.Token)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:   "sysmon_session",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+
+	r.sendJSON(w, map[string]string{"status": "logged out"})
+}
+
+func (r *Router) handleAuthMe(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.sendJSON(w, map[string]string{
+		"username": req.Header.Get("X-Session-User"),
+		"role":     req.Header.Get("X-Session-Role"),
+	})
+}
+
+func (r *Router) handleAuthUsers(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodGet:
+		users := r.auth.ListUsers()
+		r.sendJSON(w, map[string]interface{}{
+			"users": users,
+			"count": len(users),
+		})
+
+	case http.MethodPost:
+		var body struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Role     string `json:"role"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+		if err := r.auth.CreateUser(body.Username, body.Password, body.Role); err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		r.sendJSON(w, map[string]string{"status": "created", "username": body.Username})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) {
+	username := strings.TrimPrefix(req.URL.Path, "/api/auth/users/")
+	if username == "" {
+		r.sendError(w, http.StatusBadRequest, "Username required")
+		return
+	}
+
+	switch req.Method {
+	case http.MethodDelete:
+		if username == req.Header.Get("X-Session-User") {
+			r.sendError(w, http.StatusBadRequest, "Cannot delete your own account")
+			return
+		}
+		if err := r.auth.DeleteUser(username); err != nil {
+			r.sendError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		r.sendJSON(w, map[string]string{"status": "deleted", "username": username})
+
+	case http.MethodPut:
+		var body struct {
+			Password string `json:"password,omitempty"`
+			Role     string `json:"role,omitempty"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+		if body.Role != "" && body.Role != "admin" && username == req.Header.Get("X-Session-User") {
+			r.sendError(w, http.StatusBadRequest, "Cannot demote your own account")
+			return
+		}
+		if body.Password != "" {
+			if err := r.auth.ChangePassword(username, body.Password); err != nil {
+				r.sendError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if body.Role != "" {
+			if err := r.auth.ChangeRole(username, body.Role); err != nil {
+				r.sendError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		r.sendJSON(w, map[string]string{"status": "updated", "username": username})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // Push notification handlers
 
-// requireAuthKey checks the X-Auth-Key header against the configured authkey.
-// Returns true if auth passes (or no authkey is configured).
-func (r *Router) requireAuthKey(w http.ResponseWriter, req *http.Request) bool {
-	snapshot, err := r.config.GetConfig()
-	if err != nil {
-		r.sendError(w, http.StatusInternalServerError, "Failed to read config")
-		return false
-	}
-	configured := snapshot.Config.Global.AuthKey
-	if configured == "" {
-		return true
-	}
-	provided := req.Header.Get("X-Auth-Key")
-	if provided == "" {
-		// Also check JSON body for auth_key field (already parsed bodies won't work here,
-		// so we rely on the header)
-		provided = req.URL.Query().Get("auth_key")
-	}
-	if provided != configured {
-		r.sendError(w, http.StatusUnauthorized, "Invalid or missing auth key")
+// requireAdmin checks that the current session has admin role.
+func (r *Router) requireAdmin(w http.ResponseWriter, req *http.Request) bool {
+	role := req.Header.Get("X-Session-Role")
+	if role != "admin" {
+		r.sendError(w, http.StatusForbidden, "Admin access required")
 		return false
 	}
 	return true
@@ -1120,11 +1250,6 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 	case http.MethodPost:
 		if r.push == nil {
 			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
-			return
-		}
-
-		// Subscribe requires the global authkey
-		if !r.requireAuthKey(w, req) {
 			return
 		}
 
@@ -1205,7 +1330,7 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	if !r.requireAuthKey(w, req) {
+	if !r.requireAdmin(w, req) {
 		return
 	}
 
@@ -1259,7 +1384,7 @@ func (r *Router) handlePushAdminRemove(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	if !r.requireAuthKey(w, req) {
+	if !r.requireAdmin(w, req) {
 		return
 	}
 
@@ -1292,7 +1417,7 @@ func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if !r.requireAuthKey(w, req) {
+	if !r.requireAdmin(w, req) {
 		return
 	}
 
@@ -1376,7 +1501,7 @@ func (r *Router) sendErrorWithDetails(w http.ResponseWriter, status int, message
 
 func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 	// Try to get user from auth headers (if implemented)
-	user = req.Header.Get("X-User")
+	user = req.Header.Get("X-Session-User")
 	if user == "" {
 		user = "anonymous"
 	}
@@ -1393,9 +1518,12 @@ func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
 	return user, ip
 }
 
-func (r *Router) getAuthKey(req *http.Request) string {
-	// Get auth key from X-Auth-Key header
-	return req.Header.Get("X-Auth-Key")
+func (r *Router) getSysmonAuthKey() string {
+	snapshot, err := r.config.GetConfig()
+	if err != nil {
+		return ""
+	}
+	return snapshot.Config.Global.AuthKey
 }
 
 // Pagination helpers
@@ -1490,7 +1618,7 @@ func (r *Router) addCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User, X-Auth-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if req.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
