@@ -333,8 +333,15 @@ func (s *Service) ValidateSession(token string) *Session {
 
 	session.ExpiresAt = target.Format(time.RFC3339)
 	s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSessions)
+		// Between our View above and this Update, a concurrent Logout,
+		// ChangePassword, DeleteUser or ChangeRole may have deleted the
+		// session. Don't resurrect it.
+		if b.Get([]byte(token)) == nil {
+			return nil
+		}
 		data, _ := json.Marshal(session)
-		return tx.Bucket(bucketSessions).Put([]byte(token), data)
+		return b.Put([]byte(token), data)
 	})
 
 	return &session
