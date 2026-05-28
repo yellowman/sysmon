@@ -2,6 +2,7 @@ package com.sysmon.app
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -16,51 +17,34 @@ object Api {
 
     class HttpError(val status: Int, message: String) : IOException(message)
 
+    // --- Unauthenticated ---
     suspend fun login(server: String, user: String, pass: String): LoginResponse =
         withContext(Dispatchers.IO) {
             val body = json.encodeToString(LoginRequest(user, pass))
-            val response = rawRequest(
-                url = "$server/api/auth/login",
-                method = "POST",
-                body = body,
-                token = null
-            )
+            val response = rawRequest("$server/api/auth/login", "POST", body, null)
             json.decodeFromString(LoginResponse.serializer(), response)
         }
 
-    suspend fun logout() = withContext(Dispatchers.IO) {
-        authedRequest("/api/auth/logout", "POST", null)
-    }
-
-    suspend fun fetchStatus(): StatusResponse = withContext(Dispatchers.IO) {
-        val response = authedRequest("/api/status", "GET", null)
+    // --- Implicit auth (reads from Session) ---
+    suspend fun status(): StatusResponse = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/monitoring/status", "GET", null)
         json.decodeFromString(StatusResponse.serializer(), response)
     }
 
-    suspend fun fetchHosts(): List<Host> = withContext(Dispatchers.IO) {
-        val response = authedRequest("/api/hosts", "GET", null)
-        runCatching { json.decodeFromString<List<Host>>(response) }
-            .getOrElse { fetchStatus().hosts }
+    suspend fun hosts(): List<Host> = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/monitoring/hosts", "GET", null)
+        json.decodeFromString(ListSerializer(Host.serializer()), response)
     }
 
-    suspend fun subscribePush(fcmToken: String): SubscribeResponse =
-        withContext(Dispatchers.IO) {
-            val body = json.encodeToString(
-                SubscribeRequest(
-                    platform = "fcm",
-                    deviceToken = fcmToken,
-                    description = "Android (${android.os.Build.MODEL})"
-                )
-            )
-            val response = authedRequest("/api/push/subscribe", "POST", body)
-            json.decodeFromString(SubscribeResponse.serializer(), response)
-        }
-
-    suspend fun unsubscribePush(fcmToken: String) = withContext(Dispatchers.IO) {
+    suspend fun subscribePush(fcmToken: String) = withContext(Dispatchers.IO) {
         val body = json.encodeToString(
-            mapOf("device_token" to fcmToken)
+            SubscribeRequest(
+                platform = "android",
+                deviceToken = fcmToken,
+                label = "Android (${android.os.Build.MODEL})"
+            )
         )
-        authedRequest("/api/push/unsubscribe", "POST", body)
+        authedRequest("/api/push/subscribe", "POST", body)
     }
 
     suspend fun sendTestPush(fcmToken: String) = withContext(Dispatchers.IO) {
@@ -68,6 +52,18 @@ object Api {
         authedRequest("/api/push/test", "POST", body)
     }
 
+    // --- Explicit auth (for logout cleanup after Session is cleared) ---
+    suspend fun logout(server: String, sessionToken: String) = withContext(Dispatchers.IO) {
+        rawRequest("$server/api/auth/logout", "POST", null, sessionToken)
+    }
+
+    suspend fun unsubscribePush(server: String, sessionToken: String, fcmToken: String) =
+        withContext(Dispatchers.IO) {
+            val body = json.encodeToString(mapOf("device_token" to fcmToken))
+            rawRequest("$server/api/push/subscribe", "DELETE", body, sessionToken)
+        }
+
+    // --- Internals ---
     private fun authedRequest(path: String, method: String, body: String?): String {
         val server = Session.serverUrl
         val token = Session.token
@@ -89,14 +85,12 @@ object Api {
             conn.connectTimeout = 15000
             conn.readTimeout = 30000
             conn.setRequestProperty("Accept", "application/json")
-            if (body != null) {
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.doOutput = true
-            }
             if (token != null) {
                 conn.setRequestProperty("Authorization", "Bearer $token")
             }
             if (body != null) {
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.doOutput = true
                 conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
             val status = conn.responseCode
@@ -109,7 +103,7 @@ object Api {
             if (status !in 200..299) {
                 val message = runCatching {
                     json.decodeFromString(ApiError.serializer(), text).let {
-                        it.error.ifEmpty { it.message }
+                        it.message.ifEmpty { it.error }
                     }
                 }.getOrNull() ?: "HTTP $status"
                 throw HttpError(status, message.ifEmpty { "HTTP $status" })

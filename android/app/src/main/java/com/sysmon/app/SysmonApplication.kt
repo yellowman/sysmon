@@ -9,6 +9,7 @@ class SysmonApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         Session.init(this)
+        FcmTokenStore.init(this)
         createNotificationChannel()
     }
 
