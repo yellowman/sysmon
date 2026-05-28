@@ -115,7 +115,12 @@
                                   class="px-2 py-0.5 rounded text-white text-xs font-mono"
                                   x-text="error.responseCode"></span>
                         </div>
-                        <div class="text-sm font-medium text-gray-900" x-text="error.command"></div>
+                        <div class="text-sm font-medium text-gray-900 flex items-center gap-2">
+                            <span x-text="error.command"></span>
+                            <span x-show="error.count > 1"
+                                  class="px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 text-xs font-mono"
+                                  x-text="'×' + error.count"></span>
+                        </div>
                         <div class="text-sm text-red-700 mt-1" x-text="error.error"></div>
                         <div x-show="error.sysmonResponse" class="mt-2 text-xs font-mono bg-gray-800 text-green-400 p-2 rounded">
                             <div class="text-gray-400 mb-1">Sysmon Response:</div>
@@ -171,13 +176,29 @@
                 },
 
                 addError(error) {
+                    const command = error.command || 'Unknown';
+                    const message = error.error || error.message || 'Unknown error';
+                    const responseCode = error.responseCode || error.status;
+
+                    // Collapse repeats: if the last error matches command +
+                    // message + status, just bump its count and refresh the
+                    // timestamp instead of pushing a duplicate row.
+                    const last = this.errors[0];
+                    if (last && last.command === command && last.error === message && last.responseCode === responseCode) {
+                        last.count = (last.count || 1) + 1;
+                        last.timestamp = new Date().toLocaleString();
+                        sessionStorage.setItem('protocol_errors', JSON.stringify(this.errors));
+                        return;
+                    }
+
                     this.errors.unshift({
                         id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
                         timestamp: new Date().toLocaleString(),
-                        command: error.command || 'Unknown',
-                        error: error.error || error.message || 'Unknown error',
-                        responseCode: error.responseCode || error.status,
-                        sysmonResponse: error.sysmonResponse
+                        command,
+                        error: message,
+                        responseCode,
+                        sysmonResponse: error.sysmonResponse,
+                        count: 1
                     });
 
                     // Keep only last 50 errors
@@ -264,7 +285,12 @@
             if (!response.ok) {
                 const error = await response.json().catch(() => ({ message: response.statusText }));
                 const errorMsg = error.message || 'Request failed';
-                logProtocolError(url, errorMsg, responseCode);
+                // 429s are rate-limit pushback from the global limiter,
+                // not protocol errors — don't spam the error panel with
+                // them, just throw so the caller can show a retry.
+                if (responseCode !== 429) {
+                    logProtocolError(url, errorMsg, responseCode);
+                }
                 throw new Error(errorMsg);
             }
 
