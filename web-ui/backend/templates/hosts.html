@@ -120,13 +120,13 @@
                            @click.stop="toggleSelection(host.hostname)"
                            class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
                 </div>
-                <div class="bg-white rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
+                <div class="rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
                      :class="{
-                         'border-green-500': host.overall_status === 'OK' && !isSelected(host.hostname),
-                         'border-yellow-500': host.overall_status === 'WARNING' && !isSelected(host.hostname),
-                         'border-red-500': host.overall_status === 'CRITICAL' && !isSelected(host.hostname),
-                         'border-gray-400': host.paused && !isSelected(host.hostname),
-                         'border-blue-500 ring-2 ring-blue-200': isSelected(host.hostname)
+                         'bg-white border-green-500': host.overall_status === 'OK' && !isSelected(host.hostname),
+                         'bg-amber-50 border-amber-500': host.overall_status === 'WARNING' && !isSelected(host.hostname),
+                         'bg-red-100 border-red-600': host.overall_status === 'CRITICAL' && !isSelected(host.hostname),
+                         'bg-white border-gray-400': host.paused && !isSelected(host.hostname),
+                         'bg-white border-blue-500 ring-2 ring-blue-200': isSelected(host.hostname)
                      }"
                      @click="selectHost(host)">
                     <!-- Compact Header -->
@@ -137,11 +137,11 @@
                         </div>
                         <div class="flex items-center justify-between text-xs">
                             <span class="text-gray-500 truncate text-[10px]" x-text="host.description || host.ipv4_address || 'N/A'"></span>
-                            <span class="text-xs font-medium"
+                            <span class="text-xs font-bold"
                                   :class="{
                                       'text-green-600': host.overall_status === 'OK',
-                                      'text-yellow-600': host.overall_status === 'WARNING',
-                                      'text-red-600': host.overall_status === 'CRITICAL'
+                                      'text-amber-700': host.overall_status === 'WARNING',
+                                      'text-red-700': host.overall_status === 'CRITICAL'
                                   }"
                                   x-text="getCheckSummary(host)"></span>
                         </div>
@@ -227,8 +227,8 @@
                     <tr class="border-b border-gray-100 cursor-pointer"
                         :class="{
                             'hover:bg-gray-50': host.overall_status === 'OK',
-                            'bg-amber-50/50 hover:bg-amber-50': host.overall_status === 'WARNING',
-                            'bg-red-50/50 hover:bg-red-50': host.overall_status === 'CRITICAL'
+                            'bg-amber-100 hover:bg-amber-200': host.overall_status === 'WARNING',
+                            'bg-red-100 hover:bg-red-200': host.overall_status === 'CRITICAL'
                         }"
                         @click="selectHost(host)">
                         <td class="cel mono font-medium text-gray-900" x-text="host.hostname"></td>
@@ -238,10 +238,10 @@
                         <td class="cel mono text-right" x-text="host.down_count || 0"></td>
                         <td class="cel mono text-right" x-text="host.up_count || 0"></td>
                         <td class="cel" x-text="host.overall_status === 'CRITICAL' ? 'Yes' : 'No'"></td>
-                        <td class="cel font-semibold"
+                        <td class="cel font-bold uppercase tracking-wide"
                             :class="{
                                 'text-emerald-700': host.overall_status === 'OK',
-                                'text-amber-700': host.overall_status === 'WARNING',
+                                'text-amber-800': host.overall_status === 'WARNING',
                                 'text-red-700': host.overall_status === 'CRITICAL'
                             }"
                             x-text="getStatusLabel(host)"></td>
