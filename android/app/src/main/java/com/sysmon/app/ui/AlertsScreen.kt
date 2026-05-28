@@ -14,25 +14,43 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.sysmon.app.Api
+import com.sysmon.app.Session
 import com.sysmon.app.StatusResponse
 import kotlinx.coroutines.launch
 
 @Composable
 fun AlertsScreen() {
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<StatusResponse?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
         runCatching { Api.status() }
-            .onSuccess { status = it; error = null }
+            .onSuccess {
+                status = it
+                error = null
+                Session.alertCount = it.hosts.count { h -> !h.isOK }
+            }
             .onFailure { error = it.message }
         loading = false
+        refreshing = false
     }
 
     LaunchedEffect(Unit) { refresh() }
+
+    // Re-fetch when the app returns to the foreground so the badge and
+    // alert list stay in sync without requiring a manual refresh.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch {
+            refreshing = true
+            refresh()
+        }
+    }
 
     val alerts = status?.hosts.orEmpty().filter { !it.isOK }
 
@@ -40,7 +58,13 @@ fun AlertsScreen() {
         TopHeader(
             title = "Alerts",
             subtitle = "Hosts requiring attention",
-            onRefresh = { scope.launch { loading = true; refresh() } }
+            refreshing = refreshing,
+            onRefresh = {
+                scope.launch {
+                    refreshing = true
+                    refresh()
+                }
+            }
         )
 
         StatsRow(status?.statistics)

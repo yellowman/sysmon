@@ -30,6 +30,11 @@ object Session {
     var role by mutableStateOf("")
         private set
 
+    // Surfaced in the UI but not persisted.
+    var pushStatus by mutableStateOf<String?>(null)
+    var loginNote by mutableStateOf<String?>(null)
+    var alertCount by mutableStateOf(0)
+
     fun init(context: Context) {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -63,6 +68,7 @@ object Session {
     suspend fun login(server: String, user: String, pass: String) {
         val normalized = normalize(server)
         require(normalized.length > "https://".length) { "Server URL is required" }
+        loginNote = null
         val response = Api.login(normalized, user, pass)
         serverUrl = normalized
         token = response.token
@@ -85,6 +91,7 @@ object Session {
         token = ""
         username = ""
         role = ""
+        alertCount = 0
         prefs.edit()
             .remove(KEY_TOKEN)
             .remove(KEY_USERNAME)
@@ -107,6 +114,8 @@ object Session {
         token = ""
         username = ""
         role = ""
+        alertCount = 0
+        loginNote = "Session expired — please sign in again"
         prefs.edit()
             .remove(KEY_TOKEN)
             .remove(KEY_USERNAME)
@@ -114,11 +123,29 @@ object Session {
             .apply()
     }
 
-    fun registerPushToken(fcmToken: String) {
+    /**
+     * Register a (possibly rotated) FCM token with the backend. If [replacing]
+     * is non-null and differs from [fcmToken], the previous subscription is
+     * unsubscribed first so the backend doesn't end up with orphaned entries
+     * after Firebase rotates the token.
+     */
+    fun registerPushToken(fcmToken: String, replacing: String? = null) {
         FcmTokenStore.update(fcmToken)
         if (!isLoggedIn()) return
+        val serverSnap = serverUrl
+        val tokenSnap = token
         scope.launch {
-            runCatching { Api.subscribePush(fcmToken) }
+            runCatching {
+                if (replacing != null && replacing != fcmToken &&
+                    serverSnap.isNotEmpty() && tokenSnap.isNotEmpty()
+                ) {
+                    Api.unsubscribePush(serverSnap, tokenSnap, replacing)
+                }
+                Api.subscribePush(fcmToken)
+                pushStatus = "Push registered"
+            }.onFailure {
+                pushStatus = "Push registration failed: ${it.message ?: "unknown error"}"
+            }
         }
     }
 }

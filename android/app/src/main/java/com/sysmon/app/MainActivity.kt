@@ -16,7 +16,12 @@ class MainActivity : ComponentActivity() {
 
     private val pushPermissionRequest =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) registerForFcm()
+            if (granted) {
+                Session.pushStatus = null
+                registerForFcm()
+            } else {
+                Session.pushStatus = "Notifications denied — enable in system settings"
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,9 +51,13 @@ class MainActivity : ComponentActivity() {
 
     private fun registerForFcm() {
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) return@addOnCompleteListener
+            if (!task.isSuccessful) {
+                Session.pushStatus = "FCM token unavailable"
+                return@addOnCompleteListener
+            }
             val token = task.result ?: return@addOnCompleteListener
-            Session.registerPushToken(token)
+            val previous = FcmTokenStore.token
+            Session.registerPushToken(token, replacing = previous)
         }
     }
 }

@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +37,7 @@ import com.sysmon.app.ui.theme.SysmonColors
 fun TopHeader(
     title: String,
     subtitle: String,
+    refreshing: Boolean = false,
     onRefresh: (() -> Unit)? = null
 ) {
     Row(
@@ -64,14 +67,38 @@ fun TopHeader(
             )
         }
         if (onRefresh != null) {
-            IconButton(onClick = onRefresh) {
-                Icon(
-                    imageVector = Icons.Outlined.Refresh,
-                    contentDescription = "Refresh",
-                    tint = MaterialTheme.colorScheme.onBackground
-                )
+            if (refreshing) {
+                Box(
+                    modifier = Modifier.size(48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = "Refresh",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+fun AlertBadgedIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, count: Int, contentDescription: String) {
+    BadgedBox(badge = {
+        if (count > 0) {
+            Badge { Text(count.toString()) }
+        }
+    }) {
+        Icon(imageVector = icon, contentDescription = contentDescription)
     }
 }
 

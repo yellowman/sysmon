@@ -20,9 +20,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.sysmon.app.Api
+import com.sysmon.app.Session
+import kotlinx.coroutines.launch
 
 enum class Tab(val label: String, val icon: ImageVector) {
     Alerts("ALERTS", Icons.Outlined.Notifications),
@@ -33,6 +39,18 @@ enum class Tab(val label: String, val icon: ImageVector) {
 @Composable
 fun MainScreen(onLogout: () -> Unit) {
     var selectedTab by remember { mutableStateOf(Tab.Alerts) }
+    val scope = rememberCoroutineScope()
+
+    // Keep the navigation-bar badge in sync whenever the app comes back
+    // to the foreground, regardless of which tab is currently shown.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch {
+            runCatching {
+                val status = Api.status()
+                Session.alertCount = status.hosts.count { !it.isOK }
+            }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -45,7 +63,17 @@ fun MainScreen(onLogout: () -> Unit) {
                     NavigationBarItem(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        icon = {
+                            if (tab == Tab.Alerts) {
+                                AlertBadgedIcon(
+                                    icon = tab.icon,
+                                    count = Session.alertCount,
+                                    contentDescription = tab.label
+                                )
+                            } else {
+                                Icon(tab.icon, contentDescription = tab.label)
+                            }
+                        },
                         label = {
                             Text(
                                 text = tab.label,
