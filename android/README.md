@@ -104,10 +104,14 @@ tracked labels mirror the sysmon web UI's editorial magazine style.
 - In the Settings tab inside the app, tap "Send Test Notification"
 
 **"Session expired" on every action**
-- Sessions expire after 24 hours. Log in again.
+- Once you sign in, the session stays alive for as long as you keep
+  opening the app. Sysmon-web only forgets you if the app hasn't been
+  used in over 30 days. Log in again.
 
-**"Server URL must start with http:// or https://"**
-- Include the scheme. No trailing slash.
+**Server URL**
+- Scheme is optional — `sysmon.example.com` is accepted and resolved
+  to `https://sysmon.example.com`. Use `http://` explicitly only if
+  your server is plain HTTP. Trailing slashes are stripped.
 
 **Build fails: `google-services.json is missing`**
 - Drop the real file (downloaded from Firebase Console) at

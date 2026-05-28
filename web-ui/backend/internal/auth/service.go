@@ -39,8 +39,17 @@ type Session struct {
 	Username  string `json:"username"`
 	Role      string `json:"role"`
 	CreatedAt string `json:"created_at"`
-	ExpiresAt string `json:"expires_at"`
+	ExpiresAt string `json:"expires_at"` // sliding 30-day window
 }
+
+const (
+	// Sessions are valid as long as the app has been opened in the
+	// last 30 days. Any authenticated request bumps this forward.
+	sessionIdleTTL = 30 * 24 * time.Hour
+	// Throttle bolt writes — only extend the session once per day of
+	// activity, not on every API call.
+	sessionExtendStep = 24 * time.Hour
+)
 
 type Service struct {
 	db *bolt.DB
@@ -268,7 +277,7 @@ func (s *Service) Login(username, password string) (*Session, error) {
 		Username:  username,
 		Role:      user.Role,
 		CreatedAt: now.Format(time.RFC3339),
-		ExpiresAt: now.Add(24 * time.Hour).Format(time.RFC3339),
+		ExpiresAt: now.Add(sessionIdleTTL).Format(time.RFC3339),
 	}
 
 	s.db.Update(func(tx *bolt.Tx) error {
@@ -285,6 +294,12 @@ func (s *Service) Logout(token string) {
 	})
 }
 
+// ValidateSession returns the session if it's still valid. Any successful
+// authenticated request extends ExpiresAt to now + sessionIdleTTL, so the
+// session only expires once the app has been off the phone (or unopened)
+// for a full sessionIdleTTL — currently 30 days. Sessions stored before
+// this field existed are treated as having an empty ExpiresAt and never
+// expire on their own; they pick up sliding behaviour on first use.
 func (s *Service) ValidateSession(token string) *Session {
 	if token == "" {
 		return nil
@@ -300,11 +315,28 @@ func (s *Service) ValidateSession(token string) *Session {
 	if session.Token == "" {
 		return nil
 	}
-	expires, err := time.Parse(time.RFC3339, session.ExpiresAt)
-	if err != nil || time.Now().UTC().After(expires) {
-		s.Logout(token)
-		return nil
+
+	now := time.Now().UTC()
+	target := now.Add(sessionIdleTTL)
+
+	if session.ExpiresAt != "" {
+		expires, err := time.Parse(time.RFC3339, session.ExpiresAt)
+		if err == nil && now.After(expires) {
+			s.Logout(token)
+			return nil
+		}
+		// Skip the bolt write if the window has barely moved.
+		if err == nil && target.Sub(expires) < sessionExtendStep {
+			return &session
+		}
 	}
+
+	session.ExpiresAt = target.Format(time.RFC3339)
+	s.db.Update(func(tx *bolt.Tx) error {
+		data, _ := json.Marshal(session)
+		return tx.Bucket(bucketSessions).Put([]byte(token), data)
+	})
+
 	return &session
 }
 
