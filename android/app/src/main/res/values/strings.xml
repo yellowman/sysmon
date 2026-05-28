@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sysmon</string>
+    <string name="notification_channel_id">sysmon_alerts</string>
+    <string name="notification_channel_name">Host Alerts</string>
+    <string name="notification_channel_description">Host up/down state changes</string>
+</resources>
