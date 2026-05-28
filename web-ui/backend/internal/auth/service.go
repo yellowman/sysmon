@@ -35,12 +35,21 @@ type User struct {
 }
 
 type Session struct {
-	Token     string `json:"token"`
-	Username  string `json:"username"`
-	Role      string `json:"role"`
-	CreatedAt string `json:"created_at"`
-	ExpiresAt string `json:"expires_at"`
+	Token             string `json:"token"`
+	Username          string `json:"username"`
+	Role              string `json:"role"`
+	CreatedAt         string `json:"created_at"`
+	ExpiresAt         string `json:"expires_at"`          // sliding window, bumped on activity
+	AbsoluteExpiresAt string `json:"absolute_expires_at"` // hard cap, never extended
 }
+
+const (
+	sessionIdleTTL     = 24 * time.Hour
+	sessionAbsoluteTTL = 30 * 24 * time.Hour
+	// Don't bump ExpiresAt on every request — only when the remaining
+	// window has dropped by at least this much. Keeps bolt writes bounded.
+	sessionExtendStep = 1 * time.Hour
+)
 
 type Service struct {
 	db *bolt.DB
@@ -264,11 +273,12 @@ func (s *Service) Login(username, password string) (*Session, error) {
 	token := generateToken()
 	now := time.Now().UTC()
 	session := &Session{
-		Token:     token,
-		Username:  username,
-		Role:      user.Role,
-		CreatedAt: now.Format(time.RFC3339),
-		ExpiresAt: now.Add(24 * time.Hour).Format(time.RFC3339),
+		Token:             token,
+		Username:          username,
+		Role:              user.Role,
+		CreatedAt:         now.Format(time.RFC3339),
+		ExpiresAt:         now.Add(sessionIdleTTL).Format(time.RFC3339),
+		AbsoluteExpiresAt: now.Add(sessionAbsoluteTTL).Format(time.RFC3339),
 	}
 
 	s.db.Update(func(tx *bolt.Tx) error {
@@ -300,11 +310,49 @@ func (s *Service) ValidateSession(token string) *Session {
 	if session.Token == "" {
 		return nil
 	}
+
+	now := time.Now().UTC()
+
+	// Sliding window: bounce if idle beyond ExpiresAt.
 	expires, err := time.Parse(time.RFC3339, session.ExpiresAt)
-	if err != nil || time.Now().UTC().After(expires) {
+	if err != nil || now.After(expires) {
 		s.Logout(token)
 		return nil
 	}
+
+	// Hard ceiling: never extend past AbsoluteExpiresAt. Sessions created
+	// before this field existed (empty string) default to the original
+	// fixed expiry behaviour — they don't slide, they just expire.
+	var absolute time.Time
+	hasAbsolute := false
+	if session.AbsoluteExpiresAt != "" {
+		if a, err := time.Parse(time.RFC3339, session.AbsoluteExpiresAt); err == nil {
+			absolute = a
+			hasAbsolute = true
+			if now.After(absolute) {
+				s.Logout(token)
+				return nil
+			}
+		}
+	}
+	if !hasAbsolute {
+		return &session
+	}
+
+	// Extend the sliding window in coarse steps so we only write to bolt
+	// once per sessionExtendStep of activity, not on every request.
+	target := now.Add(sessionIdleTTL)
+	if target.After(absolute) {
+		target = absolute
+	}
+	if target.Sub(expires) >= sessionExtendStep {
+		session.ExpiresAt = target.Format(time.RFC3339)
+		s.db.Update(func(tx *bolt.Tx) error {
+			data, _ := json.Marshal(session)
+			return tx.Bucket(bucketSessions).Put([]byte(token), data)
+		})
+	}
+
 	return &session
 }
 

@@ -73,7 +73,11 @@ data values, minimal color palette. Matches the sysmon web UI's
 - In Settings tab inside the app, tap "Send Test Notification"
 
 **"Login required" on every action**
-- Session expired (24 hours). Log in again.
+- Sessions stay alive as long as you keep using the app. They expire
+  after 24 hours of inactivity, with a hard 30-day ceiling regardless
+  of activity. Log in again.
 
-**"Server URL is invalid"**
-- Must include `https://` or `http://`. No trailing slash.
+**Server URL**
+- Scheme is optional — `sysmon.example.com` is accepted and resolved
+  to `https://sysmon.example.com`. Use `http://` explicitly only if
+  your server is plain HTTP. Trailing slashes are stripped.
