@@ -32,10 +32,10 @@
                 <option value="CRITICAL">Critical</option>
             </select>
             <select x-model="perPage" @change="changePerPage()" class="px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-gray-900">
-                <option value="all">All</option>
-                <option value="50">50</option>
                 <option value="100">100</option>
-                <option value="200">200</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+                <option value="all">All</option>
             </select>
         </div>
     </div>
@@ -441,11 +441,11 @@ function hostsPage() {
         refreshInterval: null,
 
         // Pagination
-        perPage: 50,  // Start with pagination enabled for performance with large host counts
+        perPage: 100,  // Start with pagination enabled for performance with large host counts
         currentPage: 1,
         totalPages: 1,
         totalHosts: 0,
-        limit: 50,
+        limit: 100,
 
         // Bulk operations
         selectedHosts: [],
