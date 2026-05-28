@@ -159,8 +159,11 @@ Response:
 {"status": "subscribed", "api_key": "a1b2c3d4..."}
 ```
 
-The `api_key` is an alternate credential — useful if the session
-expires but the app still wants to unsubscribe.
+The `api_key` is a per-device fingerprint returned for the app's own
+record. It is NOT an authorization credential — all unsubscribe and
+test operations require a valid session that owns the device. The
+api_key is reserved for future use (e.g., letting the daemon mark
+device-specific delivery state).
 
 ### List my subscriptions
 
@@ -200,15 +203,9 @@ Content-Type: application/json
 {"device_token": "<token>"}
 ```
 
-Authorized if you own the subscription (via session), or if you
-include the `api_key`:
-
-```
-{"device_token": "<token>", "api_key": "<key>"}
-```
-
-Admins can unsubscribe any device. Regular users can only
-unsubscribe their own.
+You can only unsubscribe a device that your account owns. Admins can
+unsubscribe any device. The `api_key` is NOT accepted as auth — it's
+just a per-device fingerprint, not an authorization credential.
 
 ### Send a test notification
 
@@ -217,10 +214,10 @@ POST /api/push/test
 Authorization: Bearer <token>
 Content-Type: application/json
 
-{"api_key": "<api_key from subscribe>"}
+{"device_token": "<token>"}
 ```
 
-Looks up the device by its api_key and sends a test push.
+You can only test devices your account owns. Admins can test any device.
 
 ### Admin: list all subscriptions
 
