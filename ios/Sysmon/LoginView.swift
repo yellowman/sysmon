@@ -8,6 +8,8 @@ struct LoginView: View {
     @State private var loading = false
     @State private var error: String?
 
+    private var displayMessage: String? { session.loginNote ?? error }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -27,8 +29,8 @@ struct LoginView: View {
                 .padding(.bottom, 40)
 
             VStack(spacing: 14) {
-                if let err = error {
-                    Text(err)
+                if let msg = displayMessage {
+                    Text(msg)
                         .font(.system(size: 12))
                         .foregroundColor(.red)
                         .padding(10)
@@ -86,6 +88,7 @@ struct LoginView: View {
         guard canSubmit else { return }
         loading = true
         error = nil
+        session.loginNote = nil
         let normalized = Session.normalize(serverURL)
         session.serverURL = normalized
         serverURL = normalized

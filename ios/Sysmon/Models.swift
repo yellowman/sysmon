@@ -10,6 +10,8 @@ struct Host: Codable, Identifiable {
     let objectName: String?
     let hostname: String
     let description: String?
+    let ipv4Address: String?
+    let ipv6Address: String?
     let overallStatus: String
     let downCount: Int64
     let upCount: Int64
@@ -17,6 +19,11 @@ struct Host: Codable, Identifiable {
     let timeFailed: Int64?
 
     var id: String { objectName ?? hostname }
+    var ip: String {
+        if let v4 = ipv4Address, !v4.isEmpty { return v4 }
+        if let v6 = ipv6Address, !v6.isEmpty { return v6 }
+        return ""
+    }
     var isDown: Bool { overallStatus == "CRITICAL" }
     var isWarning: Bool { overallStatus == "WARNING" }
     var isOK: Bool { overallStatus == "OK" }
@@ -25,6 +32,8 @@ struct Host: Codable, Identifiable {
         case objectName = "object_name"
         case hostname
         case description
+        case ipv4Address = "ipv4_address"
+        case ipv6Address = "ipv6_address"
         case overallStatus = "overall_status"
         case downCount = "down_count"
         case upCount = "up_count"

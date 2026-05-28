@@ -18,15 +18,29 @@ struct MainView: View {
                 .tag(Tab.settings)
         }
         .tint(.black)
+        .onReceive(NotificationCenter.default.publisher(for: .sysmonPushTapped)) { _ in
+            tab = .alerts
+        }
+    }
+}
+
+func statusColor(_ status: String) -> Color {
+    switch status {
+    case "OK": return .green
+    case "WARNING": return .orange
+    case "CRITICAL": return .red
+    default: return .gray
     }
 }
 
 struct AlertsView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.scenePhase) private var scenePhase
     @State private var hosts: [Host] = []
     @State private var stats: Stats?
     @State private var loading = true
     @State private var error: String?
+    @State private var refreshKey = UUID()
 
     var alerts: [Host] { hosts.filter { !$0.isOK } }
 
@@ -40,14 +54,18 @@ struct AlertsView: View {
                             .padding(.top, 8)
                     }
 
-                    SectionHeader("ACTIVE ALERTS \(alerts.count)")
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
+                    SectionHeader(
+                        "ACTIVE",
+                        accent: alerts.isEmpty ? nil
+                            : "\(alerts.count) ALERT\(alerts.count == 1 ? "" : "S")"
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
 
                     if loading && hosts.isEmpty {
                         ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                     } else if let err = error {
-                        ErrorBox(message: err) { Task { await refresh() } }
+                        ErrorBox(message: err) { refreshKey = UUID() }
                             .padding(.horizontal, 16)
                     } else if alerts.isEmpty {
                         EmptyState(icon: "checkmark.circle", text: "All hosts healthy")
@@ -60,10 +78,13 @@ struct AlertsView: View {
                     }
                 }
             }
-            .navigationTitle("sysmon")
+            .navigationTitle("Alerts")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await refresh() }
-            .task { await refresh() }
+            .task(id: refreshKey) { await refresh() }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active { refreshKey = UUID() }
+            }
         }
     }
 
@@ -85,16 +106,21 @@ struct AlertsView: View {
 
 struct HostsView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.scenePhase) private var scenePhase
     @State private var hosts: [Host] = []
     @State private var search = ""
     @State private var loading = true
     @State private var error: String?
+    @State private var refreshKey = UUID()
 
     var filtered: [Host] {
         if search.isEmpty { return hosts }
         let q = search.lowercased()
-        return hosts.filter { $0.hostname.lowercased().contains(q) ||
-            ($0.description?.lowercased().contains(q) ?? false) }
+        return hosts.filter {
+            $0.hostname.lowercased().contains(q) ||
+            ($0.description?.lowercased().contains(q) ?? false) ||
+            $0.ip.lowercased().contains(q)
+        }
     }
 
     var body: some View {
@@ -110,11 +136,14 @@ struct HostsView: View {
                     if loading && hosts.isEmpty {
                         ProgressView().padding(.vertical, 40)
                     } else if let err = error {
-                        ErrorBox(message: err) { Task { await refresh() } }
+                        ErrorBox(message: err) { refreshKey = UUID() }
                             .padding(16)
                     } else if filtered.isEmpty {
-                        EmptyState(icon: "magnifyingglass", text: "No hosts")
-                            .padding(.vertical, 40)
+                        EmptyState(
+                            icon: "magnifyingglass",
+                            text: search.isEmpty ? "No hosts" : "No matches"
+                        )
+                        .padding(.vertical, 40)
                     } else {
                         VStack(spacing: 8) {
                             ForEach(filtered) { HostRow(host: $0) }
@@ -126,7 +155,10 @@ struct HostsView: View {
             .navigationTitle("Hosts")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await refresh() }
-            .task { await refresh() }
+            .task(id: refreshKey) { await refresh() }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active { refreshKey = UUID() }
+            }
         }
     }
 
@@ -159,6 +191,11 @@ struct HostRow: View {
                         .font(.system(size: 12))
                         .foregroundColor(.gray)
                 }
+                if !host.ip.isEmpty {
+                    Text(host.ip)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray)
+                }
                 HStack(spacing: 8) {
                     Text(host.overallStatus)
                         .font(.system(size: 9, weight: .bold))
@@ -179,29 +216,14 @@ struct HostRow: View {
         }
         .padding(.vertical, 6)
     }
-
-    private func statusColor(_ s: String) -> Color {
-        switch s {
-        case "OK": return .green
-        case "WARNING": return .orange
-        case "CRITICAL": return .red
-        default: return .gray
-        }
-    }
 }
 
 struct StatusDot: View {
     let status: String
     var body: some View {
-        Circle().fill(color).frame(width: 8, height: 8)
-    }
-    var color: Color {
-        switch status {
-        case "OK": return .green
-        case "WARNING": return .orange
-        case "CRITICAL": return .red
-        default: return .gray
-        }
+        Circle()
+            .fill(statusColor(status))
+            .frame(width: 8, height: 8)
     }
 }
 
@@ -242,12 +264,24 @@ struct StatTile: View {
 
 struct SectionHeader: View {
     let text: String
-    init(_ text: String) { self.text = text }
+    let accent: String?
+    init(_ text: String, accent: String? = nil) {
+        self.text = text
+        self.accent = accent
+    }
     var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .bold))
-            .tracking(1.5)
-            .foregroundColor(.gray)
+        HStack {
+            Text(text)
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.5)
+                .foregroundColor(.gray)
+            Spacer()
+            if let accent {
+                Text(accent)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.gray)
+            }
+        }
     }
 }
 

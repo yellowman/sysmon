@@ -7,6 +7,17 @@ struct API {
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
 
+    // Dedicated URLSession that ignores cookies — we authenticate with
+    // Bearer tokens and don't want the login-set sysmon_session cookie
+    // shadowing our Authorization header on every request.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.httpCookieAcceptPolicy = .never
+        config.httpShouldSetCookies = false
+        config.httpCookieStorage = nil
+        return URLSession(configuration: config)
+    }()
+
     func get<T: Decodable>(_ path: String) async throws -> T {
         let data = try await send(path, method: "GET", body: Optional<EmptyBody>.none)
         return try Self.decoder.decode(T.self, from: data)
@@ -60,7 +71,7 @@ struct API {
             req.httpBody = try Self.encoder.encode(body)
         }
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await Self.session.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
             throw APIError(status: 0, message: "Invalid response")
         }
