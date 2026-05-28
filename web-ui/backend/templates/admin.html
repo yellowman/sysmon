@@ -293,7 +293,7 @@
     </div>
 
     <!-- Command Output -->
-    <div x-show="commandOutput" class="card mb-6">
+    <div id="command-output" x-show="commandOutput" class="card mb-6">
         <div class="card-header flex justify-between items-center">
             <h2 class="section-title">Output</h2>
             <button @click="commandOutput = ''"
@@ -533,6 +533,7 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/admin/printq');
                 this.commandOutput = result?.output || 'No queue data received';
+                this.revealCommandOutput();
             } catch (e) {
                 alert('Failed to get queue status: ' + (e?.message || e));
             }
@@ -542,9 +543,19 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/admin/nfd');
                 this.commandOutput = result?.info || 'No FD info received';
+                this.revealCommandOutput();
             } catch (e) {
                 alert('Failed to get FD info: ' + (e?.message || e));
             }
+        },
+
+        revealCommandOutput() {
+            // commandOutput renders far below the buttons; without scrolling
+            // it just looks like nothing happened.
+            this.$nextTick(() => {
+                const el = document.getElementById('command-output');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
         },
 
         async killDaemon() {

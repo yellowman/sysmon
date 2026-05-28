@@ -766,6 +766,8 @@
                     <!-- Modal Body (Scrollable) -->
                     <div class="flex-1 overflow-y-auto px-6 py-4">
                         <template x-if="editingHost">
+                            <!-- Alpine's <template x-if> only renders a single root child; wrap everything so the tab nav AND every tab panel actually render. -->
+                            <div>
                             <!-- Host Tab Navigation -->
                             <div class="mb-4 border-b border-gray-200">
                                 <nav class="-mb-px flex space-x-6">
@@ -1235,6 +1237,7 @@
                                             </div>
                                         </div>
                                     </div>
+                            </div>
                         </template>
                     </div>
 
