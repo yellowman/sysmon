@@ -147,9 +147,6 @@ func (r *Router) handleConfig(w http.ResponseWriter, req *http.Request) {
 		r.sendJSON(w, snapshot)
 
 	case http.MethodPut:
-		if !r.requireAdmin(w, req) {
-			return
-		}
 		var update models.ConfigUpdate
 		if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON")
@@ -229,9 +226,6 @@ func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
 		})
 
 	case http.MethodPut:
-		if !r.requireAdmin(w, req) {
-			return
-		}
 		var data struct {
 			Content string `json:"content"`
 			Version string `json:"version"`
@@ -316,9 +310,6 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 	if strings.HasSuffix(filename, "/restore") {
 		if req.Method != http.MethodPost {
 			r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed for restore")
-			return
-		}
-		if !r.requireAdmin(w, req) {
 			return
 		}
 
@@ -1219,6 +1210,10 @@ func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) 
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
 			return
 		}
+		if body.Role != "" && body.Role != "admin" && username == req.Header.Get("X-Session-User") {
+			r.sendError(w, http.StatusBadRequest, "Cannot demote your own account")
+			return
+		}
 		if body.Password != "" {
 			if err := r.auth.ChangePassword(username, body.Password); err != nil {
 				r.sendError(w, http.StatusBadRequest, err.Error())
@@ -1226,10 +1221,6 @@ func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) 
 			}
 		}
 		if body.Role != "" {
-			if body.Role != "admin" && username == req.Header.Get("X-Session-User") {
-				r.sendError(w, http.StatusBadRequest, "Cannot demote your own account")
-				return
-			}
 			if err := r.auth.ChangeRole(username, body.Role); err != nil {
 				r.sendError(w, http.StatusBadRequest, err.Error())
 				return
