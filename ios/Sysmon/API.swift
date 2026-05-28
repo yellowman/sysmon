@@ -75,9 +75,13 @@ struct API {
         guard let http = resp as? HTTPURLResponse else {
             throw APIError(status: 0, message: "Invalid response")
         }
-        if http.statusCode == 401 {
+        // A 401 from /api/auth/login means bad credentials — surface the
+        // server's actual message ("Invalid credentials") rather than
+        // pretending a session expired. For every other path, a 401 means
+        // the bearer token is dead so clear session state and bounce to
+        // the login screen.
+        if http.statusCode == 401 && path != "/api/auth/login" {
             await MainActor.run { Session.shared?.handleUnauthorized() }
-            throw APIError(status: 401, message: "Session expired")
         }
         if !(200..<300).contains(http.statusCode) {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String

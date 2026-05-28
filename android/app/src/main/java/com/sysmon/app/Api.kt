@@ -94,12 +94,16 @@ object Api {
                 conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
             val status = conn.responseCode
-            if (status == 401) {
-                Session.handleUnauthorized()
-                throw HttpError(401, "Session expired. Please log in again.")
-            }
             val stream = if (status in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            // A 401 from /api/auth/login is just "bad credentials" —
+            // don't clear the session and let the server's message
+            // ("Invalid credentials") propagate. For every other path
+            // a 401 means the bearer is dead, so clear state and bounce
+            // back to the login screen.
+            if (status == 401 && !url.endsWith("/api/auth/login")) {
+                Session.handleUnauthorized()
+            }
             if (status !in 200..299) {
                 val message = runCatching {
                     json.decodeFromString(ApiError.serializer(), text).let {

@@ -290,54 +290,6 @@ func (s *Service) GetPushLog(limit int) []pushLogEntry {
 	return entries
 }
 
-// ValidateAPIKey checks if an API key is valid for a given device token.
-// If token is empty, checks if the API key belongs to any subscription.
-func (s *Service) ValidateAPIKey(token, apiKey string) bool {
-	if apiKey == "" {
-		return false
-	}
-	valid := false
-	s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketSubscriptions)
-		if token != "" {
-			v := b.Get([]byte(token))
-			if v != nil {
-				var sub Subscription
-				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
-					valid = true
-				}
-			}
-		} else {
-			b.ForEach(func(k, v []byte) error {
-				var sub Subscription
-				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
-					valid = true
-				}
-				return nil
-			})
-		}
-		return nil
-	})
-	return valid
-}
-
-// FindTokenByAPIKey returns the device token associated with an API key.
-func (s *Service) FindTokenByAPIKey(apiKey string) (string, Platform) {
-	var token string
-	var platform Platform
-	s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
-			var sub Subscription
-			if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
-				token = sub.DeviceToken
-				platform = sub.Platform
-			}
-			return nil
-		})
-	})
-	return token, platform
-}
-
 func (s *Service) Unsubscribe(token string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)

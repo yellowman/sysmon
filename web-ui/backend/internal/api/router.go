@@ -1373,6 +1373,7 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		DeviceToken    string `json:"device_token"`
 		Platform       string `json:"platform"`
 		Label          string `json:"label,omitempty"`
+		Owner          string `json:"owner,omitempty"`
 		CreatedAt      string `json:"created_at"`
 		LastSeen       string `json:"last_seen"`
 		LastPushAt     string `json:"last_push_at,omitempty"`
@@ -1388,6 +1389,7 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 			DeviceToken:    s.DeviceToken,
 			Platform:       string(s.Platform),
 			Label:          s.Label,
+			Owner:          s.Owner,
 			CreatedAt:      s.CreatedAt,
 			LastSeen:       s.LastSeen,
 			LastPushAt:     s.LastPushAt,
