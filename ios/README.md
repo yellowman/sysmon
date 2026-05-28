@@ -27,10 +27,18 @@ push notifications when hosts go down or recover.
 9. Build & Run on a real device (push notifications don't work in
    the simulator).
 
+## Releasing to the App Store
+
+Before archiving for App Store distribution, change `aps-environment` in
+`Sysmon.entitlements` from `development` to `production` — or remove the
+file and let Xcode manage entitlements automatically through Signing &
+Capabilities.
+
 ## First Run
 
 The app shows a login screen. Enter:
-- **Server URL**: your sysmon-web URL (e.g., `https://sysmon.example.com`)
+- **Server URL**: your sysmon-web hostname (e.g., `sysmon.example.com`
+  or `https://sysmon.example.com`; `https://` is assumed if omitted)
 - **Username** / **Password**: a user account you created via the
   web admin page (use `role: "user"`)
 

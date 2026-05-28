@@ -99,26 +99,28 @@ struct HostsView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !hosts.isEmpty {
-                    TextField("Filter...", text: $search)
-                        .textFieldStyle(SysmonFieldStyle())
+            ScrollView {
+                VStack(spacing: 0) {
+                    if !hosts.isEmpty {
+                        TextField("Filter...", text: $search)
+                            .textFieldStyle(SysmonFieldStyle())
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                    }
+                    if loading && hosts.isEmpty {
+                        ProgressView().padding(.vertical, 40)
+                    } else if let err = error {
+                        ErrorBox(message: err) { Task { await refresh() } }
+                            .padding(16)
+                    } else if filtered.isEmpty {
+                        EmptyState(icon: "magnifyingglass", text: "No hosts")
+                            .padding(.vertical, 40)
+                    } else {
+                        VStack(spacing: 8) {
+                            ForEach(filtered) { HostRow(host: $0) }
+                        }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                }
-                if loading && hosts.isEmpty {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                } else if let err = error {
-                    ErrorBox(message: err) { Task { await refresh() } }.padding(16)
-                    Spacer()
-                } else if filtered.isEmpty {
-                    EmptyState(icon: "magnifyingglass", text: "No hosts")
-                    Spacer()
-                } else {
-                    List(filtered) { HostRow(host: $0) }
-                        .listStyle(.plain)
+                    }
                 }
             }
             .navigationTitle("Hosts")

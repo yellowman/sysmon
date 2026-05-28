@@ -12,10 +12,9 @@ struct LoginView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // Logo
             HStack(spacing: 0) {
                 Text("sys").fontWeight(.heavy)
-                Text("mon").fontWeight(.heavy).foregroundColor(.blue)
+                Text("mon").fontWeight(.regular).foregroundColor(Color(white: 0.45))
             }
             .font(.system(size: 28))
             .tracking(-0.5)
@@ -39,7 +38,7 @@ struct LoginView: View {
                 }
 
                 FieldLabel("SERVER")
-                TextField("https://sysmon.example.com", text: $serverURL)
+                TextField("sysmon.example.com", text: $serverURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -87,8 +86,9 @@ struct LoginView: View {
         guard canSubmit else { return }
         loading = true
         error = nil
-        session.serverURL = serverURL.hasSuffix("/")
-            ? String(serverURL.dropLast()) : serverURL
+        let normalized = Session.normalize(serverURL)
+        session.serverURL = normalized
+        serverURL = normalized
         Task {
             do {
                 try await session.login(username: username, password: password)
