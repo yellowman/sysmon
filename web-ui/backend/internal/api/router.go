@@ -84,15 +84,15 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
 
 	// Admin/debug endpoints (all require admin role)
-	r.mux.HandleFunc("/api/admin/version", r.handleAdminVersion)
+	r.mux.HandleFunc("/api/admin/version", auth.RequireAdmin(r.handleAdminVersion))
 	r.mux.HandleFunc("/api/admin/debug", auth.RequireAdmin(r.handleAdminDebug))
 	r.mux.HandleFunc("/api/admin/snmpd", auth.RequireAdmin(r.handleAdminSNMPDebug))
 	r.mux.HandleFunc("/api/admin/expiredns", auth.RequireAdmin(r.handleAdminExpireDNS))
-	r.mux.HandleFunc("/api/admin/printq", r.handleAdminPrintQ)
-	r.mux.HandleFunc("/api/admin/nfd", r.handleAdminNFD)
+	r.mux.HandleFunc("/api/admin/printq", auth.RequireAdmin(r.handleAdminPrintQ))
+	r.mux.HandleFunc("/api/admin/nfd", auth.RequireAdmin(r.handleAdminNFD))
 	r.mux.HandleFunc("/api/admin/killit", auth.RequireAdmin(r.handleAdminKillit))
-	r.mux.HandleFunc("/api/admin/session-log", r.handleAdminSessionLog)
-	r.mux.HandleFunc("/api/admin/session-errors", r.handleAdminSessionErrors)
+	r.mux.HandleFunc("/api/admin/session-log", auth.RequireAdmin(r.handleAdminSessionLog))
+	r.mux.HandleFunc("/api/admin/session-errors", auth.RequireAdmin(r.handleAdminSessionErrors))
 
 	// Auth endpoints
 	r.mux.HandleFunc("/api/auth/login", r.handleAuthLogin)
