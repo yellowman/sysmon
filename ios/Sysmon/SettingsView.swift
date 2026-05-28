@@ -3,6 +3,7 @@ import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var session: Session
+    @ObservedObject private var deviceTokens = DeviceTokenStore.shared
     @State private var sending = false
     @State private var statusMessage: String?
 
@@ -18,7 +19,10 @@ struct SettingsView: View {
 
                     section("DEVICE") {
                         row("Push token",
-                            DeviceTokenStore.shared.token.map { String($0.prefix(16)) + "…" } ?? "Not registered")
+                            deviceTokens.token.map { String($0.prefix(16)) + "…" } ?? "Not registered")
+                        if let push = session.pushStatus {
+                            Text(push).font(.system(size: 11)).foregroundColor(.gray)
+                        }
                         if let msg = statusMessage {
                             Text(msg).font(.system(size: 11)).foregroundColor(.gray)
                         }
@@ -37,7 +41,7 @@ struct SettingsView: View {
                     }
 
                     section("SESSION") {
-                        Button(action: session.logout) {
+                        Button(action: { session.logout() }) {
                             Text("SIGN OUT")
                                 .font(.system(size: 11, weight: .semibold))
                                 .tracking(1)
@@ -58,20 +62,17 @@ struct SettingsView: View {
     }
 
     private var canTest: Bool {
-        !sending && DeviceTokenStore.shared.token != nil
+        !sending && deviceTokens.token != nil
     }
 
     private func sendTest() {
-        guard let token = DeviceTokenStore.shared.token else { return }
+        guard let token = deviceTokens.token else { return }
         sending = true
         statusMessage = nil
         Task {
             let api = API(baseURL: session.serverURL, token: session.token)
             do {
-                let _: EmptyResponse = try await api.post(
-                    "/api/push/test",
-                    body: ["device_token": token]
-                )
+                try await api.sendTestPush(deviceToken: token)
                 statusMessage = "Test push sent — check your notifications"
             } catch let e as APIError {
                 statusMessage = "Failed: \(e.message)"

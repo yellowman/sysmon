@@ -67,28 +67,19 @@ struct StatusResponse: Codable {
     let statistics: Stats
 }
 
-struct SubscribeResponse: Codable {
-    let status: String
-    let apiKey: String
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case apiKey = "api_key"
-    }
-}
-
 struct APIError: Error {
     let status: Int
     let message: String
 }
 
 func formatUptime(_ seconds: Int64) -> String {
+    guard seconds > 0 else { return "0s" }
     let d = seconds / 86400
     let h = (seconds % 86400) / 3600
     let m = (seconds % 3600) / 60
     let s = seconds % 60
-    if d > 0 { return "\(d)d \(h)h \(m)m" }
-    if h > 0 { return "\(h)h \(m)m \(s)s" }
-    if m > 0 { return "\(m)m \(s)s" }
+    if d > 0 { return h > 0 ? "\(d)d \(h)h" : "\(d)d" }
+    if h > 0 { return m > 0 ? "\(h)h \(m)m" : "\(h)h" }
+    if m > 0 { return s > 0 ? "\(m)m \(s)s" : "\(m)m" }
     return "\(s)s"
 }

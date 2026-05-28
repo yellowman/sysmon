@@ -11,7 +11,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        DeviceTokenStore.shared.token = token
+        DeviceTokenStore.shared.update(token)
         Task { await Session.shared?.registerPushToken(token) }
     }
 
@@ -24,7 +24,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationDelegate()
 
-    // Show notifications even when app is foregrounded
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
@@ -32,10 +31,23 @@ class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
-class DeviceTokenStore {
+final class DeviceTokenStore: ObservableObject {
     static let shared = DeviceTokenStore()
-    private(set) var token: String? {
-        get { UserDefaults.standard.string(forKey: "sysmon_device_token") }
-        set { UserDefaults.standard.set(newValue, forKey: "sysmon_device_token") }
+    private static let key = "sysmon_device_token"
+
+    @Published private(set) var token: String?
+
+    private init() {
+        self.token = UserDefaults.standard.string(forKey: Self.key)
+    }
+
+    @MainActor
+    func update(_ newToken: String?) {
+        token = newToken
+        if let newToken {
+            UserDefaults.standard.set(newToken, forKey: Self.key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.key)
+        }
     }
 }
