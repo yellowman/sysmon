@@ -452,11 +452,16 @@ function adminPage() {
             this.loadPushLog();
             this.loadUsers();
 
+            // Refresh the live tables every 30s. The previous 5s interval
+            // fired 3 parallel requests, chewing 36/min of the 60/min/IP
+            // rate-limit budget and triggering "too many requests" on
+            // push subscriptions for anyone who also had another tab open.
             this.refreshInterval = setInterval(() => {
+                if (document.hidden) return;  // pause when tab is in the background
                 this.loadSessionLog();
                 this.loadSessionErrors();
                 this.loadPushSubs();
-            }, 5000);
+            }, 30000);
         },
 
         destroy() {
