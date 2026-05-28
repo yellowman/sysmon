@@ -1,0 +1,20 @@
+{
+  "_comment": "Replace this file with the real google-services.json downloaded from Firebase Console. Drop it at android/app/google-services.json (without the .example suffix). Do NOT commit the real file.",
+  "project_info": {
+    "project_number": "YOUR_SENDER_ID",
+    "project_id": "your-firebase-project-id",
+    "storage_bucket": "your-firebase-project-id.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:YOUR_SENDER_ID:android:YOUR_APP_ID",
+        "android_client_info": {
+          "package_name": "com.sysmon.app"
+        }
+      },
+      "api_key": [{ "current_key": "YOUR_API_KEY" }]
+    }
+  ],
+  "configuration_version": "1"
+}

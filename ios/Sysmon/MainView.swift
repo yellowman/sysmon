@@ -1,0 +1,291 @@
+import SwiftUI
+
+struct MainView: View {
+    @State private var tab: Tab = .alerts
+
+    enum Tab { case alerts, hosts, settings }
+
+    var body: some View {
+        TabView(selection: $tab) {
+            AlertsView()
+                .tabItem { Label("Alerts", systemImage: "bell") }
+                .tag(Tab.alerts)
+            HostsView()
+                .tabItem { Label("Hosts", systemImage: "server.rack") }
+                .tag(Tab.hosts)
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(Tab.settings)
+        }
+        .tint(.black)
+    }
+}
+
+struct AlertsView: View {
+    @EnvironmentObject var session: Session
+    @State private var hosts: [Host] = []
+    @State private var stats: Stats?
+    @State private var loading = true
+    @State private var error: String?
+
+    var alerts: [Host] { hosts.filter { !$0.isOK } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let s = stats {
+                        StatGrid(stats: s)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                    }
+
+                    SectionHeader("ACTIVE ALERTS \(alerts.count)")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                    if loading && hosts.isEmpty {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    } else if let err = error {
+                        ErrorBox(message: err) { Task { await refresh() } }
+                            .padding(.horizontal, 16)
+                    } else if alerts.isEmpty {
+                        EmptyState(icon: "checkmark.circle", text: "All hosts healthy")
+                            .padding(.vertical, 40)
+                    } else {
+                        VStack(spacing: 8) {
+                            ForEach(alerts) { HostRow(host: $0) }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
+            }
+            .navigationTitle("sysmon")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await refresh() }
+            .task { await refresh() }
+        }
+    }
+
+    private func refresh() async {
+        let api = API(baseURL: session.serverURL, token: session.token)
+        do {
+            let status: StatusResponse = try await api.get("/api/monitoring/status")
+            hosts = status.hosts
+            stats = status.statistics
+            error = nil
+        } catch let e as APIError {
+            error = e.message
+        } catch {
+            error = "Connection failed"
+        }
+        loading = false
+    }
+}
+
+struct HostsView: View {
+    @EnvironmentObject var session: Session
+    @State private var hosts: [Host] = []
+    @State private var search = ""
+    @State private var loading = true
+    @State private var error: String?
+
+    var filtered: [Host] {
+        if search.isEmpty { return hosts }
+        let q = search.lowercased()
+        return hosts.filter { $0.hostname.lowercased().contains(q) ||
+            ($0.description?.lowercased().contains(q) ?? false) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if !hosts.isEmpty {
+                    TextField("Filter...", text: $search)
+                        .textFieldStyle(SysmonFieldStyle())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+                if loading && hosts.isEmpty {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                } else if let err = error {
+                    ErrorBox(message: err) { Task { await refresh() } }.padding(16)
+                    Spacer()
+                } else if filtered.isEmpty {
+                    EmptyState(icon: "magnifyingglass", text: "No hosts")
+                    Spacer()
+                } else {
+                    List(filtered) { HostRow(host: $0) }
+                        .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Hosts")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await refresh() }
+            .task { await refresh() }
+        }
+    }
+
+    private func refresh() async {
+        let api = API(baseURL: session.serverURL, token: session.token)
+        do {
+            let list: [Host] = try await api.get("/api/monitoring/hosts")
+            hosts = list
+            error = nil
+        } catch let e as APIError {
+            error = e.message
+        } catch {
+            error = "Connection failed"
+        }
+        loading = false
+    }
+}
+
+struct HostRow: View {
+    let host: Host
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            StatusDot(status: host.overallStatus)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(host.hostname)
+                    .font(.system(size: 14, weight: .semibold))
+                if let desc = host.description, !desc.isEmpty {
+                    Text(desc)
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+                HStack(spacing: 8) {
+                    Text(host.overallStatus)
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(statusColor(host.overallStatus))
+                    if host.isDown, let tf = host.timeFailed, tf > 0 {
+                        Text("down \(formatUptime(tf))")
+                            .font(.system(size: 10))
+                            .foregroundColor(.gray)
+                    } else if host.isOK, let tu = host.timeUp, tu > 0 {
+                        Text("up \(formatUptime(tu))")
+                            .font(.system(size: 10))
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func statusColor(_ s: String) -> Color {
+        switch s {
+        case "OK": return .green
+        case "WARNING": return .orange
+        case "CRITICAL": return .red
+        default: return .gray
+        }
+    }
+}
+
+struct StatusDot: View {
+    let status: String
+    var body: some View {
+        Circle().fill(color).frame(width: 8, height: 8)
+    }
+    var color: Color {
+        switch status {
+        case "OK": return .green
+        case "WARNING": return .orange
+        case "CRITICAL": return .red
+        default: return .gray
+        }
+    }
+}
+
+struct StatGrid: View {
+    let stats: Stats
+    var body: some View {
+        HStack(spacing: 8) {
+            StatTile(label: "TOTAL", value: stats.totalHosts, color: .primary)
+            StatTile(label: "OK", value: stats.healthyHosts, color: .green)
+            StatTile(label: "WARN", value: stats.warningHosts, color: .orange)
+            StatTile(label: "CRIT", value: stats.criticalHosts, color: .red)
+        }
+    }
+}
+
+struct StatTile: View {
+    let label: String
+    let value: Int
+    let color: Color
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(1)
+                .foregroundColor(.gray)
+            Text("\(value)")
+                .font(.system(size: 24, weight: .heavy))
+                .tracking(-0.5)
+                .foregroundColor(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(white: 0.98))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(white: 0.92)))
+        .cornerRadius(10)
+    }
+}
+
+struct SectionHeader: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .bold))
+            .tracking(1.5)
+            .foregroundColor(.gray)
+    }
+}
+
+struct ErrorBox: View {
+    let message: String
+    let retry: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundColor(.red)
+            Button("RETRY", action: retry)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1)
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.black)
+                .cornerRadius(6)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.06))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.2)))
+        .cornerRadius(10)
+    }
+}
+
+struct EmptyState: View {
+    let icon: String
+    let text: String
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 36))
+                .foregroundColor(Color(white: 0.7))
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundColor(.gray)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
