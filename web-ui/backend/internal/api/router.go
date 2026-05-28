@@ -1110,7 +1110,10 @@ func (r *Router) handleAuthLogin(w http.ResponseWriter, req *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400,
+		// 10 years — sessions don't expire on the backend; this cookie
+		// lasts as long as the browser keeps it. Explicit logout, an
+		// admin kick, or a password change still revokes the session.
+		MaxAge: 10 * 365 * 86400,
 	})
 
 	r.sendJSON(w, map[string]string{
