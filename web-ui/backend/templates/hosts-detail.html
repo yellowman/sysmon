@@ -353,7 +353,7 @@ function hostDetail() {
         init() {
             // Get hostname from URL query parameter
             const params = new URLSearchParams(window.location.search);
-            this.hostname = params.get('host');
+            this.hostname = params.get('hostname') || params.get('host');
 
             if (!this.hostname) {
                 this.error = 'No hostname specified';
@@ -370,7 +370,10 @@ function hostDetail() {
                 this.error = null;
 
                 // Fetch XML data for this host
-                const response = await fetch(`/api/xml/object/${encodeURIComponent(this.hostname)}`);
+                const fetchOpts = {};
+                const token = sessionStorage.getItem('sysmon_token');
+                if (token) fetchOpts.headers = { 'Authorization': 'Bearer ' + token };
+                const response = await fetch(`/api/xml/object/${encodeURIComponent(this.hostname)}`, fetchOpts);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -391,10 +394,14 @@ function hostDetail() {
 
         parseXML(xmlDoc) {
             const obj = {};
-            const status = xmlDoc.querySelector('ObjectStatus');
 
+            if (xmlDoc.querySelector('parsererror')) {
+                throw new Error('Malformed XML response from daemon');
+            }
+
+            const status = xmlDoc.querySelector('ObjectStatus');
             if (!status) {
-                throw new Error('Invalid XML structure');
+                throw new Error('No ObjectStatus element in response');
             }
 
             // Parse all child elements

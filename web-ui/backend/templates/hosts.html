@@ -5,42 +5,38 @@
 {{define "content"}}
 <div x-data="hostsPage()" x-init="init()">
     <!-- Header -->
-    <div class="mb-6">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Monitored Hosts</h1>
-            <!-- View Toggle -->
-            <div class="flex bg-gray-100 rounded-lg p-0.5">
-                <button @click="viewMode = 'comparison'"
-                        :class="viewMode === 'comparison' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'"
-                        class="px-3 py-1.5 text-xs font-semibold rounded-md transition-all tracking-wide">
-                    <i class="fas fa-th mr-1"></i><span class="hidden sm:inline">Cards</span>
-                </button>
-                <button @click="viewMode = 'table'"
-                        :class="viewMode === 'table' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'"
-                        class="px-3 py-1.5 text-xs font-semibold rounded-md transition-all tracking-wide">
-                    <i class="fas fa-table mr-1"></i><span class="hidden sm:inline">Table</span>
-                </button>
+    <div class="mb-4">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-baseline gap-3">
+                <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Network Status</h1>
+                <span class="text-xs text-gray-400 mono" x-text="filteredHosts.length + ' objects'"></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="flex bg-gray-100 rounded-lg p-0.5">
+                    <button @click="viewMode = 'table'"
+                            :class="viewMode === 'table' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'"
+                            class="px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all tracking-wider uppercase">Table</button>
+                    <button @click="viewMode = 'comparison'"
+                            :class="viewMode === 'comparison' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'"
+                            class="px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all tracking-wider uppercase">Cards</button>
+                </div>
             </div>
         </div>
-        <div class="flex flex-wrap gap-3 items-center">
-            <input type="text" x-model="searchQuery" placeholder="Search hosts..."
-                class="flex-1 min-w-[180px] px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm">
-            <select x-model="filterStatus" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
-                <option value="">All Status</option>
+        <div class="flex flex-wrap gap-2 items-center">
+            <input type="text" x-model="searchQuery" placeholder="Filter..."
+                class="w-48 px-2.5 py-1.5 bg-white border border-gray-200 rounded text-xs mono focus:ring-1 focus:ring-gray-900 focus:border-transparent">
+            <select x-model="filterStatus" class="px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-gray-900">
+                <option value="">All</option>
                 <option value="OK">OK</option>
-                <option value="WARNING">WARNING</option>
-                <option value="CRITICAL">CRITICAL</option>
+                <option value="WARNING">Warning</option>
+                <option value="CRITICAL">Critical</option>
             </select>
-            <div class="flex items-center space-x-2">
-                <span class="text-sm text-gray-600">Show:</span>
-                <select x-model="perPage" @change="changePerPage()" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
-                    <option value="all">All</option>
-                    <option value="10">10</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                    <option value="200">200</option>
-                </select>
-            </div>
+            <select x-model="perPage" @change="changePerPage()" class="px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-gray-900">
+                <option value="all">All</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+            </select>
         </div>
     </div>
 
@@ -208,81 +204,51 @@
     </div>
 
     <!-- Table View -->
-    <div x-show="viewMode === 'table'" class="bg-white rounded-lg shadow overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                        @click="sortBy('hostname')">
-                        HostName <i class="fas fa-sort text-xs ml-1"></i>
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Description
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Type
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Port
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Down N
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Up N
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Contact
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                        @click="sortBy('status')">
-                        Status <i class="fas fa-sort text-xs ml-1"></i>
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Time Up
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Time Failed
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Last Outage
-                    </th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Uptime
-                    </th>
+    <div x-show="viewMode === 'table'" class="card overflow-x-auto">
+        <table class="min-w-full border-collapse">
+            <thead>
+                <tr class="border-b border-gray-200">
+                    <th class="hdr cursor-pointer hover:text-gray-900" @click="sortBy('hostname')">Host</th>
+                    <th class="hdr">Desc</th>
+                    <th class="hdr">Type</th>
+                    <th class="hdr">Port</th>
+                    <th class="hdr text-right">Dn</th>
+                    <th class="hdr text-right">Up</th>
+                    <th class="hdr">Notified</th>
+                    <th class="hdr cursor-pointer hover:text-gray-900" @click="sortBy('status')">Status</th>
+                    <th class="hdr">Time Up</th>
+                    <th class="hdr">Time Failed</th>
+                    <th class="hdr">Last Outage</th>
+                    <th class="hdr text-right">Uptime</th>
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
+            <tbody>
                 <template x-for="host in sortedHosts" :key="host._uniqueId">
-                    <tr class="cursor-pointer transition-colors"
+                    <tr class="border-b border-gray-100 cursor-pointer"
                         :class="{
-                            'bg-green-50 hover:bg-green-100': host.overall_status === 'OK',
-                            'bg-yellow-50 hover:bg-yellow-100': host.overall_status === 'WARNING',
-                            'bg-red-50 hover:bg-red-100': host.overall_status === 'CRITICAL',
-                            'bg-gray-50 hover:bg-gray-100': !host.overall_status || host.paused
+                            'hover:bg-gray-50': host.overall_status === 'OK',
+                            'bg-amber-50/50 hover:bg-amber-50': host.overall_status === 'WARNING',
+                            'bg-red-50/50 hover:bg-red-50': host.overall_status === 'CRITICAL'
                         }"
                         @click="selectHost(host)">
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.hostname"></td>
-                        <td class="px-4 py-2 text-sm text-gray-900" x-text="host.description || '-'"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getPrimaryCheckType(host)"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getPrimaryCheckPort(host)"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.down_count || 0"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="host.up_count || 0"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 truncate max-w-[120px]" x-text="host.contact || '-'" :title="host.contact"></td>
-                        <td class="px-4 py-2 whitespace-nowrap">
-                            <span class="text-sm font-medium"
-                                  :class="{
-                                      'text-green-700': host.overall_status === 'OK',
-                                      'text-yellow-700': host.overall_status === 'WARNING',
-                                      'text-red-700': host.overall_status === 'CRITICAL',
-                                      'text-gray-700': !host.overall_status
-                                  }"
-                                  x-text="getStatusLabel(host)"></span>
-                        </td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatUptime(host.time_up)"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatUptime(host.time_failed)"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="formatRelativeTime(host.last_outage) || 'Never'"></td>
-                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900" x-text="getUptimePercent(host)"></td>
+                        <td class="cel mono font-medium text-gray-900" x-text="host.hostname"></td>
+                        <td class="cel text-gray-600 truncate max-w-[180px]" x-text="host.description || ''"></td>
+                        <td class="cel mono" x-text="getPrimaryCheckType(host)"></td>
+                        <td class="cel mono" x-text="getPrimaryCheckPort(host) || ''"></td>
+                        <td class="cel mono text-right" x-text="host.down_count || 0"></td>
+                        <td class="cel mono text-right" x-text="host.up_count || 0"></td>
+                        <td class="cel" x-text="host.overall_status === 'CRITICAL' ? 'Yes' : 'No'"></td>
+                        <td class="cel font-semibold"
+                            :class="{
+                                'text-emerald-700': host.overall_status === 'OK',
+                                'text-amber-700': host.overall_status === 'WARNING',
+                                'text-red-700': host.overall_status === 'CRITICAL'
+                            }"
+                            x-text="getStatusLabel(host)"></td>
+                        <td class="cel mono" x-text="host.time_up ? formatUptime(host.time_up) : ''"></td>
+                        <td class="cel mono" x-text="host.time_failed ? formatUptime(host.time_failed) : ''"></td>
+                        <td class="cel mono" x-text="formatRelativeTime(host.last_outage) || 'Never'"></td>
+                        <td class="cel mono text-right font-medium" x-text="getUptimePercent(host)"></td>
                     </tr>
                 </template>
             </tbody>
@@ -469,7 +435,7 @@ function hostsPage() {
         searchQuery: '',
         filterStatus: '',
         selectedHost: null,
-        viewMode: 'comparison', // 'comparison' or 'table'
+        viewMode: 'table',
         sortField: 'hostname',
         sortDirection: 'asc',
         refreshInterval: null,
@@ -566,16 +532,7 @@ function hostsPage() {
                     url += `?page=${this.currentPage}&limit=${this.limit}`;
                 }
 
-                const response = await fetch(url);
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ message: 'Failed to fetch hosts' }));
-                    this.error = errorData.message || `Server returned ${response.status}`;
-                    this.hosts = [];
-                    this.loading = false;
-                    return;
-                }
-
-                const data = await response.json();
+                const data = await apiCall(url);
 
                 // Handle paginated response
                 if (this.perPage !== 'all' && !hasClientFilter && data.data) {
@@ -738,23 +695,11 @@ function hostsPage() {
             }
 
             try {
-                const response = await fetch('/api/monitoring/bulk/ack', {
+                const result = await apiCall('/api/monitoring/bulk/ack', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Auth-Key': getAuthKey()
-                    },
-                    body: JSON.stringify({
-                        hostnames: this.selectedHosts
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostnames: this.selectedHosts })
                 });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to acknowledge hosts');
-                }
-
-                const result = await response.json();
                 alert(`Acknowledged ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
@@ -779,24 +724,11 @@ function hostsPage() {
             }
 
             try {
-                const response = await fetch('/api/monitoring/bulk/update', {
+                const result = await apiCall('/api/monitoring/bulk/update', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Auth-Key': getAuthKey()
-                    },
-                    body: JSON.stringify({
-                        hostnames: this.selectedHosts,
-                        note: this.bulkNote
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostnames: this.selectedHosts, note: this.bulkNote })
                 });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to update hosts');
-                }
-
-                const result = await response.json();
                 alert(`Updated ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
@@ -822,24 +754,11 @@ function hostsPage() {
             }
 
             try {
-                const response = await fetch('/api/monitoring/bulk/trace', {
+                const result = await apiCall('/api/monitoring/bulk/trace', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Auth-Key': getAuthKey()
-                    },
-                    body: JSON.stringify({
-                        hostnames: this.selectedHosts,
-                        enable: true
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostnames: this.selectedHosts, enable: true })
                 });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to toggle trace');
-                }
-
-                const result = await response.json();
                 alert(`Toggled trace for ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
@@ -854,4 +773,8 @@ function hostsPage() {
     };
 }
 </script>
+<style>
+    .hdr { padding: 6px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #9ca3af; text-align: left; white-space: nowrap; }
+    .cel { padding: 3px 8px; font-size: 11px; white-space: nowrap; color: #374151; line-height: 1.4; }
+</style>
 {{end}}

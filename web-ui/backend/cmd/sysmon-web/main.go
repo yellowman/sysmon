@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"sysmon-web/internal/api"
+	"sysmon-web/internal/auth"
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
@@ -55,7 +56,9 @@ func main() {
 
 	// Initialize push notification service from parsed config
 	var pushService *push.Service
-	if snapshot, err := configService.GetConfig(); err == nil {
+	if snapshot, err := configService.GetConfig(); err != nil {
+		log.Printf("WARNING: could not read config for push init: %v", err)
+	} else {
 		g := snapshot.Config.Global
 		pushCfg := push.Config{
 			Enabled:        g.PushNotifications,
@@ -75,8 +78,15 @@ func main() {
 		}
 	}
 
+	// Initialize auth service
+	authService, err := auth.NewService("/var/lib/sysmon/auth.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize auth: %v", err)
+	}
+	defer authService.Close()
+
 	// Create API router
-	handler := api.NewRouter(configService, monitoringService, pushService)
+	handler := api.NewRouter(configService, monitoringService, pushService, authService)
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {

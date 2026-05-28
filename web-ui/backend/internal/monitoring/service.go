@@ -15,6 +15,19 @@ import (
 	"sysmon-web/internal/models"
 )
 
+// sanitizeCmd removes newlines and control characters from user input
+// before it's sent as part of a sysmond TCP command. Prevents injection
+// of additional protocol commands via crafted hostnames or notes.
+func sanitizeCmd(s string) string {
+	clean := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r < 32 {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(clean)
+}
+
 // Service handles monitoring queries to sysmon daemon
 type Service struct {
 	sysmonAddr string
@@ -906,6 +919,7 @@ func authenticate(conn net.Conn, reader *bufio.Reader, authKey string) error {
 
 // AckHost acknowledges an alert for a specific host
 func (s *Service) AckHost(hostname string, authKey string) error {
+	hostname = sanitizeCmd(hostname)
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -964,6 +978,8 @@ func (s *Service) AckHost(hostname string, authKey string) error {
 
 // UpdateHostStatus updates a host with a status note
 func (s *Service) UpdateHostStatus(hostname string, note string, authKey string) error {
+	hostname = sanitizeCmd(hostname)
+	note = sanitizeCmd(note)
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -1022,6 +1038,7 @@ func (s *Service) UpdateHostStatus(hostname string, note string, authKey string)
 
 // ToggleTrace toggles debug tracing for a specific host
 func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
+	hostname = sanitizeCmd(hostname)
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -1410,6 +1427,7 @@ func (s *Service) GetObjectsXML() (string, error) {
 
 // GetObjectXML returns raw XML for a single monitored object
 func (s *Service) GetObjectXML(hostname string) (string, error) {
+	hostname = sanitizeCmd(hostname)
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
@@ -1535,7 +1553,7 @@ func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperati
 
 	// Process each hostname
 	for i, hostname := range hostnames {
-		// Send ACK command
+		hostname = sanitizeCmd(hostname)
 		cmd := fmt.Sprintf("ACK %s\n", hostname)
 		_, err := conn.Write([]byte(cmd))
 		if err != nil {
@@ -1645,8 +1663,9 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 	}
 
 	// Process each hostname
+	note = sanitizeCmd(note)
 	for i, hostname := range hostnames {
-		// Send UPD command (matches sysmond protocol)
+		hostname = sanitizeCmd(hostname)
 		cmd := fmt.Sprintf("UPD %s %s\n", hostname, note)
 		_, err := conn.Write([]byte(cmd))
 		if err != nil {
@@ -1749,7 +1768,7 @@ func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey strin
 
 	// Process each hostname
 	for i, hostname := range hostnames {
-		// Send TRACE command (toggle)
+		hostname = sanitizeCmd(hostname)
 		cmd := fmt.Sprintf("TRACE %s\n", hostname)
 		_, err := conn.Write([]byte(cmd))
 		if err != nil {

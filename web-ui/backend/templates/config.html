@@ -1266,6 +1266,14 @@
 </div>
 
 <script>
+async function authFetch(url, opts = {}) {
+    opts.headers = opts.headers || {};
+    const t = sessionStorage.getItem('sysmon_token');
+    if (t) opts.headers['Authorization'] = 'Bearer ' + t;
+    const resp = await fetch(url, opts);
+    if (resp.status === 401) { window.location.href = '/login.html'; }
+    return resp;
+}
 function unifiedConfigPage() {
     return {
         // Mode control
@@ -1288,6 +1296,7 @@ function unifiedConfigPage() {
         // Structured editor state
         loadingStructured: true,
         savingStructured: false,
+        structuredConfigVersion: '',
         structuredConfig: {
             root: '',
             global: {},
@@ -1301,7 +1310,7 @@ function unifiedConfigPage() {
             hosts: true
         },
         // Combined Settings Section (Global & Spawns)
-        settingsExpanded: false,  // Minimized by default
+        settingsExpanded: true,
         settingsView: 'global',   // 'global' or 'spawns'
         globalTab: 'core',
         expandedHosts: {},
@@ -1354,7 +1363,7 @@ function unifiedConfigPage() {
         // RAW EDITOR METHODS
         async fetchConfigRaw() {
             try {
-                const response = await fetch('/api/config/raw');
+                const response = await authFetch('/api/config/raw');
                 if (!response.ok) {
                     throw new Error(`Failed to load config: ${response.statusText}`);
                 }
@@ -1375,7 +1384,7 @@ function unifiedConfigPage() {
             this.versionConflict = false;
 
             try {
-                const response = await fetch('/api/config/raw', {
+                const response = await authFetch('/api/config/raw', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1415,7 +1424,7 @@ function unifiedConfigPage() {
 
             this.reloading = true;
             try {
-                const response = await fetch('/api/config/reload', { method: 'POST' });
+                const response = await authFetch('/api/config/reload', { method: 'POST' });
                 if (!response.ok) {
                     throw new Error(`Reload failed: ${response.statusText}`);
                 }
@@ -1429,7 +1438,7 @@ function unifiedConfigPage() {
 
         async fetchBackups() {
             try {
-                const response = await fetch('/api/backups');
+                const response = await authFetch('/api/backups');
                 if (!response.ok) {
                     throw new Error(`Failed to fetch backups: ${response.statusText}`);
                 }
@@ -1443,7 +1452,7 @@ function unifiedConfigPage() {
             if (!confirm(`Restore backup ${filename}? This will replace the current configuration.`)) return;
 
             try {
-                const response = await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
+                const response = await authFetch(`/api/backups/${filename}/restore`, { method: 'POST' });
                 if (!response.ok) {
                     throw new Error(`Restore failed: ${response.statusText}`);
                 }
@@ -1464,10 +1473,14 @@ function unifiedConfigPage() {
         async loadConfigStructured() {
             this.loadingStructured = true;
             try {
-                const response = await fetch('/api/config');
+                const response = await authFetch('/api/config');
                 if (response.ok) {
-                    this.structuredConfig = await response.json();
-                    // Ensure required properties exist and are arrays
+                    const snapshot = await response.json();
+                    this.structuredConfig = snapshot.config || {};
+                    this.structuredConfigVersion = snapshot.version || '';
+                    if (!this.structuredConfig.root) {
+                        this.structuredConfig.root = '';
+                    }
                     if (!this.structuredConfig.global) {
                         this.structuredConfig.global = {};
                     }
@@ -1476,6 +1489,9 @@ function unifiedConfigPage() {
                     }
                     if (!Array.isArray(this.structuredConfig.spawns)) {
                         this.structuredConfig.spawns = [];
+                    }
+                    if (!Array.isArray(this.structuredConfig.contacts)) {
+                        this.structuredConfig.contacts = [];
                     }
                     // Save original for change detection
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
@@ -1503,17 +1519,24 @@ function unifiedConfigPage() {
 
             this.savingStructured = true;
             try {
-                const response = await fetch('/api/config', {
+                const response = await authFetch('/api/config', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.structuredConfig)
+                    body: JSON.stringify({
+                        version: this.structuredConfigVersion || '',
+                        config: this.structuredConfig,
+                        comment: 'Updated via structured editor'
+                    })
                 });
 
                 if (response.ok) {
-                    // Reset change tracking after successful save
+                    const result = await response.json();
+                    if (result.version) this.structuredConfigVersion = result.version;
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
                     this.structuredHasChanges = false;
                     this.showSuccess('Configuration saved successfully! Reload sysmon to apply changes.');
+                } else if (response.status === 401) {
+                    window.location.href = '/login.html';
                 } else {
                     const error = await response.text();
                     alert('Failed to save configuration: ' + error);
