@@ -377,6 +377,24 @@ func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
 	return subs
 }
 
+// GetPlatform returns the platform of the subscription with the given token,
+// or empty string if not found.
+func (s *Service) GetPlatform(token string) Platform {
+	var platform Platform
+	s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err == nil {
+			platform = sub.Platform
+		}
+		return nil
+	})
+	return platform
+}
+
 // IsOwner checks if the given user owns the subscription with the given token.
 func (s *Service) IsOwner(token, owner string) bool {
 	owned := false

@@ -1322,7 +1322,6 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 
 		var body struct {
 			DeviceToken string `json:"device_token"`
-			APIKey      string `json:"api_key,omitempty"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -1334,14 +1333,12 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		// Allow unsubscribe via api_key OR by being the owner of the subscription.
-		// Admins can also unsubscribe any device.
+		// Only owners or admins can unsubscribe. api_key alone is not
+		// sufficient — it's just a per-device fingerprint, not an auth
+		// credential that should grant ability to cancel subscriptions.
 		owner := req.Header.Get("X-Session-User")
 		role := req.Header.Get("X-Session-Role")
-		allowed := role == "admin" ||
-			r.push.IsOwner(body.DeviceToken, owner) ||
-			(body.APIKey != "" && r.push.ValidateAPIKey(body.DeviceToken, body.APIKey))
-		if !allowed {
+		if role != "admin" && !r.push.IsOwner(body.DeviceToken, owner) {
 			r.sendError(w, http.StatusForbidden, "Not authorized to unsubscribe this device")
 			return
 		}
@@ -1474,26 +1471,33 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var body struct {
-		APIKey string `json:"api_key"`
+		DeviceToken string `json:"device_token"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
-	if body.APIKey == "" {
-		r.sendError(w, http.StatusUnauthorized, "api_key is required")
+	if body.DeviceToken == "" {
+		r.sendError(w, http.StatusBadRequest, "device_token is required")
 		return
 	}
 
-	// Look up the device by its API key
-	token, platform := r.push.FindTokenByAPIKey(body.APIKey)
-	if token == "" {
-		r.sendError(w, http.StatusForbidden, "Invalid api_key")
+	// Only owners or admins can send test pushes to a device
+	owner := req.Header.Get("X-Session-User")
+	role := req.Header.Get("X-Session-Role")
+	if role != "admin" && !r.push.IsOwner(body.DeviceToken, owner) {
+		r.sendError(w, http.StatusForbidden, "Not authorized to test this device")
 		return
 	}
 
-	if err := r.push.SendTest(token, platform); err != nil {
+	platform := r.push.GetPlatform(body.DeviceToken)
+	if platform == "" {
+		r.sendError(w, http.StatusNotFound, "Device not found")
+		return
+	}
+
+	if err := r.push.SendTest(body.DeviceToken, platform); err != nil {
 		r.sendError(w, http.StatusBadGateway, fmt.Sprintf("Push failed: %v", err))
 		return
 	}
