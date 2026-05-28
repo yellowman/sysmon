@@ -17,16 +17,13 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -36,16 +33,12 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(onSuccess: () -> Unit) {
-    var server by remember { mutableStateOf(Session.serverUrl.ifEmpty { "https://" }) }
+    var server by remember { mutableStateOf(Session.serverUrl) }
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Session.token) {
-        if (Session.token.isNotEmpty()) onSuccess()
-    }
 
     Box(
         modifier = Modifier
@@ -78,11 +71,11 @@ fun LoginScreen(onSuccess: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                FieldLabel("Server URL")
+                FieldLabel("Server")
                 OutlinedTextField(
                     value = server,
                     onValueChange = { server = it; error = null },
-                    placeholder = { Text("https://sysmon.example.com") },
+                    placeholder = { Text("sysmon.example.com") },
                     singleLine = true,
                     shape = RoundedCornerShape(4.dp),
                     modifier = Modifier.fillMaxWidth(),

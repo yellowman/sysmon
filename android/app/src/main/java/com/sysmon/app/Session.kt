@@ -49,13 +49,20 @@ object Session {
 
     fun isLoggedIn(): Boolean = token.isNotEmpty() && serverUrl.isNotEmpty()
 
-    fun isAdmin(): Boolean = role == "admin"
+    // Normalize a user-entered server URL: trim, default to https://, drop trailing slash.
+    fun normalize(raw: String): String {
+        var s = raw.trim()
+        val lower = s.lowercase()
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            s = "https://$s"
+        }
+        while (s.endsWith("/")) s = s.dropLast(1)
+        return s
+    }
 
     suspend fun login(server: String, user: String, pass: String) {
-        val normalized = server.trim().trimEnd('/')
-        require(normalized.startsWith("http://") || normalized.startsWith("https://")) {
-            "Server URL must start with http:// or https://"
-        }
+        val normalized = normalize(server)
+        require(normalized.length > "https://".length) { "Server URL is required" }
         val response = Api.login(normalized, user, pass)
         serverUrl = normalized
         token = response.token
@@ -70,7 +77,33 @@ object Session {
     }
 
     fun logout() {
-        scope.launch { runCatching { Api.logout() } }
+        val serverSnap = serverUrl
+        val tokenSnap = token
+        val fcmSnap = FcmTokenStore.token
+
+        // Flip UI to LoginScreen immediately
+        token = ""
+        username = ""
+        role = ""
+        prefs.edit()
+            .remove(KEY_TOKEN)
+            .remove(KEY_USERNAME)
+            .remove(KEY_ROLE)
+            .apply()
+
+        // Best-effort backend cleanup with snapshotted credentials
+        scope.launch {
+            if (tokenSnap.isEmpty() || serverSnap.isEmpty()) return@launch
+            runCatching {
+                if (fcmSnap != null) {
+                    Api.unsubscribePush(serverSnap, tokenSnap, fcmSnap)
+                }
+                Api.logout(serverSnap, tokenSnap)
+            }
+        }
+    }
+
+    fun handleUnauthorized() {
         token = ""
         username = ""
         role = ""
@@ -81,17 +114,11 @@ object Session {
             .apply()
     }
 
-    fun handleUnauthorized() {
-        token = ""
-        prefs.edit().remove(KEY_TOKEN).apply()
-    }
-
     fun registerPushToken(fcmToken: String) {
+        FcmTokenStore.update(fcmToken)
         if (!isLoggedIn()) return
         scope.launch {
-            runCatching {
-                Api.subscribePush(fcmToken)
-            }
+            runCatching { Api.subscribePush(fcmToken) }
         }
     }
 }

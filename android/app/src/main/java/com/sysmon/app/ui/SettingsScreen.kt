@@ -1,6 +1,5 @@
 package com.sysmon.app.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,47 +23,49 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.sysmon.app.Api
+import com.sysmon.app.FcmTokenStore
 import com.sysmon.app.Session
 import com.sysmon.app.ui.theme.MonoMedium
 import com.sysmon.app.ui.theme.SysmonColors
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 @Composable
 fun SettingsScreen(onLogout: () -> Unit) {
     val scope = rememberCoroutineScope()
     var message by remember { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
+    val fcmToken = FcmTokenStore.token
 
     Column(modifier = Modifier.fillMaxWidth()) {
         TopHeader(title = "Settings", subtitle = "Account and notifications")
 
         SectionHeader(label = "Account")
-        InfoRow("Server", Session.serverUrl)
-        InfoRow("User", Session.username)
-        InfoRow("Role", Session.role.ifEmpty { "—" })
+        InfoRow("Server", Session.serverUrl.ifEmpty { "—" })
+        InfoRow("User", Session.username.ifEmpty { "—" })
+        InfoRow("Role", Session.role.uppercase().ifEmpty { "—" })
+
+        SectionHeader(label = "Device")
+        InfoRow(
+            "Push token",
+            fcmToken?.let { it.take(16) + "…" } ?: "Not registered"
+        )
 
         SectionHeader(label = "Notifications")
         ButtonRow(
-            label = if (sending) "Sending..." else "Send Test Notification",
-            enabled = !sending,
+            label = if (sending) "Sending…" else "Send Test Notification",
+            enabled = !sending && fcmToken != null,
             primary = false
         ) {
             sending = true
+            message = null
             scope.launch {
-                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                    val token = task.result
-                    if (token == null) {
-                        message = "No FCM token available"
-                        sending = false
-                        return@addOnCompleteListener
-                    }
-                    scope.launch {
-                        runCatching { Api.sendTestPush(token) }
-                            .onSuccess { message = "Sent!" }
-                            .onFailure { message = it.message }
-                        sending = false
-                    }
-                }
+                runCatching {
+                    val token = FirebaseMessaging.getInstance().token.await()
+                    Api.sendTestPush(token)
+                }.onSuccess { message = "Sent — check your notifications" }
+                 .onFailure { message = it.message ?: "Failed" }
+                sending = false
             }
         }
 

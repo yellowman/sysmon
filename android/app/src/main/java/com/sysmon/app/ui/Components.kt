@@ -5,15 +5,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,10 +25,55 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.sysmon.app.Host
+import com.sysmon.app.Stats
 import com.sysmon.app.ui.theme.MonoLarge
 import com.sysmon.app.ui.theme.MonoMedium
 import com.sysmon.app.ui.theme.MonoSmall
 import com.sysmon.app.ui.theme.SysmonColors
+
+@Composable
+fun TopHeader(
+    title: String,
+    subtitle: String,
+    onRefresh: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "SYSMON",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.displayMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (onRefresh != null) {
+            IconButton(onClick = onRefresh) {
+                Icon(
+                    imageVector = Icons.Outlined.Refresh,
+                    contentDescription = "Refresh",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun SectionHeader(label: String, accent: String? = null) {
@@ -57,7 +104,7 @@ fun Card(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surface)
             .border(
@@ -69,12 +116,12 @@ fun Card(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun StatusDot(state: String) {
-    val color = when (state.lowercase()) {
-        "up" -> SysmonColors.Up
-        "down" -> SysmonColors.Down
-        "acknowledged" -> SysmonColors.Acked
-        else -> SysmonColors.Unknown
+fun StatusDot(status: String) {
+    val color = when (status) {
+        "OK" -> SysmonColors.Up
+        "WARNING" -> SysmonColors.Unknown
+        "CRITICAL" -> SysmonColors.Down
+        else -> SysmonColors.Acked
     }
     Box(
         modifier = Modifier
@@ -87,8 +134,8 @@ fun StatusDot(state: String) {
 @Composable
 fun StatTile(label: String, value: String, accent: Color? = null) {
     Column(
-        modifier = Modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        modifier = Modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
             text = label.uppercase(),
@@ -104,22 +151,45 @@ fun StatTile(label: String, value: String, accent: Color? = null) {
 }
 
 @Composable
+fun StatsRow(stats: Stats?) {
+    val s = stats ?: return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(modifier = Modifier.weight(1f)) { StatTile("TOTAL", s.total.toString()) }
+        Box(modifier = Modifier.weight(1f)) { StatTile("OK", s.healthy.toString(), SysmonColors.Up) }
+        Box(modifier = Modifier.weight(1f)) { StatTile("WARN", s.warning.toString(), SysmonColors.Unknown) }
+        Box(modifier = Modifier.weight(1f)) { StatTile("CRIT", s.critical.toString(), SysmonColors.Down) }
+    }
+}
+
+@Composable
 fun HostRow(host: Host) {
     Card {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            StatusDot(if (host.acknowledged) "acknowledged" else host.state)
+            StatusDot(host.overallStatus)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = host.hostname,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )
+                if (host.description.isNotEmpty()) {
+                    Text(
+                        text = host.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (host.ip.isNotEmpty()) {
                     Text(
                         text = host.ip,
@@ -129,16 +199,19 @@ fun HostRow(host: Host) {
                 }
             }
             Text(
-                text = host.state.uppercase(),
+                text = host.overallStatus,
                 style = MaterialTheme.typography.labelMedium,
-                color = when (host.state.lowercase()) {
-                    "up" -> SysmonColors.Up
-                    "down" -> SysmonColors.Down
-                    else -> SysmonColors.Unknown
-                }
+                color = statusColor(host.overallStatus)
             )
         }
     }
+}
+
+private fun statusColor(status: String): Color = when (status) {
+    "OK" -> SysmonColors.Up
+    "WARNING" -> SysmonColors.Unknown
+    "CRITICAL" -> SysmonColors.Down
+    else -> SysmonColors.Acked
 }
 
 @Composable
@@ -187,9 +260,16 @@ fun EmptyState(message: String) {
 }
 
 @Composable
-fun VSpace(height: Int) {
-    Spacer(modifier = Modifier.height(height.dp))
+fun CenteredSpinner() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
-
-@Suppress("unused")
-private val Padding16 = PaddingValues(16.dp)
