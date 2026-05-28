@@ -7,11 +7,11 @@ import com.google.firebase.messaging.RemoteMessage
 
 class MessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
-        Session.registerPushToken(token)
+        val previous = FcmTokenStore.token
+        Session.registerPushToken(token, replacing = previous)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        super.onMessageReceived(message)
         // FCM displays notification payloads automatically when the app is
         // in the background. When foregrounded we need to post the
         // notification ourselves.

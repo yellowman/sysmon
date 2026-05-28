@@ -1,6 +1,8 @@
 import SwiftUI
+import UserNotifications
 
 struct MainView: View {
+    @EnvironmentObject var session: Session
     @State private var tab: Tab = .alerts
 
     enum Tab { case alerts, hosts, settings }
@@ -9,6 +11,7 @@ struct MainView: View {
         TabView(selection: $tab) {
             AlertsView()
                 .tabItem { Label("Alerts", systemImage: "bell") }
+                .badge(session.alertCount)
                 .tag(Tab.alerts)
             HostsView()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
@@ -95,6 +98,9 @@ struct AlertsView: View {
             hosts = status.hosts
             stats = status.statistics
             error = nil
+            let count = hosts.filter { !$0.isOK }.count
+            session.alertCount = count
+            try? await UNUserNotificationCenter.current().setBadgeCount(count)
         } catch let e as APIError {
             error = e.message
         } catch {

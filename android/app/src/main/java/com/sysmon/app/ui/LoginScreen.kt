@@ -39,6 +39,7 @@ fun LoginScreen(onSuccess: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val displayMessage = error ?: Session.loginNote
 
     Box(
         modifier = Modifier
@@ -107,11 +108,12 @@ fun LoginScreen(onSuccess: () -> Unit) {
                 )
             }
 
-            if (error != null) ErrorBanner(error!!)
+            if (displayMessage != null) ErrorBanner(displayMessage)
 
             Button(
                 onClick = {
                     error = null
+                    Session.loginNote = null
                     loading = true
                     scope.launch {
                         runCatching { Session.login(server, user, pass) }

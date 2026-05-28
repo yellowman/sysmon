@@ -27,6 +27,7 @@ class Session: ObservableObject {
     }
     @Published var pushStatus: String?
     @Published var loginNote: String?
+    @Published var alertCount: Int = 0
 
     init() {
         self.serverURL = UserDefaults.standard.string(forKey: "sysmon_server_url") ?? ""
@@ -88,6 +89,8 @@ class Session: ObservableObject {
         token = nil
         username = nil
         role = nil
+        alertCount = 0
+        Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
 
         // Best-effort backend cleanup
         Task {

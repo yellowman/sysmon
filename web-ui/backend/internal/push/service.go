@@ -431,7 +431,7 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 		if s.apns == nil {
 			return fmt.Errorf("APNs not configured")
 		}
-		return s.apns.Send(token, title, subtitle, body)
+		return s.apns.Send(token, title, subtitle, body, nil)
 	case PlatformAndroid:
 		if s.fcm == nil {
 			return fmt.Errorf("FCM not configured")
@@ -442,9 +442,10 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 	}
 }
 
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string) {
+func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int) {
 	subs := s.ListSubscriptions()
 	sent := 0
+	badgePtr := &badge
 
 	for _, sub := range subs {
 		var err error
@@ -452,7 +453,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		switch sub.Platform {
 		case PlatformIOS:
 			if s.apns != nil {
-				err = s.apns.Send(sub.DeviceToken, title, subtitle, body)
+				err = s.apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
 			} else {
 				skipped = true
 			}
@@ -535,6 +536,15 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 		return
 	}
 
+	// Badge count = currently non-OK hosts (what an attentive user would
+	// want to act on). Sent on every push so iOS app icon stays accurate.
+	badge := 0
+	for _, h := range status.Hosts {
+		if strings.ToUpper(h.OverallStatus) != "OK" {
+			badge++
+		}
+	}
+
 	s.mu.Lock()
 	var changes []struct {
 		host       models.HostStatus
@@ -561,11 +571,11 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	s.mu.Unlock()
 
 	for _, c := range changes {
-		s.sendStateChange(c.host, c.prevStatus)
+		s.sendStateChange(c.host, c.prevStatus, badge)
 	}
 }
 
-func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
+func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, badge int) {
 	var title, subtitle, body string
 
 	checkType := ""
@@ -597,5 +607,5 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
 		host.Hostname, prevStatus, host.OverallStatus)
 
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType)
+	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge)
 }
