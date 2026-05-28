@@ -40,15 +40,15 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 		metrics:    metrics,
 	}
 
-	// Configuration endpoints (GET open to all, writes require admin)
-	r.mux.HandleFunc("/api/config", r.handleConfig)
+	// Configuration endpoints (admin only — config contains secrets)
+	r.mux.HandleFunc("/api/config", auth.RequireAdmin(r.handleConfig))
 	r.mux.HandleFunc("/api/config/validate", auth.RequireAdmin(r.handleConfigValidate))
 	r.mux.HandleFunc("/api/config/reload", auth.RequireAdmin(r.handleConfigReload))
-	r.mux.HandleFunc("/api/config/raw", r.handleConfigRaw)
+	r.mux.HandleFunc("/api/config/raw", auth.RequireAdmin(r.handleConfigRaw))
 
-	// Backups
-	r.mux.HandleFunc("/api/backups", r.handleBackups)
-	r.mux.HandleFunc("/api/backups/", r.handleBackupDetail)
+	// Backups (admin only)
+	r.mux.HandleFunc("/api/backups", auth.RequireAdmin(r.handleBackups))
+	r.mux.HandleFunc("/api/backups/", auth.RequireAdmin(r.handleBackupDetail))
 
 	// Live monitoring
 	r.mux.HandleFunc("/api/monitoring/status", r.handleMonitoringStatus)
@@ -57,14 +57,14 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
-	r.mux.HandleFunc("/api/monitoring/ack/", r.handleMonitoringAck)
-	r.mux.HandleFunc("/api/monitoring/update/", r.handleMonitoringUpdate)
-	r.mux.HandleFunc("/api/monitoring/trace/", r.handleMonitoringTrace)
+	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
+	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
+	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
 
-	// Bulk operations
-	r.mux.HandleFunc("/api/monitoring/bulk/ack", r.handleBulkAck)
-	r.mux.HandleFunc("/api/monitoring/bulk/update", r.handleBulkUpdate)
-	r.mux.HandleFunc("/api/monitoring/bulk/trace", r.handleBulkTrace)
+	// Bulk operations (admin only)
+	r.mux.HandleFunc("/api/monitoring/bulk/ack", auth.RequireAdmin(r.handleBulkAck))
+	r.mux.HandleFunc("/api/monitoring/bulk/update", auth.RequireAdmin(r.handleBulkUpdate))
+	r.mux.HandleFunc("/api/monitoring/bulk/trace", auth.RequireAdmin(r.handleBulkTrace))
 
 	// Push notifications
 	r.mux.HandleFunc("/api/push/subscribe", r.handlePushSubscribe)
@@ -120,11 +120,14 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// Create cache middleware
 	cache := middleware.NewCacheConfig()
 
-	// Apply middleware chain: Recovery -> CORS -> Auth -> Metrics -> Cache -> Rate Limiting -> Handler
+	// Apply middleware chain
 	var handler http.Handler = r.mux
 	handler = rateLimiter.Middleware(handler)
 	handler = cache.Middleware(handler)
 	handler = metrics.Middleware(handler)
+
+	// Limit request body size to 1MB
+	handler = http.MaxBytesHandler(handler, 1<<20)
 	handler = auth.RequireAuth(authSvc, handler)
 	handler = r.addCORS(handler)
 	handler = middleware.Recovery(handler)
@@ -1618,9 +1621,13 @@ func (r *Router) paginateSlice(data interface{}, params PaginationParams) Pagina
 
 func (r *Router) addCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := req.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User, X-Auth-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if req.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)

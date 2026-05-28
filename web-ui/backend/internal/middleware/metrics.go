@@ -74,9 +74,10 @@ func (mc *MetricsCollector) Middleware(next http.Handler) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(rw, r)
 
-		// Record metrics
+		// Record metrics with normalized path (strip path parameters)
 		duration := time.Since(start)
-		mc.RecordRequest(r.URL.Path, rw.statusCode, duration)
+		path := normalizePath(r.URL.Path)
+		mc.RecordRequest(path, rw.statusCode, duration)
 	})
 }
 
@@ -237,4 +238,25 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// normalizePath strips path parameters to avoid unbounded metrics keys
+// and leaking sensitive data (hostnames, usernames, tokens) in metrics.
+func normalizePath(path string) string {
+	prefixes := []string{
+		"/api/monitoring/host/",
+		"/api/monitoring/ack/",
+		"/api/monitoring/update/",
+		"/api/monitoring/trace/",
+		"/api/xml/object/",
+		"/api/auth/users/",
+		"/api/push/remove/",
+		"/api/backups/",
+	}
+	for _, p := range prefixes {
+		if len(path) > len(p) && path[:len(p)] == p {
+			return p + ":param"
+		}
+	}
+	return path
 }
