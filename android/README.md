@@ -104,9 +104,9 @@ tracked labels mirror the sysmon web UI's editorial magazine style.
 - In the Settings tab inside the app, tap "Send Test Notification"
 
 **"Session expired" on every action**
-- Sessions stay alive as long as you keep using the app. They expire
-  after 24 hours of inactivity, with a hard 30-day ceiling regardless
-  of activity. Log in again.
+- Once you sign in, the session stays alive for as long as you keep
+  opening the app. Sysmon-web only forgets you if the app hasn't been
+  used in over 30 days. Log in again.
 
 **Server URL**
 - Scheme is optional — `sysmon.example.com` is accepted and resolved
