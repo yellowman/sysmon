@@ -35,6 +35,7 @@ type Subscription struct {
 	Platform       Platform `json:"platform"`
 	Label          string   `json:"label,omitempty"`
 	APIKey         string   `json:"api_key"`
+	Owner          string   `json:"owner,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 	LastSeen       string   `json:"last_seen"`
 	LastPushAt     string   `json:"last_push_at,omitempty"`
@@ -159,7 +160,7 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, userAgent string) (string, error) {
+func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
 	if platform != PlatformIOS && platform != PlatformAndroid {
 		return "", fmt.Errorf("platform must be 'ios' or 'android'")
 	}
@@ -178,6 +179,10 @@ func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, user
 		// Preserve existing data on re-subscribe
 		if existing := b.Get([]byte(token)); existing != nil {
 			json.Unmarshal(existing, &sub)
+			// Don't let one user hijack another user's device token
+			if sub.Owner != "" && sub.Owner != owner {
+				return fmt.Errorf("device_token already registered to another account")
+			}
 		}
 
 		if sub.APIKey != "" {
@@ -193,6 +198,7 @@ func (s *Service) Subscribe(token string, platform Platform, label, ipAddr, user
 		sub.Platform = platform
 		sub.Label = label
 		sub.APIKey = apiKey
+		sub.Owner = owner
 		sub.LastSeen = now
 		sub.IPAddress = ipAddr
 		sub.UserAgent = userAgent
@@ -284,54 +290,6 @@ func (s *Service) GetPushLog(limit int) []pushLogEntry {
 	return entries
 }
 
-// ValidateAPIKey checks if an API key is valid for a given device token.
-// If token is empty, checks if the API key belongs to any subscription.
-func (s *Service) ValidateAPIKey(token, apiKey string) bool {
-	if apiKey == "" {
-		return false
-	}
-	valid := false
-	s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketSubscriptions)
-		if token != "" {
-			v := b.Get([]byte(token))
-			if v != nil {
-				var sub Subscription
-				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
-					valid = true
-				}
-			}
-		} else {
-			b.ForEach(func(k, v []byte) error {
-				var sub Subscription
-				if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
-					valid = true
-				}
-				return nil
-			})
-		}
-		return nil
-	})
-	return valid
-}
-
-// FindTokenByAPIKey returns the device token associated with an API key.
-func (s *Service) FindTokenByAPIKey(apiKey string) (string, Platform) {
-	var token string
-	var platform Platform
-	s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
-			var sub Subscription
-			if json.Unmarshal(v, &sub) == nil && sub.APIKey == apiKey {
-				token = sub.DeviceToken
-				platform = sub.Platform
-			}
-			return nil
-		})
-	})
-	return token, platform
-}
-
 func (s *Service) Unsubscribe(token string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
@@ -356,6 +314,56 @@ func (s *Service) ListSubscriptions() []Subscription {
 	return subs
 }
 
+// ListSubscriptionsByOwner returns only subscriptions owned by the given user.
+func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
+	var subs []Subscription
+	s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if err := json.Unmarshal(v, &sub); err == nil && sub.Owner == owner {
+				subs = append(subs, sub)
+			}
+			return nil
+		})
+	})
+	return subs
+}
+
+// GetPlatform returns the platform of the subscription with the given token,
+// or empty string if not found.
+func (s *Service) GetPlatform(token string) Platform {
+	var platform Platform
+	s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err == nil {
+			platform = sub.Platform
+		}
+		return nil
+	})
+	return platform
+}
+
+// IsOwner checks if the given user owns the subscription with the given token.
+func (s *Service) IsOwner(token, owner string) bool {
+	owned := false
+	s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
+		if v == nil {
+			return nil
+		}
+		var sub Subscription
+		if err := json.Unmarshal(v, &sub); err == nil && sub.Owner == owner {
+			owned = true
+		}
+		return nil
+	})
+	return owned
+}
+
 func (s *Service) SendTest(token string, platform Platform) error {
 	return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
 }
@@ -375,7 +383,7 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 		if s.apns == nil {
 			return fmt.Errorf("APNs not configured")
 		}
-		return s.apns.Send(token, title, subtitle, body)
+		return s.apns.Send(token, title, subtitle, body, nil)
 	case PlatformAndroid:
 		if s.fcm == nil {
 			return fmt.Errorf("FCM not configured")
@@ -386,9 +394,10 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 	}
 }
 
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string) {
+func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int) {
 	subs := s.ListSubscriptions()
 	sent := 0
+	badgePtr := &badge
 
 	for _, sub := range subs {
 		var err error
@@ -396,7 +405,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		switch sub.Platform {
 		case PlatformIOS:
 			if s.apns != nil {
-				err = s.apns.Send(sub.DeviceToken, title, subtitle, body)
+				err = s.apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
 			} else {
 				skipped = true
 			}
@@ -479,6 +488,15 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 		return
 	}
 
+	// Badge count = currently non-OK hosts (what an attentive user would
+	// want to act on). Sent on every push so iOS app icon stays accurate.
+	badge := 0
+	for _, h := range status.Hosts {
+		if strings.ToUpper(h.OverallStatus) != "OK" {
+			badge++
+		}
+	}
+
 	s.mu.Lock()
 	var changes []struct {
 		host       models.HostStatus
@@ -505,11 +523,11 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	s.mu.Unlock()
 
 	for _, c := range changes {
-		s.sendStateChange(c.host, c.prevStatus)
+		s.sendStateChange(c.host, c.prevStatus, badge)
 	}
 }
 
-func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
+func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, badge int) {
 	var title, subtitle, body string
 
 	checkType := ""
@@ -541,5 +559,5 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string) {
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
 		host.Hostname, prevStatus, host.OverallStatus)
 
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType)
+	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge)
 }

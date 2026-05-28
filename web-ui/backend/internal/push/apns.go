@@ -28,6 +28,7 @@ type apnsPayload struct {
 type apnsAps struct {
 	Alert apnsAlert `json:"alert"`
 	Sound string    `json:"sound"`
+	Badge *int      `json:"badge,omitempty"`
 }
 
 type apnsAlert struct {
@@ -63,7 +64,7 @@ func NewAPNsClient(certFile, keyFile, bundleID string, production bool) (*APNsCl
 	}, nil
 }
 
-func (c *APNsClient) Send(deviceToken string, title, subtitle, body string) error {
+func (c *APNsClient) Send(deviceToken string, title, subtitle, body string, badge *int) error {
 	payload := apnsPayload{
 		Aps: apnsAps{
 			Alert: apnsAlert{
@@ -72,6 +73,7 @@ func (c *APNsClient) Send(deviceToken string, title, subtitle, body string) erro
 				Body:     body,
 			},
 			Sound: "default",
+			Badge: badge,
 		},
 	}
 
