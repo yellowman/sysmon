@@ -7,6 +7,24 @@ import (
 	"sysmon-web/internal/models"
 )
 
+// q sanitizes a string for emission inside a double-quoted config value.
+// The C lexer (src/parser.l) reads quoted values up to the next '"' with no
+// unescaping, so a literal '"' or a newline in user input would either
+// truncate the value or break out of the directive and inject arbitrary
+// config. We strip the characters that can break the quoting rather than
+// attempt backslash-escaping the lexer doesn't understand.
+func q(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '"' || r == '\n' || r == '\r':
+			return -1
+		case r < 0x20: // other control chars (tabs, etc.)
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // Generate generates sysmon.conf format from config
 func Generate(config *models.Config) (string, error) {
 	if config == nil {
@@ -20,7 +38,7 @@ func Generate(config *models.Config) (string, error) {
 
 	// Root object for dependency tree
 	if config.Root != "" {
-		sb.WriteString(fmt.Sprintf("root = \"%s\";\n\n", config.Root))
+		sb.WriteString(fmt.Sprintf("root = \"%s\";\n\n", q(config.Root)))
 	}
 
 	// Global settings - use "config" prefix and semicolon terminators
@@ -60,59 +78,59 @@ func Generate(config *models.Config) (string, error) {
 		if fileType == "" {
 			fileType = "html"
 		}
-		sb.WriteString(fmt.Sprintf("config statusfile %s \"%s\";\n", fileType, config.Global.StatusFile))
+		sb.WriteString(fmt.Sprintf("config statusfile %s \"%s\";\n", fileType, q(config.Global.StatusFile)))
 	}
 	if config.Global.StatusTempDir != "" {
-		sb.WriteString(fmt.Sprintf("config statustempdir \"%s\";\n", config.Global.StatusTempDir))
+		sb.WriteString(fmt.Sprintf("config statustempdir \"%s\";\n", q(config.Global.StatusTempDir)))
 	}
 	if config.Global.CSSFile != "" {
-		sb.WriteString(fmt.Sprintf("config cssfile \"%s\";\n", config.Global.CSSFile))
+		sb.WriteString(fmt.Sprintf("config cssfile \"%s\";\n", q(config.Global.CSSFile)))
 	}
 	if config.Global.PidFile != "" {
-		sb.WriteString(fmt.Sprintf("config pidfile \"%s\";\n", config.Global.PidFile))
+		sb.WriteString(fmt.Sprintf("config pidfile \"%s\";\n", q(config.Global.PidFile)))
 	}
 	if config.Global.Logging != "" {
 		sb.WriteString(fmt.Sprintf("config logging %s;\n", config.Global.Logging))
 	}
 	if config.Global.SaveState != "" {
-		sb.WriteString(fmt.Sprintf("config savestate \"%s\";\n", config.Global.SaveState))
+		sb.WriteString(fmt.Sprintf("config savestate \"%s\";\n", q(config.Global.SaveState)))
 	}
 
 	// Sender / from (aliases in sysmond)
 	if config.Global.Sender != "" {
-		sb.WriteString(fmt.Sprintf("config sender \"%s\";\n", config.Global.Sender))
+		sb.WriteString(fmt.Sprintf("config sender \"%s\";\n", q(config.Global.Sender)))
 	}
 	if config.Global.Subject != "" {
-		sb.WriteString(fmt.Sprintf("config subject \"%s\";\n", config.Global.Subject))
+		sb.WriteString(fmt.Sprintf("config subject \"%s\";\n", q(config.Global.Subject)))
 	}
 	if config.Global.NoSubject {
 		sb.WriteString("config nosubject;\n")
 	}
 	if config.Global.ReplyTo != "" {
-		sb.WriteString(fmt.Sprintf("config replyto \"%s\";\n", config.Global.ReplyTo))
+		sb.WriteString(fmt.Sprintf("config replyto \"%s\";\n", q(config.Global.ReplyTo)))
 	}
 	if config.Global.ErrorsTo != "" {
-		sb.WriteString(fmt.Sprintf("config errorsto \"%s\";\n", config.Global.ErrorsTo))
+		sb.WriteString(fmt.Sprintf("config errorsto \"%s\";\n", q(config.Global.ErrorsTo)))
 	}
 	if config.Global.PMsg != "" {
-		sb.WriteString(fmt.Sprintf("config pmesg \"%s\";\n", config.Global.PMsg))
+		sb.WriteString(fmt.Sprintf("config pmesg \"%s\";\n", q(config.Global.PMsg)))
 	}
 	if config.Global.AuthKey != "" {
-		sb.WriteString(fmt.Sprintf("config authkey \"%s\";\n", config.Global.AuthKey))
+		sb.WriteString(fmt.Sprintf("config authkey \"%s\";\n", q(config.Global.AuthKey)))
 	}
 	if config.Global.DateFormat != "" {
-		sb.WriteString(fmt.Sprintf("config date \"%s\";\n", config.Global.DateFormat))
+		sb.WriteString(fmt.Sprintf("config date \"%s\";\n", q(config.Global.DateFormat)))
 	}
 
 	// Colors
 	if config.Global.UpColor != "" {
-		sb.WriteString(fmt.Sprintf("config upcolor \"%s\";\n", config.Global.UpColor))
+		sb.WriteString(fmt.Sprintf("config upcolor \"%s\";\n", q(config.Global.UpColor)))
 	}
 	if config.Global.DownColor != "" {
-		sb.WriteString(fmt.Sprintf("config downcolor \"%s\";\n", config.Global.DownColor))
+		sb.WriteString(fmt.Sprintf("config downcolor \"%s\";\n", q(config.Global.DownColor)))
 	}
 	if config.Global.RecentColor != "" {
-		sb.WriteString(fmt.Sprintf("config recentcolor \"%s\";\n", config.Global.RecentColor))
+		sb.WriteString(fmt.Sprintf("config recentcolor \"%s\";\n", q(config.Global.RecentColor)))
 	}
 
 	// Boolean flags
@@ -134,16 +152,16 @@ func Generate(config *models.Config) (string, error) {
 		sb.WriteString("config push-notifications;\n")
 	}
 	if config.Global.PushFCMServerKey != "" {
-		sb.WriteString(fmt.Sprintf("config push-fcm-serverkey \"%s\";\n", config.Global.PushFCMServerKey))
+		sb.WriteString(fmt.Sprintf("config push-fcm-serverkey \"%s\";\n", q(config.Global.PushFCMServerKey)))
 	}
 	if config.Global.PushAPNsCertFile != "" {
-		sb.WriteString(fmt.Sprintf("config push-apns-certfile \"%s\";\n", config.Global.PushAPNsCertFile))
+		sb.WriteString(fmt.Sprintf("config push-apns-certfile \"%s\";\n", q(config.Global.PushAPNsCertFile)))
 	}
 	if config.Global.PushAPNsKeyFile != "" {
-		sb.WriteString(fmt.Sprintf("config push-apns-keyfile \"%s\";\n", config.Global.PushAPNsKeyFile))
+		sb.WriteString(fmt.Sprintf("config push-apns-keyfile \"%s\";\n", q(config.Global.PushAPNsKeyFile)))
 	}
 	if config.Global.PushAPNsBundleID != "" {
-		sb.WriteString(fmt.Sprintf("config push-apns-bundleid \"%s\";\n", config.Global.PushAPNsBundleID))
+		sb.WriteString(fmt.Sprintf("config push-apns-bundleid \"%s\";\n", q(config.Global.PushAPNsBundleID)))
 	}
 	if config.Global.PushAPNsProduction {
 		sb.WriteString("config push-apns-production;\n")
@@ -155,7 +173,7 @@ func Generate(config *models.Config) (string, error) {
 	if len(config.Contacts) > 0 {
 		for _, c := range config.Contacts {
 			if c.Name != "" && c.Email != "" {
-				sb.WriteString(fmt.Sprintf("#@contact \"%s\" \"%s\"\n", c.Email, c.Name))
+				sb.WriteString(fmt.Sprintf("#@contact \"%s\" \"%s\"\n", q(c.Email), q(c.Name)))
 			}
 		}
 		sb.WriteString("\n")
@@ -164,9 +182,9 @@ func Generate(config *models.Config) (string, error) {
 	// Spawn definitions
 	for _, spawn := range config.Spawns {
 		sb.WriteString("spawns {\n")
-		sb.WriteString(fmt.Sprintf("  name \"%s\" {\n", spawn.Name))
+		sb.WriteString(fmt.Sprintf("  name \"%s\" {\n", q(spawn.Name)))
 		if spawn.Command != "" {
-			sb.WriteString(fmt.Sprintf("    command \"%s\";\n", spawn.Command))
+			sb.WriteString(fmt.Sprintf("    command \"%s\";\n", q(spawn.Command)))
 		}
 		sb.WriteString("  };\n")
 		sb.WriteString("};\n\n")
@@ -190,22 +208,26 @@ func Generate(config *models.Config) (string, error) {
 			sb.WriteString(fmt.Sprintf("\tport %d;\n", host.Checks[0].Port))
 		}
 		if host.Notes != "" {
-			sb.WriteString(fmt.Sprintf("\tdesc \"%s\";\n", host.Notes))
+			sb.WriteString(fmt.Sprintf("\tdesc \"%s\";\n", q(host.Notes)))
 		}
 		if host.Contact != "" {
-			sb.WriteString(fmt.Sprintf("\tcontact \"%s\";\n", host.Contact))
+			sb.WriteString(fmt.Sprintf("\tcontact \"%s\";\n", q(host.Contact)))
 		}
 		if host.Dependencies != "" {
-			sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", host.Dependencies))
+			sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(host.Dependencies)))
 		}
 		if host.Group != "" {
-			sb.WriteString(fmt.Sprintf("\tgroup \"%s\";\n", host.Group))
+			sb.WriteString(fmt.Sprintf("\tgroup \"%s\";\n", q(host.Group)))
 		}
-		if host.Paused {
-			sb.WriteString("\tpause;\n")
-		}
+		// NOTE: "paused" is web-UI-only runtime state. sysmond has no
+		// "pause" config directive (pausing is done via the TCP PAUSE
+		// command at runtime), so we must NOT emit it — the lexer would
+		// reject it as an unknown token on reload.
 		if host.Reverse {
 			sb.WriteString("\treverse;\n")
+		}
+		if host.TrapAlert {
+			sb.WriteString("\ttrap_alert;\n")
 		}
 
 		// Per-object overrides
@@ -219,53 +241,86 @@ func Generate(config *models.Config) (string, error) {
 			sb.WriteString(fmt.Sprintf("\tpageinterval %d;\n", host.PageInterval))
 		}
 		if host.ContactOn != "" {
-			sb.WriteString(fmt.Sprintf("\tcontact_on %s;\n", host.ContactOn))
+			sb.WriteString(fmt.Sprintf("\tcontact_on %s;\n", q(host.ContactOn)))
 		}
 		if host.Spawn != "" {
-			sb.WriteString(fmt.Sprintf("\tspawn \"%s\";\n", host.Spawn))
+			sb.WriteString(fmt.Sprintf("\tspawn \"%s\";\n", q(host.Spawn)))
 		}
 		if host.PMsg != "" {
-			sb.WriteString(fmt.Sprintf("\tpmesg \"%s\";\n", host.PMsg))
+			sb.WriteString(fmt.Sprintf("\tpmesg \"%s\";\n", q(host.PMsg)))
 		}
 
-		// Ping settings
-		if host.SendPings > 0 {
-			sb.WriteString(fmt.Sprintf("\tsend_pings %d;\n", host.SendPings))
+		// Ping/latency thresholds (send_pings/min_pings are NOT lexer
+		// directives — sysmond hardcodes those — so they're omitted).
+		if host.RTTThreshold > 0 {
+			sb.WriteString(fmt.Sprintf("\trtt_threshold %d;\n", host.RTTThreshold))
 		}
-		if host.MinPings > 0 {
-			sb.WriteString(fmt.Sprintf("\tmin_pings %d;\n", host.MinPings))
+		if host.JitterThreshold > 0 {
+			sb.WriteString(fmt.Sprintf("\tjitter_threshold %d;\n", host.JitterThreshold))
+		}
+		if host.RTTSamples > 0 {
+			sb.WriteString(fmt.Sprintf("\trtt_samples %d;\n", host.RTTSamples))
 		}
 
 		// SNMP settings
 		if host.SNMPCommunity != "" {
-			sb.WriteString(fmt.Sprintf("\tcommunity \"%s\";\n", host.SNMPCommunity))
+			sb.WriteString(fmt.Sprintf("\tcommunity \"%s\";\n", q(host.SNMPCommunity)))
 		}
 		if host.SNMPOID != "" {
-			sb.WriteString(fmt.Sprintf("\toid \"%s\";\n", host.SNMPOID))
+			sb.WriteString(fmt.Sprintf("\toid \"%s\";\n", q(host.SNMPOID)))
+		}
+		if host.SNMPOIDSec != "" {
+			sb.WriteString(fmt.Sprintf("\tsnmp-oid-sec \"%s\";\n", q(host.SNMPOIDSec)))
+		}
+		if host.SNMPType != "" {
+			sb.WriteString(fmt.Sprintf("\tsnmp-type \"%s\";\n", q(host.SNMPType)))
+		}
+		// snmp-high/low/rate/exact: the lexer requires a quoted value and
+		// reads up to ';' (atol tolerates the trailing quote).
+		if host.SNMPHigh != 0 {
+			sb.WriteString(fmt.Sprintf("\tsnmp-high \"%d\";\n", host.SNMPHigh))
+		}
+		if host.SNMPLow != 0 {
+			sb.WriteString(fmt.Sprintf("\tsnmp-low \"%d\";\n", host.SNMPLow))
+		}
+		if host.SNMPRate != 0 {
+			sb.WriteString(fmt.Sprintf("\tsnmp-rate \"%d\";\n", host.SNMPRate))
+		}
+		if host.SNMPExact != 0 {
+			sb.WriteString(fmt.Sprintf("\tsnmp-exact \"%d\";\n", host.SNMPExact))
+		}
+		if host.SNMPOctets {
+			sb.WriteString("\tsnmp-octets;\n")
 		}
 
 		// DNS settings
 		if host.DNSQuery != "" {
-			sb.WriteString(fmt.Sprintf("\tdns-query \"%s\";\n", host.DNSQuery))
+			sb.WriteString(fmt.Sprintf("\tdns-query \"%s\";\n", q(host.DNSQuery)))
+		}
+		if host.DNSAA {
+			sb.WriteString("\tdns-aa;\n")
+		}
+		if host.DNSRecursion {
+			sb.WriteString("\tdns-recursion;\n")
 		}
 
 		// HTTP settings
 		if host.URL != "" {
-			sb.WriteString(fmt.Sprintf("\turl \"%s\";\n", host.URL))
+			sb.WriteString(fmt.Sprintf("\turl \"%s\";\n", q(host.URL)))
 		}
 		if host.URLText != "" {
-			sb.WriteString(fmt.Sprintf("\turltext \"%s\";\n", host.URLText))
+			sb.WriteString(fmt.Sprintf("\turltext \"%s\";\n", q(host.URLText)))
 		}
 
 		// Auth settings
 		if host.Username != "" {
-			sb.WriteString(fmt.Sprintf("\tusername \"%s\";\n", host.Username))
+			sb.WriteString(fmt.Sprintf("\tusername \"%s\";\n", q(host.Username)))
 		}
 		if host.Password != "" {
-			sb.WriteString(fmt.Sprintf("\tpassword \"%s\";\n", host.Password))
+			sb.WriteString(fmt.Sprintf("\tpassword \"%s\";\n", q(host.Password)))
 		}
 		if host.Secret != "" {
-			sb.WriteString(fmt.Sprintf("\tsecret \"%s\";\n", host.Secret))
+			sb.WriteString(fmt.Sprintf("\tsecret \"%s\";\n", q(host.Secret)))
 		}
 
 		sb.WriteString("};\n\n")

@@ -80,6 +80,7 @@ type Service struct {
 	monitoring *monitoring.Service
 	prevHosts  map[string]string
 	stopCh     chan struct{}
+	stopOnce   sync.Once
 	wg         sync.WaitGroup
 }
 
@@ -153,11 +154,17 @@ func (s *Service) Start() {
 }
 
 func (s *Service) Stop() {
-	close(s.stopCh)
-	s.wg.Wait()
-	if s.db != nil {
-		s.db.Close()
-	}
+	// Idempotent: guards against a double close(stopCh) panic if Stop is
+	// ever called more than once (e.g. defer + an explicit graceful
+	// shutdown path). wg.Wait drains watchLoop before we close the DB so
+	// the poll goroutine can't touch a closed bolt handle.
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		s.wg.Wait()
+		if s.db != nil {
+			s.db.Close()
+		}
+	})
 }
 
 func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
@@ -461,7 +468,9 @@ func (s *Service) watchLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	s.pollAndNotify(true)
+	// Seed poll through safePoll so a panic here doesn't kill the watcher
+	// (the seed just records baseline state; it shouldn't notify).
+	s.safeSeed()
 
 	for {
 		select {
@@ -480,6 +489,15 @@ func (s *Service) safePoll() {
 		}
 	}()
 	s.pollAndNotify(false)
+}
+
+func (s *Service) safeSeed() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("push: seed poll panic: %v", r)
+		}
+	}()
+	s.pollAndNotify(true)
 }
 
 func (s *Service) pollAndNotify(initialSeed bool) {
