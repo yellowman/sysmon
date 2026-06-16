@@ -425,32 +425,27 @@ Named spawn commands can be defined in a spawns block:
 Then referenced from objects with ``spawn "pagechris";''.
 
 .SH PUSH NOTIFICATIONS (APNs / FCM)
-The following directives enable mobile push notifications via the sysmon
-web-ui backend.  The C daemon accepts and ignores these directives; they
-are consumed by the Go web-ui backend which monitors host state changes
-and sends push alerts to subscribed iOS and Android devices.
-.TP
+Push notifications belong to the sysmon web-ui, not to
+.BR sysmond .
+Configure them in the admin UI (\fIAdmin\ \(->\ Push\ Configuration\fP);
+credentials (the FCM service-account JSON, the APNs cert and key) are
+uploaded through the form and stored in
+.B /var/lib/sysmon/settings.db
+(bbolt).  Earlier releases accepted
 .B config push-notifications;
-Enable push notification support.
-.TP
-.B config push-fcm-credentials-file \fI"path"\fP;
-Path to a Google service-account JSON credentials file for the FCM HTTP v1 API
-(Android push notifications). Generate one at Firebase Console > Project Settings >
-Service accounts > "Generate new private key". The project ID is read from the JSON.
-The legacy server-key API was shut down by Google in June 2024.
-.TP
-.B config push-apns-certfile \fI"path"\fP;
-Path to the APNs TLS certificate in PEM format for iOS push notifications.
-.TP
-.B config push-apns-keyfile \fI"path"\fP;
-Path to the APNs TLS private key in PEM format.
-.TP
-.B config push-apns-bundleid \fI"bundle-id"\fP;
-The iOS app bundle identifier (e.g., com.example.sysmon).
-.TP
-.B config push-apns-production;
-Use the production APNs gateway.  If omitted, the sandbox (development)
-gateway is used.
+and related
+.B config push-fcm-*
+/
+.B config push-apns-*
+directives in
+.IR sysmon.conf ;
+those have been removed.  Any leftover
+.B config push-*
+lines will be reported by
+.B sysmond
+as unknown directives \(em remove them from your
+.I sysmon.conf
+and re-enter the values in the admin UI.
 
 .SH EXAMPLES
 

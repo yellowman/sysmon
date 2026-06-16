@@ -3,6 +3,7 @@ package push
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,8 +38,10 @@ type apnsAlert struct {
 	Body     string `json:"body"`
 }
 
-func NewAPNsClient(certFile, keyFile, bundleID string, production bool) (*APNsClient, error) {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+// NewAPNsClient builds an APNs client from a PEM cert + key (raw bytes,
+// e.g. uploaded through the admin UI and stored in bbolt).
+func NewAPNsClient(certPEM, keyPEM []byte, bundleID string, production bool) (*APNsClient, error) {
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("load APNs cert/key: %w", err)
 	}
@@ -62,6 +65,26 @@ func NewAPNsClient(certFile, keyFile, bundleID string, production bool) (*APNsCl
 		baseURL:  baseURL,
 		bundleID: bundleID,
 	}, nil
+}
+
+// APNsCertMeta validates an APNs cert+key pair and returns display-safe
+// metadata. Error text is written to be shown to an admin.
+func APNsCertMeta(certPEM, keyPEM []byte) (subject string, notAfter time.Time, err error) {
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("cert and key don't form a valid pair: %w", err)
+	}
+	leaf := pair.Leaf
+	if leaf == nil {
+		if len(pair.Certificate) == 0 {
+			return "", time.Time{}, fmt.Errorf("certificate is empty")
+		}
+		leaf, err = x509.ParseCertificate(pair.Certificate[0])
+		if err != nil {
+			return "", time.Time{}, fmt.Errorf("parse certificate: %w", err)
+		}
+	}
+	return leaf.Subject.CommonName, leaf.NotAfter, nil
 }
 
 func (c *APNsClient) Send(deviceToken string, title, subtitle, body string, badge *int) error {

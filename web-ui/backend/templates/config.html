@@ -580,77 +580,19 @@
                         </div>
                     </div>
 
-                    <!-- Push Notifications Content -->
+                    <!-- Push Notifications: moved out of sysmon.conf -->
                     <div x-show="settingsView === 'push'" class="px-6 py-4">
-                        <div class="space-y-5">
-                            <!-- Enable toggle -->
-                            <div class="flex items-center justify-between bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 border border-indigo-100">
-                                <div>
-                                    <h4 class="text-sm font-semibold text-gray-900">Push Notifications</h4>
-                                    <p class="text-xs text-gray-500 mt-0.5">Send alerts to iOS and Android devices when host state changes</p>
-                                </div>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" x-model="structuredConfig.global.pushnotifications" class="sr-only peer">
-                                    <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                </label>
-                            </div>
-
-                            <div x-show="structuredConfig.global.pushnotifications" class="space-y-4">
-                                <!-- FCM -->
-                                <div class="border border-gray-200 rounded-lg p-4">
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <i class="fab fa-android text-green-600"></i>
-                                        <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">Credentials File</label>
-                                        <input type="text" x-model="structuredConfig.global.push_fcm_credentials_file" placeholder="/var/lib/sysmon/fcm-credentials.json"
-                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
-                                        <p class="text-xs text-gray-400 mt-1">
-                                            Path to a Google service-account JSON file with the
-                                            <code class="bg-gray-100 px-1 rounded">Firebase Cloud Messaging API</code> enabled.
-                                            Firebase Console &gt; Project Settings &gt; Service accounts &gt; "Generate new private key".
-                                            The legacy Server Key API was shut down by Google in June 2024.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <!-- APNs -->
-                                <div class="border border-gray-200 rounded-lg p-4">
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <i class="fab fa-apple text-gray-800"></i>
-                                        <h4 class="text-sm font-semibold text-gray-800">APNs (iOS)</h4>
-                                    </div>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <div>
-                                            <label class="block text-xs font-medium text-gray-600 mb-1">Certificate File</label>
-                                            <input type="text" x-model="structuredConfig.global.push_apns_certfile" placeholder="/etc/sysmon/apns-cert.pem"
-                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
-                                        </div>
-                                        <div>
-                                            <label class="block text-xs font-medium text-gray-600 mb-1">Key File</label>
-                                            <input type="text" x-model="structuredConfig.global.push_apns_keyfile" placeholder="/etc/sysmon/apns-key.pem"
-                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
-                                        </div>
-                                        <div>
-                                            <label class="block text-xs font-medium text-gray-600 mb-1">Bundle ID</label>
-                                            <input type="text" x-model="structuredConfig.global.push_apns_bundleid" placeholder="com.example.sysmon"
-                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
-                                        </div>
-                                        <div class="flex items-center pt-5">
-                                            <input type="checkbox" x-model="structuredConfig.global.push_apns_production" id="apns-production"
-                                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
-                                            <label for="apns-production" class="ml-2 text-sm text-gray-700">Production gateway</label>
-                                            <span class="ml-2 text-xs text-gray-400">(uncheck for sandbox)</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div x-show="!structuredConfig.global.pushnotifications" class="text-center py-4 text-gray-400 text-sm">
-                                <i class="fas fa-bell-slash text-2xl mb-2"></i>
-                                <p>Enable push notifications to configure APNs and FCM credentials</p>
-                            </div>
+                        <div class="text-center py-8">
+                            <i class="fas fa-arrow-right text-3xl text-gray-300 mb-3"></i>
+                            <p class="text-sm text-gray-700 font-medium">Push notifications moved to the Admin page.</p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                FCM credentials and APNs cert/key are uploaded through the admin UI
+                                and stored in <code class="bg-gray-100 px-1 rounded">/var/lib/sysmon/settings.db</code>,
+                                not in <code class="bg-gray-100 px-1 rounded">sysmon.conf</code> &mdash; sysmond doesn't use them.
+                            </p>
+                            <a href="/admin.html#push-config" class="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                                Open Admin &rarr; Push Configuration
+                            </a>
                         </div>
                     </div>
                 </div>
