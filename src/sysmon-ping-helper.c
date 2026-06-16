@@ -80,12 +80,14 @@ static void drop_to_real_uid(void)
 		return;
 
 	/*
-	 * Drop supplementary groups before dropping gid/uid. Harmless for a
-	 * setuid-only install, but prevents a privilege leak if the binary is
-	 * ever installed setgid or with extra groups. Only root may call it.
+	 * Drop supplementary groups before dropping gid/uid. Must be fatal
+	 * on failure — if it fails, we'd continue with supplementary groups
+	 * still in place even after setgid/setuid, defeating the cleanup.
+	 * Only root may call setgroups; we already checked geteuid()==0
+	 * above (the early-return covers the unprivileged-helper case).
 	 */
-	if (geteuid() == 0)
-		(void) setgroups(0, NULL);
+	if (geteuid() == 0 && setgroups(0, NULL) != 0)
+		_exit(4);
 
 	if (setgid(real_gid) != 0)
 		_exit(4);
