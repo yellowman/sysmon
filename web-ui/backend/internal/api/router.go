@@ -40,8 +40,12 @@ type Router struct {
 	metrics     *middleware.MetricsCollector
 }
 
-// NewRouter creates a new API router.
-func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, pushFactory PushFactory, authSvc *auth.Service, settingsStore *settings.Store) http.Handler {
+// NewRouter creates a new API router and returns the wrapped handler
+// plus a shutdown func. The shutdown func stops whichever push service
+// the router currently owns — the boot instance OR one created later by
+// a lazy reinit — so the watcher goroutine and push.db handle are
+// always released by the same owner. Callers should defer it.
+func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, pushFactory PushFactory, authSvc *auth.Service, settingsStore *settings.Store) (http.Handler, func()) {
 	metrics := middleware.NewMetricsCollector()
 
 	r := &Router{
@@ -154,7 +158,20 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	handler = r.addCORS(handler)
 	handler = middleware.Recovery(handler)
 
-	return handler
+	return handler, r.stopPush
+}
+
+// stopPush stops whichever push service the router currently holds and
+// clears the pointer. Idempotent (push.Service.Stop is guarded by a
+// sync.Once, and we nil the field), so it's safe to call more than once
+// or alongside a never-fired boot-time defer.
+func (r *Router) stopPush() {
+	r.pushMu.Lock()
+	defer r.pushMu.Unlock()
+	if r.push != nil {
+		r.push.Stop()
+		r.push = nil
+	}
 }
 
 // Config handlers

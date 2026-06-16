@@ -80,7 +80,10 @@ func main() {
 	// init fails (e.g. push.db is unwritable at boot), pushService stays
 	// nil; the router retries via pushFactory on the next settings
 	// change, so the operator can fix the underlying problem and apply
-	// settings through the admin UI without a process restart.
+	// settings through the admin UI without a process restart. Lifecycle
+	// (Stop) is owned by the router, not this local — see the shutdown
+	// func returned by NewRouter — because the router may swap in a
+	// lazily-created instance that this local would never see.
 	var pushService *push.Service
 	if pc, err := settingsStore.GetPush(); err != nil {
 		log.Printf("WARNING: could not read push settings: %v", err)
@@ -97,7 +100,6 @@ func main() {
 			log.Printf("WARNING: push notification init failed: %v (will retry on next settings change)", err)
 		} else {
 			pushService = svc
-			defer pushService.Stop()
 		}
 	}
 
@@ -108,8 +110,10 @@ func main() {
 	}
 	defer authService.Close()
 
-	// Create API router
-	handler := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
+	// Create API router. The returned stopPush shuts down whichever push
+	// service the router ends up owning (boot instance or a lazy reinit).
+	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
+	defer stopPush()
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {
