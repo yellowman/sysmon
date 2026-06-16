@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -75,6 +76,14 @@ type Service struct {
 	db      *bolt.DB
 	started bool // watchLoop running?
 
+	// opsMu serializes the public API (Subscribe, ListSubscriptions,
+	// SendTest, …) against Stop. Public methods take RLock and check
+	// stopped; Stop takes Lock to drain in-flight ops, sets stopped,
+	// then closes channels and the bolt DB. The DB is therefore only
+	// ever closed once no RLocker can be holding it.
+	opsMu   sync.RWMutex
+	stopped bool
+
 	apns *APNsClient
 	fcm  *FCMClient
 
@@ -84,6 +93,11 @@ type Service struct {
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
 }
+
+// ErrServiceStopped is returned by public Service methods after Stop has
+// run. Callers should treat this as "push is unavailable" — typically a
+// 503 — not as a permanent failure of the request itself.
+var ErrServiceStopped = errors.New("push service is stopped")
 
 // buildClients constructs FCM and APNs clients from a Config, logging
 // (but not failing) on bad credentials so the service still runs for the
@@ -124,8 +138,16 @@ func (s *Service) clients() (fcm *FCMClient, apns *APNsClient, enabled bool) {
 
 // Reconfigure hot-swaps the push credentials/flags (e.g. after an admin
 // uploads new FCM creds). Safe to call while the watcher is running; it
-// starts the watcher if push just became enabled+configured.
+// starts the watcher if push just became enabled+configured. Becomes a
+// no-op after Stop so a late call can't relaunch the watcher against a
+// closed bolt DB.
 func (s *Service) Reconfigure(cfg Config) {
+	s.opsMu.RLock()
+	if s.stopped {
+		s.opsMu.RUnlock()
+		return
+	}
+	s.opsMu.RUnlock()
 	fcm, apns := buildClients(cfg)
 	s.mu.Lock()
 	s.config = cfg
@@ -194,14 +216,29 @@ func (s *Service) Start() {
 	s.maybeStartLoop()
 }
 
+// Stop tears the service down with proper draining:
+//  1. Close stopCh so the watcher exits at the next select.
+//  2. Wait for the watcher goroutine to finish — the watcher's bolt
+//     ops are wrapped in the same public API as handler requests, so
+//     they take opsMu.RLock per op; we must not hold the W lock yet
+//     or they'd deadlock.
+//  3. Take opsMu.Lock. This blocks until every concurrent handler
+//     that already had RLock has released. Once we own it, no new
+//     RLocker can advance, and no current RLocker is in flight.
+//  4. Set stopped = true. Releasing the W lock lets queued handlers
+//     run; they observe stopped and return ErrServiceStopped without
+//     touching the bolt DB.
+//  5. Close the bolt DB.
+//
+// Idempotent via stopOnce: safe to call from a defer plus an explicit
+// graceful shutdown path.
 func (s *Service) Stop() {
-	// Idempotent: guards against a double close(stopCh) panic if Stop is
-	// ever called more than once (e.g. defer + an explicit graceful
-	// shutdown path). wg.Wait drains watchLoop before we close the DB so
-	// the poll goroutine can't touch a closed bolt handle.
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 		s.wg.Wait()
+		s.opsMu.Lock()
+		s.stopped = true
+		s.opsMu.Unlock()
 		if s.db != nil {
 			s.db.Close()
 		}
@@ -209,6 +246,11 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return "", ErrServiceStopped
+	}
 	if platform != PlatformIOS && platform != PlatformAndroid {
 		return "", fmt.Errorf("platform must be 'ios' or 'android'")
 	}
@@ -262,6 +304,11 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 
 // TouchLastSeen updates the last_seen timestamp for a device.
 func (s *Service) TouchLastSeen(token, ipAddr string) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return
+	}
 	s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		v := b.Get([]byte(token))
@@ -283,6 +330,11 @@ func (s *Service) TouchLastSeen(token, ipAddr string) {
 
 // RecordPush updates push delivery stats for a device.
 func (s *Service) RecordPush(token string, success bool) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return
+	}
 	s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		v := b.Get([]byte(token))
@@ -308,6 +360,11 @@ func (s *Service) RecordPush(token string, success bool) {
 
 // AdminRemove removes a subscription by device token (admin operation).
 func (s *Service) AdminRemove(token string) error {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ErrServiceStopped
+	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		if b.Get([]byte(token)) == nil {
@@ -319,6 +376,11 @@ func (s *Service) AdminRemove(token string) error {
 
 // GetPushLog returns the N most recent push log entries.
 func (s *Service) GetPushLog(limit int) []pushLogEntry {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return nil
+	}
 	var entries []pushLogEntry
 	s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketPushLog)
@@ -339,6 +401,11 @@ func (s *Service) GetPushLog(limit int) []pushLogEntry {
 }
 
 func (s *Service) Unsubscribe(token string) error {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ErrServiceStopped
+	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		if b.Get([]byte(token)) == nil {
@@ -349,6 +416,11 @@ func (s *Service) Unsubscribe(token string) error {
 }
 
 func (s *Service) ListSubscriptions() []Subscription {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return nil
+	}
 	var subs []Subscription
 	s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
@@ -364,6 +436,11 @@ func (s *Service) ListSubscriptions() []Subscription {
 
 // ListSubscriptionsByOwner returns only subscriptions owned by the given user.
 func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return nil
+	}
 	var subs []Subscription
 	s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
@@ -380,6 +457,11 @@ func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
 // GetPlatform returns the platform of the subscription with the given token,
 // or empty string if not found.
 func (s *Service) GetPlatform(token string) Platform {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ""
+	}
 	var platform Platform
 	s.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
@@ -397,6 +479,11 @@ func (s *Service) GetPlatform(token string) Platform {
 
 // IsOwner checks if the given user owns the subscription with the given token.
 func (s *Service) IsOwner(token, owner string) bool {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return false
+	}
 	owned := false
 	s.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
@@ -413,6 +500,11 @@ func (s *Service) IsOwner(token, owner string) bool {
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ErrServiceStopped
+	}
 	return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
 }
 
