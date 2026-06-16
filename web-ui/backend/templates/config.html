@@ -603,10 +603,15 @@
                                         <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">Server Key</label>
-                                        <input type="password" x-model="structuredConfig.global.push_fcm_serverkey" placeholder="AAAAxxxxxxx:APA91b..."
+                                        <label class="block text-xs font-medium text-gray-600 mb-1">Credentials File</label>
+                                        <input type="text" x-model="structuredConfig.global.push_fcm_credentials_file" placeholder="/var/lib/sysmon/fcm-credentials.json"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
-                                        <p class="text-xs text-gray-400 mt-1">Firebase Console > Project Settings > Cloud Messaging</p>
+                                        <p class="text-xs text-gray-400 mt-1">
+                                            Path to a Google service-account JSON file with the
+                                            <code class="bg-gray-100 px-1 rounded">Firebase Cloud Messaging API</code> enabled.
+                                            Firebase Console &gt; Project Settings &gt; Service accounts &gt; "Generate new private key".
+                                            The legacy Server Key API was shut down by Google in June 2024.
+                                        </p>
                                     </div>
                                 </div>
 

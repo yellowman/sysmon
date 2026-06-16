@@ -61,12 +61,12 @@ type pushLogEntry struct {
 }
 
 type Config struct {
-	Enabled        bool
-	FCMServerKey   string
-	APNsCertFile   string
-	APNsKeyFile    string
-	APNsBundleID   string
-	APNsProduction bool
+	Enabled            bool
+	FCMCredentialsFile string // path to Google service-account JSON
+	APNsCertFile       string
+	APNsKeyFile        string
+	APNsBundleID       string
+	APNsProduction     bool
 }
 
 type Service struct {
@@ -114,9 +114,14 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 		stopCh:     make(chan struct{}),
 	}
 
-	if cfg.FCMServerKey != "" {
-		s.fcm = NewFCMClient(cfg.FCMServerKey)
-		log.Printf("push: FCM client initialized")
+	if cfg.FCMCredentialsFile != "" {
+		client, err := NewFCMClient(cfg.FCMCredentialsFile)
+		if err != nil {
+			log.Printf("push: WARNING: FCM client init failed: %v", err)
+		} else {
+			s.fcm = client
+			log.Printf("push: FCM client initialized for project %s", client.projectID)
+		}
 	}
 
 	if cfg.APNsCertFile != "" && cfg.APNsKeyFile != "" && cfg.APNsBundleID != "" {
