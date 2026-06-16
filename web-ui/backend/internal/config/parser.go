@@ -523,21 +523,20 @@ func Parse(content []byte) (*models.Config, error) {
 			} else if strings.HasPrefix(line, "snmp-type ") {
 				currentHost.SNMPType = extractQuoted(strings.TrimPrefix(line, "snmp-type "))
 			} else if strings.HasPrefix(line, "snmp-high ") {
-				// Value may be quoted ("80") — the daemon lexer requires
-				// quotes for these — or bare; extractQuoted handles both.
-				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-high ")), 10, 64); err == nil {
+				// sysmond requires these quoted (snmp-high "80"); tolerate bare too.
+				if val, ok := parseQuotedInt64(strings.TrimPrefix(line, "snmp-high ")); ok {
 					currentHost.SNMPHigh = val
 				}
 			} else if strings.HasPrefix(line, "snmp-low ") {
-				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-low ")), 10, 64); err == nil {
+				if val, ok := parseQuotedInt64(strings.TrimPrefix(line, "snmp-low ")); ok {
 					currentHost.SNMPLow = val
 				}
 			} else if strings.HasPrefix(line, "snmp-exact ") {
-				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-exact ")), 10, 64); err == nil {
+				if val, ok := parseQuotedInt64(strings.TrimPrefix(line, "snmp-exact ")); ok {
 					currentHost.SNMPExact = val
 				}
 			} else if strings.HasPrefix(line, "snmp-rate ") {
-				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-rate ")), 10, 64); err == nil {
+				if val, ok := parseQuotedInt64(strings.TrimPrefix(line, "snmp-rate ")); ok {
 					currentHost.SNMPRate = val
 				}
 			} else if line == "snmp-octets" || line == "snmpoctets" {
@@ -597,6 +596,18 @@ func Parse(content []byte) (*models.Config, error) {
 }
 
 // extractQuoted extracts a quoted string or returns the whole string if not quoted
+// parseQuotedInt64 parses a 64-bit integer that sysmond accepts either
+// bare (snmp-high 80) or quoted (snmp-high "80"). It is the single place
+// that owns the numeric base, the bit width, and the quote handling, so
+// the call sites express intent rather than strconv mechanics.
+func parseQuotedInt64(s string) (int64, bool) {
+	v, err := strconv.ParseInt(extractQuoted(s), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 func extractQuoted(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
