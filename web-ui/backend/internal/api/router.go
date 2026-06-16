@@ -389,7 +389,10 @@ func (r *Router) readDaemonPID() int {
 		return 0
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
+	if err != nil || pid <= 0 {
+		// A POSIX PID is strictly positive; a stale or corrupted pidfile
+		// with 0 or a negative value should not be surfaced as if it
+		// were the live daemon. Fall back to "unknown".
 		return 0
 	}
 	return pid
