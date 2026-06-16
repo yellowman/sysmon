@@ -442,7 +442,7 @@ object example-paused {
 # The C daemon accepts and ignores them.
 
 #config push-notifications;
-#config push-fcm-serverkey "AAAAxxxxxxx:APA91bxxxxxxxxxxxxxxxxxxxxxxxxx";
+#config push-fcm-credentials-file "/var/lib/sysmon/fcm-credentials.json";
 #config push-apns-certfile "/etc/sysmon/apns-cert.pem";
 #config push-apns-keyfile "/etc/sysmon/apns-key.pem";
 #config push-apns-bundleid "com.example.sysmon";

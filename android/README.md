@@ -20,13 +20,15 @@ or recover.
 3. Download the generated `google-services.json` and drop it at
    `android/app/google-services.json` (do NOT commit it — it's in
    `.gitignore`)
-4. Project Settings → Cloud Messaging → copy the **Server key** (Legacy
-   API). Put it in `sysmon.conf` as:
+4. Project Settings → **Service accounts** → "Generate new private key".
+   Save the downloaded JSON on the sysmon-web host (e.g.
+   `/var/lib/sysmon/fcm-credentials.json`), set it to mode 0600 owned by
+   the sysmon-web user, and reference it from `sysmon.conf`:
    ```
-   config push-fcm-server-key <your-server-key>
+   config push-fcm-credentials-file "/var/lib/sysmon/fcm-credentials.json";
    ```
-   If the Legacy API is disabled in your project, enable it under
-   Cloud Messaging → Manage API in Google Cloud Console.
+   sysmon-web uses the FCM HTTP v1 API; the older Server Key (Legacy
+   HTTP API) was shut down by Google in June 2024.
 
 ## Building
 
@@ -98,8 +100,10 @@ tracked labels mirror the sysmon web UI's editorial magazine style.
 
 **Push notifications never arrive**
 - Verify the package name matches the Firebase app
-- Verify the Server key in `sysmon.conf` is the **Cloud Messaging API
-  (Legacy)** key, not the Web API key
+- Verify `push-fcm-credentials-file` in `sysmon.conf` points at a
+  service-account JSON whose project matches your `google-services.json`
+- Verify the **Firebase Cloud Messaging API** (not the old Legacy HTTP
+  API) is enabled in Google Cloud Console for that project
 - Settings → Apps → Sysmon → Notifications → enabled
 - In the Settings tab inside the app, tap "Send Test Notification"
 

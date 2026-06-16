@@ -47,11 +47,28 @@ config push-notifications;
 
 ### 2. Configure FCM (Android)
 
-Get a server key from Firebase Console > Project Settings > Cloud Messaging.
+sysmon-web uses the FCM HTTP v1 API. Authenticate with a Google
+service-account JSON file:
+
+1. Firebase Console → Project Settings → **Service accounts** → "Generate
+   new private key". Save the downloaded JSON somewhere readable only by
+   the sysmon-web process (e.g. `/var/lib/sysmon/fcm-credentials.json`,
+   `chmod 600`, owned by the sysmon user).
+2. Make sure the **Firebase Cloud Messaging API** is enabled in the
+   matching Google Cloud project.
+3. Point sysmon at the file:
 
 ```
-config push-fcm-serverkey "AAAAxxxxxxx:APA91bxxxxxxxxxxxxxxxxxxxxxxxxx";
+config push-fcm-credentials-file "/var/lib/sysmon/fcm-credentials.json";
 ```
+
+The project ID is read from the JSON; no separate config directive is
+needed. sysmon-web mints short-lived OAuth access tokens transparently
+and refreshes them automatically.
+
+> The previous server-key (Legacy HTTP API) flow was shut down by Google
+> in June 2024. Any `config push-fcm-serverkey "..."` directives in
+> existing configs will be ignored and must be replaced.
 
 ### 3. Configure APNs (iOS)
 

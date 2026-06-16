@@ -61,12 +61,12 @@ type pushLogEntry struct {
 }
 
 type Config struct {
-	Enabled        bool
-	FCMServerKey   string
-	APNsCertFile   string
-	APNsKeyFile    string
-	APNsBundleID   string
-	APNsProduction bool
+	Enabled            bool
+	FCMCredentialsFile string // path to Google service-account JSON
+	APNsCertFile       string
+	APNsKeyFile        string
+	APNsBundleID       string
+	APNsProduction     bool
 }
 
 type Service struct {
@@ -80,6 +80,7 @@ type Service struct {
 	monitoring *monitoring.Service
 	prevHosts  map[string]string
 	stopCh     chan struct{}
+	stopOnce   sync.Once
 	wg         sync.WaitGroup
 }
 
@@ -113,9 +114,14 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 		stopCh:     make(chan struct{}),
 	}
 
-	if cfg.FCMServerKey != "" {
-		s.fcm = NewFCMClient(cfg.FCMServerKey)
-		log.Printf("push: FCM client initialized")
+	if cfg.FCMCredentialsFile != "" {
+		client, err := NewFCMClient(cfg.FCMCredentialsFile)
+		if err != nil {
+			log.Printf("push: WARNING: FCM client init failed: %v", err)
+		} else {
+			s.fcm = client
+			log.Printf("push: FCM client initialized for project %s", client.projectID)
+		}
 	}
 
 	if cfg.APNsCertFile != "" && cfg.APNsKeyFile != "" && cfg.APNsBundleID != "" {
@@ -153,11 +159,17 @@ func (s *Service) Start() {
 }
 
 func (s *Service) Stop() {
-	close(s.stopCh)
-	s.wg.Wait()
-	if s.db != nil {
-		s.db.Close()
-	}
+	// Idempotent: guards against a double close(stopCh) panic if Stop is
+	// ever called more than once (e.g. defer + an explicit graceful
+	// shutdown path). wg.Wait drains watchLoop before we close the DB so
+	// the poll goroutine can't touch a closed bolt handle.
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		s.wg.Wait()
+		if s.db != nil {
+			s.db.Close()
+		}
+	})
 }
 
 func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
@@ -461,7 +473,9 @@ func (s *Service) watchLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	s.pollAndNotify(true)
+	// Seed poll through safePoll so a panic here doesn't kill the watcher
+	// (the seed just records baseline state; it shouldn't notify).
+	s.safeSeed()
 
 	for {
 		select {
@@ -480,6 +494,15 @@ func (s *Service) safePoll() {
 		}
 	}()
 	s.pollAndNotify(false)
+}
+
+func (s *Service) safeSeed() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("push: seed poll panic: %v", r)
+		}
+	}()
+	s.pollAndNotify(true)
 }
 
 func (s *Service) pollAndNotify(initialSeed bool) {

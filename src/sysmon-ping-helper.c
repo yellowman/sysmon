@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <grp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -78,13 +79,25 @@ static void drop_to_real_uid(void)
 	if (geteuid() == real_uid)
 		return;
 
+	/*
+	 * Drop supplementary groups before dropping gid/uid. Must be fatal
+	 * on failure — if it fails, we'd continue with supplementary groups
+	 * still in place even after setgid/setuid, defeating the cleanup.
+	 * Only root may call setgroups; we already checked geteuid()==0
+	 * above (the early-return covers the unprivileged-helper case).
+	 */
+	if (geteuid() == 0 && setgroups(0, NULL) != 0)
+		_exit(4);
+
 	if (setgid(real_gid) != 0)
 		_exit(4);
 	if (setuid(real_uid) != 0)
 		_exit(4);
 
-	/* Verify */
+	/* Verify the drop stuck and root cannot be regained */
 	if (geteuid() == 0 || getegid() == 0)
+		_exit(4);
+	if (real_uid != 0 && setuid(0) == 0)
 		_exit(4);
 }
 

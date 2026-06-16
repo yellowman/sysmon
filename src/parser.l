@@ -1156,10 +1156,10 @@ config\ push-notifications{WS}*;	{
     print_err(0, "push-notifications enabled (handled by web-ui)");
 };
 
-config\ push-fcm-serverkey\ [^;]+;	{
+config\ push-fcm-credentials-file\ [^;]+;	{
   fixup_lineno();
   if (debug)
-    print_err(0, "push-fcm-serverkey set (handled by web-ui)");
+    print_err(0, "push-fcm-credentials-file set (handled by web-ui)");
 };
 
 config\ push-apns-certfile\ [^;]+;	{

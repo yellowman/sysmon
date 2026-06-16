@@ -22,8 +22,8 @@ type GlobalSettings struct {
 	FlapTime       int `json:"flaptime,omitempty"`       // flap detection time in seconds
 
 	// Ports
-	ClientPort   int `json:"clientport,omitempty"`   // TCP port for sysmon client (default 1345)
-	SNMPTrapPort int `json:"trapport,omitempty"`     // UDP port for SNMP traps (default 162)
+	ClientPort   int `json:"clientport,omitempty"` // TCP port for sysmon client (default 1345)
+	SNMPTrapPort int `json:"trapport,omitempty"`   // UDP port for SNMP traps (default 162)
 
 	// Alert settings
 	PageInterval int    `json:"pageinterval,omitempty"` // reminder interval in minutes
@@ -36,12 +36,12 @@ type GlobalSettings struct {
 	PMsg         string `json:"pmesg,omitempty"`        // page message format
 
 	// HTML/Display settings
-	UpColor      string `json:"upcolor,omitempty"`      // color for up status
-	DownColor    string `json:"downcolor,omitempty"`    // color for down status
-	RecentColor  string `json:"recentcolor,omitempty"`  // color for recent changes
-	HTMLRefresh  int    `json:"htmlrefresh,omitempty"`  // HTML refresh interval in seconds
-	DateFormat   string `json:"dateformat,omitempty"`   // date format string
-	ShowUpAlso   bool   `json:"showupalso,omitempty"`   // show up hosts in status
+	UpColor     string `json:"upcolor,omitempty"`     // color for up status
+	DownColor   string `json:"downcolor,omitempty"`   // color for down status
+	RecentColor string `json:"recentcolor,omitempty"` // color for recent changes
+	HTMLRefresh int    `json:"htmlrefresh,omitempty"` // HTML refresh interval in seconds
+	DateFormat  string `json:"dateformat,omitempty"`  // date format string
+	ShowUpAlso  bool   `json:"showupalso,omitempty"`  // show up hosts in status
 
 	// Files and logging
 	StatusFile     string `json:"statusfile,omitempty"`     // path to status file
@@ -57,20 +57,20 @@ type GlobalSettings struct {
 	DNSExpire int `json:"dnsexpire,omitempty"` // DNS cache TTL in seconds
 
 	// System settings
-	MaxQueued       int    `json:"maxqueued,omitempty"`       // max simultaneous checks
-	NoHeartbeat     bool   `json:"noheartbeat,omitempty"`     // disable registration packet
-	NoLogConnects   bool   `json:"nologconnects,omitempty"`   // don't log client connections
-	SNMPTrap        bool   `json:"snmptrap,omitempty"`        // enable SNMP trap monitoring
-	AuthKey         string `json:"authkey,omitempty"`         // authentication key for clients
-	SaveState       string `json:"savestate,omitempty"`       // path to save state XML file
+	MaxQueued     int    `json:"maxqueued,omitempty"`     // max simultaneous checks
+	NoHeartbeat   bool   `json:"noheartbeat,omitempty"`   // disable registration packet
+	NoLogConnects bool   `json:"nologconnects,omitempty"` // don't log client connections
+	SNMPTrap      bool   `json:"snmptrap,omitempty"`      // enable SNMP trap monitoring
+	AuthKey       string `json:"authkey,omitempty"`       // authentication key for clients
+	SaveState     string `json:"savestate,omitempty"`     // path to save state XML file
 
 	// Push notification settings
-	PushNotifications bool   `json:"pushnotifications,omitempty"` // enable push notifications
-	PushFCMServerKey  string `json:"push_fcm_serverkey,omitempty"`
-	PushAPNsCertFile  string `json:"push_apns_certfile,omitempty"`
-	PushAPNsKeyFile   string `json:"push_apns_keyfile,omitempty"`
-	PushAPNsBundleID  string `json:"push_apns_bundleid,omitempty"`
-	PushAPNsProduction bool  `json:"push_apns_production,omitempty"`
+	PushNotifications      bool   `json:"pushnotifications,omitempty"`         // enable push notifications
+	PushFCMCredentialsFile string `json:"push_fcm_credentials_file,omitempty"` // path to Google service-account JSON for FCM HTTP v1 API
+	PushAPNsCertFile       string `json:"push_apns_certfile,omitempty"`
+	PushAPNsKeyFile        string `json:"push_apns_keyfile,omitempty"`
+	PushAPNsBundleID       string `json:"push_apns_bundleid,omitempty"`
+	PushAPNsProduction     bool   `json:"push_apns_production,omitempty"`
 
 	// Include paths
 	Includes []string `json:"includes,omitempty"` // included config files
@@ -86,10 +86,10 @@ type SpawnCommand struct {
 type Host struct {
 	ID       string `json:"id"`
 	Hostname string `json:"hostname"`
-	IP       string `json:"ip"`                      // IP address
-	Contact  string `json:"contact,omitempty"`       // contact email
-	Notes    string `json:"notes,omitempty"`         // Description/notes
-	Paused   bool   `json:"paused"`                  // pause monitoring
+	IP       string `json:"ip"`                // IP address
+	Contact  string `json:"contact,omitempty"` // contact email
+	Notes    string `json:"notes,omitempty"`   // Description/notes
+	Paused   bool   `json:"paused"`            // pause monitoring
 
 	// Alert settings
 	Spawn        string `json:"spawn,omitempty"`
@@ -101,33 +101,33 @@ type Host struct {
 	Port int    `json:"port,omitempty"`
 
 	// Ping/threshold settings (read-only from sysmond, not configurable via sysmon.conf)
-	MinPings             int     `json:"minpings,omitempty"`
-	SendPings            int     `json:"sendpings,omitempty"`
-	PacketLossThreshold  float64 `json:"packetlossthreshold,omitempty"`
-	RTTThreshold         int     `json:"rttthreshold,omitempty"`
-	JitterThreshold      int     `json:"jitterthreshold,omitempty"`
-	RTTSamples           int     `json:"rttsamples,omitempty"`
+	MinPings            int     `json:"minpings,omitempty"`
+	SendPings           int     `json:"sendpings,omitempty"`
+	PacketLossThreshold float64 `json:"packetlossthreshold,omitempty"`
+	RTTThreshold        int     `json:"rttthreshold,omitempty"`
+	JitterThreshold     int     `json:"jitterthreshold,omitempty"`
+	RTTSamples          int     `json:"rttsamples,omitempty"`
 
 	// SNMP trap settings
 	TrapAlert bool `json:"trapalert,omitempty"`
 
 	// SNMP monitoring settings
-	SNMPCommunity string  `json:"snmpcommunity,omitempty"` // SNMP community string (e.g., "public")
-	SNMPOID       string  `json:"snmpoid,omitempty"`       // OID to query (e.g., ".1.3.6.1.2.1.1.3.0")
-	SNMPOIDSec    string  `json:"snmpoidsec,omitempty"`    // Secondary OID for comparison
-	SNMPUpMsg     string  `json:"snmpupmsg,omitempty"`     // Custom message when SNMP check passes
-	SNMPDownMsg   string  `json:"snmpdownmsg,omitempty"`   // Custom message when SNMP check fails
-	SNMPType      string  `json:"snmptype,omitempty"`      // SNMP check type (high/low/range/exact/rate/uptime)
-	SNMPHigh      int64   `json:"snmphigh,omitempty"`      // upper threshold
-	SNMPLow       int64   `json:"snmplow,omitempty"`       // lower threshold
-	SNMPExact     int64   `json:"snmpexact,omitempty"`     // exact value to match
-	SNMPRate      int64   `json:"snmprate,omitempty"`      // rate per second threshold
-	SNMPOctets    bool    `json:"snmpoctets,omitempty"`    // convert bytes to bits for rate
+	SNMPCommunity string `json:"snmpcommunity,omitempty"` // SNMP community string (e.g., "public")
+	SNMPOID       string `json:"snmpoid,omitempty"`       // OID to query (e.g., ".1.3.6.1.2.1.1.3.0")
+	SNMPOIDSec    string `json:"snmpoidsec,omitempty"`    // Secondary OID for comparison
+	SNMPUpMsg     string `json:"snmpupmsg,omitempty"`     // Custom message when SNMP check passes
+	SNMPDownMsg   string `json:"snmpdownmsg,omitempty"`   // Custom message when SNMP check fails
+	SNMPType      string `json:"snmptype,omitempty"`      // SNMP check type (high/low/range/exact/rate/uptime)
+	SNMPHigh      int64  `json:"snmphigh,omitempty"`      // upper threshold
+	SNMPLow       int64  `json:"snmplow,omitempty"`       // lower threshold
+	SNMPExact     int64  `json:"snmpexact,omitempty"`     // exact value to match
+	SNMPRate      int64  `json:"snmprate,omitempty"`      // rate per second threshold
+	SNMPOctets    bool   `json:"snmpoctets,omitempty"`    // convert bytes to bits for rate
 
 	// DNS check settings
-	DNSQuery      string `json:"dnsquery,omitempty"`      // DNS hostname to query
-	DNSAA         bool   `json:"dnsaa,omitempty"`         // Require authoritative answer
-	DNSRecursion  bool   `json:"dnsrecursion,omitempty"`  // Perform recursive query
+	DNSQuery     string `json:"dnsquery,omitempty"`     // DNS hostname to query
+	DNSAA        bool   `json:"dnsaa,omitempty"`        // Require authoritative answer
+	DNSRecursion bool   `json:"dnsrecursion,omitempty"` // Perform recursive query
 
 	// Protocol authentication (POP3, IMAP, RADIUS, etc.)
 	Username string `json:"username,omitempty"` // Authentication username
@@ -141,13 +141,13 @@ type Host struct {
 	HeaderVal string `json:"headerval,omitempty"` // Expected HTTP header value
 
 	// Per-object overrides and customization
-	QueueTime            int    `json:"queuetime,omitempty"`            // per-object check interval in seconds
-	NumFailures          int    `json:"numfailures,omitempty"`          // per-object failures before alert (overrides global)
-	PMsg                 string `json:"pmsg,omitempty"`                 // custom page message format
-	Command              string `json:"command,omitempty"`              // command to execute on failure
-	Group                string `json:"group,omitempty"`                // group/category for organization
-	PktLossTolerance     int    `json:"pktlosstolerance,omitempty"`     // packet count threshold (not percentage)
-	PktLossHistoryHours  int    `json:"pktlosshistoryhours,omitempty"`  // hours of packet loss history
+	QueueTime           int    `json:"queuetime,omitempty"`           // per-object check interval in seconds
+	NumFailures         int    `json:"numfailures,omitempty"`         // per-object failures before alert (overrides global)
+	PMsg                string `json:"pmsg,omitempty"`                // custom page message format
+	Command             string `json:"command,omitempty"`             // command to execute on failure
+	Group               string `json:"group,omitempty"`               // group/category for organization
+	PktLossTolerance    int    `json:"pktlosstolerance,omitempty"`    // packet count threshold (not percentage)
+	PktLossHistoryHours int    `json:"pktlosshistoryhours,omitempty"` // hours of packet loss history
 
 	// Advanced settings
 	Reverse      bool   `json:"reverse,omitempty"`      // reverse logic (alert when UP)
@@ -208,7 +208,7 @@ type DaemonInfo struct {
 
 // HostStatus represents the status of a monitored host
 type HostStatus struct {
-	ObjectName     string        `json:"object_name"`           // Unique sysmon object name
+	ObjectName     string        `json:"object_name"` // Unique sysmon object name
 	Hostname       string        `json:"hostname"`
 	Description    string        `json:"description,omitempty"` // Notes/description from config
 	IPv4Address    string        `json:"ipv4_address,omitempty"`
@@ -217,10 +217,10 @@ type HostStatus struct {
 	StatusColor    string        `json:"status_color"`
 	Contact        string        `json:"contact,omitempty"`
 	Paused         bool          `json:"paused"`
-	DownCount      int64         `json:"down_count"`          // Consecutive down count
-	UpCount        int64         `json:"up_count"`            // Consecutive up count
-	TotalDown      int64         `json:"total_down"`          // Total times down
-	TotalChecked   int64         `json:"total_checked"`       // Total checks performed
+	DownCount      int64         `json:"down_count"`                 // Consecutive down count
+	UpCount        int64         `json:"up_count"`                   // Consecutive up count
+	TotalDown      int64         `json:"total_down"`                 // Total times down
+	TotalChecked   int64         `json:"total_checked"`              // Total checks performed
 	LastChangeTime *time.Time    `json:"last_change_time,omitempty"` // When status last changed
 	TimeUp         int64         `json:"time_up,omitempty"`          // Seconds host has been up (0 if down)
 	TimeFailed     int64         `json:"time_failed,omitempty"`      // Seconds host has been down (0 if up)
