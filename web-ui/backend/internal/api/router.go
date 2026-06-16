@@ -1572,6 +1572,12 @@ type fcmConfiguredView struct {
 type apnsConfiguredView struct {
 	Subject  string `json:"subject"`   // certificate Subject CN
 	NotAfter string `json:"not_after"` // RFC3339, for the expiry warning
+	// Ready is true only when APNs is actually operational, which the
+	// push service requires a bundle ID for (see buildClients). A cert
+	// uploaded without a bundle ID is present-but-not-ready: we still
+	// show its metadata, but Ready=false so the UI doesn't claim iOS
+	// delivery works when it doesn't.
+	Ready bool `json:"ready"`
 }
 
 func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
@@ -1587,7 +1593,11 @@ func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
 	}
 	if len(pc.APNsCertPEM) > 0 && len(pc.APNsKeyPEM) > 0 {
 		if subj, notAfter, err := push.APNsCertMeta(pc.APNsCertPEM, pc.APNsKeyPEM); err == nil {
-			v.APNs = &apnsConfiguredView{Subject: subj, NotAfter: notAfter.UTC().Format(time.RFC3339)}
+			v.APNs = &apnsConfiguredView{
+				Subject:  subj,
+				NotAfter: notAfter.UTC().Format(time.RFC3339),
+				Ready:    pc.APNsBundleID != "",
+			}
 		}
 	}
 	return v

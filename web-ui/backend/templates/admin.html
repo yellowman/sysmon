@@ -217,7 +217,8 @@
                 <div class="flex items-center gap-2 mb-3">
                     <i class="fab fa-apple text-gray-800"></i>
                     <h4 class="text-sm font-semibold text-gray-800">APNs (iOS)</h4>
-                    <span x-show="pushCfg.apns" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.apns && pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Incomplete</span>
                     <span x-show="!pushCfg.apns" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
                 </div>
 
@@ -232,6 +233,11 @@
                         </div>
                     </div>
                 </template>
+
+                <div x-show="pushCfg.apns && !pushCfg.apns.ready"
+                     class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                    ⚠ Certificate uploaded, but iOS delivery is off until you set a <b>Bundle ID</b> below.
+                </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                     <div>
