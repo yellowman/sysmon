@@ -1625,10 +1625,20 @@ func (r *Router) handleSettingsPush(w http.ResponseWriter, req *http.Request) {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// failAfterWrite re-reads the actual on-disk state and pushes it
+		// to the runtime before reporting the error, so a partial PUT
+		// can never leave the push service tracking a stale view of
+		// settings.db (e.g. Enabled persisted but Reconfigure skipped).
+		failAfterWrite := func(status int, msg string) {
+			if fresh, gerr := r.settings.GetPush(); gerr == nil {
+				r.reconfigurePush(fresh)
+			}
+			r.sendError(w, status, msg)
+		}
 		if body.Enabled != nil {
 			pc.Enabled = *body.Enabled
 			if err := r.settings.SetPushEnabled(pc.Enabled); err != nil {
-				r.sendError(w, http.StatusInternalServerError, err.Error())
+				failAfterWrite(http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -1640,12 +1650,11 @@ func (r *Router) handleSettingsPush(w http.ResponseWriter, req *http.Request) {
 				pc.APNsProduction = *body.APNsProduction
 			}
 			if err := r.settings.SetAPNs(pc.APNsCertPEM, pc.APNsKeyPEM, pc.APNsBundleID, pc.APNsProduction); err != nil {
-				r.sendError(w, http.StatusInternalServerError, err.Error())
+				failAfterWrite(http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		r.reconfigurePush(pc)
-		r.sendJSON(w, r.viewPush(pc))
+		r.commitPushAndRespond(w)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1676,18 +1685,14 @@ func (r *Router) handleSettingsPushFCM(w http.ResponseWriter, req *http.Request)
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		pc, _ := r.settings.GetPush()
-		r.reconfigurePush(pc)
-		r.sendJSON(w, r.viewPush(pc))
+		r.commitPushAndRespond(w)
 
 	case http.MethodDelete:
 		if err := r.settings.ClearFCMCredentials(); err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		pc, _ := r.settings.GetPush()
-		r.reconfigurePush(pc)
-		r.sendJSON(w, r.viewPush(pc))
+		r.commitPushAndRespond(w)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1722,23 +1727,26 @@ func (r *Router) handleSettingsPushAPNs(w http.ResponseWriter, req *http.Request
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		pc, _ := r.settings.GetPush()
+		// Carry forward the existing bundle id / production flag — but
+		// fail loud if the read errors, otherwise a flaky GetPush would
+		// silently zero them out as part of an APNs cert upload.
+		pc, err := r.settings.GetPush()
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if err := r.settings.SetAPNs(certPEM, keyPEM, pc.APNsBundleID, pc.APNsProduction); err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		pc.APNsCertPEM, pc.APNsKeyPEM = certPEM, keyPEM
-		r.reconfigurePush(pc)
-		r.sendJSON(w, r.viewPush(pc))
+		r.commitPushAndRespond(w)
 
 	case http.MethodDelete:
 		if err := r.settings.ClearAPNs(); err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		pc, _ := r.settings.GetPush()
-		r.reconfigurePush(pc)
-		r.sendJSON(w, r.viewPush(pc))
+		r.commitPushAndRespond(w)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1760,6 +1768,21 @@ func (r *Router) reconfigurePush(pc settings.PushConfig) {
 		APNsBundleID:   pc.APNsBundleID,
 		APNsProduction: pc.APNsProduction,
 	})
+}
+
+// commitPushAndRespond reloads the push config from settings.db, pushes
+// it to the runtime, and writes the metadata view to w. This is the only
+// way a push-config handler should return success — runtime and on-disk
+// state stay in lockstep, with no chance of returning a snapshot that
+// differs from what just got persisted.
+func (r *Router) commitPushAndRespond(w http.ResponseWriter) {
+	pc, err := r.settings.GetPush()
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	r.reconfigurePush(pc)
+	r.sendJSON(w, r.viewPush(pc))
 }
 
 // readFCMBody accepts the service-account JSON either as the raw request
