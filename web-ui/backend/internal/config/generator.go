@@ -151,8 +151,8 @@ func Generate(config *models.Config) (string, error) {
 	if config.Global.PushNotifications {
 		sb.WriteString("config push-notifications;\n")
 	}
-	if config.Global.PushFCMServerKey != "" {
-		sb.WriteString(fmt.Sprintf("config push-fcm-serverkey \"%s\";\n", q(config.Global.PushFCMServerKey)))
+	if config.Global.PushFCMCredentialsFile != "" {
+		sb.WriteString(fmt.Sprintf("config push-fcm-credentials-file \"%s\";\n", q(config.Global.PushFCMCredentialsFile)))
 	}
 	if config.Global.PushAPNsCertFile != "" {
 		sb.WriteString(fmt.Sprintf("config push-apns-certfile \"%s\";\n", q(config.Global.PushAPNsCertFile)))
