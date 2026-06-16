@@ -190,17 +190,24 @@
                 <div class="flex items-center gap-2 mb-3">
                     <i class="fab fa-android text-green-600"></i>
                     <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
-                    <span x-show="pushCfg.fcm" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.fcm && !pushCfg.fcm.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.fcm && pushCfg.fcm.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
                     <span x-show="!pushCfg.fcm" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
                 </div>
 
-                <template x-if="pushCfg.fcm">
+                <template x-if="pushCfg.fcm && !pushCfg.fcm.error">
                     <div class="text-xs text-gray-600 space-y-1 mb-3 font-mono bg-gray-50 rounded p-3">
                         <div><span class="text-gray-400">project&nbsp;&nbsp;</span><span x-text="pushCfg.fcm.project_id"></span></div>
                         <div><span class="text-gray-400">account&nbsp;&nbsp;</span><span x-text="pushCfg.fcm.client_email"></span></div>
                         <div><span class="text-gray-400">key&nbsp;id&nbsp;&nbsp;</span>…<span x-text="pushCfg.fcm.key_id_last4"></span></div>
                     </div>
                 </template>
+
+                <div x-show="pushCfg.fcm && pushCfg.fcm.error"
+                     class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3">
+                    Stored credentials could not be read: <span x-text="pushCfg.fcm && pushCfg.fcm.error"></span>.
+                    Re-upload a valid service-account JSON.
+                </div>
 
                 <div class="flex items-center gap-2">
                     <input type="file" accept=".json,application/json" class="hidden" x-ref="fcmFile"
@@ -226,12 +233,13 @@
                 <div class="flex items-center gap-2 mb-3">
                     <i class="fab fa-apple text-gray-800"></i>
                     <h4 class="text-sm font-semibold text-gray-800">APNs (iOS)</h4>
-                    <span x-show="pushCfg.apns && pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
-                    <span x-show="pushCfg.apns && !pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Incomplete</span>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.error && pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.error && !pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Incomplete</span>
+                    <span x-show="pushCfg.apns && pushCfg.apns.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
                     <span x-show="!pushCfg.apns" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
                 </div>
 
-                <template x-if="pushCfg.apns">
+                <template x-if="pushCfg.apns && !pushCfg.apns.error">
                     <div class="text-xs text-gray-600 space-y-1 mb-3 font-mono bg-gray-50 rounded p-3">
                         <div><span class="text-gray-400">subject&nbsp;&nbsp;</span><span x-text="pushCfg.apns.subject"></span></div>
                         <div>
@@ -243,7 +251,13 @@
                     </div>
                 </template>
 
-                <div x-show="pushCfg.apns && !pushCfg.apns.ready"
+                <div x-show="pushCfg.apns && pushCfg.apns.error"
+                     class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3">
+                    Stored certificate could not be read: <span x-text="pushCfg.apns && pushCfg.apns.error"></span>.
+                    Re-upload a valid cert + key.
+                </div>
+
+                <div x-show="pushCfg.apns && !pushCfg.apns.error && !pushCfg.apns.ready"
                      class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
                     ⚠ Certificate uploaded, but iOS delivery is off until you set a <b>Bundle ID</b> below.
                 </div>
