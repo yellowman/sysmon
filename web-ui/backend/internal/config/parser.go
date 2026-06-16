@@ -523,32 +523,22 @@ func Parse(content []byte) (*models.Config, error) {
 			} else if strings.HasPrefix(line, "snmp-type ") {
 				currentHost.SNMPType = extractQuoted(strings.TrimPrefix(line, "snmp-type "))
 			} else if strings.HasPrefix(line, "snmp-high ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-						currentHost.SNMPHigh = val
-					}
+				// Value may be quoted ("80") — the daemon lexer requires
+				// quotes for these — or bare; extractQuoted handles both.
+				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-high ")), 10, 64); err == nil {
+					currentHost.SNMPHigh = val
 				}
 			} else if strings.HasPrefix(line, "snmp-low ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-						currentHost.SNMPLow = val
-					}
+				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-low ")), 10, 64); err == nil {
+					currentHost.SNMPLow = val
 				}
 			} else if strings.HasPrefix(line, "snmp-exact ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-						currentHost.SNMPExact = val
-					}
+				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-exact ")), 10, 64); err == nil {
+					currentHost.SNMPExact = val
 				}
 			} else if strings.HasPrefix(line, "snmp-rate ") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					if val, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-						currentHost.SNMPRate = val
-					}
+				if val, err := strconv.ParseInt(extractQuoted(strings.TrimPrefix(line, "snmp-rate ")), 10, 64); err == nil {
+					currentHost.SNMPRate = val
 				}
 			} else if line == "snmp-octets" || line == "snmpoctets" {
 				currentHost.SNMPOctets = true
