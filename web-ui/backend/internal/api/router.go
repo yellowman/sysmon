@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"sysmon-web/internal/auth"
@@ -20,28 +21,38 @@ import (
 )
 
 // Router holds the API handlers
+// PushFactory rebuilds the push service from a Config. The router calls
+// it on a settings change if the boot-time push service is nil (e.g.
+// push.db was unwritable at boot but the operator has since fixed
+// permissions), so configuration changes don't require a process
+// restart to recover.
+type PushFactory func(push.Config) (*push.Service, error)
+
 type Router struct {
-	config     *config.Service
-	monitoring *monitoring.Service
-	push       *push.Service
-	auth       *auth.Service
-	settings   *settings.Store
-	mux        *http.ServeMux
-	metrics    *middleware.MetricsCollector
+	config      *config.Service
+	monitoring  *monitoring.Service
+	pushMu      sync.Mutex // guards push during lazy init
+	push        *push.Service
+	pushFactory PushFactory
+	auth        *auth.Service
+	settings    *settings.Store
+	mux         *http.ServeMux
+	metrics     *middleware.MetricsCollector
 }
 
-// NewRouter creates a new API router
-func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, authSvc *auth.Service, settingsStore *settings.Store) http.Handler {
+// NewRouter creates a new API router.
+func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, pushFactory PushFactory, authSvc *auth.Service, settingsStore *settings.Store) http.Handler {
 	metrics := middleware.NewMetricsCollector()
 
 	r := &Router{
-		config:     cfg,
-		monitoring: mon,
-		push:       pushSvc,
-		auth:       authSvc,
-		settings:   settingsStore,
-		mux:        http.NewServeMux(),
-		metrics:    metrics,
+		config:      cfg,
+		monitoring:  mon,
+		push:        pushSvc,
+		pushFactory: pushFactory,
+		auth:        authSvc,
+		settings:    settingsStore,
+		mux:         http.NewServeMux(),
+		metrics:     metrics,
 	}
 
 	// Configuration endpoints (admin only — config contains secrets)
@@ -1561,6 +1572,13 @@ type pushSettingsView struct {
 	APNs           *apnsConfiguredView `json:"apns,omitempty"`
 	APNsBundleID   string              `json:"apns_bundle_id,omitempty"`
 	APNsProduction bool                `json:"apns_production"`
+	// RuntimeAvailable is false when the push service didn't initialize
+	// at startup (typically a bbolt open failure on push.db) — in that
+	// case settings still persist to settings.db, but they won't be
+	// hot-applied: a process restart is required after the underlying
+	// problem is fixed. The admin UI surfaces this clearly so changes
+	// don't appear to silently take effect when they haven't.
+	RuntimeAvailable bool `json:"runtime_available"`
 }
 
 type fcmConfiguredView struct {
@@ -1582,9 +1600,10 @@ type apnsConfiguredView struct {
 
 func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
 	v := pushSettingsView{
-		Enabled:        pc.Enabled,
-		APNsBundleID:   pc.APNsBundleID,
-		APNsProduction: pc.APNsProduction,
+		Enabled:          pc.Enabled,
+		APNsBundleID:     pc.APNsBundleID,
+		APNsProduction:   pc.APNsProduction,
+		RuntimeAvailable: r.pushRuntimeAvailable(),
 	}
 	if len(pc.FCMCredentials) > 0 {
 		if proj, email, last4, err := push.FCMCredentialMeta(pc.FCMCredentials); err == nil {
@@ -1763,21 +1782,53 @@ func (r *Router) handleSettingsPushAPNs(w http.ResponseWriter, req *http.Request
 	}
 }
 
-// reconfigurePush is a no-op if the push service didn't start; otherwise
-// it hot-swaps the credentials so the change takes effect without a
-// restart.
-func (r *Router) reconfigurePush(pc settings.PushConfig) {
-	if r.push == nil {
-		return
-	}
-	r.push.Reconfigure(push.Config{
+// pushConfigFrom translates a settings record into the push-service
+// config shape, in one place so the two layouts can drift independently
+// without spreading field-by-field copies around.
+func pushConfigFrom(pc settings.PushConfig) push.Config {
+	return push.Config{
 		Enabled:        pc.Enabled,
 		FCMCredentials: pc.FCMCredentials,
 		APNsCertPEM:    pc.APNsCertPEM,
 		APNsKeyPEM:     pc.APNsKeyPEM,
 		APNsBundleID:   pc.APNsBundleID,
 		APNsProduction: pc.APNsProduction,
-	})
+	}
+}
+
+// reconfigurePush hot-swaps the running push service to match pc. If the
+// push service is nil because its boot-time init failed (e.g. push.db
+// unwritable) and we have a factory, retry NewService now — the
+// operator may have fixed the underlying problem since startup. Returns
+// true if the runtime is now in sync with pc.
+func (r *Router) reconfigurePush(pc settings.PushConfig) bool {
+	r.pushMu.Lock()
+	defer r.pushMu.Unlock()
+	cfg := pushConfigFrom(pc)
+	if r.push == nil {
+		if r.pushFactory == nil {
+			return false
+		}
+		svc, err := r.pushFactory(cfg)
+		if err != nil {
+			return false
+		}
+		r.push = svc
+		r.push.Start()
+		return true
+	}
+	r.push.Reconfigure(cfg)
+	return true
+}
+
+// pushRuntimeAvailable reports whether the push service is currently
+// running, under the same lock that reconfigurePush takes — so the
+// "runtime_available" field GETs return matches the truth at the moment
+// of the call, not a stale view from before a successful lazy init.
+func (r *Router) pushRuntimeAvailable() bool {
+	r.pushMu.Lock()
+	defer r.pushMu.Unlock()
+	return r.push != nil
 }
 
 // commitPushAndRespond reloads the push config from settings.db, pushes
