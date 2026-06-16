@@ -170,8 +170,17 @@
         <div class="p-6 space-y-5">
             <p class="text-xs text-gray-500 -mt-2">
                 Credentials are stored in <code class="bg-gray-100 px-1 rounded">/var/lib/sysmon/settings.db</code>
-                (not <code class="bg-gray-100 px-1 rounded">sysmon.conf</code>). Changes take effect immediately.
+                (not <code class="bg-gray-100 px-1 rounded">sysmon.conf</code>).
+                <span x-show="pushCfg.runtime_available">Changes take effect immediately.</span>
             </p>
+
+            <div x-show="pushCfg.runtime_available === false"
+                 class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">
+                <b>Push service didn't start at boot</b> &mdash; the server log will say why
+                (usually a problem opening <code class="bg-amber-100 px-1 rounded">/var/lib/sysmon/push.db</code>).
+                Saving any setting here will retry initialization. Until that retry succeeds the
+                badges below reflect what's stored on disk, not what's running.
+            </div>
 
             <div x-show="pushCfgError" class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3" x-text="pushCfgError"></div>
             <div x-show="pushCfgNote" class="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-3" x-text="pushCfgNote"></div>

@@ -63,24 +63,40 @@ func main() {
 	}
 	defer settingsStore.Close()
 
-	// Initialize push notification service from the settings store.
+	// pushFactory rebuilds the push service from a config. Used by main
+	// for boot, and by the router for on-demand reinit if boot failed
+	// (e.g. /var/lib/sysmon/push.db was unwritable at boot but the
+	// operator has since fixed permissions).
+	pushFactory := func(cfg push.Config) (*push.Service, error) {
+		svc, err := push.NewService(cfg, "/var/lib/sysmon/push.db", monitoringService)
+		if err != nil {
+			return nil, err
+		}
+		svc.Start()
+		return svc, nil
+	}
+
+	// Initialize push notification service from the settings store. If
+	// init fails (e.g. push.db is unwritable at boot), pushService stays
+	// nil; the router retries via pushFactory on the next settings
+	// change, so the operator can fix the underlying problem and apply
+	// settings through the admin UI without a process restart.
 	var pushService *push.Service
 	if pc, err := settingsStore.GetPush(); err != nil {
 		log.Printf("WARNING: could not read push settings: %v", err)
 	} else {
-		svc, err := push.NewService(push.Config{
+		svc, err := pushFactory(push.Config{
 			Enabled:        pc.Enabled,
 			FCMCredentials: pc.FCMCredentials,
 			APNsCertPEM:    pc.APNsCertPEM,
 			APNsKeyPEM:     pc.APNsKeyPEM,
 			APNsBundleID:   pc.APNsBundleID,
 			APNsProduction: pc.APNsProduction,
-		}, "/var/lib/sysmon/push.db", monitoringService)
+		})
 		if err != nil {
-			log.Printf("WARNING: push notification init failed: %v", err)
+			log.Printf("WARNING: push notification init failed: %v (will retry on next settings change)", err)
 		} else {
 			pushService = svc
-			pushService.Start()
 			defer pushService.Stop()
 		}
 	}
@@ -93,7 +109,7 @@ func main() {
 	defer authService.Close()
 
 	// Create API router
-	handler := api.NewRouter(configService, monitoringService, pushService, authService, settingsStore)
+	handler := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {
