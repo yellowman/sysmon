@@ -61,12 +61,12 @@ func main() {
 	} else {
 		g := snapshot.Config.Global
 		pushCfg := push.Config{
-			Enabled:        g.PushNotifications,
-			FCMServerKey:   g.PushFCMServerKey,
-			APNsCertFile:   g.PushAPNsCertFile,
-			APNsKeyFile:    g.PushAPNsKeyFile,
-			APNsBundleID:   g.PushAPNsBundleID,
-			APNsProduction: g.PushAPNsProduction,
+			Enabled:            g.PushNotifications,
+			FCMCredentialsFile: g.PushFCMCredentialsFile,
+			APNsCertFile:       g.PushAPNsCertFile,
+			APNsKeyFile:        g.PushAPNsKeyFile,
+			APNsBundleID:       g.PushAPNsBundleID,
+			APNsProduction:     g.PushAPNsProduction,
 		}
 		svc, err := push.NewService(pushCfg, "/var/lib/sysmon/push.db", monitoringService)
 		if err != nil {

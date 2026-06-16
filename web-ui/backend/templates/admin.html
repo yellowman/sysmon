@@ -130,9 +130,21 @@
                         </div>
                         <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <span class="text-[10px] text-gray-400" x-show="user.last_login" x-text="'Last login: ' + formatRelativeTime(user.last_login)"></span>
+                            <button @click="resetPassword(user.username)"
+                                    class="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs"
+                                    title="Reset password">
+                                <i class="fas fa-key"></i>
+                            </button>
+                            <button @click="toggleRole(user)"
+                                    class="px-2 py-1 text-gray-700 hover:bg-gray-100 rounded text-xs"
+                                    x-show="user.username !== currentUser"
+                                    :title="user.role === 'admin' ? 'Demote to user' : 'Promote to admin'">
+                                <i :class="user.role === 'admin' ? 'fas fa-user-minus' : 'fas fa-user-shield'"></i>
+                            </button>
                             <button @click="if(confirm('Delete user ' + user.username + '?')) deleteUser(user.username)"
                                     class="px-2 py-1 text-red-500 hover:bg-red-50 rounded text-xs"
-                                    x-show="user.username !== currentUser">
+                                    x-show="user.username !== currentUser"
+                                    title="Delete user">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -293,7 +305,7 @@
     </div>
 
     <!-- Command Output -->
-    <div x-show="commandOutput" class="card mb-6">
+    <div id="command-output" x-show="commandOutput" class="card mb-6">
         <div class="card-header flex justify-between items-center">
             <h2 class="section-title">Output</h2>
             <button @click="commandOutput = ''"
@@ -452,11 +464,16 @@ function adminPage() {
             this.loadPushLog();
             this.loadUsers();
 
+            // Refresh the live tables every 30s. The previous 5s interval
+            // fired 3 parallel requests, chewing 36/min of the 60/min/IP
+            // rate-limit budget and triggering "too many requests" on
+            // push subscriptions for anyone who also had another tab open.
             this.refreshInterval = setInterval(() => {
+                if (document.hidden) return;  // pause when tab is in the background
                 this.loadSessionLog();
                 this.loadSessionErrors();
                 this.loadPushSubs();
-            }, 5000);
+            }, 30000);
         },
 
         destroy() {
@@ -528,6 +545,7 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/admin/printq');
                 this.commandOutput = result?.output || 'No queue data received';
+                this.revealCommandOutput();
             } catch (e) {
                 alert('Failed to get queue status: ' + (e?.message || e));
             }
@@ -537,9 +555,19 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/admin/nfd');
                 this.commandOutput = result?.info || 'No FD info received';
+                this.revealCommandOutput();
             } catch (e) {
                 alert('Failed to get FD info: ' + (e?.message || e));
             }
+        },
+
+        revealCommandOutput() {
+            // commandOutput renders far below the buttons; without scrolling
+            // it just looks like nothing happened.
+            this.$nextTick(() => {
+                const el = document.getElementById('command-output');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
         },
 
         async killDaemon() {
@@ -595,6 +623,46 @@ function adminPage() {
                 this.loadUsers();
             } catch (e) {
                 alert('Failed to delete user: ' + e.message);
+            }
+        },
+
+        async resetPassword(username) {
+            const pw = prompt('New password for ' + username + ':');
+            if (pw === null) return;
+            if (pw.length < 8) {
+                alert('Password must be at least 8 characters.');
+                return;
+            }
+            const confirm2 = prompt('Confirm new password:');
+            if (confirm2 !== pw) {
+                alert('Passwords do not match.');
+                return;
+            }
+            try {
+                await apiCall('/api/auth/users/' + encodeURIComponent(username), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: pw })
+                });
+                alert('Password updated for ' + username + '. Their existing sessions were revoked.');
+            } catch (e) {
+                alert('Failed to reset password: ' + e.message);
+            }
+        },
+
+        async toggleRole(user) {
+            const newRole = user.role === 'admin' ? 'user' : 'admin';
+            const verb = newRole === 'admin' ? 'Promote' : 'Demote';
+            if (!confirm(`${verb} ${user.username} to ${newRole}?`)) return;
+            try {
+                await apiCall('/api/auth/users/' + encodeURIComponent(user.username), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: newRole })
+                });
+                this.loadUsers();
+            } catch (e) {
+                alert('Failed to change role: ' + e.message);
             }
         },
 

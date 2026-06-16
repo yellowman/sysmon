@@ -433,8 +433,11 @@ and sends push alerts to subscribed iOS and Android devices.
 .B config push-notifications;
 Enable push notification support.
 .TP
-.B config push-fcm-serverkey \fI"key"\fP;
-Firebase Cloud Messaging server key for Android push notifications.
+.B config push-fcm-credentials-file \fI"path"\fP;
+Path to a Google service-account JSON credentials file for the FCM HTTP v1 API
+(Android push notifications). Generate one at Firebase Console > Project Settings >
+Service accounts > "Generate new private key". The project ID is read from the JSON.
+The legacy server-key API was shut down by Google in June 2024.
 .TP
 .B config push-apns-certfile \fI"path"\fP;
 Path to the APNs TLS certificate in PEM format for iOS push notifications.

@@ -203,15 +203,32 @@ dump_to_file(char *filename, int html, time_t now)
 	{
 		if (errno == EXDEV)
 		{
-			/* Cross-device rename; fall back to copy + unlink */
-			if (copy_file(newfname, filename) == 0)
+			/*
+			 * Cross-device rename (statustempdir is on another
+			 * filesystem than the status file). Copy into a temp
+			 * file *in the destination directory* and rename that
+			 * onto the target — the second rename is same-filesystem
+			 * so it's atomic, and readers never see a partially
+			 * written status file.
+			 */
+			char desttmp[512];
+			snprintf(desttmp, sizeof(desttmp), "%s.tmp", filename);
+
+			if (copy_file(newfname, desttmp) == 0)
 			{
-				chmod(filename, 0644);
+				chmod(desttmp, 0644);
+				if (rename(desttmp, filename) != 0)
+				{
+					print_err(1, "dump_to_file: rename %s to %s failed: %s",
+						desttmp, filename, strerror(errno));
+					unlink(desttmp);
+				}
 				unlink(newfname);
 			}
 			else
 			{
-				print_err(1, "dump_to_file: copy %s to %s failed", newfname, filename);
+				print_err(1, "dump_to_file: copy %s to %s failed", newfname, desttmp);
+				unlink(desttmp);
 				unlink(newfname);
 			}
 		}

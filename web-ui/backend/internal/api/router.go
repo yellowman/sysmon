@@ -365,7 +365,37 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	// sysmond's TCP protocol doesn't expose its PID; read it from the
+	// pidfile configured in sysmon.conf so the dashboard isn't stuck
+	// showing "PID 0".
+	if status.Daemon.PID == 0 {
+		status.Daemon.PID = r.readDaemonPID()
+	}
+
 	r.sendJSON(w, status)
+}
+
+func (r *Router) readDaemonPID() int {
+	snapshot, err := r.config.GetConfig()
+	if err != nil || snapshot == nil {
+		return 0
+	}
+	path := snapshot.Config.Global.PidFile
+	if path == "" {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		// A POSIX PID is strictly positive; a stale or corrupted pidfile
+		// with 0 or a negative value should not be surfaced as if it
+		// were the live daemon. Fall back to "unknown".
+		return 0
+	}
+	return pid
 }
 
 func (r *Router) handleMonitoringHosts(w http.ResponseWriter, req *http.Request) {

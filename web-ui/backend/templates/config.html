@@ -546,6 +546,7 @@
                             <p>No spawn commands defined. Add one above to get started.</p>
                         </div>
                     </div>
+                    </div>
 
                     <!-- Contacts Content -->
                     <div x-show="settingsView === 'contacts'" class="px-6 py-4">
@@ -602,10 +603,15 @@
                                         <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-medium text-gray-600 mb-1">Server Key</label>
-                                        <input type="password" x-model="structuredConfig.global.push_fcm_serverkey" placeholder="AAAAxxxxxxx:APA91b..."
+                                        <label class="block text-xs font-medium text-gray-600 mb-1">Credentials File</label>
+                                        <input type="text" x-model="structuredConfig.global.push_fcm_credentials_file" placeholder="/var/lib/sysmon/fcm-credentials.json"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
-                                        <p class="text-xs text-gray-400 mt-1">Firebase Console > Project Settings > Cloud Messaging</p>
+                                        <p class="text-xs text-gray-400 mt-1">
+                                            Path to a Google service-account JSON file with the
+                                            <code class="bg-gray-100 px-1 rounded">Firebase Cloud Messaging API</code> enabled.
+                                            Firebase Console &gt; Project Settings &gt; Service accounts &gt; "Generate new private key".
+                                            The legacy Server Key API was shut down by Google in June 2024.
+                                        </p>
                                     </div>
                                 </div>
 
@@ -646,8 +652,6 @@
                                 <p>Enable push notifications to configure APNs and FCM credentials</p>
                             </div>
                         </div>
-                    </div>
-
                     </div>
                 </div>
             </div>
@@ -767,6 +771,8 @@
                     <!-- Modal Body (Scrollable) -->
                     <div class="flex-1 overflow-y-auto px-6 py-4">
                         <template x-if="editingHost">
+                            <!-- Alpine's <template x-if> only renders a single root child; wrap everything so the tab nav AND every tab panel actually render. -->
+                            <div>
                             <!-- Host Tab Navigation -->
                             <div class="mb-4 border-b border-gray-200">
                                 <nav class="-mb-px flex space-x-6">
@@ -1062,11 +1068,38 @@
 
                                     <!-- Alerts & Contact Tab -->
                                     <div x-show="editingHost && editingHost.activeTab === 'alerts'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div class="md:col-span-2">
+                                        <div class="md:col-span-2 relative">
                                             <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
-                                            <input type="email" x-model="editingHost.contact" placeholder="admin@example.com"
+                                            <input type="email"
+                                                   x-model="editingHost.contact"
+                                                   @focus="showContactSuggestions = true"
+                                                   @blur="setTimeout(() => showContactSuggestions = false, 150)"
+                                                   placeholder="admin@example.com"
+                                                   autocomplete="off"
+                                                   list="contact-suggestions"
                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                            <p class="text-xs text-gray-500 mt-1">Email address for alerts</p>
+                                            <datalist id="contact-suggestions">
+                                                <template x-for="c in (structuredConfig.contacts || [])" :key="c.id || c.email">
+                                                    <option :value="c.email" :label="c.name || c.email"></option>
+                                                </template>
+                                            </datalist>
+                                            <!-- Visible suggestion list (datalist UI varies by browser/OS) -->
+                                            <div x-show="showContactSuggestions && filteredContactSuggestions.length > 0"
+                                                 class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                                <template x-for="c in filteredContactSuggestions" :key="c.id || c.email">
+                                                    <div @mousedown.prevent="editingHost.contact = c.email; showContactSuggestions = false"
+                                                         class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm">
+                                                        <div class="font-mono text-gray-900" x-text="c.email"></div>
+                                                        <div x-show="c.name" class="text-xs text-gray-500" x-text="c.name"></div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                            <p class="text-xs text-gray-500 mt-1">
+                                                Email address for alerts.
+                                                <span x-show="(structuredConfig.contacts || []).length > 0" class="text-blue-600">
+                                                    Type to filter from <span x-text="(structuredConfig.contacts || []).length"></span> defined contact<span x-show="(structuredConfig.contacts || []).length !== 1">s</span>.
+                                                </span>
+                                            </p>
                                         </div>
                                         <div>
                                             <label class="block text-sm font-medium text-gray-700 mb-1">Page Interval (minutes)</label>
@@ -1236,6 +1269,7 @@
                                             </div>
                                         </div>
                                     </div>
+                            </div>
                         </template>
                     </div>
 
@@ -1316,6 +1350,16 @@ function unifiedConfigPage() {
         expandedHosts: {},
         dependencySuggestions: {},
         showDependencySuggestions: {},
+        showContactSuggestions: false,
+        get filteredContactSuggestions() {
+            const all = this.structuredConfig.contacts || [];
+            const q = (this.editingHost?.contact || '').toLowerCase().trim();
+            if (!q) return all.slice(0, 20);
+            return all.filter(c =>
+                (c.email || '').toLowerCase().includes(q) ||
+                (c.name || '').toLowerCase().includes(q)
+            ).slice(0, 20);
+        },
         newSpawn: {
             name: '',
             command: ''
