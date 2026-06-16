@@ -61,18 +61,19 @@ type pushLogEntry struct {
 }
 
 type Config struct {
-	Enabled            bool
-	FCMCredentialsFile string // path to Google service-account JSON
-	APNsCertFile       string
-	APNsKeyFile        string
-	APNsBundleID       string
-	APNsProduction     bool
+	Enabled        bool
+	FCMCredentials []byte // Google service-account JSON
+	APNsCertPEM    []byte
+	APNsKeyPEM     []byte
+	APNsBundleID   string
+	APNsProduction bool
 }
 
 type Service struct {
-	mu     sync.RWMutex
-	config Config
-	db     *bolt.DB
+	mu      sync.RWMutex
+	config  Config
+	db      *bolt.DB
+	started bool // watchLoop running?
 
 	apns *APNsClient
 	fcm  *FCMClient
@@ -82,6 +83,70 @@ type Service struct {
 	stopCh     chan struct{}
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
+}
+
+// buildClients constructs FCM and APNs clients from a Config, logging
+// (but not failing) on bad credentials so the service still runs for the
+// other platform. Network-free: it only parses creds/certs.
+func buildClients(cfg Config) (fcm *FCMClient, apns *APNsClient) {
+	if len(cfg.FCMCredentials) > 0 {
+		c, err := NewFCMClient(cfg.FCMCredentials)
+		if err != nil {
+			log.Printf("push: WARNING: FCM client init failed: %v", err)
+		} else {
+			fcm = c
+			log.Printf("push: FCM client initialized for project %s", c.projectID)
+		}
+	}
+	if len(cfg.APNsCertPEM) > 0 && len(cfg.APNsKeyPEM) > 0 && cfg.APNsBundleID != "" {
+		c, err := NewAPNsClient(cfg.APNsCertPEM, cfg.APNsKeyPEM, cfg.APNsBundleID, cfg.APNsProduction)
+		if err != nil {
+			log.Printf("push: WARNING: APNs client init failed: %v", err)
+		} else {
+			apns = c
+			env := "sandbox"
+			if cfg.APNsProduction {
+				env = "production"
+			}
+			log.Printf("push: APNs client initialized (%s, bundle: %s)", env, cfg.APNsBundleID)
+		}
+	}
+	return fcm, apns
+}
+
+// clients snapshots the current client pointers and enable flag under a
+// brief read lock so the send path never races a Reconfigure swap.
+func (s *Service) clients() (fcm *FCMClient, apns *APNsClient, enabled bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fcm, s.apns, s.config.Enabled
+}
+
+// Reconfigure hot-swaps the push credentials/flags (e.g. after an admin
+// uploads new FCM creds). Safe to call while the watcher is running; it
+// starts the watcher if push just became enabled+configured.
+func (s *Service) Reconfigure(cfg Config) {
+	fcm, apns := buildClients(cfg)
+	s.mu.Lock()
+	s.config = cfg
+	s.fcm = fcm
+	s.apns = apns
+	s.mu.Unlock()
+	s.maybeStartLoop()
+}
+
+// maybeStartLoop starts the watcher once, if push is enabled and at least
+// one platform is configured. Idempotent.
+func (s *Service) maybeStartLoop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.started || !s.config.Enabled || (s.fcm == nil && s.apns == nil) {
+		return
+	}
+	s.started = true
+	s.wg.Add(1)
+	go s.watchLoop()
+	log.Printf("push: state change watcher started (1s poll interval)")
 }
 
 func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
@@ -114,29 +179,7 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 		stopCh:     make(chan struct{}),
 	}
 
-	if cfg.FCMCredentialsFile != "" {
-		client, err := NewFCMClient(cfg.FCMCredentialsFile)
-		if err != nil {
-			log.Printf("push: WARNING: FCM client init failed: %v", err)
-		} else {
-			s.fcm = client
-			log.Printf("push: FCM client initialized for project %s", client.projectID)
-		}
-	}
-
-	if cfg.APNsCertFile != "" && cfg.APNsKeyFile != "" && cfg.APNsBundleID != "" {
-		client, err := NewAPNsClient(cfg.APNsCertFile, cfg.APNsKeyFile, cfg.APNsBundleID, cfg.APNsProduction)
-		if err != nil {
-			log.Printf("push: WARNING: APNs client init failed: %v", err)
-		} else {
-			s.apns = client
-			env := "sandbox"
-			if cfg.APNsProduction {
-				env = "production"
-			}
-			log.Printf("push: APNs client initialized (%s, bundle: %s)", env, cfg.APNsBundleID)
-		}
-	}
+	s.fcm, s.apns = buildClients(cfg)
 
 	count := s.subscriberCount()
 	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
@@ -144,18 +187,11 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 	return s, nil
 }
 
+// Start begins the state-change watcher if push is enabled and at least
+// one platform is configured. If not, it stays dormant until an admin
+// configures push via Reconfigure.
 func (s *Service) Start() {
-	if !s.config.Enabled {
-		log.Printf("push: notifications disabled in config")
-		return
-	}
-	if s.fcm == nil && s.apns == nil {
-		log.Printf("push: no FCM or APNs credentials configured, watcher not started")
-		return
-	}
-	s.wg.Add(1)
-	go s.watchLoop()
-	log.Printf("push: state change watcher started (1s poll interval)")
+	s.maybeStartLoop()
 }
 
 func (s *Service) Stop() {
@@ -390,23 +426,27 @@ func (s *Service) subscriberCount() int {
 }
 
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
+	fcm, apns, _ := s.clients()
 	switch platform {
 	case PlatformIOS:
-		if s.apns == nil {
+		if apns == nil {
 			return fmt.Errorf("APNs not configured")
 		}
-		return s.apns.Send(token, title, subtitle, body, nil)
+		return apns.Send(token, title, subtitle, body, nil)
 	case PlatformAndroid:
-		if s.fcm == nil {
+		if fcm == nil {
 			return fmt.Errorf("FCM not configured")
 		}
-		return s.fcm.Send(token, title, body, fcmData{})
+		return fcm.Send(token, title, body, fcmData{})
 	default:
 		return fmt.Errorf("unknown platform: %s", platform)
 	}
 }
 
 func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int) {
+	// Snapshot the clients once so a concurrent Reconfigure can't swap
+	// them mid-fan-out, and so we don't hold a lock across slow sends.
+	fcm, apns, _ := s.clients()
 	subs := s.ListSubscriptions()
 	sent := 0
 	badgePtr := &badge
@@ -416,19 +456,19 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
-			if s.apns != nil {
-				err = s.apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
+			if apns != nil {
+				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
 			} else {
 				skipped = true
 			}
 		case PlatformAndroid:
-			if s.fcm != nil {
+			if fcm != nil {
 				data := fcmData{
 					Hostname: hostname,
 					Status:   status,
 					Type:     checkType,
 				}
-				err = s.fcm.Send(sub.DeviceToken, title, body, data)
+				err = fcm.Send(sub.DeviceToken, title, body, data)
 			} else {
 				skipped = true
 			}
@@ -545,6 +585,13 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	}
 	s.mu.Unlock()
 
+	// If push is disabled or unconfigured we still updated prevHosts
+	// above, so the baseline stays current and re-enabling later doesn't
+	// replay a backlog of stale state changes — we just don't send.
+	_, _, enabled := s.clients()
+	if !enabled {
+		return
+	}
 	for _, c := range changes {
 		s.sendStateChange(c.host, c.prevStatus, badge)
 	}

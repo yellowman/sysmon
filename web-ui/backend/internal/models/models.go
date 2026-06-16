@@ -64,13 +64,8 @@ type GlobalSettings struct {
 	AuthKey       string `json:"authkey,omitempty"`       // authentication key for clients
 	SaveState     string `json:"savestate,omitempty"`     // path to save state XML file
 
-	// Push notification settings
-	PushNotifications      bool   `json:"pushnotifications,omitempty"`         // enable push notifications
-	PushFCMCredentialsFile string `json:"push_fcm_credentials_file,omitempty"` // path to Google service-account JSON for FCM HTTP v1 API
-	PushAPNsCertFile       string `json:"push_apns_certfile,omitempty"`
-	PushAPNsKeyFile        string `json:"push_apns_keyfile,omitempty"`
-	PushAPNsBundleID       string `json:"push_apns_bundleid,omitempty"`
-	PushAPNsProduction     bool   `json:"push_apns_production,omitempty"`
+	// Push notification settings live in the web-ui settings store
+	// (bbolt), not here — sysmond doesn't care about them.
 
 	// Include paths
 	Includes []string `json:"includes,omitempty"` // included config files

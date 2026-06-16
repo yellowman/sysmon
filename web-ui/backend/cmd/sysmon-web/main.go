@@ -13,6 +13,7 @@ import (
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
+	"sysmon-web/internal/settings"
 )
 
 func main() {
@@ -54,21 +55,27 @@ func main() {
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
 
-	// Initialize push notification service from parsed config
+	// Web-only settings (push credentials etc.) live in their own bbolt
+	// store, not in sysmon.conf — they aren't sysmond's concern.
+	settingsStore, err := settings.NewStore("/var/lib/sysmon/settings.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize settings store: %v", err)
+	}
+	defer settingsStore.Close()
+
+	// Initialize push notification service from the settings store.
 	var pushService *push.Service
-	if snapshot, err := configService.GetConfig(); err != nil {
-		log.Printf("WARNING: could not read config for push init: %v", err)
+	if pc, err := settingsStore.GetPush(); err != nil {
+		log.Printf("WARNING: could not read push settings: %v", err)
 	} else {
-		g := snapshot.Config.Global
-		pushCfg := push.Config{
-			Enabled:            g.PushNotifications,
-			FCMCredentialsFile: g.PushFCMCredentialsFile,
-			APNsCertFile:       g.PushAPNsCertFile,
-			APNsKeyFile:        g.PushAPNsKeyFile,
-			APNsBundleID:       g.PushAPNsBundleID,
-			APNsProduction:     g.PushAPNsProduction,
-		}
-		svc, err := push.NewService(pushCfg, "/var/lib/sysmon/push.db", monitoringService)
+		svc, err := push.NewService(push.Config{
+			Enabled:        pc.Enabled,
+			FCMCredentials: pc.FCMCredentials,
+			APNsCertPEM:    pc.APNsCertPEM,
+			APNsKeyPEM:     pc.APNsKeyPEM,
+			APNsBundleID:   pc.APNsBundleID,
+			APNsProduction: pc.APNsProduction,
+		}, "/var/lib/sysmon/push.db", monitoringService)
 		if err != nil {
 			log.Printf("WARNING: push notification init failed: %v", err)
 		} else {
@@ -86,7 +93,7 @@ func main() {
 	defer authService.Close()
 
 	// Create API router
-	handler := api.NewRouter(configService, monitoringService, pushService, authService)
+	handler := api.NewRouter(configService, monitoringService, pushService, authService, settingsStore)
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {

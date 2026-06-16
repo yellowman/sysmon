@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"sysmon-web/internal/models"
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
+	"sysmon-web/internal/settings"
 )
 
 // Router holds the API handlers
@@ -23,12 +25,13 @@ type Router struct {
 	monitoring *monitoring.Service
 	push       *push.Service
 	auth       *auth.Service
+	settings   *settings.Store
 	mux        *http.ServeMux
 	metrics    *middleware.MetricsCollector
 }
 
 // NewRouter creates a new API router
-func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, authSvc *auth.Service) http.Handler {
+func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, authSvc *auth.Service, settingsStore *settings.Store) http.Handler {
 	metrics := middleware.NewMetricsCollector()
 
 	r := &Router{
@@ -36,6 +39,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 		monitoring: mon,
 		push:       pushSvc,
 		auth:       authSvc,
+		settings:   settingsStore,
 		mux:        http.NewServeMux(),
 		metrics:    metrics,
 	}
@@ -94,6 +98,12 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/admin/killit", auth.RequireAdmin(r.handleAdminKillit))
 	r.mux.HandleFunc("/api/admin/session-log", auth.RequireAdmin(r.handleAdminSessionLog))
 	r.mux.HandleFunc("/api/admin/session-errors", auth.RequireAdmin(r.handleAdminSessionErrors))
+
+	// Web-only settings (stored in bbolt, not sysmon.conf) — admin only
+	// because the push tab carries FCM credentials / APNs PEMs.
+	r.mux.HandleFunc("/api/settings/push", auth.RequireAdmin(r.handleSettingsPush))
+	r.mux.HandleFunc("/api/settings/push/fcm-credentials", auth.RequireAdmin(r.handleSettingsPushFCM))
+	r.mux.HandleFunc("/api/settings/push/apns", auth.RequireAdmin(r.handleSettingsPushAPNs))
 
 	// Auth endpoints
 	r.mux.HandleFunc("/api/auth/login", r.handleAuthLogin)
@@ -641,10 +651,10 @@ func (r *Router) handleMonitoringTrace(w http.ResponseWriter, req *http.Request)
 	}
 
 	r.sendJSON(w, map[string]interface{}{
-		"status":   "success",
-		"hostname": hostname,
+		"status":          "success",
+		"hostname":        hostname,
 		"tracing_enabled": enabled,
-		"message":  fmt.Sprintf("Tracing %s for %s", map[bool]string{true: "enabled", false: "disabled"}[enabled], hostname),
+		"message":         fmt.Sprintf("Tracing %s for %s", map[bool]string{true: "enabled", false: "disabled"}[enabled], hostname),
 	})
 }
 
@@ -904,7 +914,7 @@ func (r *Router) handleBulkUpdate(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
-		Note string `json:"note"`
+		Note      string   `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -1269,7 +1279,6 @@ func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) 
 
 // Push notification handlers
 
-
 // handlePushMe returns the current user's own push subscriptions.
 func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
@@ -1538,6 +1547,265 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	r.sendJSON(w, map[string]string{"status": "sent"})
+}
+
+// -- Push settings (web-only, bbolt-backed) -------------------------------
+
+// pushSettingsView is what the UI sees: never the raw secrets, just metadata
+// (configured y/n + the bits that aren't secret) so the page can render
+// "FCM: project yk-sysmon, firebase-adminsdk@... (key ...85020)" without
+// re-leaking the private key.
+type pushSettingsView struct {
+	Enabled        bool                `json:"enabled"`
+	FCM            *fcmConfiguredView  `json:"fcm,omitempty"`
+	APNs           *apnsConfiguredView `json:"apns,omitempty"`
+	APNsBundleID   string              `json:"apns_bundle_id,omitempty"`
+	APNsProduction bool                `json:"apns_production"`
+}
+
+type fcmConfiguredView struct {
+	ProjectID   string `json:"project_id"`
+	ClientEmail string `json:"client_email"`
+	KeyIDLast4  string `json:"key_id_last4"`
+}
+
+type apnsConfiguredView struct {
+	Subject  string `json:"subject"`   // certificate Subject CN
+	NotAfter string `json:"not_after"` // RFC3339, for the expiry warning
+}
+
+func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
+	v := pushSettingsView{
+		Enabled:        pc.Enabled,
+		APNsBundleID:   pc.APNsBundleID,
+		APNsProduction: pc.APNsProduction,
+	}
+	if len(pc.FCMCredentials) > 0 {
+		if proj, email, last4, err := push.FCMCredentialMeta(pc.FCMCredentials); err == nil {
+			v.FCM = &fcmConfiguredView{ProjectID: proj, ClientEmail: email, KeyIDLast4: last4}
+		}
+	}
+	if len(pc.APNsCertPEM) > 0 && len(pc.APNsKeyPEM) > 0 {
+		if subj, notAfter, err := push.APNsCertMeta(pc.APNsCertPEM, pc.APNsKeyPEM); err == nil {
+			v.APNs = &apnsConfiguredView{Subject: subj, NotAfter: notAfter.UTC().Format(time.RFC3339)}
+		}
+	}
+	return v
+}
+
+// handleSettingsPush: GET returns the metadata view; PUT updates the
+// non-credential bits (enable flag, APNs bundle, APNs production).
+// Credential uploads/deletes go through the dedicated endpoints below.
+func (r *Router) handleSettingsPush(w http.ResponseWriter, req *http.Request) {
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
+		return
+	}
+	switch req.Method {
+	case http.MethodGet:
+		pc, err := r.settings.GetPush()
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		r.sendJSON(w, r.viewPush(pc))
+
+	case http.MethodPut:
+		var body struct {
+			Enabled        *bool   `json:"enabled"`
+			APNsBundleID   *string `json:"apns_bundle_id"`
+			APNsProduction *bool   `json:"apns_production"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+		pc, err := r.settings.GetPush()
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if body.Enabled != nil {
+			pc.Enabled = *body.Enabled
+			if err := r.settings.SetPushEnabled(pc.Enabled); err != nil {
+				r.sendError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if body.APNsBundleID != nil || body.APNsProduction != nil {
+			if body.APNsBundleID != nil {
+				pc.APNsBundleID = *body.APNsBundleID
+			}
+			if body.APNsProduction != nil {
+				pc.APNsProduction = *body.APNsProduction
+			}
+			if err := r.settings.SetAPNs(pc.APNsCertPEM, pc.APNsKeyPEM, pc.APNsBundleID, pc.APNsProduction); err != nil {
+				r.sendError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		r.reconfigurePush(pc)
+		r.sendJSON(w, r.viewPush(pc))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSettingsPushFCM: POST uploads a service-account JSON (validated
+// before storage); DELETE removes the stored credentials.
+func (r *Router) handleSettingsPushFCM(w http.ResponseWriter, req *http.Request) {
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
+		return
+	}
+	switch req.Method {
+	case http.MethodPost:
+		// Accept either application/json (raw paste) or
+		// multipart/form-data (file upload via the admin UI).
+		body, err := readFCMBody(req)
+		if err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, _, _, err := push.FCMCredentialMeta(body); err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := r.settings.SetFCMCredentials(body); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		pc, _ := r.settings.GetPush()
+		r.reconfigurePush(pc)
+		r.sendJSON(w, r.viewPush(pc))
+
+	case http.MethodDelete:
+		if err := r.settings.ClearFCMCredentials(); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		pc, _ := r.settings.GetPush()
+		r.reconfigurePush(pc)
+		r.sendJSON(w, r.viewPush(pc))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSettingsPushAPNs: POST uploads a cert + key (PEM, multipart);
+// DELETE clears them. Bundle ID and production flag go through the
+// /api/settings/push PUT.
+func (r *Router) handleSettingsPushAPNs(w http.ResponseWriter, req *http.Request) {
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
+		return
+	}
+	switch req.Method {
+	case http.MethodPost:
+		if err := req.ParseMultipartForm(2 << 20); err != nil { // 2 MiB ceiling for PEMs
+			r.sendError(w, http.StatusBadRequest, "expected multipart/form-data with cert+key files")
+			return
+		}
+		certPEM, err := readFormFile(req, "cert")
+		if err != nil {
+			r.sendError(w, http.StatusBadRequest, "cert: "+err.Error())
+			return
+		}
+		keyPEM, err := readFormFile(req, "key")
+		if err != nil {
+			r.sendError(w, http.StatusBadRequest, "key: "+err.Error())
+			return
+		}
+		if _, _, err := push.APNsCertMeta(certPEM, keyPEM); err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		pc, _ := r.settings.GetPush()
+		if err := r.settings.SetAPNs(certPEM, keyPEM, pc.APNsBundleID, pc.APNsProduction); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		pc.APNsCertPEM, pc.APNsKeyPEM = certPEM, keyPEM
+		r.reconfigurePush(pc)
+		r.sendJSON(w, r.viewPush(pc))
+
+	case http.MethodDelete:
+		if err := r.settings.ClearAPNs(); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		pc, _ := r.settings.GetPush()
+		r.reconfigurePush(pc)
+		r.sendJSON(w, r.viewPush(pc))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// reconfigurePush is a no-op if the push service didn't start; otherwise
+// it hot-swaps the credentials so the change takes effect without a
+// restart.
+func (r *Router) reconfigurePush(pc settings.PushConfig) {
+	if r.push == nil {
+		return
+	}
+	r.push.Reconfigure(push.Config{
+		Enabled:        pc.Enabled,
+		FCMCredentials: pc.FCMCredentials,
+		APNsCertPEM:    pc.APNsCertPEM,
+		APNsKeyPEM:     pc.APNsKeyPEM,
+		APNsBundleID:   pc.APNsBundleID,
+		APNsProduction: pc.APNsProduction,
+	})
+}
+
+// readFCMBody accepts the service-account JSON either as the raw request
+// body (Content-Type: application/json) or as the "credentials" form
+// field of a multipart upload (Content-Type: multipart/form-data). Caps
+// at 64 KiB — real service-account JSONs are ~2.5 KiB.
+func readFCMBody(req *http.Request) ([]byte, error) {
+	const maxBytes = 64 * 1024
+	ctype := req.Header.Get("Content-Type")
+	if strings.HasPrefix(ctype, "multipart/form-data") {
+		if err := req.ParseMultipartForm(maxBytes); err != nil {
+			return nil, fmt.Errorf("multipart parse: %w", err)
+		}
+		return readFormFile(req, "credentials")
+	}
+	body, err := io.ReadAll(io.LimitReader(req.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxBytes {
+		return nil, fmt.Errorf("credentials too large (>%d bytes)", maxBytes)
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("empty body")
+	}
+	return body, nil
+}
+
+func readFormFile(req *http.Request, field string) ([]byte, error) {
+	f, _, err := req.FormFile(field)
+	if err != nil {
+		return nil, fmt.Errorf("missing form file %q", field)
+	}
+	defer f.Close()
+	const maxBytes = 64 * 1024
+	body, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxBytes {
+		return nil, fmt.Errorf("file too large (>%d bytes)", maxBytes)
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("empty file")
+	}
+	return body, nil
 }
 
 // Helper functions
