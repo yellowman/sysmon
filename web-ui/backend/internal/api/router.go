@@ -1612,20 +1612,27 @@ type pushSettingsView struct {
 }
 
 type fcmConfiguredView struct {
-	ProjectID   string `json:"project_id"`
-	ClientEmail string `json:"client_email"`
-	KeyIDLast4  string `json:"key_id_last4"`
+	ProjectID   string `json:"project_id,omitempty"`
+	ClientEmail string `json:"client_email,omitempty"`
+	KeyIDLast4  string `json:"key_id_last4,omitempty"`
+	// Error is set when credentials ARE stored but couldn't be parsed.
+	// This is distinct from the FCM block being absent (nothing stored)
+	// — the UI must not show "not configured" while real bytes sit in
+	// settings.db (and the running service may still be using them).
+	Error string `json:"error,omitempty"`
 }
 
 type apnsConfiguredView struct {
-	Subject  string `json:"subject"`   // certificate Subject CN
-	NotAfter string `json:"not_after"` // RFC3339, for the expiry warning
+	Subject  string `json:"subject,omitempty"`   // certificate Subject CN
+	NotAfter string `json:"not_after,omitempty"` // RFC3339, for the expiry warning
 	// Ready is true only when APNs is actually operational, which the
 	// push service requires a bundle ID for (see buildClients). A cert
 	// uploaded without a bundle ID is present-but-not-ready: we still
 	// show its metadata, but Ready=false so the UI doesn't claim iOS
 	// delivery works when it doesn't.
 	Ready bool `json:"ready"`
+	// Error is set when a cert+key ARE stored but couldn't be parsed.
+	Error string `json:"error,omitempty"`
 }
 
 func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
@@ -1636,8 +1643,13 @@ func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
 		RuntimeAvailable: r.pushRuntimeAvailable(),
 	}
 	if len(pc.FCMCredentials) > 0 {
+		// Credentials are stored: always emit an FCM block so the panel
+		// reflects that. If they no longer parse, report the error
+		// instead of silently dropping to a "not configured" view.
 		if proj, email, last4, err := push.FCMCredentialMeta(pc.FCMCredentials); err == nil {
 			v.FCM = &fcmConfiguredView{ProjectID: proj, ClientEmail: email, KeyIDLast4: last4}
+		} else {
+			v.FCM = &fcmConfiguredView{Error: err.Error()}
 		}
 	}
 	if len(pc.APNsCertPEM) > 0 && len(pc.APNsKeyPEM) > 0 {
@@ -1647,6 +1659,8 @@ func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
 				NotAfter: notAfter.UTC().Format(time.RFC3339),
 				Ready:    pc.APNsBundleID != "",
 			}
+		} else {
+			v.APNs = &apnsConfiguredView{Error: err.Error()}
 		}
 	}
 	return v
