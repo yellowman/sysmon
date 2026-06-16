@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"sysmon-web/internal/auth"
@@ -29,10 +30,15 @@ import (
 type PushFactory func(push.Config) (*push.Service, error)
 
 type Router struct {
-	config      *config.Service
-	monitoring  *monitoring.Service
-	pushMu      sync.Mutex // guards push during lazy init
-	push        *push.Service
+	config     *config.Service
+	monitoring *monitoring.Service
+	// push is an atomic pointer so handler reads are race-free without a
+	// lock; per-call safety against Stop is handled inside the push
+	// Service itself (opsMu + ErrServiceStopped). pushInitMu serializes
+	// the few writers (lazy init, shutdown) so we never end up with two
+	// live services or a torn pointer swap.
+	push        atomic.Pointer[push.Service]
+	pushInitMu  sync.Mutex
 	pushFactory PushFactory
 	auth        *auth.Service
 	settings    *settings.Store
@@ -51,12 +57,14 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r := &Router{
 		config:      cfg,
 		monitoring:  mon,
-		push:        pushSvc,
 		pushFactory: pushFactory,
 		auth:        authSvc,
 		settings:    settingsStore,
 		mux:         http.NewServeMux(),
 		metrics:     metrics,
+	}
+	if pushSvc != nil {
+		r.push.Store(pushSvc)
 	}
 
 	// Configuration endpoints (admin only — config contains secrets)
@@ -163,14 +171,12 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 
 // stopPush stops whichever push service the router currently holds and
 // clears the pointer. Idempotent (push.Service.Stop is guarded by a
-// sync.Once, and we nil the field), so it's safe to call more than once
-// or alongside a never-fired boot-time defer.
+// sync.Once, and the swap-to-nil short-circuits subsequent calls).
 func (r *Router) stopPush() {
-	r.pushMu.Lock()
-	defer r.pushMu.Unlock()
-	if r.push != nil {
-		r.push.Stop()
-		r.push = nil
+	r.pushInitMu.Lock()
+	defer r.pushInitMu.Unlock()
+	if svc := r.push.Swap(nil); svc != nil {
+		svc.Stop()
 	}
 }
 
@@ -1313,13 +1319,14 @@ func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
 		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
 		return
 	}
-	if r.push == nil {
+	svc := r.push.Load()
+	if svc == nil {
 		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 		return
 	}
 
 	owner := req.Header.Get("X-Session-User")
-	subs := r.push.ListSubscriptionsByOwner(owner)
+	subs := svc.ListSubscriptionsByOwner(owner)
 
 	// Strip api_keys — the app already has its own
 	type safeSub struct {
@@ -1350,7 +1357,8 @@ func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodPost:
-		if r.push == nil {
+		svc := r.push.Load()
+		if svc == nil {
 			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 			return
 		}
@@ -1373,7 +1381,7 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 		_, clientIP := r.getUserInfo(req)
 		userAgent := req.Header.Get("User-Agent")
 		owner := req.Header.Get("X-Session-User")
-		apiKey, err := r.push.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, owner, clientIP, userAgent)
+		apiKey, err := svc.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, owner, clientIP, userAgent)
 		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
@@ -1385,7 +1393,8 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 		})
 
 	case http.MethodDelete:
-		if r.push == nil {
+		svc := r.push.Load()
+		if svc == nil {
 			r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 			return
 		}
@@ -1408,12 +1417,12 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 		// credential that should grant ability to cancel subscriptions.
 		owner := req.Header.Get("X-Session-User")
 		role := req.Header.Get("X-Session-Role")
-		if role != "admin" && !r.push.IsOwner(body.DeviceToken, owner) {
+		if role != "admin" && !svc.IsOwner(body.DeviceToken, owner) {
 			r.sendError(w, http.StatusForbidden, "Not authorized to unsubscribe this device")
 			return
 		}
 
-		if err := r.push.Unsubscribe(body.DeviceToken); err != nil {
+		if err := svc.Unsubscribe(body.DeviceToken); err != nil {
 			r.sendError(w, http.StatusNotFound, err.Error())
 			return
 		}
@@ -1431,12 +1440,13 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	if r.push == nil {
+	svc := r.push.Load()
+	if svc == nil {
 		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 		return
 	}
 
-	subs := r.push.ListSubscriptions()
+	subs := svc.ListSubscriptions()
 
 	// Return all metadata except api_keys
 	type adminSubscription struct {
@@ -1483,7 +1493,8 @@ func (r *Router) handlePushAdminRemove(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	if r.push == nil {
+	svc := r.push.Load()
+	if svc == nil {
 		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 		return
 	}
@@ -1495,7 +1506,7 @@ func (r *Router) handlePushAdminRemove(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	if err := r.push.AdminRemove(token); err != nil {
+	if err := svc.AdminRemove(token); err != nil {
 		r.sendError(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -1512,7 +1523,8 @@ func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if r.push == nil {
+	svc := r.push.Load()
+	if svc == nil {
 		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 		return
 	}
@@ -1524,7 +1536,7 @@ func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	entries := r.push.GetPushLog(limit)
+	entries := svc.GetPushLog(limit)
 	r.sendJSON(w, map[string]interface{}{
 		"entries": entries,
 		"count":   len(entries),
@@ -1537,7 +1549,8 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if r.push == nil {
+	svc := r.push.Load()
+	if svc == nil {
 		r.sendError(w, http.StatusServiceUnavailable, "Push notifications not configured")
 		return
 	}
@@ -1558,18 +1571,18 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 	// Only owners or admins can send test pushes to a device
 	owner := req.Header.Get("X-Session-User")
 	role := req.Header.Get("X-Session-Role")
-	if role != "admin" && !r.push.IsOwner(body.DeviceToken, owner) {
+	if role != "admin" && !svc.IsOwner(body.DeviceToken, owner) {
 		r.sendError(w, http.StatusForbidden, "Not authorized to test this device")
 		return
 	}
 
-	platform := r.push.GetPlatform(body.DeviceToken)
+	platform := svc.GetPlatform(body.DeviceToken)
 	if platform == "" {
 		r.sendError(w, http.StatusNotFound, "Device not found")
 		return
 	}
 
-	if err := r.push.SendTest(body.DeviceToken, platform); err != nil {
+	if err := svc.SendTest(body.DeviceToken, platform); err != nil {
 		r.sendError(w, http.StatusBadGateway, fmt.Sprintf("Push failed: %v", err))
 		return
 	}
@@ -1813,39 +1826,44 @@ func pushConfigFrom(pc settings.PushConfig) push.Config {
 	}
 }
 
-// reconfigurePush hot-swaps the running push service to match pc. If the
-// push service is nil because its boot-time init failed (e.g. push.db
-// unwritable) and we have a factory, retry NewService now — the
+// reconfigurePush hot-swaps the running push service to match pc. If
+// the push service is nil because its boot-time init failed (e.g.
+// push.db unwritable) and we have a factory, retry NewService now — the
 // operator may have fixed the underlying problem since startup. Returns
 // true if the runtime is now in sync with pc.
 func (r *Router) reconfigurePush(pc settings.PushConfig) bool {
-	r.pushMu.Lock()
-	defer r.pushMu.Unlock()
 	cfg := pushConfigFrom(pc)
-	if r.push == nil {
-		if r.pushFactory == nil {
-			return false
-		}
-		svc, err := r.pushFactory(cfg)
-		if err != nil {
-			return false
-		}
-		r.push = svc
-		r.push.Start()
+	// Fast path: existing service → no init mutex needed; Reconfigure
+	// has its own internal locking against Stop and concurrent calls.
+	if svc := r.push.Load(); svc != nil {
+		svc.Reconfigure(cfg)
 		return true
 	}
-	r.push.Reconfigure(cfg)
+	if r.pushFactory == nil {
+		return false
+	}
+	// Serialise lazy init so two simultaneous requests can't both spin
+	// up a Service (one of which would then leak its watcher + DB
+	// handle when overwritten).
+	r.pushInitMu.Lock()
+	defer r.pushInitMu.Unlock()
+	if svc := r.push.Load(); svc != nil {
+		// Lost the race; the other reinit won.
+		svc.Reconfigure(cfg)
+		return true
+	}
+	svc, err := r.pushFactory(cfg)
+	if err != nil {
+		return false
+	}
+	r.push.Store(svc)
 	return true
 }
 
 // pushRuntimeAvailable reports whether the push service is currently
-// running, under the same lock that reconfigurePush takes — so the
-// "runtime_available" field GETs return matches the truth at the moment
-// of the call, not a stale view from before a successful lazy init.
+// running. Cheap atomic Load; matches what handlers see.
 func (r *Router) pushRuntimeAvailable() bool {
-	r.pushMu.Lock()
-	defer r.pushMu.Unlock()
-	return r.push != nil
+	return r.push.Load() != nil
 }
 
 // commitPushAndRespond reloads the push config from settings.db, pushes
