@@ -13,8 +13,8 @@ push notifications when hosts go down or recover.
 
 1. Open Xcode → File → New → Project → iOS → App
 2. Product Name: `Sysmon`, Interface: SwiftUI, Language: Swift
-3. Bundle Identifier: `com.yourcompany.sysmon` (must match what you
-   configured in `sysmon.conf` as `config push-apns-bundleid`)
+3. Bundle Identifier: `com.yourcompany.sysmon` (must match the
+   **Bundle ID** entered in sysmon-web's Admin → Push Configuration → APNs)
 4. Delete the default `ContentView.swift` and `SysmonApp.swift` that
    Xcode created.
 5. Drag every `.swift` file from `Sysmon/` into the project (check
@@ -66,9 +66,10 @@ data values, minimal color palette. Matches the sysmon web UI's
 ## Troubleshooting
 
 **Push notifications never arrive**
-- Verify the bundle ID matches `config push-apns-bundleid` in `sysmon.conf`
-- Verify the APNs cert in `config push-apns-certfile` was issued for
-  the same bundle ID
+- Verify the bundle ID matches **Bundle ID** in sysmon-web's
+  Admin → Push Configuration → APNs
+- Verify the APNs cert uploaded in that same panel was issued for the
+  same bundle ID (the Subject CN is shown in the panel)
 - Check Settings → Notifications → Sysmon → enabled
 - In Settings tab inside the app, tap "Send Test Notification"
 

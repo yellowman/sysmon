@@ -39,56 +39,56 @@ is tied to the user account that registered it.
 
 ## Server Setup
 
-### 1. Enable push in sysmon.conf
+Push notifications are configured in the admin UI, **not** in
+`sysmon.conf`. The C daemon never used these settings; they live in the
+web-ui-only settings store (bbolt at `/var/lib/sysmon/settings.db`).
 
-```
-config push-notifications;
-```
+Open the web UI → log in as an admin → **Admin** → **Push Configuration**.
 
-### 2. Configure FCM (Android)
+### 1. FCM (Android)
 
-sysmon-web uses the FCM HTTP v1 API. Authenticate with a Google
-service-account JSON file:
+sysmon-web talks to FCM via the HTTP v1 API and authenticates with a
+Google service-account JSON.
 
 1. Firebase Console → Project Settings → **Service accounts** → "Generate
-   new private key". Save the downloaded JSON somewhere readable only by
-   the sysmon-web process (e.g. `/var/lib/sysmon/fcm-credentials.json`,
-   `chmod 600`, owned by the sysmon user).
+   new private key" → download the JSON. (This is **not** the
+   `google-services.json` your Android app ships with.)
 2. Make sure the **Firebase Cloud Messaging API** is enabled in the
    matching Google Cloud project.
-3. Point sysmon at the file:
+3. In the admin UI, click **Upload service-account JSON** under the FCM
+   section and select the downloaded file.
 
-```
-config push-fcm-credentials-file "/var/lib/sysmon/fcm-credentials.json";
-```
-
-The project ID is read from the JSON; no separate config directive is
-needed. sysmon-web mints short-lived OAuth access tokens transparently
+The credentials are validated on upload (rejected with a clear error if
+you accidentally upload `google-services.json` or any other non
+service-account file). Project ID and service-account email are extracted
+and shown in the admin UI; the private key itself is never re-served by
+the API. sysmon-web mints short-lived OAuth access tokens transparently
 and refreshes them automatically.
 
-> The previous server-key (Legacy HTTP API) flow was shut down by Google
-> in June 2024. Any `config push-fcm-serverkey "..."` directives in
-> existing configs will be ignored and must be replaced.
-
-### 3. Configure APNs (iOS)
+### 2. APNs (iOS)
 
 Export your push certificate from the Apple Developer portal as `.p12`,
-then convert to PEM:
+then convert to PEM (locally — you'll upload, not deploy to disk):
 
 ```sh
-openssl pkcs12 -in cert.p12 -out /etc/sysmon/apns-cert.pem -clcerts -nokeys
-openssl pkcs12 -in cert.p12 -out /etc/sysmon/apns-key.pem -nocerts -nodes
-chmod 600 /etc/sysmon/apns-key.pem
+openssl pkcs12 -in cert.p12 -out apns-cert.pem -clcerts -nokeys
+openssl pkcs12 -in cert.p12 -out apns-key.pem -nocerts -nodes
 ```
 
-```
-config push-apns-certfile "/etc/sysmon/apns-certificate.pem";
-config push-apns-keyfile "/etc/sysmon/apns-key.pem";
-config push-apns-bundleid "com.example.sysmon";
-config push-apns-production;
-```
+In the admin UI under **APNs**:
 
-Omit `push-apns-production` to use the APNs sandbox gateway.
+- Upload `apns-cert.pem` and `apns-key.pem`.
+- Set **Bundle ID** to match your app (e.g. `com.example.sysmon`).
+- Toggle **Production** on for App Store builds; leave it off to use
+  the APNs sandbox gateway during development.
+
+The certificate is validated on upload; its Subject CN and expiry are
+shown in the panel.
+
+### 3. Enable
+
+Flip the master **Enabled** switch in the admin UI to start the push
+watcher. Changes take effect immediately without a restart.
 
 ### 4. Create a mobile user account
 

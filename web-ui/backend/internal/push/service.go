@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -61,18 +62,27 @@ type pushLogEntry struct {
 }
 
 type Config struct {
-	Enabled            bool
-	FCMCredentialsFile string // path to Google service-account JSON
-	APNsCertFile       string
-	APNsKeyFile        string
-	APNsBundleID       string
-	APNsProduction     bool
+	Enabled        bool
+	FCMCredentials []byte // Google service-account JSON
+	APNsCertPEM    []byte
+	APNsKeyPEM     []byte
+	APNsBundleID   string
+	APNsProduction bool
 }
 
 type Service struct {
-	mu     sync.RWMutex
-	config Config
-	db     *bolt.DB
+	mu      sync.RWMutex
+	config  Config
+	db      *bolt.DB
+	started bool // watchLoop running?
+
+	// opsMu serializes the public API (Subscribe, ListSubscriptions,
+	// SendTest, …) against Stop. Public methods take RLock and check
+	// stopped; Stop takes Lock to drain in-flight ops, sets stopped,
+	// then closes channels and the bolt DB. The DB is therefore only
+	// ever closed once no RLocker can be holding it.
+	opsMu   sync.RWMutex
+	stopped bool
 
 	apns *APNsClient
 	fcm  *FCMClient
@@ -82,6 +92,83 @@ type Service struct {
 	stopCh     chan struct{}
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
+}
+
+// ErrServiceStopped is returned by public Service methods after Stop has
+// run. Callers should treat this as "push is unavailable" — typically a
+// 503 — not as a permanent failure of the request itself.
+var ErrServiceStopped = errors.New("push service is stopped")
+
+// buildClients constructs FCM and APNs clients from a Config, logging
+// (but not failing) on bad credentials so the service still runs for the
+// other platform. Network-free: it only parses creds/certs.
+func buildClients(cfg Config) (fcm *FCMClient, apns *APNsClient) {
+	if len(cfg.FCMCredentials) > 0 {
+		c, err := NewFCMClient(cfg.FCMCredentials)
+		if err != nil {
+			log.Printf("push: WARNING: FCM client init failed: %v", err)
+		} else {
+			fcm = c
+			log.Printf("push: FCM client initialized for project %s", c.projectID)
+		}
+	}
+	if len(cfg.APNsCertPEM) > 0 && len(cfg.APNsKeyPEM) > 0 && cfg.APNsBundleID != "" {
+		c, err := NewAPNsClient(cfg.APNsCertPEM, cfg.APNsKeyPEM, cfg.APNsBundleID, cfg.APNsProduction)
+		if err != nil {
+			log.Printf("push: WARNING: APNs client init failed: %v", err)
+		} else {
+			apns = c
+			env := "sandbox"
+			if cfg.APNsProduction {
+				env = "production"
+			}
+			log.Printf("push: APNs client initialized (%s, bundle: %s)", env, cfg.APNsBundleID)
+		}
+	}
+	return fcm, apns
+}
+
+// clients snapshots the current client pointers and enable flag under a
+// brief read lock so the send path never races a Reconfigure swap.
+func (s *Service) clients() (fcm *FCMClient, apns *APNsClient, enabled bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fcm, s.apns, s.config.Enabled
+}
+
+// Reconfigure hot-swaps the push credentials/flags (e.g. after an admin
+// uploads new FCM creds). Safe to call while the watcher is running; it
+// starts the watcher if push just became enabled+configured. Becomes a
+// no-op after Stop so a late call can't relaunch the watcher against a
+// closed bolt DB.
+func (s *Service) Reconfigure(cfg Config) {
+	s.opsMu.RLock()
+	if s.stopped {
+		s.opsMu.RUnlock()
+		return
+	}
+	s.opsMu.RUnlock()
+	fcm, apns := buildClients(cfg)
+	s.mu.Lock()
+	s.config = cfg
+	s.fcm = fcm
+	s.apns = apns
+	s.mu.Unlock()
+	s.maybeStartLoop()
+}
+
+// maybeStartLoop starts the watcher once, if push is enabled and at least
+// one platform is configured. Idempotent.
+func (s *Service) maybeStartLoop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.started || !s.config.Enabled || (s.fcm == nil && s.apns == nil) {
+		return
+	}
+	s.started = true
+	s.wg.Add(1)
+	go s.watchLoop()
+	log.Printf("push: state change watcher started (1s poll interval)")
 }
 
 func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, error) {
@@ -114,29 +201,7 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 		stopCh:     make(chan struct{}),
 	}
 
-	if cfg.FCMCredentialsFile != "" {
-		client, err := NewFCMClient(cfg.FCMCredentialsFile)
-		if err != nil {
-			log.Printf("push: WARNING: FCM client init failed: %v", err)
-		} else {
-			s.fcm = client
-			log.Printf("push: FCM client initialized for project %s", client.projectID)
-		}
-	}
-
-	if cfg.APNsCertFile != "" && cfg.APNsKeyFile != "" && cfg.APNsBundleID != "" {
-		client, err := NewAPNsClient(cfg.APNsCertFile, cfg.APNsKeyFile, cfg.APNsBundleID, cfg.APNsProduction)
-		if err != nil {
-			log.Printf("push: WARNING: APNs client init failed: %v", err)
-		} else {
-			s.apns = client
-			env := "sandbox"
-			if cfg.APNsProduction {
-				env = "production"
-			}
-			log.Printf("push: APNs client initialized (%s, bundle: %s)", env, cfg.APNsBundleID)
-		}
-	}
+	s.fcm, s.apns = buildClients(cfg)
 
 	count := s.subscriberCount()
 	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
@@ -144,28 +209,36 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 	return s, nil
 }
 
+// Start begins the state-change watcher if push is enabled and at least
+// one platform is configured. If not, it stays dormant until an admin
+// configures push via Reconfigure.
 func (s *Service) Start() {
-	if !s.config.Enabled {
-		log.Printf("push: notifications disabled in config")
-		return
-	}
-	if s.fcm == nil && s.apns == nil {
-		log.Printf("push: no FCM or APNs credentials configured, watcher not started")
-		return
-	}
-	s.wg.Add(1)
-	go s.watchLoop()
-	log.Printf("push: state change watcher started (1s poll interval)")
+	s.maybeStartLoop()
 }
 
+// Stop tears the service down with proper draining:
+//  1. Close stopCh so the watcher exits at the next select.
+//  2. Wait for the watcher goroutine to finish — the watcher's bolt
+//     ops are wrapped in the same public API as handler requests, so
+//     they take opsMu.RLock per op; we must not hold the W lock yet
+//     or they'd deadlock.
+//  3. Take opsMu.Lock. This blocks until every concurrent handler
+//     that already had RLock has released. Once we own it, no new
+//     RLocker can advance, and no current RLocker is in flight.
+//  4. Set stopped = true. Releasing the W lock lets queued handlers
+//     run; they observe stopped and return ErrServiceStopped without
+//     touching the bolt DB.
+//  5. Close the bolt DB.
+//
+// Idempotent via stopOnce: safe to call from a defer plus an explicit
+// graceful shutdown path.
 func (s *Service) Stop() {
-	// Idempotent: guards against a double close(stopCh) panic if Stop is
-	// ever called more than once (e.g. defer + an explicit graceful
-	// shutdown path). wg.Wait drains watchLoop before we close the DB so
-	// the poll goroutine can't touch a closed bolt handle.
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 		s.wg.Wait()
+		s.opsMu.Lock()
+		s.stopped = true
+		s.opsMu.Unlock()
 		if s.db != nil {
 			s.db.Close()
 		}
@@ -173,6 +246,11 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return "", ErrServiceStopped
+	}
 	if platform != PlatformIOS && platform != PlatformAndroid {
 		return "", fmt.Errorf("platform must be 'ios' or 'android'")
 	}
@@ -226,6 +304,11 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 
 // TouchLastSeen updates the last_seen timestamp for a device.
 func (s *Service) TouchLastSeen(token, ipAddr string) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return
+	}
 	s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		v := b.Get([]byte(token))
@@ -247,6 +330,11 @@ func (s *Service) TouchLastSeen(token, ipAddr string) {
 
 // RecordPush updates push delivery stats for a device.
 func (s *Service) RecordPush(token string, success bool) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return
+	}
 	s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		v := b.Get([]byte(token))
@@ -272,6 +360,11 @@ func (s *Service) RecordPush(token string, success bool) {
 
 // AdminRemove removes a subscription by device token (admin operation).
 func (s *Service) AdminRemove(token string) error {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ErrServiceStopped
+	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		if b.Get([]byte(token)) == nil {
@@ -283,6 +376,11 @@ func (s *Service) AdminRemove(token string) error {
 
 // GetPushLog returns the N most recent push log entries.
 func (s *Service) GetPushLog(limit int) []pushLogEntry {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return nil
+	}
 	var entries []pushLogEntry
 	s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketPushLog)
@@ -303,6 +401,11 @@ func (s *Service) GetPushLog(limit int) []pushLogEntry {
 }
 
 func (s *Service) Unsubscribe(token string) error {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ErrServiceStopped
+	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 		if b.Get([]byte(token)) == nil {
@@ -313,6 +416,11 @@ func (s *Service) Unsubscribe(token string) error {
 }
 
 func (s *Service) ListSubscriptions() []Subscription {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return nil
+	}
 	var subs []Subscription
 	s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
@@ -328,6 +436,11 @@ func (s *Service) ListSubscriptions() []Subscription {
 
 // ListSubscriptionsByOwner returns only subscriptions owned by the given user.
 func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return nil
+	}
 	var subs []Subscription
 	s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketSubscriptions).ForEach(func(k, v []byte) error {
@@ -344,6 +457,11 @@ func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
 // GetPlatform returns the platform of the subscription with the given token,
 // or empty string if not found.
 func (s *Service) GetPlatform(token string) Platform {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ""
+	}
 	var platform Platform
 	s.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
@@ -361,6 +479,11 @@ func (s *Service) GetPlatform(token string) Platform {
 
 // IsOwner checks if the given user owns the subscription with the given token.
 func (s *Service) IsOwner(token, owner string) bool {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return false
+	}
 	owned := false
 	s.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
@@ -377,6 +500,11 @@ func (s *Service) IsOwner(token, owner string) bool {
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return ErrServiceStopped
+	}
 	return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
 }
 
@@ -390,23 +518,27 @@ func (s *Service) subscriberCount() int {
 }
 
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
+	fcm, apns, _ := s.clients()
 	switch platform {
 	case PlatformIOS:
-		if s.apns == nil {
+		if apns == nil {
 			return fmt.Errorf("APNs not configured")
 		}
-		return s.apns.Send(token, title, subtitle, body, nil)
+		return apns.Send(token, title, subtitle, body, nil)
 	case PlatformAndroid:
-		if s.fcm == nil {
+		if fcm == nil {
 			return fmt.Errorf("FCM not configured")
 		}
-		return s.fcm.Send(token, title, body, fcmData{})
+		return fcm.Send(token, title, body, fcmData{})
 	default:
 		return fmt.Errorf("unknown platform: %s", platform)
 	}
 }
 
 func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int) {
+	// Snapshot the clients once so a concurrent Reconfigure can't swap
+	// them mid-fan-out, and so we don't hold a lock across slow sends.
+	fcm, apns, _ := s.clients()
 	subs := s.ListSubscriptions()
 	sent := 0
 	badgePtr := &badge
@@ -416,19 +548,19 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
-			if s.apns != nil {
-				err = s.apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
+			if apns != nil {
+				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
 			} else {
 				skipped = true
 			}
 		case PlatformAndroid:
-			if s.fcm != nil {
+			if fcm != nil {
 				data := fcmData{
 					Hostname: hostname,
 					Status:   status,
 					Type:     checkType,
 				}
-				err = s.fcm.Send(sub.DeviceToken, title, body, data)
+				err = fcm.Send(sub.DeviceToken, title, body, data)
 			} else {
 				skipped = true
 			}
@@ -545,6 +677,13 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	}
 	s.mu.Unlock()
 
+	// If push is disabled or unconfigured we still updated prevHosts
+	// above, so the baseline stays current and re-enabling later doesn't
+	// replay a backlog of stale state changes — we just don't send.
+	_, _, enabled := s.clients()
+	if !enabled {
+		return
+	}
 	for _, c := range changes {
 		s.sendStateChange(c.host, c.prevStatus, badge)
 	}

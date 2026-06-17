@@ -147,25 +147,9 @@ func Generate(config *models.Config) (string, error) {
 		sb.WriteString("config snmp-trap;\n")
 	}
 
-	// Push notifications
-	if config.Global.PushNotifications {
-		sb.WriteString("config push-notifications;\n")
-	}
-	if config.Global.PushFCMCredentialsFile != "" {
-		sb.WriteString(fmt.Sprintf("config push-fcm-credentials-file \"%s\";\n", q(config.Global.PushFCMCredentialsFile)))
-	}
-	if config.Global.PushAPNsCertFile != "" {
-		sb.WriteString(fmt.Sprintf("config push-apns-certfile \"%s\";\n", q(config.Global.PushAPNsCertFile)))
-	}
-	if config.Global.PushAPNsKeyFile != "" {
-		sb.WriteString(fmt.Sprintf("config push-apns-keyfile \"%s\";\n", q(config.Global.PushAPNsKeyFile)))
-	}
-	if config.Global.PushAPNsBundleID != "" {
-		sb.WriteString(fmt.Sprintf("config push-apns-bundleid \"%s\";\n", q(config.Global.PushAPNsBundleID)))
-	}
-	if config.Global.PushAPNsProduction {
-		sb.WriteString("config push-apns-production;\n")
-	}
+	// Push notification settings are stored in the web-ui settings
+	// store (bbolt), not here — see /api/settings/push. The C daemon
+	// never used them anyway.
 
 	sb.WriteString("\n")
 

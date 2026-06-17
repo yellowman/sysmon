@@ -438,15 +438,9 @@ object example-paused {
 # =============================================================================
 # PUSH NOTIFICATIONS (APNs / FCM)
 # =============================================================================
-# These directives are consumed by the sysmon web-ui backend, not sysmond.
-# The C daemon accepts and ignores them.
-
-#config push-notifications;
-#config push-fcm-credentials-file "/var/lib/sysmon/fcm-credentials.json";
-#config push-apns-certfile "/etc/sysmon/apns-cert.pem";
-#config push-apns-keyfile "/etc/sysmon/apns-key.pem";
-#config push-apns-bundleid "com.example.sysmon";
-#config push-apns-production;
+# Push notification settings (FCM credentials, APNs cert/key, bundle id,
+# enable flag) are configured in the sysmon-web admin UI and stored in
+# /var/lib/sysmon/settings.db — they are not sysmond's concern.
 
 
 # =============================================================================

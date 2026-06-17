@@ -1150,41 +1150,13 @@ config\ flaptime\ [^;]+;          {
 
 };
 
-config\ push-notifications{WS}*;	{
-  fixup_lineno();
-  if (debug)
-    print_err(0, "push-notifications enabled (handled by web-ui)");
-};
-
-config\ push-fcm-credentials-file\ [^;]+;	{
-  fixup_lineno();
-  if (debug)
-    print_err(0, "push-fcm-credentials-file set (handled by web-ui)");
-};
-
-config\ push-apns-certfile\ [^;]+;	{
-  fixup_lineno();
-  if (debug)
-    print_err(0, "push-apns-certfile set (handled by web-ui)");
-};
-
-config\ push-apns-keyfile\ [^;]+;	{
-  fixup_lineno();
-  if (debug)
-    print_err(0, "push-apns-keyfile set (handled by web-ui)");
-};
-
-config\ push-apns-bundleid\ [^;]+;	{
-  fixup_lineno();
-  if (debug)
-    print_err(0, "push-apns-bundleid set (handled by web-ui)");
-};
-
-config\ push-apns-production{WS}*;	{
-  fixup_lineno();
-  if (debug)
-    print_err(0, "push-apns-production set (handled by web-ui)");
-};
+/*
+ * push-* directives used to be parsed-and-ignored here so they could
+ * coexist with sysmond. They've moved to the sysmon-web settings store
+ * (bbolt); sysmond has no business knowing about them and will report
+ * any leftover "config push-*" lines as unknown directives. Configure
+ * push notifications in the admin UI instead.
+ */
 
 config\ pmesg\ [^;]+;          {
   /* Search for extra newlines that are not being counted */

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -86,27 +86,64 @@ func (d fcmData) toMap() map[string]string {
 	return m
 }
 
-// NewFCMClient loads a Google service-account credentials JSON file and
-// returns an FCM client configured for that file's project. The token
-// source it builds refreshes access tokens transparently.
-//
-// Pass the absolute path of the JSON downloaded from
-// Firebase Console -> Project Settings -> Service Accounts ->
-// "Generate new private key".
-func NewFCMClient(credentialsFile string) (*FCMClient, error) {
-	if credentialsFile == "" {
-		return nil, fmt.Errorf("FCM credentials file path is empty")
+// serviceAccountFields are the parts of a Google service-account JSON we
+// care about for validation and display. The full credential is handed
+// to the oauth2 library; this is just for our own checks/metadata.
+type serviceAccountFields struct {
+	Type         string `json:"type"`
+	ProjectID    string `json:"project_id"`
+	PrivateKey   string `json:"private_key"`
+	PrivateKeyID string `json:"private_key_id"`
+	ClientEmail  string `json:"client_email"`
+	TokenURI     string `json:"token_uri"`
+}
+
+// FCMCredentialMeta validates a service-account JSON and returns
+// display-safe metadata (never the private key). Used both to vet an
+// upload and to render the "currently configured" panel. The error
+// messages are written to be shown to an admin in the UI.
+func FCMCredentialMeta(credentialsJSON []byte) (projectID, clientEmail, keyIDLast4 string, err error) {
+	var sa serviceAccountFields
+	if e := json.Unmarshal(credentialsJSON, &sa); e != nil {
+		return "", "", "", fmt.Errorf("not valid JSON: %w", e)
 	}
-	data, err := os.ReadFile(credentialsFile)
-	if err != nil {
-		return nil, fmt.Errorf("read FCM credentials %q: %w", credentialsFile, err)
+	if sa.Type != "service_account" {
+		// Most common mistake: uploading google-services.json (the
+		// client config bundled into the Android app) instead of the
+		// service-account key.
+		return "", "", "", fmt.Errorf("this is not a service-account key (type=%q). Use Firebase Console → Project Settings → Service accounts → \"Generate new private key\", not the google-services.json app file", sa.Type)
 	}
-	creds, err := google.CredentialsFromJSON(context.Background(), data, fcmScope)
+	if sa.ProjectID == "" || sa.ClientEmail == "" || sa.TokenURI == "" {
+		return "", "", "", fmt.Errorf("service-account JSON is missing required fields (project_id/client_email/token_uri)")
+	}
+	if !strings.Contains(sa.PrivateKey, "BEGIN PRIVATE KEY") {
+		return "", "", "", fmt.Errorf("service-account JSON has no usable private_key")
+	}
+	// Final authority: let the oauth2 library actually accept it.
+	if _, e := google.CredentialsFromJSON(context.Background(), credentialsJSON, fcmScope); e != nil {
+		return "", "", "", fmt.Errorf("Google rejected the credentials: %w", e)
+	}
+	last4 := sa.PrivateKeyID
+	if len(last4) > 4 {
+		last4 = last4[len(last4)-4:]
+	}
+	return sa.ProjectID, sa.ClientEmail, last4, nil
+}
+
+// NewFCMClient builds an FCM client from a Google service-account
+// credentials JSON (the raw bytes, e.g. as uploaded through the admin UI
+// and stored in bbolt). The token source it builds refreshes access
+// tokens transparently.
+func NewFCMClient(credentialsJSON []byte) (*FCMClient, error) {
+	if len(credentialsJSON) == 0 {
+		return nil, fmt.Errorf("FCM credentials are empty")
+	}
+	creds, err := google.CredentialsFromJSON(context.Background(), credentialsJSON, fcmScope)
 	if err != nil {
-		return nil, fmt.Errorf("parse FCM credentials %q: %w", credentialsFile, err)
+		return nil, fmt.Errorf("parse FCM credentials: %w", err)
 	}
 	if creds.ProjectID == "" {
-		return nil, fmt.Errorf("FCM credentials %q has no project_id; download a service-account key, not an OAuth client", credentialsFile)
+		return nil, fmt.Errorf("FCM credentials have no project_id; upload a service-account key, not an OAuth client")
 	}
 	return &FCMClient{
 		httpClient:  &http.Client{Timeout: 10 * time.Second},
