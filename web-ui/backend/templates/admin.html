@@ -155,6 +155,150 @@
         </div>
     </div>
 
+    <!-- Push Configuration (FCM / APNs credentials, stored in settings.db) -->
+    <div id="push-config" class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Push Configuration</h2>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="sr-only peer"
+                       :checked="pushCfg.enabled"
+                       @change="setPushEnabled($event.target.checked)">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                <span class="ml-2 text-xs font-medium text-gray-600" x-text="pushCfg.enabled ? 'Enabled' : 'Disabled'"></span>
+            </label>
+        </div>
+        <div class="p-6 space-y-5">
+            <p class="text-xs text-gray-500 -mt-2">
+                Credentials are stored in <code class="bg-gray-100 px-1 rounded">/var/lib/sysmon/settings.db</code>
+                (not <code class="bg-gray-100 px-1 rounded">sysmon.conf</code>).
+                <span x-show="pushCfg.runtime_available">Changes take effect immediately.</span>
+            </p>
+
+            <div x-show="pushCfg.runtime_available === false"
+                 class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">
+                <b>Push service didn't start at boot</b> &mdash; the server log will say why
+                (usually a problem opening <code class="bg-amber-100 px-1 rounded">/var/lib/sysmon/push.db</code>).
+                Saving any setting here will retry initialization. Until that retry succeeds the
+                badges below reflect what's stored on disk, not what's running.
+            </div>
+
+            <div x-show="pushCfgError" class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3" x-text="pushCfgError"></div>
+            <div x-show="pushCfgNote" class="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-3" x-text="pushCfgNote"></div>
+
+            <!-- FCM (Android) -->
+            <div class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-3">
+                    <i class="fab fa-android text-green-600"></i>
+                    <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
+                    <span x-show="pushCfg.fcm && !pushCfg.fcm.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.fcm && pushCfg.fcm.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
+                    <span x-show="!pushCfg.fcm" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
+                </div>
+
+                <template x-if="pushCfg.fcm && !pushCfg.fcm.error">
+                    <div class="text-xs text-gray-600 space-y-1 mb-3 font-mono bg-gray-50 rounded p-3">
+                        <div><span class="text-gray-400">project&nbsp;&nbsp;</span><span x-text="pushCfg.fcm.project_id"></span></div>
+                        <div><span class="text-gray-400">account&nbsp;&nbsp;</span><span x-text="pushCfg.fcm.client_email"></span></div>
+                        <div><span class="text-gray-400">key&nbsp;id&nbsp;&nbsp;</span>…<span x-text="pushCfg.fcm.key_id_last4"></span></div>
+                    </div>
+                </template>
+
+                <div x-show="pushCfg.fcm && pushCfg.fcm.error"
+                     class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3">
+                    Stored credentials could not be read: <span x-text="pushCfg.fcm && pushCfg.fcm.error"></span>.
+                    Re-upload a valid service-account JSON.
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <input type="file" accept=".json,application/json" class="hidden" x-ref="fcmFile"
+                           @change="uploadFCM($event.target.files[0]); $event.target.value=''">
+                    <button @click="$refs.fcmFile.click()" :disabled="pushBusy"
+                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">
+                        <i class="fas fa-upload mr-1"></i>
+                        <span x-text="pushCfg.fcm ? 'Replace service-account JSON' : 'Upload service-account JSON'"></span>
+                    </button>
+                    <button x-show="pushCfg.fcm" @click="deleteFCM()" :disabled="pushBusy"
+                            class="px-3 py-1.5 text-red-600 text-sm rounded hover:bg-red-50 disabled:opacity-50">
+                        <i class="fas fa-trash mr-1"></i>Remove
+                    </button>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">
+                    Firebase Console → Project Settings → <b>Service accounts</b> → "Generate new private key".
+                    Not the <code class="bg-gray-100 px-1 rounded">google-services.json</code> app file.
+                </p>
+            </div>
+
+            <!-- APNs (iOS) -->
+            <div class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-3">
+                    <i class="fab fa-apple text-gray-800"></i>
+                    <h4 class="text-sm font-semibold text-gray-800">APNs (iOS)</h4>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.error && pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.error && !pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Incomplete</span>
+                    <span x-show="pushCfg.apns && pushCfg.apns.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
+                    <span x-show="!pushCfg.apns" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
+                </div>
+
+                <template x-if="pushCfg.apns && !pushCfg.apns.error">
+                    <div class="text-xs text-gray-600 space-y-1 mb-3 font-mono bg-gray-50 rounded p-3">
+                        <div><span class="text-gray-400">subject&nbsp;&nbsp;</span><span x-text="pushCfg.apns.subject"></span></div>
+                        <div>
+                            <span class="text-gray-400">expires&nbsp;&nbsp;</span>
+                            <span x-text="formatTime(pushCfg.apns.not_after)"
+                                  :class="apnsExpirySoon ? 'text-red-600 font-semibold' : ''"></span>
+                            <span x-show="apnsExpirySoon" class="text-red-600"> ⚠ expiring soon</span>
+                        </div>
+                    </div>
+                </template>
+
+                <div x-show="pushCfg.apns && pushCfg.apns.error"
+                     class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3">
+                    Stored certificate could not be read: <span x-text="pushCfg.apns && pushCfg.apns.error"></span>.
+                    Re-upload a valid cert + key.
+                </div>
+
+                <div x-show="pushCfg.apns && !pushCfg.apns.error && !pushCfg.apns.ready"
+                     class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                    ⚠ Certificate uploaded, but iOS delivery is off until you set a <b>Bundle ID</b> below.
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Bundle ID</label>
+                        <input type="text" x-model="pushCfg.apns_bundle_id" placeholder="com.example.sysmon"
+                               @change="savePushMeta()"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="flex items-center pt-6">
+                        <input type="checkbox" id="apns-prod" x-model="pushCfg.apns_production" @change="savePushMeta()"
+                               class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                        <label for="apns-prod" class="ml-2 text-sm text-gray-700">Production gateway</label>
+                        <span class="ml-2 text-xs text-gray-400">(uncheck for sandbox)</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <label class="text-xs text-gray-600">
+                        Cert (PEM)
+                        <input type="file" accept=".pem,.crt" x-ref="apnsCert" class="block text-xs mt-1">
+                    </label>
+                    <label class="text-xs text-gray-600">
+                        Key (PEM)
+                        <input type="file" accept=".pem,.key" x-ref="apnsKey" class="block text-xs mt-1">
+                    </label>
+                    <button @click="uploadAPNs()" :disabled="pushBusy"
+                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 self-end">
+                        <i class="fas fa-upload mr-1"></i>Upload cert + key
+                    </button>
+                    <button x-show="pushCfg.apns" @click="deleteAPNs()" :disabled="pushBusy"
+                            class="px-3 py-1.5 text-red-600 text-sm rounded hover:bg-red-50 disabled:opacity-50 self-end">
+                        <i class="fas fa-trash mr-1"></i>Remove
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Push Notification Subscribers -->
     <div class="card mb-6">
         <div class="card-header flex justify-between items-center">
@@ -452,8 +596,17 @@ function adminPage() {
         pushSubs: [],
         pushSubsError: '',
         pushLog: [],
+        pushCfg: { enabled: false, fcm: null, apns: null, apns_bundle_id: '', apns_production: false },
+        pushCfgError: '',
+        pushCfgNote: '',
+        pushBusy: false,
         refreshInterval: null,
 
+        get apnsExpirySoon() {
+            if (!this.pushCfg.apns || !this.pushCfg.apns.not_after) return false;
+            const days = (new Date(this.pushCfg.apns.not_after) - Date.now()) / 86400000;
+            return days < 30;
+        },
 
         init() {
             this.loadVersion();
@@ -462,6 +615,7 @@ function adminPage() {
             this.loadSessionErrors();
             this.loadPushSubs();
             this.loadPushLog();
+            this.loadPushCfg();
             this.loadUsers();
 
             // Refresh the live tables every 30s. The previous 5s interval
@@ -664,6 +818,112 @@ function adminPage() {
             } catch (e) {
                 alert('Failed to change role: ' + e.message);
             }
+        },
+
+        async loadPushCfg() {
+            try {
+                this.pushCfg = await apiCall('/api/settings/push');
+                this.pushCfgError = '';
+            } catch (e) {
+                this.pushCfgError = e.message || 'Failed to load push configuration';
+            }
+        },
+
+        flashPush(note) {
+            this.pushCfgNote = note;
+            this.pushCfgError = '';
+            setTimeout(() => { this.pushCfgNote = ''; }, 4000);
+        },
+
+        async setPushEnabled(enabled) {
+            this.pushBusy = true;
+            try {
+                this.pushCfg = await apiCall('/api/settings/push', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                this.flashPush(enabled ? 'Push notifications enabled.' : 'Push notifications disabled.');
+            } catch (e) {
+                this.pushCfgError = e.message || 'Failed to update';
+                await this.loadPushCfg(); // resync the toggle with reality
+            }
+            this.pushBusy = false;
+        },
+
+        async savePushMeta() {
+            try {
+                this.pushCfg = await apiCall('/api/settings/push', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        apns_bundle_id: this.pushCfg.apns_bundle_id || '',
+                        apns_production: !!this.pushCfg.apns_production
+                    })
+                });
+            } catch (e) {
+                this.pushCfgError = e.message || 'Failed to save';
+            }
+        },
+
+        async uploadFCM(file) {
+            if (!file) return;
+            this.pushBusy = true;
+            try {
+                const text = await file.text();
+                this.pushCfg = await apiCall('/api/settings/push/fcm-credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: text
+                });
+                this.flashPush('FCM credentials saved for project ' + (this.pushCfg.fcm ? this.pushCfg.fcm.project_id : '?') + '.');
+            } catch (e) {
+                this.pushCfgError = e.message || 'Upload failed';
+            }
+            this.pushBusy = false;
+        },
+
+        async deleteFCM() {
+            if (!confirm('Remove the stored FCM credentials? Android push will stop until you upload a new key.')) return;
+            this.pushBusy = true;
+            try {
+                this.pushCfg = await apiCall('/api/settings/push/fcm-credentials', { method: 'DELETE' });
+                this.flashPush('FCM credentials removed.');
+            } catch (e) {
+                this.pushCfgError = e.message || 'Delete failed';
+            }
+            this.pushBusy = false;
+        },
+
+        async uploadAPNs() {
+            const cert = this.$refs.apnsCert.files[0];
+            const key = this.$refs.apnsKey.files[0];
+            if (!cert || !key) { this.pushCfgError = 'Select both a cert and a key file.'; return; }
+            this.pushBusy = true;
+            try {
+                const fd = new FormData();
+                fd.append('cert', cert);
+                fd.append('key', key);
+                this.pushCfg = await apiCall('/api/settings/push/apns', { method: 'POST', body: fd });
+                this.$refs.apnsCert.value = '';
+                this.$refs.apnsKey.value = '';
+                this.flashPush('APNs certificate saved.');
+            } catch (e) {
+                this.pushCfgError = e.message || 'Upload failed';
+            }
+            this.pushBusy = false;
+        },
+
+        async deleteAPNs() {
+            if (!confirm('Remove the stored APNs certificate? iOS push will stop until you upload a new one.')) return;
+            this.pushBusy = true;
+            try {
+                this.pushCfg = await apiCall('/api/settings/push/apns', { method: 'DELETE' });
+                this.flashPush('APNs certificate removed.');
+            } catch (e) {
+                this.pushCfgError = e.message || 'Delete failed';
+            }
+            this.pushBusy = false;
         },
 
         async loadPushSubs() {

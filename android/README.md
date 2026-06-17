@@ -15,20 +15,18 @@ or recover.
 1. Create a new Firebase project at https://console.firebase.google.com
 2. Add an Android app to the project:
    - Package name: `com.sysmon.app` (must match `applicationId` in
-     `app/build.gradle.kts` and `config push-fcm-package` in `sysmon.conf`
-     if you set it)
+     `app/build.gradle.kts`)
 3. Download the generated `google-services.json` and drop it at
    `android/app/google-services.json` (do NOT commit it — it's in
-   `.gitignore`)
+   `.gitignore`). This is the client-side Firebase config bundled into
+   the Android app.
 4. Project Settings → **Service accounts** → "Generate new private key".
-   Save the downloaded JSON on the sysmon-web host (e.g.
-   `/var/lib/sysmon/fcm-credentials.json`), set it to mode 0600 owned by
-   the sysmon-web user, and reference it from `sysmon.conf`:
-   ```
-   config push-fcm-credentials-file "/var/lib/sysmon/fcm-credentials.json";
-   ```
-   sysmon-web uses the FCM HTTP v1 API; the older Server Key (Legacy
-   HTTP API) was shut down by Google in June 2024.
+   This downloads a *different* JSON (a service-account key, with
+   `"type": "service_account"`). Don't deploy it to disk — upload it
+   through the sysmon-web admin UI: **Admin** → **Push Configuration**
+   → **Upload service-account JSON**. sysmon-web uses the FCM HTTP v1
+   API; the older Server Key (Legacy HTTP API) was shut down by Google
+   in June 2024.
 
 ## Building
 
@@ -100,12 +98,15 @@ tracked labels mirror the sysmon web UI's editorial magazine style.
 
 **Push notifications never arrive**
 - Verify the package name matches the Firebase app
-- Verify `push-fcm-credentials-file` in `sysmon.conf` points at a
-  service-account JSON whose project matches your `google-services.json`
+- Open sysmon-web → **Admin** → **Push Configuration**. The FCM panel
+  should show **project id**, **service-account email**, and a key id.
+  If it's empty, re-upload the service-account JSON.
+- The project id shown there must match the `project_id` in your
+  Android-side `google-services.json`.
 - Verify the **Firebase Cloud Messaging API** (not the old Legacy HTTP
-  API) is enabled in Google Cloud Console for that project
-- Settings → Apps → Sysmon → Notifications → enabled
-- In the Settings tab inside the app, tap "Send Test Notification"
+  API) is enabled in Google Cloud Console for that project.
+- Settings → Apps → Sysmon → Notifications → enabled.
+- In the Settings tab inside the app, tap "Send Test Notification".
 
 **"Session expired" on every action**
 - Once you sign in, the session stays alive for as long as you keep

@@ -362,18 +362,17 @@ func Parse(content []byte) (*models.Config, error) {
 				config.Global.DownColor = extractQuoted(strings.TrimPrefix(line, "downcolor "))
 			} else if strings.HasPrefix(line, "recentcolor ") {
 				config.Global.RecentColor = extractQuoted(strings.TrimPrefix(line, "recentcolor "))
-			} else if line == "push-notifications" {
-				config.Global.PushNotifications = true
-			} else if strings.HasPrefix(line, "push-fcm-credentials-file ") {
-				config.Global.PushFCMCredentialsFile = extractQuoted(strings.TrimPrefix(line, "push-fcm-credentials-file "))
-			} else if strings.HasPrefix(line, "push-apns-certfile ") {
-				config.Global.PushAPNsCertFile = extractQuoted(strings.TrimPrefix(line, "push-apns-certfile "))
-			} else if strings.HasPrefix(line, "push-apns-keyfile ") {
-				config.Global.PushAPNsKeyFile = extractQuoted(strings.TrimPrefix(line, "push-apns-keyfile "))
-			} else if strings.HasPrefix(line, "push-apns-bundleid ") {
-				config.Global.PushAPNsBundleID = extractQuoted(strings.TrimPrefix(line, "push-apns-bundleid "))
-			} else if line == "push-apns-production" {
-				config.Global.PushAPNsProduction = true
+			} else if line == "push-notifications" ||
+				strings.HasPrefix(line, "push-fcm-credentials-file ") ||
+				strings.HasPrefix(line, "push-apns-certfile ") ||
+				strings.HasPrefix(line, "push-apns-keyfile ") ||
+				strings.HasPrefix(line, "push-apns-bundleid ") ||
+				line == "push-apns-production" {
+				// Legacy directives — push configuration moved to the
+				// web-ui settings store (bbolt). Parsed-and-ignored here
+				// for backwards compat with old sysmon.conf files; remove
+				// them from your sysmon.conf and configure push in the
+				// admin UI instead.
 			}
 			continue
 		}

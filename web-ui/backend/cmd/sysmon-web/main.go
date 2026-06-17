@@ -13,6 +13,7 @@ import (
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
+	"sysmon-web/internal/settings"
 )
 
 func main() {
@@ -54,27 +55,51 @@ func main() {
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
 
-	// Initialize push notification service from parsed config
-	var pushService *push.Service
-	if snapshot, err := configService.GetConfig(); err != nil {
-		log.Printf("WARNING: could not read config for push init: %v", err)
-	} else {
-		g := snapshot.Config.Global
-		pushCfg := push.Config{
-			Enabled:            g.PushNotifications,
-			FCMCredentialsFile: g.PushFCMCredentialsFile,
-			APNsCertFile:       g.PushAPNsCertFile,
-			APNsKeyFile:        g.PushAPNsKeyFile,
-			APNsBundleID:       g.PushAPNsBundleID,
-			APNsProduction:     g.PushAPNsProduction,
-		}
-		svc, err := push.NewService(pushCfg, "/var/lib/sysmon/push.db", monitoringService)
+	// Web-only settings (push credentials etc.) live in their own bbolt
+	// store, not in sysmon.conf — they aren't sysmond's concern.
+	settingsStore, err := settings.NewStore("/var/lib/sysmon/settings.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize settings store: %v", err)
+	}
+	defer settingsStore.Close()
+
+	// pushFactory rebuilds the push service from a config. Used by main
+	// for boot, and by the router for on-demand reinit if boot failed
+	// (e.g. /var/lib/sysmon/push.db was unwritable at boot but the
+	// operator has since fixed permissions).
+	pushFactory := func(cfg push.Config) (*push.Service, error) {
+		svc, err := push.NewService(cfg, "/var/lib/sysmon/push.db", monitoringService)
 		if err != nil {
-			log.Printf("WARNING: push notification init failed: %v", err)
+			return nil, err
+		}
+		svc.Start()
+		return svc, nil
+	}
+
+	// Initialize push notification service from the settings store. If
+	// init fails (e.g. push.db is unwritable at boot), pushService stays
+	// nil; the router retries via pushFactory on the next settings
+	// change, so the operator can fix the underlying problem and apply
+	// settings through the admin UI without a process restart. Lifecycle
+	// (Stop) is owned by the router, not this local — see the shutdown
+	// func returned by NewRouter — because the router may swap in a
+	// lazily-created instance that this local would never see.
+	var pushService *push.Service
+	if pc, err := settingsStore.GetPush(); err != nil {
+		log.Printf("WARNING: could not read push settings: %v", err)
+	} else {
+		svc, err := pushFactory(push.Config{
+			Enabled:        pc.Enabled,
+			FCMCredentials: pc.FCMCredentials,
+			APNsCertPEM:    pc.APNsCertPEM,
+			APNsKeyPEM:     pc.APNsKeyPEM,
+			APNsBundleID:   pc.APNsBundleID,
+			APNsProduction: pc.APNsProduction,
+		})
+		if err != nil {
+			log.Printf("WARNING: push notification init failed: %v (will retry on next settings change)", err)
 		} else {
 			pushService = svc
-			pushService.Start()
-			defer pushService.Stop()
 		}
 	}
 
@@ -85,8 +110,10 @@ func main() {
 	}
 	defer authService.Close()
 
-	// Create API router
-	handler := api.NewRouter(configService, monitoringService, pushService, authService)
+	// Create API router. The returned stopPush shuts down whichever push
+	// service the router ends up owning (boot instance or a lazy reinit).
+	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
+	defer stopPush()
 
 	// Development mode (HTTP) or production (FastCGI)
 	if *listen != "" {
