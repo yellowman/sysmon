@@ -1,0 +1,36 @@
+#!/bin/ksh
+#
+# OpenBSD rc.d(8) script for sysmon-web.
+# Install as /etc/rc.d/sysmon_web (chmod 555), then:
+#   rcctl enable sysmon_web
+#   rcctl start sysmon_web
+#
+# Because httpd(8) runs chrooted in /var/www, the FastCGI socket must
+# live inside that chroot. We put it at /var/www/run/sysmon-web.sock and
+# reference it from httpd.conf as "/run/sysmon-web.sock" (chroot-relative).
+# The socket is handed to the www user/group so httpd can connect.
+
+daemon="/usr/local/bin/sysmon-web"
+daemon_flags="-foreground \
+  -socket /var/www/run/sysmon-web.sock \
+  -socket-user www -socket-group www \
+  -config /etc/sysmon.conf \
+  -sysmon 127.0.0.1:1345 \
+  -templates /usr/local/libexec/sysmon-web/templates \
+  -backups /var/backups/sysmon \
+  -audit /var/log/sysmon-web-audit.log"
+daemon_user="root"
+
+. /etc/rc.d/rc.subr
+
+# sysmon-web has no readiness signal of its own; treat "process is up" as
+# running. rc_bg backgrounds it under rc.d's supervision (we pass
+# -foreground so the binary itself does not double-fork).
+rc_bg=YES
+
+rc_pre() {
+	# Ensure the chroot run dir exists for the socket.
+	[ -d /var/www/run ] || mkdir -p /var/www/run
+}
+
+rc_cmd $1

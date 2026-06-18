@@ -2,11 +2,17 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/fcgi"
 	"os"
+	"os/exec"
+	"os/user"
+	"strconv"
+	"syscall"
 
 	"sysmon-web/internal/api"
 	"sysmon-web/internal/auth"
@@ -15,6 +21,78 @@ import (
 	"sysmon-web/internal/push"
 	"sysmon-web/internal/settings"
 )
+
+// daemonEnvMarker is set in the detached child's environment so it knows
+// not to re-daemonize (which would fork-bomb).
+const daemonEnvMarker = "_SYSMON_WEB_DAEMON"
+
+// daemonize re-executes this process detached from the controlling
+// terminal — new session (setsid), std streams to /dev/null — then exits
+// the parent. The detached child runs with daemonEnvMarker set so it
+// skips this and proceeds to run the server. No-op if we're already the
+// child. The working directory is intentionally preserved so relative
+// template/static paths still resolve.
+func daemonize() {
+	if os.Getenv(daemonEnvMarker) == "1" {
+		return // we are the detached child
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: %v\n", err)
+		os.Exit(1)
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: open %s: %v\n", os.DevNull, err)
+		os.Exit(1)
+	}
+	defer null.Close()
+
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Env = append(os.Environ(), daemonEnvMarker+"=1")
+	cmd.Stdin = null
+	cmd.Stdout = null
+	cmd.Stderr = null
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("sysmon-web: started in background (pid %d)\n", cmd.Process.Pid)
+	os.Exit(0)
+}
+
+// chownSocket changes the socket's owner and/or group by name. Either
+// may be empty to leave that component unchanged (os.Chown takes -1 for
+// "no change"). A no-op when both are empty.
+func chownSocket(path, userName, groupName string) error {
+	if userName == "" && groupName == "" {
+		return nil
+	}
+	uid, gid := -1, -1
+	if userName != "" {
+		u, err := user.Lookup(userName)
+		if err != nil {
+			return fmt.Errorf("lookup user %q: %w", userName, err)
+		}
+		if uid, err = strconv.Atoi(u.Uid); err != nil {
+			return fmt.Errorf("parse uid for %q: %w", userName, err)
+		}
+	}
+	if groupName != "" {
+		g, err := user.LookupGroup(groupName)
+		if err != nil {
+			return fmt.Errorf("lookup group %q: %w", groupName, err)
+		}
+		if gid, err = strconv.Atoi(g.Gid); err != nil {
+			return fmt.Errorf("parse gid for %q: %w", groupName, err)
+		}
+	}
+	if err := os.Chown(path, uid, gid); err != nil {
+		return fmt.Errorf("chown %q to %d:%d: %w", path, uid, gid, err)
+	}
+	return nil
+}
 
 func main() {
 	// Command line flags
@@ -25,7 +103,24 @@ func main() {
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
 	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")
 	listen := flag.String("listen", "", "HTTP listen address (for dev mode, leave empty for FastCGI)")
+	socketUser := flag.String("socket-user", "", "chown the FastCGI socket to this user (so the web server can connect when sysmon-web runs as root)")
+	socketGroup := flag.String("socket-group", "", "chgrp the FastCGI socket to this group (e.g. www-data on nginx, www on OpenBSD httpd)")
+	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
+	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
+
+	// Logging is off unless -debug. A daemon shouldn't chatter; if you
+	// need to see what's happening, run with -debug in the foreground.
+	if !*debug {
+		log.SetOutput(io.Discard)
+	}
+
+	// Daemonize by default. -debug or -foreground keep us attached so a
+	// process supervisor (systemd Type=simple, OpenBSD rc) can track the
+	// process, and so -debug output actually reaches a terminal.
+	if !*debug && !*foreground {
+		daemonize() // exits the parent; the detached child returns here
+	}
 
 	// Initialize services
 	log.Println("Initializing sysmon web configuration manager...")
@@ -136,7 +231,15 @@ func main() {
 		}
 		defer listener.Close()
 
-		// Set permissions on socket
+		// Hand the socket to the web server's user/group. Without this,
+		// a sysmon-web started as root leaves the socket root-owned
+		// (root:wheel on BSD) mode 0660, and nginx/httpd get EACCES.
+		if err := chownSocket(*socketPath, *socketUser, *socketGroup); err != nil {
+			log.Fatalf("Failed to set socket ownership: %v", err)
+		}
+
+		// 0660: owner + group read/write, world none. Combined with the
+		// chgrp above this lets exactly the web server connect.
 		if err := os.Chmod(*socketPath, 0660); err != nil {
 			log.Fatalf("Failed to chmod socket: %v", err)
 		}

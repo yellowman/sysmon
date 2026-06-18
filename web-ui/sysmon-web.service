@@ -8,7 +8,13 @@ Requires=sysmond.service
 Type=simple
 User=www-data
 Group=www-data
+# -foreground: don't self-daemonize, so systemd (Type=simple) tracks the
+#   process directly. sysmon-web daemonizes by default when run by hand.
+# Add -debug to send logs to the journal while troubleshooting.
+# Running as User/Group=www-data means the socket is already owned by the
+# web server's user, so -socket-user/-socket-group aren't needed here.
 ExecStart=/usr/local/bin/sysmon-web \
+  -foreground \
   -socket /var/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
   -sysmon localhost:3333 \
@@ -23,7 +29,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/run /var/backups/sysmon /var/log /etc/sysmon.conf
+# /var/lib/sysmon holds the bbolt stores (auth.db, push.db, settings.db);
+# without it here ProtectSystem=strict would make them read-only.
+ReadWritePaths=/var/run /var/lib/sysmon /var/backups/sysmon /var/log /etc/sysmon.conf
+StateDirectory=sysmon
 
 [Install]
 WantedBy=multi-user.target
