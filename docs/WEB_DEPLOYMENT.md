@@ -37,30 +37,45 @@ supervisor.
 
 ---
 
-## 2. Socket ownership (the root:wheel problem)
+## 2. Privilege dropping and socket ownership
 
-`sysmon-web` creates the socket mode `0660` (owner+group read/write,
-world nothing). If you start it as **root** and do nothing else, the
-socket ends up owned by `root:root` (`root:wheel` on BSD) — and your web
-server, which runs as `www-data`/`www`, gets **permission denied** (502 /
-"connect() failed (13: Permission denied)").
+`sysmon-web` is built to be **started as root and immediately drop
+privileges**. The only thing it does as root is the unavoidable part —
+bind the listening socket (a unix socket inside httpd's `/var/www`
+chroot, or a low TCP port) and hand that socket to the web server's user.
+Then, before opening any database or serving a single request, it:
 
-Two ways to fix it:
+1. **Chowns the socket** to the web server's identity so it can connect.
+   Default: the first of **`www`, `www-data`, `nobody`** that exists.
+   Override with `-socket-user` / `-socket-group`.
+2. **Prepares its data directories** (`/var/lib/sysmon`,
+   `/var/backups/sysmon`, the audit log) owned by the unprivileged user.
+3. **Drops to an unprivileged user/group** for the rest of its life.
+   Default: **`_sysmon`** if it exists, otherwise **`nobody`**. Override
+   with `-user` / `-group`. The group defaults to that user's primary
+   group (so the `nobody`/`nogroup` split across distros is handled for
+   you).
 
-1. **Run sysmon-web as the web-server user** (simplest). The socket is
-   then created already owned correctly. The systemd unit does this
-   (`User=www-data`).
+If it's started as root and can't find *any* unprivileged account to drop
+to, it **refuses to run** rather than silently stay root. Create a
+`_sysmon` user, or pass `-user`/`-group`.
 
-2. **Hand the socket over after creating it** with
-   `-socket-user`/`-socket-group`. Use this when sysmon-web must run as
-   root (e.g. so it can read a root-only `sysmon.conf`, or on OpenBSD
-   where it places the socket inside httpd's chroot). Either flag may be
-   given alone; the other component is left unchanged.
+If `sysmon-web` is started by something that has **already** dropped
+privileges (the systemd unit runs as `www-data`), it detects it isn't
+root and skips all of the above — the socket is simply created owned by
+that user, which is exactly what you want.
 
-   ```sh
-   sysmon-web -socket-group www-data …      # nginx / Linux
-   sysmon-web -socket-user www -socket-group www …   # OpenBSD httpd
-   ```
+> The socket is mode `0660` (owner+group read/write, world none), so only
+> the web server's user/group can connect. A `502` with
+> "connect() failed (13: Permission denied)" in the web-server log means
+> the socket is still owned by the wrong user — i.e. it was started as a
+> non-root, non-web user, or the resolved socket owner is wrong.
+
+For the unprivileged user to work, its data paths must be writable by it.
+`sysmon-web` creates and chowns `/var/lib/sysmon` and the backup dir on
+first start, but **`/etc/sysmon.conf` is yours**: if you want to use the
+config editor, that file must be writable by the drop user (or its
+group). Reading it only needs world-read, which is the default.
 
 ---
 
@@ -154,22 +169,21 @@ rcctl enable sysmon_web
 rcctl start sysmon_web
 ```
 
-Its flags (already set in the script):
+It runs `sysmon-web` as **root** just long enough to bind the socket
+inside the chroot and chown it to `www` (httpd's user); it then drops to
+`_sysmon` (or `nobody` if you haven't created `_sysmon`). The socket path,
+the `www` socket owner, and the `_sysmon` drop target are all defaults on
+OpenBSD, so the script doesn't need to spell them out — it only sets
+`-foreground`, the paths, and the sysmond address.
 
-```
--foreground
--socket /var/www/run/sysmon-web.sock
--socket-user www -socket-group www
--config /etc/sysmon.conf
--sysmon 127.0.0.1:1345
--templates /usr/local/libexec/sysmon-web/templates
--backups /var/backups/sysmon
--audit /var/log/sysmon-web-audit.log
-```
+Create the unprivileged user so it doesn't fall back to `nobody`:
 
-It runs `sysmon-web` as root (so it can place the socket inside the
-chroot and read a root-owned config) and chowns the socket to `www:www`
-so httpd can connect. The `rc_pre` step creates `/var/www/run` if needed.
+```sh
+useradd -d /var/empty -s /sbin/nologin -g =uid _sysmon
+# sysmon-web creates+chowns /var/lib/sysmon and /var/backups/sysmon on
+# first start; if you want the config editor to work, make /etc/sysmon.conf
+# writable by _sysmon as well.
+```
 
 To see why it won't start:
 
@@ -221,19 +235,33 @@ A plain-HTTP variant (no TLS) just drops the `tls { … }` block and uses
 
 ---
 
-## 5. Verifying the socket
+## 5. Verifying socket and process
 
-Regardless of platform, after starting sysmon-web:
+After starting sysmon-web, check **both** the socket ownership and that
+the process actually dropped root.
 
 ```sh
-ls -l /var/run/sysmon-web.sock          # Linux
-ls -l /var/www/run/sysmon-web.sock      # OpenBSD
-# srw-rw----  1 root  www-data  0 … sysmon-web.sock   <- group must be the web user
+# Socket: owned by the web server's user/group, mode 0660.
+ls -l /var/run/sysmon-web.sock          # Linux  (nginx -> www-data)
+ls -l /var/www/run/sysmon-web.sock      # OpenBSD (httpd -> www)
+# srw-rw----  1 www-data www-data 0 … sysmon-web.sock
+
+# Process: must NOT be root.
+ps -o user,group,comm -C sysmon-web     # Linux
+ps -axo user,comm | grep sysmon-web     # OpenBSD
+# _sysmon (or nobody)  sysmon-web        <- never "root"
 ```
 
-The group must be the web server's group and the mode `0660`. If it
-shows `root wheel` / `root root`, the chown didn't happen — you started
-it as root without `-socket-group`, or the supervisor's flags are stale.
+Troubleshooting:
+- Socket shows `root wheel`/`root root` → it was started by a non-root,
+  non-web user, or by the wrong supervisor flags. Only a **root**-started
+  instance chowns the socket.
+- Process shows `root` → either it was started non-root by some account
+  that happens to be root's, or (if you see "refusing to run as root" with
+  `-debug`) there was no `_sysmon`/`nobody` account to drop to.
+- `502 / Permission denied` in the web-server log → socket group isn't the
+  web server's group. Re-check `-socket-user`/`-socket-group`, or just run
+  sysmon-web as the web user (the systemd unit does).
 
 ---
 
