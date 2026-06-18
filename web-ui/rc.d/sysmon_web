@@ -5,15 +5,21 @@
 #   rcctl enable sysmon_web
 #   rcctl start sysmon_web
 #
-# Because httpd(8) runs chrooted in /var/www, the FastCGI socket must
-# live inside that chroot. We put it at /var/www/run/sysmon-web.sock and
-# reference it from httpd.conf as "/run/sysmon-web.sock" (chroot-relative).
-# The socket is handed to the www user/group so httpd can connect.
+# httpd(8) runs chrooted in /var/www, so the FastCGI socket lives at
+# /var/www/run/sysmon-web.sock (the binary's default on OpenBSD) and is
+# referenced from httpd.conf chroot-relative as "/run/sysmon-web.sock".
+#
+# sysmon-web starts as root (daemon_user below) only long enough to bind
+# the socket inside the chroot and hand it to the www user; it then drops
+# to an unprivileged account for the rest of its life. By default that's
+# the _sysmon user if it exists, otherwise nobody. Create one with e.g.:
+#   useradd -d /var/empty -s /sbin/nologin -g =uid _sysmon
+# and make /var/lib/sysmon, /var/backups/sysmon and the audit log writable
+# by it (sysmon-web also creates+chowns those on first start).
 
 daemon="/usr/local/bin/sysmon-web"
 daemon_flags="-foreground \
   -socket /var/www/run/sysmon-web.sock \
-  -socket-user www -socket-group www \
   -config /etc/sysmon.conf \
   -sysmon 127.0.0.1:1345 \
   -templates /usr/local/libexec/sysmon-web/templates \
@@ -23,13 +29,11 @@ daemon_user="root"
 
 . /etc/rc.d/rc.subr
 
-# sysmon-web has no readiness signal of its own; treat "process is up" as
-# running. rc_bg backgrounds it under rc.d's supervision (we pass
-# -foreground so the binary itself does not double-fork).
+# rc_bg=YES: rc.d backgrounds the process. We pass -foreground so the
+# binary itself does NOT double-fork; rc.d supervises the real process.
 rc_bg=YES
 
 rc_pre() {
-	# Ensure the chroot run dir exists for the socket.
 	[ -d /var/www/run ] || mkdir -p /var/www/run
 }
 
