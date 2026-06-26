@@ -13,9 +13,13 @@ Group=www-data
 # Add -debug to send logs to the journal while troubleshooting.
 # Running as User/Group=www-data means the socket is already owned by the
 # web server's user, so -socket-user/-socket-group aren't needed here.
+# The ExecStartPre lines (run as root via "+") create the socket's parent
+# directory, since www-data can't mkdir under root-owned /var/www.
+ExecStartPre=+/bin/mkdir -p /var/www/run
+ExecStartPre=+/bin/chown www-data:www-data /var/www/run
 ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
-  -socket /var/run/sysmon-web.sock \
+  -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
   -sysmon localhost:3333 \
   -templates /usr/local/libexec/sysmon-web/templates \
@@ -30,8 +34,9 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 # /var/lib/sysmon holds the bbolt stores (auth.db, push.db, settings.db);
-# without it here ProtectSystem=strict would make them read-only.
-ReadWritePaths=/var/run /var/lib/sysmon /var/backups/sysmon /var/log /etc/sysmon.conf
+# /var/www/run holds the FastCGI socket. Both must be writable under
+# ProtectSystem=strict.
+ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log /etc/sysmon.conf
 StateDirectory=sysmon
 
 [Install]

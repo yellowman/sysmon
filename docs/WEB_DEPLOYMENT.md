@@ -6,7 +6,7 @@ or httpd(8) (OpenBSD) in front of it. This document covers both, plus the
 two things that bite everyone: **socket ownership** and **daemonization**.
 
 > Quick reference for the impatient:
-> - Default socket: `/var/run/sysmon-web.sock`, mode `0660`.
+> - Default socket: `/var/www/run/sysmon-web.sock`, mode `0660`.
 > - Run as the web-server user, OR pass `-socket-user`/`-socket-group` so
 >   the web server can connect.
 > - `sysmon-web` daemonizes by default. Use `-foreground` under a
@@ -90,9 +90,13 @@ Use the shipped unit (`web-ui/sysmon-web.service`); the important bits:
 Type=simple
 User=www-data
 Group=www-data
+# www-data can't mkdir under root-owned /var/www, so create the socket
+# dir as root first (the "+" runs these as root despite User=www-data).
+ExecStartPre=+/bin/mkdir -p /var/www/run
+ExecStartPre=+/bin/chown www-data:www-data /var/www/run
 ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
-  -socket /var/run/sysmon-web.sock \
+  -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
   -sysmon localhost:1345 \
   -templates /usr/local/libexec/sysmon-web/templates \
@@ -102,8 +106,10 @@ Restart=always
 ```
 
 Because it runs as `www-data`, the socket is already owned by nginx's
-user — no `-socket-*` flags needed. Add `-debug` to the `ExecStart` line
-temporarily to get logs in the journal (`journalctl -u sysmon-web -f`).
+user — no `-socket-*` flags needed. The `ExecStartPre` lines create
+`/var/www/run` (which `ProtectSystem=strict` also lists in
+`ReadWritePaths`). Add `-debug` to the `ExecStart` line temporarily to
+get logs in the journal (`journalctl -u sysmon-web -f`).
 
 ```sh
 cp web-ui/sysmon-web.service /etc/systemd/system/
@@ -125,7 +131,7 @@ server {
 
     location / {
         include fastcgi_params;
-        fastcgi_pass unix:/var/run/sysmon-web.sock;
+        fastcgi_pass unix:/var/www/run/sysmon-web.sock;
     }
 
     # Static assets are served straight off disk, bypassing FastCGI.
@@ -242,9 +248,10 @@ the process actually dropped root.
 
 ```sh
 # Socket: owned by the web server's user/group, mode 0660.
-ls -l /var/run/sysmon-web.sock          # Linux  (nginx -> www-data)
-ls -l /var/www/run/sysmon-web.sock      # OpenBSD (httpd -> www)
-# srw-rw----  1 www-data www-data 0 … sysmon-web.sock
+# (/var/www/run is the default on both platforms.)
+ls -l /var/www/run/sysmon-web.sock
+# Linux  -> srw-rw----  1 www-data www-data 0 … sysmon-web.sock
+# OpenBSD -> srw-rw----  1 www      www      0 … sysmon-web.sock
 
 # Process: must NOT be root.
 ps -o user,group,comm -C sysmon-web     # Linux
