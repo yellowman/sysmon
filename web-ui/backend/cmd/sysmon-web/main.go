@@ -134,9 +134,22 @@ func daemonizeAndWait() {
 		}
 		os.Exit(1)
 	case <-time.After(readyTimeout):
-		fmt.Printf("sysmon-web: started (pid %d) but readiness not confirmed after %s; re-run with -debug if it isn't serving\n",
-			cmd.Process.Pid, readyTimeout)
-		os.Exit(0)
+		// The child never confirmed readiness. Don't leave it orphaned
+		// and half-attached to pipes we're about to stop reading (and
+		// don't tell the operator to start a second one, which would
+		// fight the first for the socket). Abort it and fail.
+		_ = cmd.Process.Kill()
+		<-diagDone
+		_ = cmd.Wait()
+		fmt.Fprintf(os.Stderr, "sysmon-web: did not become ready within %s; aborted (pid %d)\n",
+			readyTimeout, cmd.Process.Pid)
+		if diag.Len() > 0 {
+			os.Stderr.Write(bytes.TrimRight(diag.Bytes(), "\n"))
+			fmt.Fprintln(os.Stderr)
+		} else {
+			fmt.Fprintln(os.Stderr, "(no diagnostics; re-run with -debug)")
+		}
+		os.Exit(1)
 	}
 }
 
@@ -259,6 +272,17 @@ func main() {
 	} else {
 		if err := os.MkdirAll(filepath.Dir(*socketPath), 0o755); err != nil {
 			log.Fatalf("Failed to create socket directory: %v", err)
+		}
+		// Don't clobber a socket another live instance is using. Probe
+		// it first: if something answers, refuse to start; only a stale
+		// or absent socket is safe to remove and rebind. (net.Listen on
+		// an existing path fails with EADDRINUSE whether or not anyone is
+		// listening, which is why the unconditional Remove existed — but
+		// that Remove would yank the socket out from under a running
+		// process. The probe distinguishes the two cases.)
+		if c, derr := net.DialTimeout("unix", *socketPath, 250*time.Millisecond); derr == nil {
+			c.Close()
+			log.Fatalf("another sysmon-web is already listening on %s", *socketPath)
 		}
 		os.Remove(*socketPath)
 		ln, err := net.Listen("unix", *socketPath)
