@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -58,31 +60,57 @@ func resolveGroup(names ...string) (gid int, ok bool) {
 	return -1, false
 }
 
-// prepareRuntimeDirs (run as root, before dropping) ensures the state /
-// backup / audit-log locations exist and are owned by the target uid/gid,
-// so the soon-to-be-unprivileged process can open its bbolt stores, write
-// backups, and append to the audit log. The socket's parent directory is
-// created too (kept root-owned; the web server only needs to traverse it).
-func prepareRuntimeDirs(socketPath, stateDir, backupDir, auditLog string, uid, gid int) {
-	if socketPath != "" {
-		_ = os.MkdirAll(filepath.Dir(socketPath), 0o755)
-	}
+// prepareRuntimeDirs (run as root, before dropping) ensures the state and
+// backup directories and the audit log exist and are owned by the target
+// uid/gid, so the soon-to-be-unprivileged process can open its bbolt
+// stores, write backups, and append to the audit log. Errors are
+// returned — not swallowed — so main can fail loudly while it still has
+// root and a working diagnostics channel, rather than dropping and then
+// hitting an opaque "permission denied" deep in init.
+//
+// The socket's parent directory is handled separately by the bind path.
+func prepareRuntimeDirs(stateDir, backupDir, auditLog string, uid, gid int) error {
 	for _, dir := range []string{stateDir, backupDir} {
 		if dir == "" {
 			continue
 		}
-		_ = os.MkdirAll(dir, 0o750)
-		_ = os.Chown(dir, uid, gid)
-	}
-	if auditLog != "" {
-		_ = os.MkdirAll(filepath.Dir(auditLog), 0o755)
-		// Create the file if absent so the dropped process can append,
-		// then hand it to the service user.
-		if f, err := os.OpenFile(auditLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
-			f.Close()
-			_ = os.Chown(auditLog, uid, gid)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+		if err := os.Chown(dir, uid, gid); err != nil {
+			return fmt.Errorf("chown %s to %d:%d: %w", dir, uid, gid, err)
 		}
 	}
+	if auditLog == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(auditLog), 0o755); err != nil {
+		return fmt.Errorf("create audit dir %s: %w", filepath.Dir(auditLog), err)
+	}
+	switch info, err := os.Stat(auditLog); {
+	case errors.Is(err, fs.ErrNotExist):
+		// Create it so the dropped process can append, then hand it over.
+		f, ferr := os.OpenFile(auditLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+		if ferr != nil {
+			return fmt.Errorf("create audit log %s: %w", auditLog, ferr)
+		}
+		f.Close()
+		if cerr := os.Chown(auditLog, uid, gid); cerr != nil {
+			return fmt.Errorf("chown audit log %s: %w", auditLog, cerr)
+		}
+	case err != nil:
+		return fmt.Errorf("stat audit log %s: %w", auditLog, err)
+	case info.Mode().IsRegular():
+		// Existing regular file (e.g. from a prior root run): re-own it so
+		// the dropped process can keep appending.
+		if cerr := os.Chown(auditLog, uid, gid); cerr != nil {
+			return fmt.Errorf("chown audit log %s: %w", auditLog, cerr)
+		}
+	default:
+		// Exists but not a regular file (e.g. /dev/null, a fifo) — leave
+		// its ownership alone.
+	}
+	return nil
 }
 
 // dropPrivileges lowers the whole process to uid/gid: clear supplementary

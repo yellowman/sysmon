@@ -295,11 +295,12 @@ func main() {
 	}
 
 	if amRoot {
-		sockForPrep := *socketPath
-		if httpMode {
-			sockForPrep = ""
+		// Must succeed while we still have root — otherwise the dropped
+		// process can't open its stores / write backups / audit, and the
+		// failure surfaces later as an opaque permission error.
+		if err := prepareRuntimeDirs(stateDir, *backupDir, *auditLog, dropUID, dropGID); err != nil {
+			log.Fatalf("Failed to prepare runtime directories: %v", err)
 		}
-		prepareRuntimeDirs(sockForPrep, stateDir, *backupDir, *auditLog, dropUID, dropGID)
 		if err := dropPrivileges(dropUID, dropGID); err != nil {
 			log.Fatalf("Failed to drop privileges to uid=%d gid=%d: %v", dropUID, dropGID, err)
 		}
