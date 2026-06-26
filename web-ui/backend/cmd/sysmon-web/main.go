@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -11,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"syscall"
+	"time"
 
 	"sysmon-web/internal/api"
 	"sysmon-web/internal/auth"
@@ -31,20 +34,35 @@ const stateDir = "/var/lib/sysmon"
 // directory before binding.
 const defaultSocket = "/var/www/run/sysmon-web.sock"
 
-// daemonEnvMarker is set in the detached child's environment so it knows
-// not to re-daemonize (which would fork-bomb).
-const daemonEnvMarker = "_SYSMON_WEB_DAEMON"
+// Daemonization environment markers. The detached child inherits these so
+// it (a) knows not to re-daemonize and (b) knows which inherited fds to use
+// to report readiness and startup diagnostics back to the parent.
+const (
+	daemonEnvMarker = "_SYSMON_WEB_DAEMON"   // "1" in the child
+	readyFDEnv      = "_SYSMON_WEB_READY_FD" // fd the child signals "up" on
+	diagFDEnv       = "_SYSMON_WEB_DIAG_FD"  // fd the child logs startup to
+	readyByte       = 'R'
+	readyTimeout    = 15 * time.Second
+)
 
-// daemonize re-executes this process detached from the controlling
-// terminal — new session (setsid), std streams to /dev/null — then exits
-// the parent. The detached child runs with daemonEnvMarker set so it
-// skips this and proceeds to run the server. No-op if we're already the
-// child. The working directory is intentionally preserved so relative
-// template/static paths still resolve.
-func daemonize() {
-	if os.Getenv(daemonEnvMarker) == "1" {
-		return // we are the detached child
-	}
+// diagFile is the child's startup-diagnostics pipe back to the parent (the
+// log destination until signalReady runs). nil outside the daemon child.
+var diagFile *os.File
+
+// daemonizeAndWait re-executes this process detached from the controlling
+// terminal (setsid, std streams to /dev/null) and then BLOCKS until the
+// child reports it is actually serving — or dies trying. Only then does it
+// exit: 0 with the pid on success, non-zero with the child's captured
+// startup output on failure. This closes the classic daemon gap where the
+// parent reports success before the child has bound its socket / dropped
+// privileges / opened its stores.
+//
+// Two inherited pipes carry the handshake: a "ready" pipe the child writes
+// one byte to when it's up, and a "diag" pipe the child logs startup
+// messages to so a failure can be relayed even though the daemon is
+// otherwise silent without -debug. std streams stay pointed at /dev/null
+// throughout, so the daemon can never SIGPIPE on a post-exit write.
+func daemonizeAndWait() {
 	exe, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: %v\n", err)
@@ -57,18 +75,94 @@ func daemonize() {
 	}
 	defer null.Close()
 
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: pipe: %v\n", err)
+		os.Exit(1)
+	}
+	diagR, diagW, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: pipe: %v\n", err)
+		os.Exit(1)
+	}
+
 	cmd := exec.Command(exe, os.Args[1:]...)
-	cmd.Env = append(os.Environ(), daemonEnvMarker+"=1")
+	cmd.Env = append(os.Environ(), daemonEnvMarker+"=1", readyFDEnv+"=3", diagFDEnv+"=4")
 	cmd.Stdin = null
 	cmd.Stdout = null
 	cmd.Stderr = null
+	cmd.ExtraFiles = []*os.File{readyW, diagW} // -> child fds 3 and 4
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "sysmon-web: daemonize: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("sysmon-web: started in background (pid %d)\n", cmd.Process.Pid)
-	os.Exit(0)
+	// The child holds the write ends now; the parent must drop its copies
+	// so reads see EOF when the child exits/closes them.
+	readyW.Close()
+	diagW.Close()
+
+	// Capture the child's startup diagnostics so we can show them if it
+	// fails. Drains to EOF (child closes diag on ready or on exit).
+	var diag bytes.Buffer
+	diagDone := make(chan struct{})
+	go func() { io.Copy(&diag, diagR); close(diagDone) }()
+
+	// Wait for the ready byte.
+	ready := make(chan bool, 1)
+	go func() {
+		buf := make([]byte, 1)
+		n, _ := readyR.Read(buf)
+		ready <- (n == 1 && buf[0] == readyByte)
+	}()
+
+	select {
+	case ok := <-ready:
+		if ok {
+			fmt.Printf("sysmon-web: started in background (pid %d)\n", cmd.Process.Pid)
+			os.Exit(0)
+		}
+		// EOF without the ready byte: the child died during startup.
+		<-diagDone
+		_ = cmd.Wait()
+		fmt.Fprintln(os.Stderr, "sysmon-web: failed to start")
+		if diag.Len() > 0 {
+			os.Stderr.Write(bytes.TrimRight(diag.Bytes(), "\n"))
+			fmt.Fprintln(os.Stderr)
+		} else {
+			fmt.Fprintln(os.Stderr, "(no diagnostics; re-run with -debug)")
+		}
+		os.Exit(1)
+	case <-time.After(readyTimeout):
+		fmt.Printf("sysmon-web: started (pid %d) but readiness not confirmed after %s; re-run with -debug if it isn't serving\n",
+			cmd.Process.Pid, readyTimeout)
+		os.Exit(0)
+	}
+}
+
+// signalReady tells the parent (if we were daemonized) that startup
+// succeeded and we're about to serve, then detaches from the startup
+// channels: it closes the ready/diag pipes and silences logging so the
+// running daemon is quiet. No-op when not daemonized (foreground/-debug).
+func signalReady() {
+	fdStr := os.Getenv(readyFDEnv)
+	if fdStr == "" {
+		return // not a daemon child
+	}
+	if fd, err := strconv.Atoi(fdStr); err == nil {
+		f := os.NewFile(uintptr(fd), "ready")
+		if f != nil {
+			f.Write([]byte{readyByte})
+			f.Close()
+		}
+	}
+	// Startup is over: stop logging to the parent's diag pipe (which it
+	// has stopped reading) and go silent for the rest of our life.
+	log.SetOutput(io.Discard)
+	if diagFile != nil {
+		diagFile.Close()
+		diagFile = nil
+	}
 }
 
 func main() {
@@ -88,17 +182,39 @@ func main() {
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
 
-	// Logging is off unless -debug. A daemon shouldn't chatter; if you
-	// need to see what's happening, run with -debug in the foreground.
-	if !*debug {
+	isDaemonChild := os.Getenv(daemonEnvMarker) == "1"
+
+	// Logging destination:
+	//   -debug                  -> stderr, verbose, stays (foreground).
+	//   daemon child (startup)  -> the diag pipe, so the parent can relay
+	//                              a startup failure; signalReady() later
+	//                              silences us for the rest of the run.
+	//   everything else         -> discard (quiet).
+	switch {
+	case *debug:
+		// leave log going to stderr
+	case isDaemonChild:
+		if fdStr := os.Getenv(diagFDEnv); fdStr != "" {
+			if fd, err := strconv.Atoi(fdStr); err == nil {
+				diagFile = os.NewFile(uintptr(fd), "diag")
+			}
+		}
+		if diagFile != nil {
+			log.SetOutput(diagFile)
+		} else {
+			log.SetOutput(io.Discard)
+		}
+	default:
 		log.SetOutput(io.Discard)
 	}
 
 	// Daemonize by default. -debug or -foreground keep us attached so a
 	// process supervisor (systemd Type=simple, OpenBSD rc) can track the
-	// process, and so -debug output actually reaches a terminal.
-	if !*debug && !*foreground {
-		daemonize() // exits the parent; the detached child returns here
+	// process, and so -debug output actually reaches a terminal. The
+	// parent blocks inside daemonizeAndWait until the child confirms it's
+	// serving (or fails), so the shell's exit status is meaningful.
+	if !*debug && !*foreground && !isDaemonChild {
+		daemonizeAndWait() // never returns in the parent
 	}
 
 	httpMode := *listen != ""
@@ -270,6 +386,13 @@ func main() {
 	// service the router ends up owning (boot instance or a lazy reinit).
 	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
 	defer stopPush()
+
+	// Everything that can fail at startup — socket bind, privilege drop,
+	// templates, the bbolt stores — is done. Tell the parent we're up
+	// (if we were daemonized) before we block in Serve. Anything that
+	// goes wrong before here makes the parent report a failed start;
+	// anything after here is a running-daemon problem, not a start one.
+	signalReady()
 
 	if httpMode {
 		log.Printf("Starting HTTP server on %s (development mode)", *listen)
