@@ -24,6 +24,13 @@ import (
 // stateDir holds the bbolt stores (auth.db, push.db, settings.db).
 const stateDir = "/var/lib/sysmon"
 
+// defaultSocket is the FastCGI socket path when -socket isn't given, on
+// every platform. /var/www/run is inside httpd(8)'s chroot on OpenBSD
+// (referenced chroot-relative as "/run/sysmon-web.sock" in httpd.conf);
+// on Linux nginx just connects to the path. The binary creates the parent
+// directory before binding.
+const defaultSocket = "/var/www/run/sysmon-web.sock"
+
 // daemonEnvMarker is set in the detached child's environment so it knows
 // not to re-daemonize (which would fork-bomb).
 const daemonEnvMarker = "_SYSMON_WEB_DAEMON"

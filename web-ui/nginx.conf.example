@@ -20,7 +20,7 @@ server {
     # Or serve directly over HTTP (not recommended for production)
     location / {
         include fastcgi_params;
-        fastcgi_pass unix:/var/run/sysmon-web.sock;
+        fastcgi_pass unix:/var/www/run/sysmon-web.sock;
 
         # Optional: Basic authentication
         # auth_basic "Sysmon Administration";
@@ -65,7 +65,7 @@ server {
 
     location / {
         include fastcgi_params;
-        fastcgi_pass unix:/var/run/sysmon-web.sock;
+        fastcgi_pass unix:/var/www/run/sysmon-web.sock;
 
         # Optional: Basic authentication (additional layer)
         # auth_basic "Sysmon Administration";
