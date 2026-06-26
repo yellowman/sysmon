@@ -3,6 +3,12 @@
 # Enable with: ln -s /etc/nginx/sites-available/sysmon-web /etc/nginx/sites-enabled/
 # Test with: nginx -t
 # Reload with: systemctl reload nginx
+#
+# The FastCGI socket must be reachable by nginx's user (www-data). Either
+# run sysmon-web as www-data (the shipped systemd unit does), or start it
+# with -socket-group www-data so it hands the socket over. A 502 with
+# "Permission denied" in error.log means the socket is still root-owned.
+# Full guide: docs/WEB_DEPLOYMENT.md
 
 server {
     listen 80;
@@ -14,7 +20,7 @@ server {
     # Or serve directly over HTTP (not recommended for production)
     location / {
         include fastcgi_params;
-        fastcgi_pass unix:/var/run/sysmon-web.sock;
+        fastcgi_pass unix:/var/www/run/sysmon-web.sock;
 
         # Optional: Basic authentication
         # auth_basic "Sysmon Administration";
@@ -59,7 +65,7 @@ server {
 
     location / {
         include fastcgi_params;
-        fastcgi_pass unix:/var/run/sysmon-web.sock;
+        fastcgi_pass unix:/var/www/run/sysmon-web.sock;
 
         # Optional: Basic authentication (additional layer)
         # auth_basic "Sysmon Administration";
