@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/xml"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"regexp"
 	"sort"
@@ -39,9 +40,26 @@ type Service struct {
 	fetching     bool
 	fetchDone    chan struct{}
 
+	// Delta bookkeeping (guarded by cacheMu). rev bumps only when host
+	// state actually changes. hostRev[name] is the rev a host last changed
+	// at; hostSig[name] is its content signature (volatile timers
+	// excluded) used to detect change. removedAt[name] records the rev a
+	// host was removed, so delta clients learn about deletions.
+	// minDeltaRev is the oldest rev we can still produce a correct delta
+	// from; a client older than that gets a full resync.
+	rev         int64
+	hostRev     map[string]int64
+	hostSig     map[string]uint64
+	removedAt   map[string]int64
+	minDeltaRev int64
+
 	pollOnce sync.Once
 	pollStop chan struct{}
 }
+
+// maxRemovedTracked caps the removal log; removals are rare in a
+// monitoring tool, so this is effectively never hit, but it bounds memory.
+const maxRemovedTracked = 256
 
 // SessionLogEntry represents a single logged operation
 type SessionLogEntry struct {
@@ -155,7 +173,41 @@ func NewService(sysmonAddr string) *Service {
 	return &Service{
 		sysmonAddr: sysmonAddr,
 		sessionLog: NewSessionLogger(500, 100), // Keep last 500 entries, 100 errors
+		hostRev:    make(map[string]int64),
+		hostSig:    make(map[string]uint64),
+		removedAt:  make(map[string]int64),
 	}
+}
+
+// hostKey is the stable identity for a host across snapshots.
+func hostKey(h *models.HostStatus) string {
+	if h.ObjectName != "" {
+		return h.ObjectName
+	}
+	return h.Hostname
+}
+
+// hostSignature hashes the fields that represent a host's *state*,
+// deliberately excluding values that tick every poll regardless of any
+// real change — TimeUp/TimeFailed (computed from now()) and the per-check
+// timestamps/response time. Consecutive counters (down/up) and totals
+// change only when a check actually runs (check cadence, not poll
+// cadence), so they're included: a steady host produces an identical
+// signature poll-over-poll and thus no delta. Clients render live "up/down
+// for X" locally from LastChangeTime.
+func hostSignature(h *models.HostStatus) uint64 {
+	w := fnv.New64a()
+	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%d\x00%d\x00%d\x00%s\x00%s",
+		h.ObjectName, h.Hostname, h.OverallStatus, h.StatusColor, h.Contact,
+		h.Paused, h.DownCount, h.UpCount, h.TotalDown, h.Description, h.IPv4Address)
+	if h.LastChangeTime != nil {
+		fmt.Fprintf(w, "\x00%d", h.LastChangeTime.Unix())
+	}
+	for i := range h.Checks {
+		c := &h.Checks[i]
+		fmt.Fprintf(w, "\x01%s\x00%d\x00%s\x00%s", c.Type, c.Port, c.Status, c.StatusMessage)
+	}
+	return w.Sum64()
 }
 
 // GetSessionLog returns recent session log entries
@@ -328,8 +380,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 
 		s.cacheMu.Lock()
 		if err == nil {
-			s.cachedStatus = status
-			s.cacheTime = time.Now()
+			s.storeSnapshotLocked(status)
 		}
 		s.fetching = false
 		close(s.fetchDone)
@@ -362,12 +413,119 @@ func (s *Service) Refresh() {
 
 	s.cacheMu.Lock()
 	if err == nil {
-		s.cachedStatus = status
-		s.cacheTime = time.Now()
+		s.storeSnapshotLocked(status)
 	}
 	s.fetching = false
 	close(s.fetchDone)
 	s.cacheMu.Unlock()
+}
+
+// storeSnapshotLocked installs a freshly fetched snapshot and updates the
+// delta bookkeeping. Caller must hold cacheMu. It bumps rev only if some
+// host's state signature changed or a host was added/removed, stamping
+// each changed host with the new rev, so GetDelta can answer "what
+// changed since rev N". It also sets status.Rev.
+func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) {
+	newSig := make(map[string]uint64, len(status.Hosts))
+	changed := false
+	for i := range status.Hosts {
+		name := hostKey(&status.Hosts[i])
+		sig := hostSignature(&status.Hosts[i])
+		newSig[name] = sig
+		if old, ok := s.hostSig[name]; !ok || old != sig {
+			changed = true
+		}
+	}
+	var removed []string
+	for name := range s.hostSig {
+		if _, ok := newSig[name]; !ok {
+			removed = append(removed, name)
+			changed = true
+		}
+	}
+
+	if changed {
+		s.rev++
+		for name, sig := range newSig {
+			if old, ok := s.hostSig[name]; !ok || old != sig {
+				s.hostRev[name] = s.rev
+			}
+		}
+		for _, name := range removed {
+			delete(s.hostRev, name)
+			s.removedAt[name] = s.rev
+		}
+		s.hostSig = newSig
+		s.pruneRemovedLocked()
+	}
+
+	status.Rev = s.rev
+	s.cachedStatus = status
+	s.cacheTime = time.Now()
+}
+
+// pruneRemovedLocked bounds the removal log. When it overflows we drop the
+// oldest entries and raise minDeltaRev so any client older than the
+// dropped point is correctly forced into a full resync (we can no longer
+// prove we'd report every deletion they missed). Caller holds cacheMu.
+func (s *Service) pruneRemovedLocked() {
+	if len(s.removedAt) <= maxRemovedTracked {
+		return
+	}
+	// Find the cutoff rev: keep the newest maxRemovedTracked entries.
+	revs := make([]int64, 0, len(s.removedAt))
+	for _, r := range s.removedAt {
+		revs = append(revs, r)
+	}
+	sort.Slice(revs, func(i, j int) bool { return revs[i] < revs[j] })
+	cutoff := revs[len(revs)-maxRemovedTracked]
+	for name, r := range s.removedAt {
+		if r < cutoff {
+			delete(s.removedAt, name)
+		}
+	}
+	if cutoff > s.minDeltaRev {
+		s.minDeltaRev = cutoff
+	}
+}
+
+// GetDelta returns the changes since the client's revision. If the client
+// is fresh (since<=0), too far behind (since<minDeltaRev), or somehow
+// ahead, it returns a full resync (Full=true, Changed=all hosts). Daemon
+// and Statistics are always included (they're small). If nothing changed
+// since `since`, Changed/Removed are empty and Rev==since.
+func (s *Service) GetDelta(since int64) *models.StatusDelta {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	d := &models.StatusDelta{Rev: s.rev}
+	cur := s.cachedStatus
+	if cur == nil {
+		d.Full = true
+		return d
+	}
+	d.Daemon = cur.Daemon
+	d.Statistics = cur.Statistics
+
+	if since <= 0 || since < s.minDeltaRev || since > s.rev {
+		d.Full = true
+		d.Changed = cur.Hosts
+		return d
+	}
+	if since == s.rev {
+		return d // up to date — nothing changed
+	}
+	for i := range cur.Hosts {
+		if s.hostRev[hostKey(&cur.Hosts[i])] > since {
+			d.Changed = append(d.Changed, cur.Hosts[i])
+		}
+	}
+	for name, r := range s.removedAt {
+		if r > since {
+			d.Removed = append(d.Removed, name)
+		}
+	}
+	return d
 }
 
 // StartPoller runs a background goroutine that refreshes the status cache
