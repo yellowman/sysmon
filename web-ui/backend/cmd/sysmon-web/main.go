@@ -355,6 +355,11 @@ func main() {
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
+	// Refresh the status cache in the background so the per-host sysmond
+	// fetch happens off the request path — UI/app requests serve from a
+	// warm cache instead of each one driving a fresh N-round-trip query.
+	monitoringService.StartPoller(2 * time.Second)
+	defer monitoringService.StopPoller()
 
 	// Web-only settings (push credentials etc.) live in their own bbolt
 	// store, not in sysmon.conf — they aren't sysmond's concern.

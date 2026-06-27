@@ -38,6 +38,9 @@ type Service struct {
 	cacheTime    time.Time
 	fetching     bool
 	fetchDone    chan struct{}
+
+	pollOnce sync.Once
+	pollStop chan struct{}
 }
 
 // SessionLogEntry represents a single logged operation
@@ -51,11 +54,11 @@ type SessionLogEntry struct {
 
 // SessionLogger captures all sysmon protocol operations
 type SessionLogger struct {
-	mu           sync.RWMutex
-	entries      []SessionLogEntry
-	errors       []SessionLogEntry
-	maxEntries   int
-	maxErrors    int
+	mu         sync.RWMutex
+	entries    []SessionLogEntry
+	errors     []SessionLogEntry
+	maxEntries int
+	maxErrors  int
 }
 
 // NewSessionLogger creates a new session logger
@@ -187,8 +190,8 @@ func readSysmonResponse(reader *bufio.Reader) (*SysmonResponse, error) {
 		code := trimmed[0:3]
 		// All valid sysmon codes are numeric
 		if code[0] >= '0' && code[0] <= '9' &&
-		   code[1] >= '0' && code[1] <= '9' &&
-		   code[2] >= '0' && code[2] <= '9' {
+			code[1] >= '0' && code[1] <= '9' &&
+			code[2] >= '0' && code[2] <= '9' {
 			return &SysmonResponse{
 				Code:    code,
 				Message: trimmed,
@@ -208,44 +211,44 @@ func readSysmonResponse(reader *bufio.Reader) (*SysmonResponse, error) {
 // XMLObjectStatus represents the XML structure from SHOWOBJ command
 // Maps to send_object_xml() output in srvclient.c
 type XMLObjectStatus struct {
-	XMLName         xml.Name `xml:"ObjectStatus"`
-	Object          string   `xml:"Object"`
-	HostName        string   `xml:"HostName"`
-	ObjectPort      int      `xml:"ObjectPort"`
-	ObjectType      string   `xml:"ObjectType"`
-	ObjectMessage   string   `xml:"ObjectMessage"`
-	ObjectNotes     string   `xml:"ObjectNotes"`
-	ObjectContact   string   `xml:"ObjectContact"`
-	ObjectGroup     string   `xml:"ObjectGroup"`
-	ObjectState     int      `xml:"ObjectLastcheckState"`
-	ObjectContacted int      `xml:"ObjectContacted"`
-	ObjectContactedAt int64  `xml:"ObjectContactedAt"`
-	ObjectContactOnUp int    `xml:"ObjectContactOnUp"`
-	TotalChecked    int64    `xml:"ObjectTotalChecked"`
-	TotalDown       int64    `xml:"ObjectTotalDown"`
-	DownCt          int64    `xml:"ObjectDownCt"`
-	UpCt            int64    `xml:"ObjectUpCt"`
-	MaxDown         int64    `xml:"ObjectMaxDown"`
-	QueueInterval   int64    `xml:"ObjectQueueInterval"`
-	SendPings       int      `xml:"ObjectSendPings"`
-	MinPings        int      `xml:"ObjectMinPings"`
-	Reversed        int      `xml:"ObjectReversed"`
-	Queued          int      `xml:"ObjectQueued"`
-	LastChecked     int64    `xml:"ObjectLastChecked"`
-	CheckStarted    int64    `xml:"ObjectCheckStarted"`
-	DeathTime       int64    `xml:"ObjectOutageTime"`
-	LastTimeUp      int64    `xml:"ObjectLastTimeUp"`
-	UniqueID        string   `xml:"ObjectUniqueID"`
-	URL             string   `xml:"ObjectURL"`
-	URLText         string   `xml:"ObjectURLText"`
-	ExecCmd         string   `xml:"ObjectExecCmd"`
-	PageMessage     string   `xml:"ObjectPageMessage"`
+	XMLName           xml.Name `xml:"ObjectStatus"`
+	Object            string   `xml:"Object"`
+	HostName          string   `xml:"HostName"`
+	ObjectPort        int      `xml:"ObjectPort"`
+	ObjectType        string   `xml:"ObjectType"`
+	ObjectMessage     string   `xml:"ObjectMessage"`
+	ObjectNotes       string   `xml:"ObjectNotes"`
+	ObjectContact     string   `xml:"ObjectContact"`
+	ObjectGroup       string   `xml:"ObjectGroup"`
+	ObjectState       int      `xml:"ObjectLastcheckState"`
+	ObjectContacted   int      `xml:"ObjectContacted"`
+	ObjectContactedAt int64    `xml:"ObjectContactedAt"`
+	ObjectContactOnUp int      `xml:"ObjectContactOnUp"`
+	TotalChecked      int64    `xml:"ObjectTotalChecked"`
+	TotalDown         int64    `xml:"ObjectTotalDown"`
+	DownCt            int64    `xml:"ObjectDownCt"`
+	UpCt              int64    `xml:"ObjectUpCt"`
+	MaxDown           int64    `xml:"ObjectMaxDown"`
+	QueueInterval     int64    `xml:"ObjectQueueInterval"`
+	SendPings         int      `xml:"ObjectSendPings"`
+	MinPings          int      `xml:"ObjectMinPings"`
+	Reversed          int      `xml:"ObjectReversed"`
+	Queued            int      `xml:"ObjectQueued"`
+	LastChecked       int64    `xml:"ObjectLastChecked"`
+	CheckStarted      int64    `xml:"ObjectCheckStarted"`
+	DeathTime         int64    `xml:"ObjectOutageTime"`
+	LastTimeUp        int64    `xml:"ObjectLastTimeUp"`
+	UniqueID          string   `xml:"ObjectUniqueID"`
+	URL               string   `xml:"ObjectURL"`
+	URLText           string   `xml:"ObjectURLText"`
+	ExecCmd           string   `xml:"ObjectExecCmd"`
+	PageMessage       string   `xml:"ObjectPageMessage"`
 
 	// Thresholds
-	PacketLossThreshold int  `xml:"ObjectPacketLossThreshold"`
-	RTTThreshold        int  `xml:"ObjectRTTThreshold"`
-	JitterThreshold     int  `xml:"ObjectJitterThreshold"`
-	WakeupRetries       int  `xml:"ObjectWakeupRetries"`
+	PacketLossThreshold int `xml:"ObjectPacketLossThreshold"`
+	RTTThreshold        int `xml:"ObjectRTTThreshold"`
+	JitterThreshold     int `xml:"ObjectJitterThreshold"`
+	WakeupRetries       int `xml:"ObjectWakeupRetries"`
 
 	// Debug/diagnostic
 	TraceEnabled int `xml:"ObjectTraceEnabled"`
@@ -262,16 +265,16 @@ type XMLObjectStatus struct {
 	HeaderValue  string `xml:"ObjectHeaderValue"`
 
 	// SNMP
-	SNMPCommunity  string `xml:"ObjectSNMPCommunity"`
-	SNMPOID        string `xml:"ObjectSNMPoid"`
-	SNMPType       string `xml:"ObjectSNMPType"`
-	SNMPLow        int64  `xml:"ObjectSNMPLowThresh"`
-	SNMPHigh       int64  `xml:"ObjectSNMPHighThresh"`
-	SNMPExact      int64  `xml:"ObjectSNMPExactThresh"`
-	SNMPSysUpTime  int64  `xml:"ObjectSNMPObjectSysUpTime"`
-	SNMPRate       int64  `xml:"ObjectSNMPRate"`
-	SNMPOctets     int    `xml:"ObjectSNMPOctets"`
-	SNMPLastResp   int64  `xml:"ObjectSNMPLastResponseTime"`
+	SNMPCommunity string `xml:"ObjectSNMPCommunity"`
+	SNMPOID       string `xml:"ObjectSNMPoid"`
+	SNMPType      string `xml:"ObjectSNMPType"`
+	SNMPLow       int64  `xml:"ObjectSNMPLowThresh"`
+	SNMPHigh      int64  `xml:"ObjectSNMPHighThresh"`
+	SNMPExact     int64  `xml:"ObjectSNMPExactThresh"`
+	SNMPSysUpTime int64  `xml:"ObjectSNMPObjectSysUpTime"`
+	SNMPRate      int64  `xml:"ObjectSNMPRate"`
+	SNMPOctets    int    `xml:"ObjectSNMPOctets"`
+	SNMPLastResp  int64  `xml:"ObjectSNMPLastResponseTime"`
 
 	// DNS
 	DNSQuery     string `xml:"ObjectDNSQuery"`
@@ -279,17 +282,23 @@ type XMLObjectStatus struct {
 	DNSRecursion int    `xml:"ObjectDNSRecursion"`
 
 	// Runtime check state (from queue entry)
-	CheckQueuedAt    string `xml:"CheckQueuedAt"`
+	CheckQueuedAt     string `xml:"CheckQueuedAt"`
 	CheckLastServiced string `xml:"CheckLastServiced"`
-	CheckFD          int    `xml:"CheckFileDescriptor"`
-	CheckStartedFlag int    `xml:"CheckStarted"`
-	CheckReturnValue int    `xml:"CheckReturnValue"`
-	CheckWakeupCount int    `xml:"CheckWakeupCount"`
-	CheckWakeupTime  int64  `xml:"CheckLastWakeupTime"`
+	CheckFD           int    `xml:"CheckFileDescriptor"`
+	CheckStartedFlag  int    `xml:"CheckStarted"`
+	CheckReturnValue  int    `xml:"CheckReturnValue"`
+	CheckWakeupCount  int    `xml:"CheckWakeupCount"`
+	CheckWakeupTime   int64  `xml:"CheckLastWakeupTime"`
 }
 
 // GetStatus gets the complete sysmon status via TCP protocol
-const statusCacheTTL = 1 * time.Second
+// statusCacheTTL is how long a cached status snapshot is served before a
+// request would refetch. The background poller (StartPoller) refreshes
+// well within this window, so user/app requests are served from a warm
+// cache and never block on the expensive per-host sysmond fetch. The TTL
+// is the fallback if the poller stalls or sysmond goes away — after it,
+// requests refetch and surface the real error.
+const statusCacheTTL = 10 * time.Second
 
 func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 	for {
@@ -330,6 +339,68 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			return nil, err
 		}
 		return status, nil
+	}
+}
+
+// Refresh forces a fresh fetch from sysmond and updates the cache,
+// regardless of cache age. Single-flighted against GetStatus via the same
+// fetching/fetchDone state, so a concurrent caller never triggers a second
+// fetch. Used by the background poller to keep the cache warm; a failed
+// fetch leaves the previous snapshot in place (the TTL is the backstop).
+func (s *Service) Refresh() {
+	s.cacheMu.Lock()
+	if s.fetching {
+		// A fetch is already in progress — that's enough.
+		s.cacheMu.Unlock()
+		return
+	}
+	s.fetching = true
+	s.fetchDone = make(chan struct{})
+	s.cacheMu.Unlock()
+
+	status, err := s.fetchStatus()
+
+	s.cacheMu.Lock()
+	if err == nil {
+		s.cachedStatus = status
+		s.cacheTime = time.Now()
+	}
+	s.fetching = false
+	close(s.fetchDone)
+	s.cacheMu.Unlock()
+}
+
+// StartPoller runs a background goroutine that refreshes the status cache
+// every interval, so the expensive per-host sysmond fetch happens off the
+// request path and UI/app requests always hit a warm cache. Idempotent —
+// only the first call starts a poller. Primes the cache once immediately.
+func (s *Service) StartPoller(interval time.Duration) {
+	s.pollOnce.Do(func() {
+		s.pollStop = make(chan struct{})
+		go func() {
+			s.Refresh() // prime so the first request is warm
+			t := time.NewTicker(interval)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					s.Refresh()
+				case <-s.pollStop:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// StopPoller stops the background poller (best-effort; safe to call once).
+func (s *Service) StopPoller() {
+	if s.pollStop != nil {
+		select {
+		case <-s.pollStop: // already closed
+		default:
+			close(s.pollStop)
+		}
 	}
 }
 
@@ -456,7 +527,7 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	hostsUp := 0
 	hostsDown := 0
 	debugXMLSamples := []map[string]string{} // Collect first few XML samples for debugging
-	allResponses := []ResponseCapture{}       // Capture ALL protocol responses
+	allResponses := []ResponseCapture{}      // Capture ALL protocol responses
 
 	// Capture MODE xml response
 	allResponses = append(allResponses, ResponseCapture{
