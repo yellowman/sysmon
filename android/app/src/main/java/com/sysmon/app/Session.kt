@@ -102,6 +102,7 @@ object Session {
         username = ""
         role = ""
         alertCount = 0
+        StatusStore.reset()
         prefs.edit()
             .remove(KEY_TOKEN)
             .remove(KEY_USERNAME)
@@ -125,6 +126,7 @@ object Session {
         username = ""
         role = ""
         alertCount = 0
+        StatusStore.reset()
         loginNote = "Session expired — please sign in again"
         prefs.edit()
             .remove(KEY_TOKEN)

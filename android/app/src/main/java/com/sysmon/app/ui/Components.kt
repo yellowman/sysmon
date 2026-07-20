@@ -2,6 +2,7 @@ package com.sysmon.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -195,11 +196,12 @@ fun StatsRow(stats: Stats?) {
 }
 
 @Composable
-fun HostRow(host: Host) {
+fun HostRow(host: Host, onClick: (() -> Unit)? = null) {
     Card {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -261,7 +263,7 @@ fun HostRow(host: Host) {
     }
 }
 
-private fun statusColor(status: String): Color = when (status) {
+fun statusColor(status: String): Color = when (status) {
     "OK" -> SysmonColors.Up
     "WARNING" -> SysmonColors.Unknown
     "CRITICAL" -> SysmonColors.Down
