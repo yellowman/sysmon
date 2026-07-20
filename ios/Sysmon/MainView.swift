@@ -3,7 +3,9 @@ import UserNotifications
 
 struct MainView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.scenePhase) private var scenePhase
     @State private var tab: Tab = .alerts
+    private let store = StatusStore.shared
 
     enum Tab { case alerts, hosts, settings }
 
@@ -24,6 +26,12 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sysmonPushTapped)) { _ in
             tab = .alerts
         }
+        // One poller feeds every tab (and the badge). Run it while the app
+        // is foreground; pause it in the background to save battery/data.
+        .onAppear { store.start() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { store.start() } else { store.stop() }
+        }
     }
 }
 
@@ -37,27 +45,18 @@ func statusColor(_ status: String) -> Color {
 }
 
 struct AlertsView: View {
-    @EnvironmentObject var session: Session
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var hosts: [Host] = []
-    @State private var stats: Stats?
-    @State private var daemon: DaemonInfo?
-    @State private var loading = true
-    @State private var error: String?
-    @State private var refreshKey = UUID()
-
-    var alerts: [Host] { hosts.filter { !$0.isOK } }
+    @ObservedObject private var store = StatusStore.shared
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if daemon?.paused == true {
+                    if store.daemon?.paused == true {
                         PausedBanner()
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
                     }
-                    if let s = stats {
+                    if let s = store.stats {
                         StatGrid(stats: s)
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
@@ -65,23 +64,27 @@ struct AlertsView: View {
 
                     SectionHeader(
                         "ACTIVE",
-                        accent: alerts.isEmpty ? nil
-                            : "\(alerts.count) ALERT\(alerts.count == 1 ? "" : "S")"
+                        accent: store.alerts.isEmpty ? nil
+                            : "\(store.alerts.count) ALERT\(store.alerts.count == 1 ? "" : "S")"
                     )
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
-                    if loading && hosts.isEmpty {
+                    if store.loading && store.hosts.isEmpty {
                         ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
-                    } else if let err = error {
-                        ErrorBox(message: err) { refreshKey = UUID() }
+                    } else if let err = store.error, store.hosts.isEmpty {
+                        ErrorBox(message: err) { Task { await store.refreshNow() } }
                             .padding(.horizontal, 16)
-                    } else if alerts.isEmpty {
+                    } else if store.alerts.isEmpty {
                         EmptyState(icon: "checkmark.circle", text: "All hosts healthy")
                             .padding(.vertical, 40)
                     } else {
                         VStack(spacing: 8) {
-                            ForEach(alerts) { HostRow(host: $0) }
+                            ForEach(store.alerts) { host in
+                                NavigationLink { HostDetailView(host: host) }
+                                    label: { HostRow(host: host) }
+                                    .buttonStyle(.plain)
+                            }
                         }
                         .padding(.horizontal, 16)
                     }
@@ -89,47 +92,19 @@ struct AlertsView: View {
             }
             .navigationTitle("Alerts")
             .navigationBarTitleDisplayMode(.inline)
-            .refreshable { await refresh() }
-            .task(id: refreshKey) { await refresh() }
-            .onChange(of: scenePhase) { phase in
-                if phase == .active { refreshKey = UUID() }
-            }
+            .refreshable { await store.refreshNow() }
         }
-    }
-
-    private func refresh() async {
-        let api = API(baseURL: session.serverURL, token: session.token)
-        do {
-            let status: StatusResponse = try await api.get("/api/monitoring/status")
-            hosts = status.hosts
-            stats = status.statistics
-            daemon = status.daemon
-            error = nil
-            let count = hosts.filter { !$0.isOK }.count
-            session.alertCount = count
-            try? await UNUserNotificationCenter.current().setBadgeCount(count)
-        } catch let e as APIError {
-            error = e.message
-        } catch {
-            error = "Connection failed"
-        }
-        loading = false
     }
 }
 
 struct HostsView: View {
-    @EnvironmentObject var session: Session
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var hosts: [Host] = []
+    @ObservedObject private var store = StatusStore.shared
     @State private var search = ""
-    @State private var loading = true
-    @State private var error: String?
-    @State private var refreshKey = UUID()
 
     var filtered: [Host] {
-        if search.isEmpty { return hosts }
+        if search.isEmpty { return store.hosts }
         let q = search.lowercased()
-        return hosts.filter {
+        return store.hosts.filter {
             $0.hostname.lowercased().contains(q) ||
             ($0.description?.lowercased().contains(q) ?? false) ||
             $0.ip.lowercased().contains(q)
@@ -140,16 +115,16 @@ struct HostsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 0) {
-                    if !hosts.isEmpty {
+                    if !store.hosts.isEmpty {
                         TextField("Filter...", text: $search)
                             .textFieldStyle(SysmonFieldStyle())
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                     }
-                    if loading && hosts.isEmpty {
+                    if store.loading && store.hosts.isEmpty {
                         ProgressView().padding(.vertical, 40)
-                    } else if let err = error {
-                        ErrorBox(message: err) { refreshKey = UUID() }
+                    } else if let err = store.error, store.hosts.isEmpty {
+                        ErrorBox(message: err) { Task { await store.refreshNow() } }
                             .padding(16)
                     } else if filtered.isEmpty {
                         EmptyState(
@@ -159,7 +134,11 @@ struct HostsView: View {
                         .padding(.vertical, 40)
                     } else {
                         VStack(spacing: 8) {
-                            ForEach(filtered) { HostRow(host: $0) }
+                            ForEach(filtered) { host in
+                                NavigationLink { HostDetailView(host: host) }
+                                    label: { HostRow(host: host) }
+                                    .buttonStyle(.plain)
+                            }
                         }
                         .padding(.horizontal, 16)
                     }
@@ -167,26 +146,8 @@ struct HostsView: View {
             }
             .navigationTitle("Hosts")
             .navigationBarTitleDisplayMode(.inline)
-            .refreshable { await refresh() }
-            .task(id: refreshKey) { await refresh() }
-            .onChange(of: scenePhase) { phase in
-                if phase == .active { refreshKey = UUID() }
-            }
+            .refreshable { await store.refreshNow() }
         }
-    }
-
-    private func refresh() async {
-        let api = API(baseURL: session.serverURL, token: session.token)
-        do {
-            let list: [Host] = try await api.get("/api/monitoring/hosts")
-            hosts = list
-            error = nil
-        } catch let e as APIError {
-            error = e.message
-        } catch {
-            error = "Connection failed"
-        }
-        loading = false
     }
 }
 
@@ -236,6 +197,10 @@ struct HostRow: View {
                 }
             }
             Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color(white: 0.7))
+                .padding(.top, 4)
         }
         .padding(.vertical, 6)
     }
@@ -247,6 +212,109 @@ struct StatusDot: View {
         Circle()
             .fill(statusColor(status))
             .frame(width: 8, height: 8)
+    }
+}
+
+struct HostDetailView: View {
+    let host: Host
+    @EnvironmentObject var session: Session
+    @State private var acking = false
+    @State private var ackNote: String?
+
+    private var isAdmin: Bool { session.role == "admin" }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 10) {
+                    StatusDot(status: host.overallStatus)
+                    Text(host.overallStatus)
+                        .font(.system(size: 13, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(statusColor(host.overallStatus))
+                    if host.isPaused {
+                        Text("PAUSED")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.gray).cornerRadius(3)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    if let desc = host.description, !desc.isEmpty {
+                        DetailRow(label: "DESCRIPTION", value: desc)
+                    }
+                    if !host.ip.isEmpty {
+                        DetailRow(label: "ADDRESS", value: host.ip, mono: true)
+                    }
+                    if host.isDown, let tf = host.timeFailed, tf > 0 {
+                        DetailRow(label: "DOWN FOR", value: formatUptime(tf))
+                    } else if host.isOK, let tu = host.timeUp, tu > 0 {
+                        DetailRow(label: "UP FOR", value: formatUptime(tu))
+                    }
+                    DetailRow(label: "FAIL COUNT", value: "\(host.downCount)")
+                    DetailRow(label: "OK COUNT", value: "\(host.upCount)")
+                }
+
+                if isAdmin && !host.isOK && !host.isPaused {
+                    Button(action: ack) {
+                        Text(acking ? "ACKNOWLEDGING..." : "ACKNOWLEDGE")
+                            .font(.system(size: 13, weight: .semibold))
+                            .tracking(1)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(acking ? Color.gray : Color.black)
+                            .cornerRadius(8)
+                    }
+                    .disabled(acking)
+                }
+                if let note = ackNote {
+                    Text(note)
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle(host.hostname)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func ack() {
+        acking = true
+        ackNote = nil
+        Task {
+            let api = API(baseURL: session.serverURL, token: session.token)
+            do {
+                try await api.ackHost(objectName: host.id)
+                ackNote = "Acknowledged — sysmond will suppress further alerts."
+            } catch let e as APIError {
+                ackNote = e.message
+            } catch {
+                ackNote = "Acknowledge failed"
+            }
+            acking = false
+        }
+    }
+}
+
+struct DetailRow: View {
+    let label: String
+    let value: String
+    var mono: Bool = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(1)
+                .foregroundColor(.gray)
+            Text(value)
+                .font(.system(size: 14, design: mono ? .monospaced : .default))
+                .foregroundColor(.primary)
+        }
     }
 }
 

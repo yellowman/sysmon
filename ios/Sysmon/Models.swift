@@ -77,6 +77,18 @@ struct StatusResponse: Codable {
     let daemon: DaemonInfo?
     let hosts: [Host]
     let statistics: Stats
+    let rev: Int64?
+}
+
+// Response to GET /api/monitoring/status?since=<rev>: only the hosts that
+// changed since the client's last revision, so live polling stays cheap.
+struct StatusDelta: Codable {
+    let rev: Int64
+    let full: Bool
+    let daemon: DaemonInfo?
+    let statistics: Stats
+    let changed: [Host]
+    let removed: [String]?
 }
 
 struct APIError: Error {

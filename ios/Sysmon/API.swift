@@ -57,6 +57,14 @@ struct API {
         try await postVoid("/api/push/test", body: ["device_token": deviceToken])
     }
 
+    // Acknowledge an active alert. Admin-only on the server; the caller
+    // gates the UI on role but the server is the real authority.
+    func ackHost(objectName: String) async throws {
+        let escaped = objectName.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed) ?? objectName
+        try await postVoid("/api/monitoring/ack/\(escaped)", body: EmptyBody())
+    }
+
     private func send<B: Encodable>(_ path: String, method: String, body: B?) async throws -> Data {
         guard let url = URL(string: baseURL + path) else {
             throw APIError(status: 0, message: "Invalid URL")

@@ -21,15 +21,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import com.sysmon.app.Api
 import com.sysmon.app.Session
-import kotlinx.coroutines.launch
+import com.sysmon.app.StatusStore
 
 enum class Tab(val label: String, val icon: ImageVector) {
     Alerts("ALERTS", Icons.Outlined.Notifications),
@@ -40,7 +38,6 @@ enum class Tab(val label: String, val icon: ImageVector) {
 @Composable
 fun MainScreen(onLogout: () -> Unit) {
     var selectedTab by remember { mutableStateOf(Tab.Alerts) }
-    val scope = rememberCoroutineScope()
 
     // A tapped push notification bumps this counter; jump to Alerts.
     LaunchedEffect(Session.pushNavigateToAlerts) {
@@ -49,16 +46,10 @@ fun MainScreen(onLogout: () -> Unit) {
         }
     }
 
-    // Keep the navigation-bar badge in sync whenever the app comes back
-    // to the foreground, regardless of which tab is currently shown.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch {
-            runCatching {
-                val status = Api.status()
-                Session.alertCount = status.hosts.count { !it.isOK }
-            }
-        }
-    }
+    // One poller feeds every tab (and the badge). Run it while the app is
+    // foreground; pause it when backgrounded to save battery/data.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { StatusStore.start() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { StatusStore.stop() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
