@@ -266,16 +266,25 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 
 		var sub Subscription
 
-		// Preserve existing data on re-subscribe
+		// Preserve existing data on re-subscribe.
+		ownerChanged := false
 		if existing := b.Get([]byte(token)); existing != nil {
 			json.Unmarshal(existing, &sub)
-			// Don't let one user hijack another user's device token
+			// A device token is a per-install secret held by whoever
+			// physically has the app. When a different account signs in
+			// on the same device it legitimately takes the token over —
+			// the previous owner logged out. (There's no hijack risk: the
+			// push providers only deliver to the device that actually
+			// holds the token, so re-registering someone else's token
+			// can't redirect their notifications.) Reassign ownership
+			// instead of rejecting, but rotate the API key so the prior
+			// owner's key can no longer target this device.
 			if sub.Owner != "" && sub.Owner != owner {
-				return fmt.Errorf("device_token already registered to another account")
+				ownerChanged = true
 			}
 		}
 
-		if sub.APIKey != "" {
+		if sub.APIKey != "" && !ownerChanged {
 			apiKey = sub.APIKey
 		} else {
 			apiKey = generateAPIKey()
