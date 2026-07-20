@@ -41,6 +41,7 @@ struct AlertsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var hosts: [Host] = []
     @State private var stats: Stats?
+    @State private var daemon: DaemonInfo?
     @State private var loading = true
     @State private var error: String?
     @State private var refreshKey = UUID()
@@ -51,6 +52,11 @@ struct AlertsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if daemon?.paused == true {
+                        PausedBanner()
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                    }
                     if let s = stats {
                         StatGrid(stats: s)
                             .padding(.horizontal, 16)
@@ -97,6 +103,7 @@ struct AlertsView: View {
             let status: StatusResponse = try await api.get("/api/monitoring/status")
             hosts = status.hosts
             stats = status.statistics
+            daemon = status.daemon
             error = nil
             let count = hosts.filter { !$0.isOK }.count
             session.alertCount = count
@@ -207,6 +214,16 @@ struct HostRow: View {
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.5)
                         .foregroundColor(statusColor(host.overallStatus))
+                    if host.isPaused {
+                        Text("PAUSED")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.gray)
+                            .cornerRadius(3)
+                    }
                     if host.isDown, let tf = host.timeFailed, tf > 0 {
                         Text("down \(formatUptime(tf))")
                             .font(.system(size: 10))
@@ -312,6 +329,24 @@ struct ErrorBox: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.red.opacity(0.06))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.2)))
+        .cornerRadius(10)
+    }
+}
+
+struct PausedBanner: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 14))
+            Text("Monitoring paused — the daemon is not running checks")
+                .font(.system(size: 12, weight: .medium))
+            Spacer()
+        }
+        .foregroundColor(.orange)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.1))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.3)))
         .cornerRadius(10)
     }
 }

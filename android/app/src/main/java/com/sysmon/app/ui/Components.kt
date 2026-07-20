@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.sysmon.app.Host
 import com.sysmon.app.Stats
+import com.sysmon.app.formatUptime
 import com.sysmon.app.ui.theme.MonoLarge
 import com.sysmon.app.ui.theme.MonoMedium
 import com.sysmon.app.ui.theme.MonoSmall
@@ -224,12 +225,38 @@ fun HostRow(host: Host) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                val duration = when {
+                    host.isDown && host.timeFailed > 0 -> "down ${formatUptime(host.timeFailed)}"
+                    host.isOK && host.timeUp > 0 -> "up ${formatUptime(host.timeUp)}"
+                    else -> null
+                }
+                if (duration != null) {
+                    Text(
+                        text = duration,
+                        style = MonoSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            Text(
-                text = host.overallStatus,
-                style = MaterialTheme.typography.labelMedium,
-                color = statusColor(host.overallStatus)
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = host.overallStatus,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = statusColor(host.overallStatus)
+                )
+                if (host.paused) {
+                    Text(
+                        text = "PAUSED",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(SysmonColors.Acked)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -266,6 +293,25 @@ fun ErrorBanner(message: String) {
             text = message,
             style = MaterialTheme.typography.bodyMedium,
             color = SysmonColors.Down
+        )
+    }
+}
+
+@Composable
+fun PausedBanner() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(SysmonColors.Unknown.copy(alpha = 0.1f))
+            .border(1.dp, SysmonColors.Unknown, RoundedCornerShape(4.dp))
+            .padding(12.dp)
+    ) {
+        Text(
+            text = "Monitoring paused — the daemon is not running checks",
+            style = MaterialTheme.typography.bodyMedium,
+            color = SysmonColors.Unknown
         )
     }
 }
