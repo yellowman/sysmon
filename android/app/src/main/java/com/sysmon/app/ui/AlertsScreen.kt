@@ -67,6 +67,10 @@ fun AlertsScreen() {
             }
         )
 
+        if (status?.daemon?.paused == true) {
+            PausedBanner()
+        }
+
         StatsRow(status?.statistics)
 
         SectionHeader(

@@ -13,12 +13,14 @@ struct Host: Codable, Identifiable {
     let ipv4Address: String?
     let ipv6Address: String?
     let overallStatus: String
+    let paused: Bool?
     let downCount: Int64
     let upCount: Int64
     let timeUp: Int64?
     let timeFailed: Int64?
 
     var id: String { objectName ?? hostname }
+    var isPaused: Bool { paused ?? false }
     var ip: String {
         if let v4 = ipv4Address, !v4.isEmpty { return v4 }
         if let v6 = ipv6Address, !v6.isEmpty { return v6 }
@@ -35,6 +37,7 @@ struct Host: Codable, Identifiable {
         case ipv4Address = "ipv4_address"
         case ipv6Address = "ipv6_address"
         case overallStatus = "overall_status"
+        case paused
         case downCount = "down_count"
         case upCount = "up_count"
         case timeUp = "time_up"

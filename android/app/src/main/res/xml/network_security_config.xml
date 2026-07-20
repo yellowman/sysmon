@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  sysmon is a self-hosted server the user points the app at by hostname or
+  IP. Many deployments run plain HTTP on a LAN or behind a reverse proxy,
+  so cleartext must be permitted; otherwise every http:// server silently
+  fails with a CLEARTEXT_NOT_PERMITTED error on API 28+. HTTPS is still
+  used whenever the server offers it (Session.normalize defaults an
+  unschemed host to https://).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
