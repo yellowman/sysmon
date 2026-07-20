@@ -1,5 +1,4 @@
 import SwiftUI
-import UserNotifications
 
 struct MainView: View {
     @EnvironmentObject var session: Session
