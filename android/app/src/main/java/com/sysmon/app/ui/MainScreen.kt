@@ -17,6 +17,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,13 @@ enum class Tab(val label: String, val icon: ImageVector) {
 fun MainScreen(onLogout: () -> Unit) {
     var selectedTab by remember { mutableStateOf(Tab.Alerts) }
     val scope = rememberCoroutineScope()
+
+    // A tapped push notification bumps this counter; jump to Alerts.
+    LaunchedEffect(Session.pushNavigateToAlerts) {
+        if (Session.pushNavigateToAlerts > 0) {
+            selectedTab = Tab.Alerts
+        }
+    }
 
     // Keep the navigation-bar badge in sync whenever the app comes back
     // to the foreground, regardless of which tab is currently shown.

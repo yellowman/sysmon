@@ -1,6 +1,7 @@
 package com.sysmon.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -32,6 +33,32 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (Session.isLoggedIn()) requestPushPermission()
+        handlePushIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePushIntent(intent)
+    }
+
+    // A launch from a tapped notification carries our EXTRA_NAVIGATE (from
+    // a foreground-posted notification) or the FCM data payload's
+    // "hostname" key (when the system posts a background notification and
+    // adds the data fields to the launch intent). Either way, jump to the
+    // Alerts tab.
+    private fun handlePushIntent(intent: Intent?) {
+        val extras = intent?.extras ?: return
+        val fromPush = extras.getString(EXTRA_NAVIGATE) == NAV_ALERTS ||
+            extras.containsKey("hostname")
+        if (fromPush) {
+            Session.requestNavigateToAlerts()
+        }
+    }
+
+    companion object {
+        const val EXTRA_NAVIGATE = "navigate"
+        const val NAV_ALERTS = "alerts"
     }
 
     private fun requestPushPermission() {
