@@ -21,7 +21,7 @@ struct MainView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
-        .tint(.black)
+        .tint(Theme.ink)
         .onReceive(NotificationCenter.default.publisher(for: .sysmonPushTapped)) { _ in
             tab = .alerts
         }
@@ -31,15 +31,6 @@ struct MainView: View {
         .onChange(of: scenePhase) { phase in
             if phase == .active { store.start() } else { store.stop() }
         }
-    }
-}
-
-func statusColor(_ status: String) -> Color {
-    switch status {
-    case "OK": return .green
-    case "WARNING": return .orange
-    case "CRITICAL": return .red
-    default: return .gray
     }
 }
 
@@ -54,6 +45,7 @@ struct AlertsView: View {
                         PausedBanner()
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     if let s = store.stats {
                         StatGrid(stats: s)
@@ -75,8 +67,9 @@ struct AlertsView: View {
                         ErrorBox(message: err) { Task { await store.refreshNow() } }
                             .padding(.horizontal, 16)
                     } else if store.alerts.isEmpty {
-                        EmptyState(icon: "checkmark.circle", text: "All hosts healthy")
-                            .padding(.vertical, 40)
+                        AllClearCard(total: store.stats?.totalHosts ?? store.hosts.count)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
                     } else {
                         VStack(spacing: 8) {
                             ForEach(store.alerts) { host in
@@ -88,9 +81,16 @@ struct AlertsView: View {
                         .padding(.horizontal, 16)
                     }
                 }
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.hosts)
             }
+            .background(Theme.paper)
             .navigationTitle("Alerts")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    LivePill(offline: store.error != nil)
+                }
+            }
             .refreshable { await store.refreshNow() }
         }
     }
@@ -115,10 +115,29 @@ struct HostsView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     if !store.hosts.isEmpty {
-                        TextField("Filter...", text: $search)
-                            .textFieldStyle(SysmonFieldStyle())
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Theme.faint)
+                            TextField("Filter hosts...", text: $search)
+                                .font(.system(size: 14))
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                            if !search.isEmpty {
+                                Button { search = "" } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(Theme.faint)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Theme.surfaceSubtle)
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.hairline, lineWidth: 1))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                     }
                     if store.loading && store.hosts.isEmpty {
                         ProgressView().padding(.vertical, 40)
@@ -140,11 +159,19 @@ struct HostsView: View {
                             }
                         }
                         .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.hosts)
                     }
                 }
             }
+            .background(Theme.paper)
             .navigationTitle("Hosts")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    LivePill(offline: store.error != nil)
+                }
+            }
             .refreshable { await store.refreshNow() }
         }
     }
@@ -153,64 +180,88 @@ struct HostsView: View {
 struct HostRow: View {
     let host: Host
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            StatusDot(status: host.overallStatus)
-                .padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(host.hostname)
-                    .font(.system(size: 14, weight: .semibold))
+        HStack(alignment: .center, spacing: 12) {
+            StatusDot(status: host.overallStatus, pulse: host.isDown && !host.isPaused)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(host.hostname)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Theme.ink)
+                    if host.isPaused {
+                        Text("PAUSED")
+                            .font(.system(size: 8, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundColor(Theme.subtle)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.surfaceSubtle))
+                            .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+                    }
+                }
                 if let desc = host.description, !desc.isEmpty {
                     Text(desc)
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                }
-                if !host.ip.isEmpty {
-                    Text(host.ip)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.gray)
+                        .foregroundColor(Theme.subtle)
+                        .lineLimit(1)
                 }
                 HStack(spacing: 8) {
                     Text(host.overallStatus)
                         .font(.system(size: 9, weight: .bold))
-                        .tracking(0.5)
+                        .tracking(0.8)
                         .foregroundColor(statusColor(host.overallStatus))
-                    if host.isPaused {
-                        Text("PAUSED")
-                            .font(.system(size: 9, weight: .bold))
-                            .tracking(0.5)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.gray)
-                            .cornerRadius(3)
+                    if !host.ip.isEmpty {
+                        Text(host.ip)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Theme.faint)
                     }
                     if host.isDown, let tf = host.timeFailed, tf > 0 {
-                        Text("down \(formatUptime(tf))")
+                        Text("· down \(formatUptime(tf))")
                             .font(.system(size: 10))
-                            .foregroundColor(.gray)
+                            .foregroundColor(Theme.down)
                     } else if host.isOK, let tu = host.timeUp, tu > 0 {
-                        Text("up \(formatUptime(tu))")
+                        Text("· up \(formatUptime(tu))")
                             .font(.system(size: 10))
-                            .foregroundColor(.gray)
+                            .foregroundColor(Theme.faint)
                     }
                 }
             }
-            Spacer()
+            Spacer(minLength: 8)
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Color(white: 0.7))
-                .padding(.top, 4)
+                .foregroundColor(Theme.faint)
         }
-        .padding(.vertical, 6)
+        .card()
     }
 }
 
-struct StatusDot: View {
-    let status: String
+// The good news, said loudly: shown when zero hosts are alerting.
+struct AllClearCard: View {
+    let total: Int
     var body: some View {
-        Circle()
-            .fill(statusColor(status))
-            .frame(width: 8, height: 8)
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Theme.up.opacity(0.12))
+                    .frame(width: 64, height: 64)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(Theme.up)
+            }
+            Text("All systems operational")
+                .font(.system(size: 17, weight: .semibold, design: .serif))
+                .foregroundColor(Theme.ink)
+            if total > 0 {
+                Text("\(total) host\(total == 1 ? "" : "s") monitored · nothing needs you")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.subtle)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .background(Theme.surface)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.hairline, lineWidth: 1))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 }
 
@@ -224,60 +275,72 @@ struct HostDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 10) {
-                    StatusDot(status: host.overallStatus)
-                    Text(host.overallStatus)
-                        .font(.system(size: 13, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundColor(statusColor(host.overallStatus))
-                    if host.isPaused {
-                        Text("PAUSED")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.gray).cornerRadius(3)
+            VStack(alignment: .leading, spacing: 16) {
+                // Status hero
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        StatusDot(status: host.overallStatus,
+                                  pulse: host.isDown && !host.isPaused)
+                        Text(host.overallStatus)
+                            .font(.system(size: 14, weight: .bold))
+                            .tracking(1)
+                            .foregroundColor(statusColor(host.overallStatus))
+                        if host.isPaused {
+                            Text("PAUSED")
+                                .font(.system(size: 9, weight: .bold))
+                                .tracking(0.5)
+                                .foregroundColor(Theme.subtle)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.surfaceSubtle))
+                                .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+                        }
+                        Spacer()
+                    }
+                    if host.isDown, let tf = host.timeFailed, tf > 0 {
+                        Text("Down for \(formatUptime(tf))")
+                            .font(.system(size: 21, weight: .bold, design: .serif))
+                            .foregroundColor(Theme.ink)
+                    } else if host.isOK, let tu = host.timeUp, tu > 0 {
+                        Text("Up for \(formatUptime(tu))")
+                            .font(.system(size: 21, weight: .bold, design: .serif))
+                            .foregroundColor(Theme.ink)
                     }
                 }
+                .card(padding: 16)
 
-                VStack(alignment: .leading, spacing: 12) {
+                SectionHeader("DETAILS")
+                VStack(alignment: .leading, spacing: 14) {
                     if let desc = host.description, !desc.isEmpty {
                         DetailRow(label: "DESCRIPTION", value: desc)
                     }
                     if !host.ip.isEmpty {
                         DetailRow(label: "ADDRESS", value: host.ip, mono: true)
                     }
-                    if host.isDown, let tf = host.timeFailed, tf > 0 {
-                        DetailRow(label: "DOWN FOR", value: formatUptime(tf))
-                    } else if host.isOK, let tu = host.timeUp, tu > 0 {
-                        DetailRow(label: "UP FOR", value: formatUptime(tu))
-                    }
                     DetailRow(label: "FAIL COUNT", value: "\(host.downCount)")
                     DetailRow(label: "OK COUNT", value: "\(host.upCount)")
                 }
+                .card(padding: 16)
 
                 if isAdmin && !host.isOK && !host.isPaused {
                     Button(action: ack) {
                         Text(acking ? "ACKNOWLEDGING..." : "ACKNOWLEDGE")
-                            .font(.system(size: 13, weight: .semibold))
-                            .tracking(1)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(acking ? Color.gray : Color.black)
-                            .cornerRadius(8)
                     }
+                    .buttonStyle(SlabButtonStyle(enabled: !acking))
                     .disabled(acking)
+                    .padding(.top, 4)
                 }
                 if let note = ackNote {
                     Text(note)
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                        .foregroundColor(Theme.subtle)
+                        .transition(.opacity)
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(Theme.paper)
         .navigationTitle(host.hostname)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -309,10 +372,10 @@ struct DetailRow: View {
             Text(label)
                 .font(.system(size: 9, weight: .bold))
                 .tracking(1)
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.subtle)
             Text(value)
                 .font(.system(size: 14, design: mono ? .monospaced : .default))
-                .foregroundColor(.primary)
+                .foregroundColor(Theme.ink)
         }
     }
 }
@@ -321,10 +384,10 @@ struct StatGrid: View {
     let stats: Stats
     var body: some View {
         HStack(spacing: 8) {
-            StatTile(label: "TOTAL", value: stats.totalHosts, color: .primary)
-            StatTile(label: "OK", value: stats.healthyHosts, color: .green)
-            StatTile(label: "WARN", value: stats.warningHosts, color: .orange)
-            StatTile(label: "CRIT", value: stats.criticalHosts, color: .red)
+            StatTile(label: "TOTAL", value: stats.totalHosts, color: Theme.ink)
+            StatTile(label: "OK", value: stats.healthyHosts, color: Theme.up)
+            StatTile(label: "WARN", value: stats.warningHosts, color: Theme.warn)
+            StatTile(label: "CRIT", value: stats.criticalHosts, color: Theme.down)
         }
     }
 }
@@ -338,17 +401,20 @@ struct StatTile: View {
             Text(label)
                 .font(.system(size: 9, weight: .bold))
                 .tracking(1)
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.subtle)
             Text("\(value)")
-                .font(.system(size: 24, weight: .heavy))
+                .font(.system(size: 26, weight: .heavy))
                 .tracking(-0.5)
-                .foregroundColor(color)
+                .foregroundColor(value == 0 && label != "TOTAL" ? Theme.faint : color)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: value)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(white: 0.98))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(white: 0.92)))
-        .cornerRadius(10)
+        .background(Theme.surface)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.hairline, lineWidth: 1))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 }
 
@@ -364,39 +430,14 @@ struct SectionHeader: View {
             Text(text)
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.5)
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.subtle)
             Spacer()
             if let accent {
                 Text(accent)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(Theme.subtle)
             }
         }
-    }
-}
-
-struct ErrorBox: View {
-    let message: String
-    let retry: () -> Void
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(message)
-                .font(.system(size: 13))
-                .foregroundColor(.red)
-            Button("RETRY", action: retry)
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(1)
-                .foregroundColor(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color.black)
-                .cornerRadius(6)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.06))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.2)))
-        .cornerRadius(10)
     }
 }
 
@@ -409,11 +450,40 @@ struct PausedBanner: View {
                 .font(.system(size: 12, weight: .medium))
             Spacer()
         }
-        .foregroundColor(.orange)
+        .foregroundColor(Theme.warn)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.1))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.3)))
+        .background(Theme.warn.opacity(0.1))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.warn.opacity(0.3)))
+        .cornerRadius(10)
+    }
+}
+
+struct ErrorBox: View {
+    let message: String
+    let retry: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(message)
+                    .font(.system(size: 13))
+            }
+            .foregroundColor(Theme.down)
+            Button("RETRY", action: retry)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1)
+                .foregroundColor(Theme.onInk)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Theme.ink)
+                .cornerRadius(6)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.down.opacity(0.06))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.down.opacity(0.2)))
         .cornerRadius(10)
     }
 }
@@ -423,12 +493,17 @@ struct EmptyState: View {
     let text: String
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 36))
-                .foregroundColor(Color(white: 0.7))
+            ZStack {
+                Circle()
+                    .fill(Theme.surfaceSubtle)
+                    .frame(width: 56, height: 56)
+                Image(systemName: icon)
+                    .font(.system(size: 22))
+                    .foregroundColor(Theme.faint)
+            }
             Text(text)
                 .font(.system(size: 13))
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.subtle)
         }
         .frame(maxWidth: .infinity)
     }

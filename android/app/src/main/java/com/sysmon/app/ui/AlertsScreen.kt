@@ -1,6 +1,7 @@
 package com.sysmon.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +31,7 @@ fun AlertsScreen() {
             title = "Alerts",
             subtitle = "Hosts requiring attention",
             refreshing = refreshing,
+            live = StatusStore.error == null,
             onRefresh = {
                 scope.launch {
                     refreshing = true
@@ -55,12 +57,16 @@ fun AlertsScreen() {
             StatusStore.loading && StatusStore.hosts.isEmpty() -> CenteredSpinner()
             StatusStore.error != null && StatusStore.hosts.isEmpty() ->
                 ErrorBanner(StatusStore.error!!)
-            alerts.isEmpty() -> EmptyState("All systems operational")
+            alerts.isEmpty() -> AllClearCard(
+                total = StatusStore.stats?.total ?: StatusStore.hosts.size
+            )
             else -> LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 items(alerts, key = { it.objectName.ifEmpty { it.hostname } }) { host ->
-                    HostRow(host, onClick = { selectedHost = host })
+                    Box(modifier = Modifier.animateItem()) {
+                        HostRow(host, onClick = { selectedHost = host })
+                    }
                 }
             }
         }

@@ -48,7 +48,7 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(host.overallStatus)
+                StatusDot(host.overallStatus, pulse = host.isDown && !host.paused)
                 Text(
                     text = "  ${host.hostname}",
                     style = MaterialTheme.typography.titleLarge,

@@ -10,7 +10,6 @@ struct SysmonApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(session)
-                .preferredColorScheme(.light)
         }
     }
 }

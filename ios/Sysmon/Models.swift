@@ -6,7 +6,7 @@ struct LoginResponse: Codable {
     let role: String
 }
 
-struct Host: Codable, Identifiable {
+struct Host: Codable, Identifiable, Equatable {
     let objectName: String?
     let hostname: String
     let description: String?
@@ -45,7 +45,7 @@ struct Host: Codable, Identifiable {
     }
 }
 
-struct DaemonInfo: Codable {
+struct DaemonInfo: Codable, Equatable {
     let version: String
     let uptimeSeconds: Int64
     let pid: Int
@@ -59,7 +59,7 @@ struct DaemonInfo: Codable {
     }
 }
 
-struct Stats: Codable {
+struct Stats: Codable, Equatable {
     let totalHosts: Int
     let healthyHosts: Int
     let warningHosts: Int

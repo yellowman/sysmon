@@ -1,5 +1,6 @@
 package com.sysmon.app.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,6 +42,7 @@ fun HostsScreen() {
             title = "Hosts",
             subtitle = "${hosts.size} monitored",
             refreshing = refreshing,
+            live = StatusStore.error == null,
             onRefresh = {
                 scope.launch {
                     refreshing = true
@@ -79,7 +81,9 @@ fun HostsScreen() {
                     filtered,
                     key = { it.objectName.ifEmpty { it.hostname } }
                 ) { host ->
-                    HostRow(host, onClick = { selectedHost = host })
+                    Box(modifier = Modifier.animateItem()) {
+                        HostRow(host, onClick = { selectedHost = host })
+                    }
                 }
             }
         }
