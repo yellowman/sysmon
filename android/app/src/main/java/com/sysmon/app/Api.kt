@@ -58,9 +58,14 @@ object Api {
         authedRequest("/api/push/subscribe", "POST", body)
     }
 
-    suspend fun sendTestPush(fcmToken: String) = withContext(Dispatchers.IO) {
+    // Returns the server's warning, if any (e.g. "push is disabled — this
+    // test was delivered but real alerts are not being sent").
+    suspend fun sendTestPush(fcmToken: String): String? = withContext(Dispatchers.IO) {
         val body = json.encodeToString(mapOf("device_token" to fcmToken))
-        authedRequest("/api/push/test", "POST", body)
+        val response = authedRequest("/api/push/test", "POST", body)
+        runCatching {
+            json.decodeFromString(TestPushResponse.serializer(), response).warning
+        }.getOrNull()
     }
 
     // --- Explicit auth (for logout cleanup after Session is cleared) ---

@@ -80,6 +80,9 @@ data class SubscribeRequest(
 @Serializable
 data class ApiError(val error: String = "", val message: String = "")
 
+@Serializable
+data class TestPushResponse(val status: String = "", val warning: String? = null)
+
 fun formatUptime(seconds: Long): String {
     if (seconds <= 0) return "0s"
     val d = seconds / 86400

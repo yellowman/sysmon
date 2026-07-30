@@ -102,7 +102,9 @@ fun SettingsScreen(onLogout: () -> Unit) {
                     return@launch
                 }
                 runCatching { Api.sendTestPush(current) }
-                    .onSuccess { message = "Sent — check your notifications" }
+                    .onSuccess { warning ->
+                        message = warning ?: "Sent — check your notifications"
+                    }
                     .onFailure { message = it.message ?: "Failed" }
                 sending = false
             }

@@ -53,8 +53,13 @@ struct API {
         try await deleteVoid("/api/push/subscribe", body: ["device_token": deviceToken])
     }
 
-    func sendTestPush(deviceToken: String) async throws {
-        try await postVoid("/api/push/test", body: ["device_token": deviceToken])
+    // Returns the server's warning, if any (e.g. "push is disabled — this
+    // test was delivered but real alerts are not being sent").
+    func sendTestPush(deviceToken: String) async throws -> String? {
+        let data = try await send("/api/push/test", method: "POST",
+                                  body: ["device_token": deviceToken])
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return obj?["warning"] as? String
     }
 
     // Acknowledge an active alert. Admin-only on the server; the caller
