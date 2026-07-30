@@ -92,8 +92,13 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
             )
         }
+        ButtonRow(label = "Test Locally (this phone)", primary = false) {
+            // No server, no FCM — proves the display path in isolation.
+            message = NotificationHealth.postLocalTest(context)
+                ?: "Posted locally — if you didn't see it, check Do Not Disturb"
+        }
         ButtonRow(
-            label = if (sending) "Sending…" else "Send Test Notification",
+            label = if (sending) "Sending…" else "Send Test via Server (FCM)",
             enabled = !sending && fcmToken != null,
             primary = false
         ) {

@@ -111,7 +111,7 @@
 
     <!-- Comparison View -->
     <div x-show="viewMode === 'comparison'" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
-        <template x-for="host in filteredHosts" :key="host._uniqueId">
+        <template x-for="host in pageHosts" :key="hostKey(host)">
             <div class="relative group">
                 <!-- Selection Checkbox -->
                 <div class="absolute top-2 left-2 z-10">
@@ -165,7 +165,7 @@
                         <div><span class="text-gray-400">Contact:</span> <span x-text="host.contact || 'None'"></span></div>
                         <div class="border-t border-gray-700 mt-2 pt-2">
                             <div class="font-semibold mb-1">Checks:</div>
-                            <template x-for="check in host.checks.slice(0, 5)" :key="host._uniqueId + '-check-' + check.type + '-' + (check.port || '0')">
+                            <template x-for="check in host.checks.slice(0, 5)" :key="hostKey(host) + '-check-' + check.type + '-' + (check.port || '0')">
                                 <div class="flex items-center justify-between">
                                     <span x-text="check.type + (check.port ? ':' + check.port : '')"></span>
                                     <span :class="{
@@ -224,7 +224,7 @@
                 </tr>
             </thead>
             <tbody>
-                <template x-for="host in sortedHosts" :key="host._uniqueId">
+                <template x-for="host in pageHosts" :key="hostKey(host)">
                     <tr class="border-b border-gray-100 cursor-pointer"
                         :class="{
                             'hover:bg-gray-50': host.overall_status === 'OK',
@@ -259,8 +259,8 @@
     <!-- Pagination Controls -->
     <div x-show="perPage !== 'all' && totalPages > 1" class="mt-6 flex justify-between items-center">
         <div class="text-sm text-gray-600">
-            Showing <span x-text="((currentPage - 1) * limit) + 1"></span> to
-            <span x-text="Math.min(currentPage * limit, totalHosts)"></span> of
+            Showing <span x-text="((currentPage - 1) * parseInt(perPage)) + 1"></span> to
+            <span x-text="Math.min(currentPage * parseInt(perPage), totalHosts)"></span> of
             <span x-text="totalHosts"></span> hosts
         </div>
         <div class="flex items-center space-x-2">
@@ -393,7 +393,7 @@
 
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">Check Results</h3>
                         <div class="space-y-3">
-                            <template x-for="check in selectedHost.checks" :key="selectedHost._uniqueId + '-modal-check-' + check.type + '-' + (check.port || '0')">
+                            <template x-for="check in selectedHost.checks" :key="hostKey(selectedHost) + '-modal-check-' + check.type + '-' + (check.port || '0')">
                                 <div class="border border-gray-200 rounded-lg p-4">
                                     <div class="flex items-center justify-between">
                                         <div class="flex items-center space-x-3">
@@ -441,12 +441,12 @@ function hostsPage() {
         sortDirection: 'asc',
         refreshInterval: null,
 
-        // Pagination
-        perPage: 100,  // Start with pagination enabled for performance with large host counts
+        // Delta poller: full fetch once, near-empty deltas after.
+        poller: createStatusPoller(),
+
+        // Pagination (purely client-side; the poller holds the full list)
+        perPage: 100,
         currentPage: 1,
-        totalPages: 1,
-        totalHosts: 0,
-        limit: 100,
 
         // Bulk operations
         selectedHosts: [],
@@ -465,6 +465,20 @@ function hostsPage() {
 
                 return matchesSearch && matchesStatus;
             });
+        },
+
+        get totalHosts() { return this.filteredHosts.length; },
+
+        get totalPages() {
+            if (this.perPage === 'all') return 1;
+            return Math.max(1, Math.ceil(this.filteredHosts.length / parseInt(this.perPage)));
+        },
+
+        get pageHosts() {
+            if (this.perPage === 'all') return this.sortedHosts;
+            const per = parseInt(this.perPage);
+            const page = Math.min(this.currentPage, this.totalPages);
+            return this.sortedHosts.slice((page - 1) * per, page * per);
         },
 
         get visiblePages() {
@@ -509,8 +523,8 @@ function hostsPage() {
         },
 
         init() {
-            this.fetchHosts();
-            this.refreshInterval = setInterval(() => this.fetchHosts(), 10000);
+            this.refresh(true);
+            this.refreshInterval = setInterval(() => this.refresh(), 5000);
         },
 
         destroy() {
@@ -520,67 +534,62 @@ function hostsPage() {
             }
         },
 
-        async fetchHosts() {
+        hostKey(host) {
+            // sysmond's identity for an object; hostname/IP can repeat.
+            // Also the stable row key: rows only re-render when their own
+            // data changes, never because the list was refetched.
+            return host.object_name || host.hostname;
+        },
+
+        async refresh(initial = false) {
             try {
-                this.loading = true;
+                if (initial) this.loading = true;
                 this.error = null;
-
-                let url = '/api/monitoring/hosts';
-
-                // When search or filter is active, fetch all hosts for client-side filtering.
-                // Otherwise use server-side pagination.
-                const hasClientFilter = this.searchQuery || this.filterStatus;
-                if (this.perPage !== 'all' && !hasClientFilter) {
-                    url += `?page=${this.currentPage}&limit=${this.limit}`;
-                }
-
-                const data = await apiCall(url);
-
-                // Handle paginated response
-                if (this.perPage !== 'all' && !hasClientFilter && data.data) {
-                    this.hosts = Array.isArray(data.data) ? data.data : [];
-                    this.totalHosts = data.total || 0;
-                    this.totalPages = data.total_pages || 1;
-                    this.currentPage = data.page || 1;
-                } else {
-                    // Non-paginated response (all hosts)
-                    // Ensure hosts is always an array, even if API returns null
-                    this.hosts = Array.isArray(data) ? data : [];
-                    this.totalHosts = this.hosts.length;
-                    this.totalPages = 1;
-                    this.currentPage = 1;
-                }
-
-                // Generate unique IDs for each host to prevent duplicate key errors
-                // This is necessary because multiple hosts can have the same hostname/IP
-                this.hosts = this.hosts.map((host, index) => ({
-                    ...host,
-                    _uniqueId: `${host.hostname}-${index}-${Date.now()}`
-                }));
-
+                const r = await this.poller.poll();
+                this.applyHosts(r);
                 this.loading = false;
             } catch (e) {
                 console.error('Failed to fetch hosts:', e);
                 this.error = e.message || 'Failed to connect to server';
-                this.hosts = [];
                 this.loading = false;
             }
         },
 
-        changePerPage() {
-            // Update limit based on perPage selection
-            if (this.perPage !== 'all') {
-                this.limit = parseInt(this.perPage);
+        // Patch only what the delta says moved; on a full (re)sync swap
+        // the whole array once. Untouched rows keep their DOM.
+        applyHosts(r) {
+            if (r.full) {
+                this.hosts = r.hosts;
+                return;
             }
-            // Reset to page 1 when changing per-page value
+            if (r.removed.length) {
+                const gone = new Set(r.removed);
+                this.hosts = this.hosts.filter(h => !gone.has(this.hostKey(h)));
+            }
+            if (r.changed.length) {
+                const idx = new Map(this.hosts.map((h, i) => [this.hostKey(h), i]));
+                for (const nh of r.changed) {
+                    const i = idx.get(this.hostKey(nh));
+                    if (i === undefined) this.hosts.push(nh);
+                    else this.hosts[i] = nh;
+                }
+            }
+        },
+
+        // Manual refresh (retry button, after bulk ops): force a full
+        // resync so flags the delta signature ignores (e.g. acked) update.
+        async fetchHosts() {
+            this.poller.invalidate();
+            await this.refresh();
+        },
+
+        changePerPage() {
             this.currentPage = 1;
-            this.fetchHosts();
         },
 
         goToPage(page) {
             if (page < 1 || page > this.totalPages) return;
             this.currentPage = page;
-            this.fetchHosts();
         },
 
         selectHost(host) {

@@ -37,6 +37,33 @@ object NotificationHealth {
     }
 
     /**
+     * Post a notification directly on this phone — no server, no FCM.
+     * Pairs with the server test to split "delivery broken" from
+     * "display broken": if this shows but the server test doesn't, the
+     * problem is between the server and Firebase; if neither shows, the
+     * problem is on this phone. Returns null on success, else the reason.
+     */
+    fun postLocalTest(context: Context): String? {
+        problem(context)?.let { return it }
+        return try {
+            val notification = androidx.core.app.NotificationCompat.Builder(
+                context, context.getString(R.string.notification_channel_id)
+            )
+                .setContentTitle("sysmon local test")
+                .setContentText("Posted directly on this phone — display path works")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .build()
+            androidx.core.app.NotificationManagerCompat.from(context)
+                .notify(("local-test").hashCode(), notification)
+            null
+        } catch (e: SecurityException) {
+            "Notification permission not granted — enable it in system settings"
+        }
+    }
+
+    /**
      * Open the system notification settings — the channel's own page when
      * the app-level toggle is fine (channel problems are fixed there),
      * otherwise the app's notification page.
