@@ -188,18 +188,20 @@ func hostKey(h *models.HostStatus) string {
 }
 
 // hostSignature hashes the fields that represent a host's *state*,
-// deliberately excluding values that tick every poll regardless of any
-// real change — TimeUp/TimeFailed (computed from now()) and the per-check
-// timestamps/response time. Consecutive counters (down/up) and totals
-// change only when a check actually runs (check cadence, not poll
-// cadence), so they're included: a steady host produces an identical
-// signature poll-over-poll and thus no delta. Clients render live "up/down
-// for X" locally from LastChangeTime.
+// deliberately excluding everything that ticks without a real change —
+// TimeUp/TimeFailed (computed from now()), the per-check timestamps and
+// response times, and ALL check counters (down/up/total): sysmond bumps
+// them on every single check run (TotalDown counts failed checks, not
+// outages), which would mark every host "changed" on every poll and
+// void the delta system. Actual transitions are fully captured by
+// OverallStatus/StatusColor/LastChangeTime. A steady host thus produces
+// an identical signature poll-over-poll and no delta; clients render
+// live "up/down for X" locally from LastChangeTime.
 func hostSignature(h *models.HostStatus) uint64 {
 	w := fnv.New64a()
-	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%d\x00%d\x00%d\x00%s\x00%s",
+	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s",
 		h.ObjectName, h.Hostname, h.OverallStatus, h.StatusColor, h.Contact,
-		h.Paused, h.DownCount, h.UpCount, h.TotalDown, h.Description, h.IPv4Address)
+		h.Paused, h.Description, h.IPv4Address)
 	if h.LastChangeTime != nil {
 		fmt.Fprintf(w, "\x00%d", h.LastChangeTime.Unix())
 	}
@@ -861,6 +863,13 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 				lastTimeUp := time.Unix(xmlObj.LastTimeUp, 0)
 				host.LastChangeTime = &lastTimeUp
 				host.TimeUp = int64(currentTime.Sub(lastTimeUp).Seconds())
+				host.TimeFailed = 0
+			} else if !daemonInfo.StartTime.IsZero() {
+				// sysmond only sets ObjectLastTimeUp after a recovery; a
+				// host that has been up since the daemon started reports 0.
+				// Fall back to the daemon start time so "up for X" isn't
+				// blank for perfectly healthy hosts.
+				host.TimeUp = int64(currentTime.Sub(daemonInfo.StartTime).Seconds())
 				host.TimeFailed = 0
 			}
 			// LastOutage is when it last went down (before coming back up)

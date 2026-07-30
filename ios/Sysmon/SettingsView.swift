@@ -85,8 +85,8 @@ struct SettingsView: View {
         Task {
             let api = API(baseURL: session.serverURL, token: session.token)
             do {
-                try await api.sendTestPush(deviceToken: token)
-                statusMessage = "Test push sent — check your notifications"
+                let warning = try await api.sendTestPush(deviceToken: token)
+                statusMessage = warning ?? "Test push sent — check your notifications"
             } catch let e as APIError {
                 statusMessage = "Failed: \(e.message)"
             } catch {

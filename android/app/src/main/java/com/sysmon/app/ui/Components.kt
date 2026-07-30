@@ -502,6 +502,37 @@ fun PausedBanner() {
     }
 }
 
+// Amber warning with an optional tappable action, e.g. "Notifications are
+// turned off — OPEN NOTIFICATION SETTINGS".
+@Composable
+fun WarningBanner(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+    val amber = warnColor()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(amber.copy(alpha = 0.1f))
+            .border(1.dp, amber.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+            .then(if (onAction != null) Modifier.clickable { onAction() } else Modifier)
+            .padding(12.dp)
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = amber
+        )
+        if (actionLabel != null && onAction != null) {
+            Text(
+                text = actionLabel.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = amber,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
+}
+
 @Composable
 fun EmptyState(message: String) {
     Box(

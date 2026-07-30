@@ -2,10 +2,13 @@ package com.sysmon.app
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+
+private const val TAG = "SysmonPush"
 
 class MessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
@@ -46,9 +49,20 @@ class MessagingService : FirebaseMessagingService() {
             val id = message.messageId?.hashCode() ?: System.currentTimeMillis().toInt()
             try {
                 manager.notify(id, builder.build())
-            } catch (_: SecurityException) {
+                Log.d(TAG, "posted alert notification: $title")
+            } catch (e: SecurityException) {
                 // POST_NOTIFICATIONS not granted on Android 13+
+                Log.w(TAG, "alert delivered but POST_NOTIFICATIONS not granted — dropped: $title", e)
+                Session.pushStatus =
+                    "Alert received but notifications are blocked — enable them in system settings"
             }
+        } else {
+            // Never fail silent: the message made it all the way to the
+            // device and the OS refused to show it. Say so where the user
+            // will see it (Settings tab) and in logcat.
+            Log.w(TAG, "alert delivered but notifications are disabled for this app — dropped: $title")
+            Session.pushStatus =
+                "Alert received but notifications are blocked — enable them in system settings"
         }
     }
 }

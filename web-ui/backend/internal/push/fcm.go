@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,13 @@ import (
 
 // FCMScope is the OAuth scope required for the FCM HTTP v1 API.
 const fcmScope = "https://www.googleapis.com/auth/firebase.messaging"
+
+// androidChannelID pins every send to the notification channel the app
+// creates at startup (SysmonApplication.createNotificationChannel), so
+// the OS→channel mapping is explicit rather than relying on the app's
+// manifest default. MUST match notification_channel_id in
+// android/app/src/main/res/values/strings.xml.
+const androidChannelID = "sysmon_alerts"
 
 // FCMClient talks to the FCM HTTP v1 endpoint
 // (https://fcm.googleapis.com/v1/projects/{project}/messages:send) using
@@ -57,7 +65,8 @@ type fcmV1Android struct {
 }
 
 type fcmV1AndroidNotification struct {
-	Sound string `json:"sound,omitempty"`
+	Sound     string `json:"sound,omitempty"`
+	ChannelID string `json:"channel_id,omitempty"`
 }
 
 // fcmData carries the optional structured payload tagged onto each
@@ -130,6 +139,94 @@ func FCMCredentialMeta(credentialsJSON []byte) (projectID, clientEmail, keyIDLas
 	return sa.ProjectID, sa.ClientEmail, last4, nil
 }
 
+// KeyRejectedError means Google itself refused the service-account key
+// (revoked, deleted, or fundamentally unusable) — as opposed to a
+// transient network failure reaching Google, which is NOT evidence the
+// key is bad.
+type KeyRejectedError struct{ Detail string }
+
+func (e *KeyRejectedError) Error() string { return e.Detail }
+
+// classifyTokenError turns an OAuth token-mint failure into a
+// KeyRejectedError when Google answered with an auth error, or returns
+// the error wrapped as-is for network trouble.
+func classifyTokenError(err error) error {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) {
+		body := strings.TrimSpace(string(re.Body))
+		if len(body) > 300 {
+			body = body[:300] + "…"
+		}
+		code := 0
+		if re.Response != nil {
+			code = re.Response.StatusCode
+		}
+		return &KeyRejectedError{Detail: fmt.Sprintf(
+			"Google rejected the service-account key (HTTP %d): %s — the key has likely been revoked or deleted. Generate a new one in Firebase Console → Project Settings → Service accounts",
+			code, body)}
+	}
+	return fmt.Errorf("could not reach Google to verify the key: %w", err)
+}
+
+// FCMCredentialLiveCheck proves Google currently accepts the key by
+// minting a real OAuth access token. FCMCredentialMeta is offline-only —
+// a revoked key still parses fine — so this is the only way to catch a
+// dead key before alert delivery silently stops. Returns nil on success,
+// *KeyRejectedError when Google definitively refused the key, and other
+// errors for network trouble.
+func FCMCredentialLiveCheck(ctx context.Context, credentialsJSON []byte) error {
+	creds, err := google.CredentialsFromJSON(ctx, credentialsJSON, fcmScope)
+	if err != nil {
+		return &KeyRejectedError{Detail: fmt.Sprintf("credentials unusable: %v", err)}
+	}
+	if _, err := creds.TokenSource.Token(); err != nil {
+		return classifyTokenError(err)
+	}
+	return nil
+}
+
+// FCMSendError classifies a v1 send failure so callers can react —
+// prune dead tokens, flag a project mismatch, or recheck the key.
+type FCMSendError struct {
+	StatusCode int
+	Reason     string // FCM errorCode: UNREGISTERED, SENDER_ID_MISMATCH, …
+	Body       string
+}
+
+func (e *FCMSendError) Error() string {
+	switch e.Reason {
+	case "UNREGISTERED":
+		return fmt.Sprintf("FCM: device token is no longer valid (app uninstalled or token rotated) [HTTP %d]", e.StatusCode)
+	case "SENDER_ID_MISMATCH":
+		return fmt.Sprintf("FCM: device token belongs to a DIFFERENT Firebase project than this service-account key — the app was built with a google-services.json from another project [HTTP %d]", e.StatusCode)
+	default:
+		return fmt.Sprintf("FCM v1 error %d (%s): %s", e.StatusCode, e.Reason, e.Body)
+	}
+}
+
+// parseFCMErrorReason extracts the machine-readable errorCode from an
+// FCM v1 error response body, falling back to the google.rpc status.
+func parseFCMErrorReason(body []byte) string {
+	var parsed struct {
+		Error struct {
+			Status  string `json:"status"`
+			Details []struct {
+				Type      string `json:"@type"`
+				ErrorCode string `json:"errorCode"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &parsed) != nil {
+		return ""
+	}
+	for _, d := range parsed.Error.Details {
+		if d.ErrorCode != "" {
+			return d.ErrorCode
+		}
+	}
+	return parsed.Error.Status
+}
+
 // NewFCMClient builds an FCM client from a Google service-account
 // credentials JSON (the raw bytes, e.g. as uploaded through the admin UI
 // and stored in bbolt). The token source it builds refreshes access
@@ -168,9 +265,14 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 			},
 			Data: data.toMap(),
 			Android: &fcmV1Android{
+				// Canonical AndroidMessagePriority enum name. The v1 API
+				// also accepts lowercase "high" (Google's own docs use it),
+				// and an actually-invalid value would be a 400, never a
+				// silent downgrade.
 				Priority: "HIGH",
 				Notification: &fcmV1AndroidNotification{
-					Sound: "default",
+					Sound:     "default",
+					ChannelID: androidChannelID,
 				},
 			},
 		},
@@ -183,7 +285,10 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 
 	tok, err := c.tokenSource.Token()
 	if err != nil {
-		return fmt.Errorf("mint FCM OAuth token: %w", err)
+		// A definitive OAuth refusal here means the key died after being
+		// stored (revoked/deleted). classifyTokenError surfaces that as
+		// KeyRejectedError so the service can flip the key-health status.
+		return classifyTokenError(err)
 	}
 
 	httpReq, err := http.NewRequest("POST", c.endpoint, bytes.NewReader(payload))
@@ -201,10 +306,15 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		// On 404 with errorCode UNREGISTERED the device token is dead;
-		// the caller logs the failure and the next poll will keep the
-		// subscription around. Pruning dead tokens is a separate job.
-		return fmt.Errorf("FCM v1 error %d: %s", resp.StatusCode, string(respBody))
+		body := strings.TrimSpace(string(respBody))
+		if len(body) > 300 {
+			body = body[:300] + "…"
+		}
+		return &FCMSendError{
+			StatusCode: resp.StatusCode,
+			Reason:     parseFCMErrorReason(respBody),
+			Body:       body,
+		}
 	}
 
 	return nil
