@@ -1,7 +1,6 @@
 package com.sysmon.app.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HostsScreen() {
     var refreshing by remember { mutableStateOf(false) }
-    var search by remember { mutableStateOf("") }
+    var search by rememberSaveable { mutableStateOf("") }
     var selectedHost by remember { mutableStateOf<Host?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -33,57 +33,65 @@ fun HostsScreen() {
     val filtered = if (search.isEmpty()) hosts
         else hosts.filter {
             it.hostname.contains(search, ignoreCase = true) ||
+                it.objectName.contains(search, ignoreCase = true) ||
                 it.description.contains(search, ignoreCase = true) ||
                 it.ip.contains(search, ignoreCase = true)
         }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopHeader(
-            title = "Hosts",
-            subtitle = "${hosts.size} monitored",
-            refreshing = refreshing,
-            live = StatusStore.error == null,
-            onRefresh = {
-                scope.launch {
-                    refreshing = true
-                    StatusStore.refreshNow()
-                    refreshing = false
+    // One LazyColumn for the whole page (header and search included) so
+    // everything scrolls as a unit and stays reachable in landscape.
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        item {
+            TopHeader(
+                title = "Hosts",
+                subtitle = "${hosts.size} monitored",
+                refreshing = refreshing,
+                live = StatusStore.error == null,
+                onRefresh = {
+                    scope.launch {
+                        refreshing = true
+                        StatusStore.refreshNow()
+                        refreshing = false
+                    }
                 }
-            }
-        )
-
-        if (hosts.isNotEmpty()) {
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it },
-                placeholder = { Text("Filter…") },
-                singleLine = true,
-                shape = RoundedCornerShape(4.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
 
-        SectionHeader(
-            label = "All hosts",
-            accent = if (search.isEmpty()) null else "${filtered.size} OF ${hosts.size}"
-        )
+        if (hosts.isNotEmpty()) {
+            item {
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { search = it },
+                    placeholder = { Text("Filter…") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        item {
+            SectionHeader(
+                label = "All hosts",
+                accent = if (search.isEmpty()) null else "${filtered.size} OF ${hosts.size}"
+            )
+        }
 
         when {
-            StatusStore.loading && hosts.isEmpty() -> CenteredSpinner()
-            StatusStore.error != null && hosts.isEmpty() -> ErrorBanner(StatusStore.error!!)
-            filtered.isEmpty() -> EmptyState(
-                if (search.isEmpty()) "No hosts configured" else "No matches"
-            )
-            else -> LazyColumn {
-                items(
-                    filtered,
-                    key = { it.objectName.ifEmpty { it.hostname } }
-                ) { host ->
-                    Box(modifier = Modifier.animateItem()) {
-                        HostRow(host, onClick = { selectedHost = host })
-                    }
+            StatusStore.loading && hosts.isEmpty() -> item { CenteredSpinner() }
+            StatusStore.error != null && hosts.isEmpty() ->
+                item { ErrorBanner(StatusStore.error!!) }
+            filtered.isEmpty() -> item {
+                EmptyState(if (search.isEmpty()) "No hosts configured" else "No matches")
+            }
+            else -> items(
+                filtered,
+                key = { it.objectName.ifEmpty { it.hostname } }
+            ) { host ->
+                Box(modifier = Modifier.animateItem()) {
+                    HostRow(host, onClick = { selectedHost = host })
                 }
             }
         }
