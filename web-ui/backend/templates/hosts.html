@@ -116,23 +116,23 @@
                 <!-- Selection Checkbox -->
                 <div class="absolute top-2 left-2 z-10">
                     <input type="checkbox"
-                           :checked="isSelected(host.hostname)"
-                           @click.stop="toggleSelection(host.hostname)"
+                           :checked="isSelected(hostKey(host))"
+                           @click.stop="toggleSelection(hostKey(host))"
                            class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer">
                 </div>
                 <div class="rounded shadow hover:shadow-md transition-all cursor-pointer border-2"
                      :class="{
-                         'bg-white border-green-500': host.overall_status === 'OK' && !isSelected(host.hostname),
-                         'bg-amber-50 border-amber-500': host.overall_status === 'WARNING' && !isSelected(host.hostname),
-                         'bg-red-100 border-red-600': host.overall_status === 'CRITICAL' && !isSelected(host.hostname),
-                         'bg-white border-gray-400': host.paused && !isSelected(host.hostname),
-                         'bg-white border-blue-500 ring-2 ring-blue-200': isSelected(host.hostname)
+                         'bg-white border-green-500': host.overall_status === 'OK' && !isSelected(hostKey(host)),
+                         'bg-amber-50 border-amber-500': host.overall_status === 'WARNING' && !isSelected(hostKey(host)),
+                         'bg-red-100 border-red-600': host.overall_status === 'CRITICAL' && !isSelected(hostKey(host)),
+                         'bg-white border-gray-400': host.paused && !isSelected(hostKey(host)),
+                         'bg-white border-blue-500 ring-2 ring-blue-200': isSelected(hostKey(host))
                      }"
                      @click="selectHost(host)">
                     <!-- Compact Header -->
                     <div class="px-2 py-1.5 pl-8">
                         <div class="flex items-center justify-between mb-1">
-                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="host.hostname" :title="host.hostname"></h3>
+                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="hostKey(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></h3>
                             <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0"></i>
                         </div>
                         <div class="flex items-center justify-between text-xs">
@@ -150,7 +150,8 @@
 
                 <!-- Hover Tooltip -->
                 <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
-                    <div class="font-bold mb-2" x-text="host.hostname"></div>
+                    <div class="font-bold mb-2" x-text="hostKey(host)"></div>
+                    <div class="text-xs text-gray-400 mb-2 -mt-1" x-text="host.hostname"></div>
                     <div class="space-y-1 text-xs">
                         <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
                         <div><span class="text-gray-400">IP:</span> <span x-text="host.ipv4_address || 'N/A'"></span></div>
@@ -231,7 +232,7 @@
                             'bg-red-100 hover:bg-red-200': host.overall_status === 'CRITICAL'
                         }"
                         @click="selectHost(host)">
-                        <td class="cel mono font-medium text-gray-900" x-text="host.hostname"></td>
+                        <td class="cel mono font-medium text-gray-900" x-text="hostKey(host)" :title="host.hostname"></td>
                         <td class="cel text-gray-600 truncate max-w-[180px]" x-text="host.description || ''"></td>
                         <td class="cel mono" x-text="getPrimaryCheckType(host)"></td>
                         <td class="cel mono" x-text="getPrimaryCheckPort(host) || ''"></td>
@@ -330,7 +331,7 @@
                     <!-- Modal Header -->
                     <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
                         <div class="flex-1">
-                            <h2 class="text-2xl font-bold text-gray-900" x-text="selectedHost.hostname"></h2>
+                            <h2 class="text-2xl font-bold text-gray-900" x-text="hostKey(selectedHost)"></h2>
                             <div class="mt-1 flex items-center space-x-4 text-sm">
                                 <span :class="{
                                     'text-green-600': selectedHost.overall_status === 'OK',
@@ -345,7 +346,7 @@
                         </div>
                         <div class="flex items-center space-x-3">
                             <!-- TRACE Toggle -->
-                            <button @click="toggleTrace(selectedHost.hostname)"
+                            <button @click="toggleTrace(hostKey(selectedHost))"
                                     :class="selectedHost.tracing ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 hover:bg-gray-500'"
                                     class="px-3 py-1 text-white text-xs rounded transition-colors"
                                     :title="selectedHost.tracing ? 'Tracing enabled - click to disable' : 'Tracing disabled - click to enable'">
@@ -456,6 +457,7 @@ function hostsPage() {
             return this.hosts.filter(host => {
                 const matchesSearch = !this.searchQuery ||
                     host.hostname.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                    (host.object_name && host.object_name.toLowerCase().includes(this.searchQuery.toLowerCase())) ||
                     (host.description && host.description.toLowerCase().includes(this.searchQuery.toLowerCase())) ||
                     (host.ipv4_address && host.ipv4_address.includes(this.searchQuery));
 
@@ -488,8 +490,8 @@ function hostsPage() {
                 let aVal, bVal;
 
                 if (this.sortField === 'hostname') {
-                    aVal = a.hostname.toLowerCase();
-                    bVal = b.hostname.toLowerCase();
+                    aVal = this.hostKey(a).toLowerCase();
+                    bVal = this.hostKey(b).toLowerCase();
                 } else if (this.sortField === 'status') {
                     const statusOrder = { 'CRITICAL': 0, 'WARNING': 1, 'OK': 2 };
                     aVal = statusOrder[a.overall_status] || 3;
@@ -596,12 +598,12 @@ function hostsPage() {
                 });
 
                 // Update the tracing flag based on response
-                if (this.selectedHost && this.selectedHost.hostname === hostname) {
+                if (this.selectedHost && this.hostKey(this.selectedHost) === hostname) {
                     this.selectedHost.tracing = result.tracing_enabled;
                 }
 
                 // Also update in the hosts list
-                const hostInList = this.hosts.find(h => h.hostname === hostname);
+                const hostInList = this.hosts.find(h => this.hostKey(h) === hostname);
                 if (hostInList) {
                     hostInList.tracing = result.tracing_enabled;
                 }
@@ -667,6 +669,13 @@ function hostsPage() {
 
 
         // Bulk operations methods
+        // sysmond's identity for an object is its object name; hostname/IP
+        // can be shared by many objects. Every display, selection key, and
+        // ack/trace API call goes through this.
+        hostKey(host) {
+            return host.object_name || host.hostname;
+        },
+
         isSelected(hostname) {
             return this.selectedHosts.includes(hostname);
         },
