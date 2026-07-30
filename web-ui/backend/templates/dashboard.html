@@ -215,6 +215,8 @@ function dashboard() {
         alerts: [],
         traps: [],
         refreshInterval: null,
+        trapsInterval: null,
+        poller: createStatusPoller(),
         updateDialog: {
             show: false,
             hostname: '',
@@ -227,18 +229,29 @@ function dashboard() {
 
         init() {
             this.fetchData();
-            // Auto-refresh every 10 seconds (but not if there's an error showing)
+            // Delta polling makes a steady-state refresh nearly free, so
+            // poll fast; back off is unnecessary. Traps aren't part of the
+            // delta stream, refresh them on their own slower cadence.
             this.refreshInterval = setInterval(() => {
                 if (!this.error) {
                     this.fetchData();
                 }
-            }, 10000);
+            }, 5000);
+            this.trapsInterval = setInterval(() => {
+                if (!this.error) {
+                    this.fetchTraps();
+                }
+            }, 30000);
         },
 
         destroy() {
             if (this.refreshInterval) {
                 clearInterval(this.refreshInterval);
                 this.refreshInterval = null;
+            }
+            if (this.trapsInterval) {
+                clearInterval(this.trapsInterval);
+                this.trapsInterval = null;
             }
         },
 
@@ -247,20 +260,13 @@ function dashboard() {
                 if (this.stats.total_hosts === undefined) this.loading = true;
                 this.error = null;
 
-                const data = await apiCall('/api/monitoring/status');
-                this.daemon = data.daemon;
-                this.stats = data.statistics;
-
-                // Get alerts
-                try {
-                    this.alerts = await apiCall('/api/monitoring/alerts');
-                } catch (e) {
-                    this.alerts = [];
-                }
-
-                // Get traps
-                if (data.snmp_traps) {
-                    this.traps = data.snmp_traps.recent_traps || [];
+                const r = await this.poller.poll();
+                this.daemon = r.daemon;
+                this.stats = r.stats;
+                // Alerts derive from the same host list — no second request.
+                this.alerts = r.hosts.filter(h => h.overall_status !== 'OK');
+                if (r.snmp_traps) {
+                    this.traps = r.snmp_traps.recent_traps || [];
                 }
 
                 this.loading = false;
@@ -268,6 +274,13 @@ function dashboard() {
                 this.error = e?.message || e?.toString() || 'Unknown error';
                 this.loading = false;
             }
+        },
+
+        async fetchTraps() {
+            try {
+                const t = await apiCall('/api/monitoring/traps');
+                this.traps = t.recent_traps || [];
+            } catch (e) { /* traps are decorative on this page */ }
         },
 
         async ackHost(hostname) {
@@ -279,6 +292,7 @@ function dashboard() {
                 this.showNotification(`Host ${hostname} acknowledged successfully`);
 
                 // Refresh data to show updated status
+                this.poller.invalidate();
                 setTimeout(() => this.fetchData(), 1000);
             } catch (e) {
                 alert(`Failed to acknowledge host: ${e.message}`);
@@ -311,6 +325,7 @@ function dashboard() {
                 this.showNotification(`Host ${this.updateDialog.hostname} updated successfully`);
 
                 // Refresh data to show updated status
+                this.poller.invalidate();
                 setTimeout(() => this.fetchData(), 1000);
             } catch (e) {
                 alert(`Failed to update host: ${e.message}`);
