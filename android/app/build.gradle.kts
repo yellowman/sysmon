@@ -8,7 +8,11 @@ plugins {
 
 android {
     namespace = "com.sysmon.app"
-    compileSdk = 34
+    // compileSdk 35 for the Firebase BoM 34 dependency tree; targetSdk
+    // stays 34 deliberately — bumping it to 35 opts Android 15 devices
+    // into forced edge-to-edge, which is its own change to make on
+    // purpose, not as a side effect of a dependency refresh.
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.sysmon.app"
@@ -49,6 +53,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
-    implementation(platform("com.google.firebase:firebase-bom:33.4.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.14.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
 }
