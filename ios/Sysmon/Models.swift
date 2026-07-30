@@ -6,19 +6,21 @@ struct LoginResponse: Codable {
     let role: String
 }
 
-struct Host: Codable, Identifiable {
+struct Host: Codable, Identifiable, Equatable {
     let objectName: String?
     let hostname: String
     let description: String?
     let ipv4Address: String?
     let ipv6Address: String?
     let overallStatus: String
+    let paused: Bool?
     let downCount: Int64
     let upCount: Int64
     let timeUp: Int64?
     let timeFailed: Int64?
 
     var id: String { objectName ?? hostname }
+    var isPaused: Bool { paused ?? false }
     var ip: String {
         if let v4 = ipv4Address, !v4.isEmpty { return v4 }
         if let v6 = ipv6Address, !v6.isEmpty { return v6 }
@@ -35,6 +37,7 @@ struct Host: Codable, Identifiable {
         case ipv4Address = "ipv4_address"
         case ipv6Address = "ipv6_address"
         case overallStatus = "overall_status"
+        case paused
         case downCount = "down_count"
         case upCount = "up_count"
         case timeUp = "time_up"
@@ -42,7 +45,7 @@ struct Host: Codable, Identifiable {
     }
 }
 
-struct DaemonInfo: Codable {
+struct DaemonInfo: Codable, Equatable {
     let version: String
     let uptimeSeconds: Int64
     let pid: Int
@@ -56,7 +59,7 @@ struct DaemonInfo: Codable {
     }
 }
 
-struct Stats: Codable {
+struct Stats: Codable, Equatable {
     let totalHosts: Int
     let healthyHosts: Int
     let warningHosts: Int
@@ -74,6 +77,18 @@ struct StatusResponse: Codable {
     let daemon: DaemonInfo?
     let hosts: [Host]
     let statistics: Stats
+    let rev: Int64?
+}
+
+// Response to GET /api/monitoring/status?since=<rev>: only the hosts that
+// changed since the client's last revision, so live polling stays cheap.
+struct StatusDelta: Codable {
+    let rev: Int64
+    let full: Bool
+    let daemon: DaemonInfo?
+    let statistics: Stats
+    let changed: [Host]
+    let removed: [String]?
 }
 
 struct APIError: Error {

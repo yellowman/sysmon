@@ -90,6 +90,7 @@ class Session: ObservableObject {
         username = nil
         role = nil
         alertCount = 0
+        StatusStore.shared.reset()
         Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
 
         // Best-effort backend cleanup

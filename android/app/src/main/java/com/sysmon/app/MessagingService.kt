@@ -1,5 +1,7 @@
 package com.sysmon.app
 
+import android.app.PendingIntent
+import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -18,11 +20,25 @@ class MessagingService : FirebaseMessagingService() {
         val title = message.notification?.title ?: message.data["title"] ?: "sysmon"
         val body = message.notification?.body ?: message.data["body"] ?: return
 
+        // Tapping the notification opens the app on the Alerts tab.
+        val tapIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(MainActivity.EXTRA_NAVIGATE, MainActivity.NAV_ALERTS)
+            message.data["hostname"]?.let { putExtra("hostname", it) }
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(this, getString(R.string.notification_channel_id))
             .setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
             .setAutoCancel(true)
 
         val manager = NotificationManagerCompat.from(this)
