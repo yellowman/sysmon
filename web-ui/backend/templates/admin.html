@@ -408,6 +408,9 @@
             </div>
         </div>
         <div class="p-6">
+            <div x-show="pushTestResult"
+                 :class="pushTestOk ? 'text-green-700 bg-green-50 border-green-200' : 'text-red-700 bg-red-50 border-red-200'"
+                 class="text-sm border rounded p-3 mb-4" x-text="pushTestResult"></div>
             <div x-show="pushSubs.length === 0 && !pushSubsError" class="text-center text-gray-500 py-8">
                 <i class="fas fa-bell-slash text-4xl mb-2"></i>
                 <p>No devices subscribed to push notifications</p>
@@ -479,6 +482,11 @@
                                     <div class="text-xs text-gray-400 truncate max-w-[150px]" x-text="sub.user_agent || ''" :title="sub.user_agent"></div>
                                 </td>
                                 <td class="px-4 py-3 text-right">
+                                    <button @click="testDevice(sub)"
+                                            :disabled="testingToken === sub.device_token"
+                                            class="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200 transition-colors disabled:opacity-50 mr-1">
+                                        <i :class="testingToken === sub.device_token ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'" class="mr-1"></i>Test
+                                    </button>
                                     <button @click="kickDevice(sub)"
                                             class="px-2 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200 transition-colors">
                                         <i class="fas fa-user-slash mr-1"></i>Kick
@@ -694,6 +702,9 @@ function adminPage() {
         pushLog: [],
         pushCfg: { enabled: false, fcm: null, apns: null, apns_bundle_id: '', apns_production: false },
         pushHealth: null,
+        testingToken: null,
+        pushTestResult: null,
+        pushTestOk: false,
         pushCfgError: '',
         pushCfgNote: '',
         pushBusy: false,
@@ -917,6 +928,30 @@ function adminPage() {
             } catch (e) {
                 alert('Failed to change role: ' + e.message);
             }
+        },
+
+        // Fire the full server → FCM/APNs → device test at one device,
+        // straight from the browser — same endpoint the app's test button
+        // uses, no phone required.
+        async testDevice(sub) {
+            this.testingToken = sub.device_token;
+            this.pushTestResult = null;
+            try {
+                const r = await apiCall('/api/push/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_token: sub.device_token })
+                });
+                this.pushTestOk = true;
+                this.pushTestResult = 'Test sent to "' + (sub.label || sub.device_token.slice(0, 12) + '…')
+                    + '" — check that device. ' + (r.warning || '');
+            } catch (e) {
+                this.pushTestOk = false;
+                this.pushTestResult = 'Test to "' + (sub.label || sub.device_token.slice(0, 12) + '…')
+                    + '" FAILED: ' + (e.message || 'unknown error');
+            }
+            this.testingToken = null;
+            setTimeout(() => { this.pushTestResult = null; }, 12000);
         },
 
         async loadPushHealth() {
