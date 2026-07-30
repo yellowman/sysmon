@@ -1,7 +1,5 @@
 package com.sysmon.app.ui
 
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +13,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,8 +23,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.sysmon.app.Api
 import com.sysmon.app.FcmTokenStore
+import com.sysmon.app.NotificationHealth
 import com.sysmon.app.Session
 import com.sysmon.app.ui.theme.MonoMedium
 import com.sysmon.app.ui.theme.SysmonColors
@@ -42,6 +42,13 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var sending by remember { mutableStateOf(false) }
     val fcmToken = FcmTokenStore.token
     val pushStatus = Session.pushStatus
+
+    // Re-check on every resume: the user may have just come back from the
+    // system settings the warning banner sends them to.
+    var notifProblem by remember { mutableStateOf<String?>(null) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notifProblem = NotificationHealth.problem(context)
+    }
 
     LaunchedEffect(message) {
         if (message != null) {
@@ -65,6 +72,11 @@ fun SettingsScreen(onLogout: () -> Unit) {
         )
 
         SectionHeader(label = "Notifications")
+        notifProblem?.let {
+            WarningBanner(it, actionLabel = "Open notification settings") {
+                NotificationHealth.openSettings(context)
+            }
+        }
         if (pushStatus != null) {
             Text(
                 text = pushStatus,
@@ -72,20 +84,6 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
             )
-            if (pushStatus.contains("denied", ignoreCase = true)) {
-                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    TextButton(onClick = {
-                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                        context.startActivity(intent)
-                    }) {
-                        Text(
-                            "OPEN SYSTEM SETTINGS",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                }
-            }
         }
         ButtonRow(
             label = if (sending) "Sending…" else "Send Test Notification",
