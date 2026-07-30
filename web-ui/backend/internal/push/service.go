@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -87,11 +88,29 @@ type Service struct {
 	apns *APNsClient
 	fcm  *FCMClient
 
+	// fcmKey is the latest result of the live key check (see
+	// keyCheckLoop). Guarded by mu. kickKeyCh forces an immediate
+	// re-check (buffered 1; extra kicks coalesce).
+	fcmKey    FCMKeyStatus
+	kickKeyCh chan struct{}
+
 	monitoring *monitoring.Service
 	prevHosts  map[string]string
 	stopCh     chan struct{}
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
+}
+
+// FCMKeyStatus reports whether Google currently accepts the stored FCM
+// service-account key. The offline metadata check can't see revocation,
+// so this is maintained by actually minting OAuth tokens: hourly, on
+// credential changes, and whenever a send fails with an auth error.
+type FCMKeyStatus struct {
+	Checked   bool   `json:"checked"`              // at least one check has completed
+	CheckedAt string `json:"checked_at,omitempty"` // RFC3339
+	Valid     bool   `json:"valid"`
+	Rejected  bool   `json:"rejected"` // Google definitively refused (vs network trouble)
+	Error     string `json:"error,omitempty"`
 }
 
 // ErrServiceStopped is returned by public Service methods after Stop has
@@ -155,6 +174,9 @@ func (s *Service) Reconfigure(cfg Config) {
 	s.apns = apns
 	s.mu.Unlock()
 	s.maybeStartLoop()
+	// Revalidate the (possibly new) key right away so the settings
+	// panel reflects reality without waiting for the hourly tick.
+	s.kickKeyCheck()
 }
 
 // maybeStartLoop starts the watcher once, if push is enabled and at least
@@ -185,8 +207,55 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 		if _, err := tx.CreateBucketIfNotExists(bucketSubscriptions); err != nil {
 			return err
 		}
-		_, err := tx.CreateBucketIfNotExists(bucketPushLog)
-		return err
+		if _, err := tx.CreateBucketIfNotExists(bucketPushLog); err != nil {
+			return err
+		}
+		// Hard-migrate legacy rows. Early Android builds subscribed with
+		// platform "fcm" — rewrite those to "android" (notifyAll fans out
+		// by platform, so they were silently undeliverable). Anything
+		// else unrecognized (or unparseable) is unroutable garbage with
+		// no upgrade path: delete it — the app re-subscribes on every
+		// launch, so a legitimate device comes right back.
+		b := tx.Bucket(bucketSubscriptions)
+		type fix struct {
+			key  []byte
+			data []byte
+		}
+		var rewrites []fix
+		var deletes [][]byte
+		b.ForEach(func(k, v []byte) error {
+			var sub Subscription
+			if json.Unmarshal(v, &sub) != nil {
+				deletes = append(deletes, append([]byte(nil), k...))
+				return nil
+			}
+			switch sub.Platform {
+			case PlatformIOS, PlatformAndroid:
+			case "fcm":
+				sub.Platform = PlatformAndroid
+				if data, err := json.Marshal(sub); err == nil {
+					rewrites = append(rewrites, fix{append([]byte(nil), k...), data})
+				}
+			default:
+				deletes = append(deletes, append([]byte(nil), k...))
+			}
+			return nil
+		})
+		for _, f := range rewrites {
+			if err := b.Put(f.key, f.data); err != nil {
+				return err
+			}
+		}
+		for _, k := range deletes {
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+		}
+		if len(rewrites) > 0 || len(deletes) > 0 {
+			log.Printf("push: migrated subscriptions: %d platform=fcm rewritten to android, %d unroutable row(s) deleted",
+				len(rewrites), len(deletes))
+		}
+		return nil
 	})
 	if err != nil {
 		db.Close()
@@ -199,6 +268,7 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 		monitoring: mon,
 		prevHosts:  make(map[string]string),
 		stopCh:     make(chan struct{}),
+		kickKeyCh:  make(chan struct{}, 1),
 	}
 
 	s.fcm, s.apns = buildClients(cfg)
@@ -206,7 +276,101 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 	count := s.subscriberCount()
 	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
 
+	// The key-health checker runs for the service's whole lifetime,
+	// independent of the enabled flag — a stored-but-disabled key still
+	// deserves a truthful status on the settings panel.
+	s.wg.Add(1)
+	go s.keyCheckLoop()
+
 	return s, nil
+}
+
+// keyCheckLoop revalidates the FCM key hourly, plus immediately on
+// kickKeyCheck (credential change or an auth failure during a send).
+func (s *Service) keyCheckLoop() {
+	defer s.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("push: keyCheckLoop panic recovered: %v", r)
+		}
+	}()
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	s.runKeyCheck()
+	for {
+		select {
+		case <-ticker.C:
+			s.runKeyCheck()
+		case <-s.kickKeyCh:
+			s.runKeyCheck()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+// kickKeyCheck requests an immediate key re-check. Non-blocking;
+// concurrent kicks coalesce into one.
+func (s *Service) kickKeyCheck() {
+	select {
+	case s.kickKeyCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) runKeyCheck() {
+	s.mu.RLock()
+	creds := s.config.FCMCredentials
+	prev := s.fcmKey
+	s.mu.RUnlock()
+
+	if len(creds) == 0 {
+		s.mu.Lock()
+		s.fcmKey = FCMKeyStatus{}
+		s.mu.Unlock()
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := FCMCredentialLiveCheck(ctx, creds)
+
+	st := FCMKeyStatus{
+		Checked:   true,
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+		Valid:     err == nil,
+	}
+	if err != nil {
+		st.Error = err.Error()
+		var rej *KeyRejectedError
+		if errors.As(err, &rej) {
+			st.Rejected = true
+		}
+		log.Printf("push: WARNING: FCM service-account key check failed: %v", err)
+	} else if prev.Checked && !prev.Valid {
+		log.Printf("push: FCM service-account key check passing again")
+	}
+
+	s.mu.Lock()
+	s.fcmKey = st
+	s.mu.Unlock()
+}
+
+// FCMKeyHealth returns the latest live key-check result.
+func (s *Service) FCMKeyHealth() FCMKeyStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fcmKey
+}
+
+// Enabled reports the current master enable flag. Used by handlers to
+// warn when a test push succeeds while real alert delivery is off.
+func (s *Service) Enabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.Enabled
 }
 
 // Start begins the state-change watcher if push is enabled and at least
@@ -337,8 +501,10 @@ func (s *Service) TouchLastSeen(token, ipAddr string) {
 	})
 }
 
-// RecordPush updates push delivery stats for a device.
-func (s *Service) RecordPush(token string, success bool) {
+// RecordPush updates push delivery stats for a device. On failure,
+// status carries a short classified reason (e.g. "failed: project
+// mismatch") that the subscribers admin page surfaces per device.
+func (s *Service) RecordPush(token string, success bool, status string) {
 	s.opsMu.RLock()
 	defer s.opsMu.RUnlock()
 	if s.stopped {
@@ -357,14 +523,35 @@ func (s *Service) RecordPush(token string, success bool) {
 		sub.LastPushAt = time.Now().UTC().Format(time.RFC3339)
 		if success {
 			sub.PushCount++
-			sub.LastPushStatus = "ok"
 		} else {
 			sub.FailCount++
-			sub.LastPushStatus = "failed"
 		}
+		sub.LastPushStatus = status
 		data, _ := json.Marshal(sub)
 		return b.Put([]byte(token), data)
 	})
+}
+
+// pushFailStatus compresses a send error into a short per-device status
+// for the subscribers page. The full error still goes to the log.
+func pushFailStatus(err error) string {
+	var se *FCMSendError
+	if errors.As(err, &se) {
+		switch se.Reason {
+		case "UNREGISTERED":
+			return "failed: token dead"
+		case "SENDER_ID_MISMATCH":
+			return "failed: project mismatch"
+		}
+		if se.Reason != "" {
+			return "failed: " + strings.ToLower(se.Reason)
+		}
+	}
+	var kr *KeyRejectedError
+	if errors.As(err, &kr) {
+		return "failed: key rejected"
+	}
+	return "failed"
 }
 
 // AdminRemove removes a subscription by device token (admin operation).
@@ -514,7 +701,14 @@ func (s *Service) SendTest(token string, platform Platform) error {
 	if s.stopped {
 		return ErrServiceStopped
 	}
-	return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
+	err := s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
+	if err != nil {
+		var kr *KeyRejectedError
+		if errors.As(err, &kr) {
+			s.kickKeyCheck()
+		}
+	}
+	return err
 }
 
 func (s *Service) subscriberCount() int {
@@ -574,15 +768,26 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 				skipped = true
 			}
 		default:
-			skipped = true
+			// Can't happen after the boot-time migration (Subscribe
+			// rejects anything but ios/android) — but never fail silent.
+			log.Printf("push: WARNING: subscription %q has unknown platform %q — not delivered", sub.Label, sub.Platform)
+			continue
 		}
 		if skipped {
 			continue
 		}
-		s.RecordPush(sub.DeviceToken, err == nil)
 		if err != nil {
+			s.RecordPush(sub.DeviceToken, false, pushFailStatus(err))
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
+			// An auth-level refusal means the key itself died — flip the
+			// settings-panel key status now instead of at the next hourly
+			// check.
+			var kr *KeyRejectedError
+			if errors.As(err, &kr) {
+				s.kickKeyCheck()
+			}
 		} else {
+			s.RecordPush(sub.DeviceToken, true, "ok")
 			sent++
 		}
 	}
