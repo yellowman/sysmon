@@ -1150,13 +1150,16 @@ config\ flaptime\ [^;]+;          {
 
 };
 
-/*
- * push-* directives used to be parsed-and-ignored here so they could
- * coexist with sysmond. They've moved to the sysmon-web settings store
- * (bbolt); sysmond has no business knowing about them and will report
- * any leftover "config push-*" lines as unknown directives. Configure
- * push notifications in the admin UI instead.
- */
+ /*
+  * push-* directives used to be parsed-and-ignored here so they could
+  * coexist with sysmond. They've moved to the sysmon-web settings store
+  * (bbolt); sysmond has no business knowing about them and will report
+  * any leftover "config push-*" lines as unknown directives. Configure
+  * push notifications in the admin UI instead.
+  *
+  * (Indented one column deliberately: flex treats column-0 text in the
+  * rules section as a rule, so a flush-left comment breaks the build.)
+  */
 
 config\ pmesg\ [^;]+;          {
   /* Search for extra newlines that are not being counted */
