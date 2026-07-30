@@ -44,6 +44,12 @@ type Router struct {
 	settings    *settings.Store
 	mux         *http.ServeMux
 	metrics     *middleware.MetricsCollector
+
+	// Cached sysmond PID (the daemon doesn't report it; we read the
+	// pidfile). Cached so delta polls don't hit config+disk every request.
+	pidMu  sync.Mutex
+	pidVal int
+	pidAt  time.Time
 }
 
 // NewRouter creates a new API router and returns the wrapped handler
@@ -393,9 +399,10 @@ func (r *Router) handleBackupDetail(w http.ResponseWriter, req *http.Request) {
 
 // Monitoring handlers
 func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request) {
+	// Make sure the cache is warm (the background poller normally keeps it
+	// so, but on a cold start this primes it and surfaces a real error).
 	status, err := r.monitoring.GetStatus()
 	if err != nil {
-		// Check if it's an XML parse error with debug data
 		if xmlErr, ok := err.(*monitoring.XMLParseError); ok {
 			r.sendErrorWithDetails(w, http.StatusServiceUnavailable, xmlErr.Message, map[string]interface{}{
 				"object_name":   xmlErr.ObjectName,
@@ -409,14 +416,44 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	// Delta mode: ?since=<rev> returns only what changed, for cheap live
+	// polling (and the basis for an SSE stream later).
+	if sinceStr := req.URL.Query().Get("since"); sinceStr != "" {
+		since, perr := strconv.ParseInt(sinceStr, 10, 64)
+		if perr != nil {
+			r.sendError(w, http.StatusBadRequest, "invalid 'since' parameter")
+			return
+		}
+		delta := r.monitoring.GetDelta(since)
+		if delta.Daemon.PID == 0 {
+			delta.Daemon.PID = r.daemonPID()
+		}
+		r.sendJSON(w, delta)
+		return
+	}
+
 	// sysmond's TCP protocol doesn't expose its PID; read it from the
 	// pidfile configured in sysmon.conf so the dashboard isn't stuck
 	// showing "PID 0".
 	if status.Daemon.PID == 0 {
-		status.Daemon.PID = r.readDaemonPID()
+		status.Daemon.PID = r.daemonPID()
 	}
 
 	r.sendJSON(w, status)
+}
+
+// daemonPID returns the sysmond PID, cached for 30s so delta polls don't
+// re-read config + the pidfile on every request. The PID only changes on
+// a daemon restart, so 30s staleness is fine.
+func (r *Router) daemonPID() int {
+	r.pidMu.Lock()
+	defer r.pidMu.Unlock()
+	if time.Since(r.pidAt) < 30*time.Second && r.pidVal != 0 {
+		return r.pidVal
+	}
+	r.pidVal = r.readDaemonPID()
+	r.pidAt = time.Now()
+	return r.pidVal
 }
 
 func (r *Router) readDaemonPID() int {

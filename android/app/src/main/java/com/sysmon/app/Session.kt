@@ -35,6 +35,16 @@ object Session {
     var loginNote by mutableStateOf<String?>(null)
     var alertCount by mutableStateOf(0)
 
+    // Bumped whenever a push notification is tapped; MainScreen observes
+    // this to jump to the Alerts tab. A monotonic counter (rather than a
+    // Boolean) so repeated taps re-trigger navigation each time.
+    var pushNavigateToAlerts by mutableStateOf(0)
+        private set
+
+    fun requestNavigateToAlerts() {
+        pushNavigateToAlerts++
+    }
+
     fun init(context: Context) {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -92,6 +102,7 @@ object Session {
         username = ""
         role = ""
         alertCount = 0
+        StatusStore.reset()
         prefs.edit()
             .remove(KEY_TOKEN)
             .remove(KEY_USERNAME)
@@ -115,6 +126,7 @@ object Session {
         username = ""
         role = ""
         alertCount = 0
+        StatusStore.reset()
         loginNote = "Session expired — please sign in again"
         prefs.edit()
             .remove(KEY_TOKEN)

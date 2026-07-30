@@ -31,9 +31,20 @@ object Api {
         json.decodeFromString(StatusResponse.serializer(), response)
     }
 
+    suspend fun statusDelta(since: Long): StatusDelta = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/monitoring/status?since=$since", "GET", null)
+        json.decodeFromString(StatusDelta.serializer(), response)
+    }
+
     suspend fun hosts(): List<Host> = withContext(Dispatchers.IO) {
         val response = authedRequest("/api/monitoring/hosts", "GET", null)
         json.decodeFromString(ListSerializer(Host.serializer()), response)
+    }
+
+    // Acknowledge an active alert. Admin-only on the server.
+    suspend fun ackHost(objectName: String) = withContext(Dispatchers.IO) {
+        val escaped = java.net.URLEncoder.encode(objectName, "UTF-8").replace("+", "%20")
+        authedRequest("/api/monitoring/ack/$escaped", "POST", null)
     }
 
     suspend fun subscribePush(fcmToken: String) = withContext(Dispatchers.IO) {

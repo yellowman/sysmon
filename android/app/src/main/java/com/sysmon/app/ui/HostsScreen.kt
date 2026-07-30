@@ -1,5 +1,6 @@
 package com.sysmon.app.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,38 +18,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
-import com.sysmon.app.Api
 import com.sysmon.app.Host
+import com.sysmon.app.StatusStore
 import kotlinx.coroutines.launch
 
 @Composable
 fun HostsScreen() {
-    var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
-    var hosts by remember { mutableStateOf<List<Host>>(emptyList()) }
     var search by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
+    var selectedHost by remember { mutableStateOf<Host?>(null) }
     val scope = rememberCoroutineScope()
 
-    suspend fun refresh() {
-        runCatching { Api.hosts() }
-            .onSuccess { hosts = it; error = null }
-            .onFailure { error = it.message }
-        loading = false
-        refreshing = false
-    }
-
-    LaunchedEffect(Unit) { refresh() }
-
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch {
-            refreshing = true
-            refresh()
-        }
-    }
-
+    val hosts = StatusStore.hosts
     val filtered = if (search.isEmpty()) hosts
         else hosts.filter {
             it.hostname.contains(search, ignoreCase = true) ||
@@ -62,10 +42,12 @@ fun HostsScreen() {
             title = "Hosts",
             subtitle = "${hosts.size} monitored",
             refreshing = refreshing,
+            live = StatusStore.error == null,
             onRefresh = {
                 scope.launch {
                     refreshing = true
-                    refresh()
+                    StatusStore.refreshNow()
+                    refreshing = false
                 }
             }
         )
@@ -89,19 +71,25 @@ fun HostsScreen() {
         )
 
         when {
-            loading && hosts.isEmpty() -> CenteredSpinner()
-            error != null -> ErrorBanner(error!!)
+            StatusStore.loading && hosts.isEmpty() -> CenteredSpinner()
+            StatusStore.error != null && hosts.isEmpty() -> ErrorBanner(StatusStore.error!!)
             filtered.isEmpty() -> EmptyState(
                 if (search.isEmpty()) "No hosts configured" else "No matches"
             )
             else -> LazyColumn {
                 items(
-                    filtered.sortedBy { it.hostname },
+                    filtered,
                     key = { it.objectName.ifEmpty { it.hostname } }
                 ) { host ->
-                    HostRow(host)
+                    Box(modifier = Modifier.animateItem()) {
+                        HostRow(host, onClick = { selectedHost = host })
+                    }
                 }
             }
         }
+    }
+
+    selectedHost?.let { host ->
+        HostDetailSheet(host = host, onDismiss = { selectedHost = null })
     }
 }

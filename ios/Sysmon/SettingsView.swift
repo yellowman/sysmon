@@ -21,7 +21,7 @@ struct SettingsView: View {
                         row("Push token",
                             deviceTokens.token.map { String($0.prefix(16)) + "…" } ?? "Not registered")
                         if let push = session.pushStatus {
-                            Text(push).font(.system(size: 11)).foregroundColor(.gray)
+                            Text(push).font(.system(size: 11)).foregroundColor(Theme.subtle)
                             if push.localizedCaseInsensitiveContains("denied") {
                                 Button("Open iOS Settings") {
                                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -30,22 +30,17 @@ struct SettingsView: View {
                                 }
                                 .font(.system(size: 11, weight: .semibold))
                                 .tracking(0.5)
+                                .foregroundColor(Theme.ink)
                                 .padding(.top, 2)
                             }
                         }
                         if let msg = statusMessage {
-                            Text(msg).font(.system(size: 11)).foregroundColor(.gray)
+                            Text(msg).font(.system(size: 11)).foregroundColor(Theme.subtle)
                         }
                         Button(action: sendTest) {
                             Text(sending ? "SENDING..." : "SEND TEST NOTIFICATION")
-                                .font(.system(size: 11, weight: .semibold))
-                                .tracking(1)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(canTest ? Color.black : Color.gray.opacity(0.3))
-                                .cornerRadius(8)
                         }
+                        .buttonStyle(SlabButtonStyle(enabled: canTest))
                         .disabled(!canTest)
                         .padding(.top, 4)
                     }
@@ -55,17 +50,18 @@ struct SettingsView: View {
                             Text("SIGN OUT")
                                 .font(.system(size: 11, weight: .semibold))
                                 .tracking(1)
-                                .foregroundColor(.red)
+                                .foregroundColor(Theme.down)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
-                                .background(Color.red.opacity(0.08))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red.opacity(0.3)))
+                                .background(Theme.down.opacity(0.08))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.down.opacity(0.3)))
                                 .cornerRadius(8)
                         }
                     }
                 }
                 .padding(16)
             }
+            .background(Theme.paper)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: statusMessage) { msg in
@@ -106,13 +102,9 @@ struct SettingsView: View {
             Text(title)
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.5)
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.subtle)
             VStack(alignment: .leading, spacing: 12) { content() }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(white: 0.98))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(white: 0.92)))
-                .cornerRadius(10)
+                .card()
         }
     }
 
@@ -121,10 +113,11 @@ struct SettingsView: View {
         HStack(alignment: .top) {
             Text(key)
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.subtle)
             Spacer()
             Text(value)
                 .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.ink)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
                 .truncationMode(.middle)

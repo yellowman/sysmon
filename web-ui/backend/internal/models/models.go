@@ -187,6 +187,23 @@ type SysmonStatus struct {
 	Hosts      []HostStatus `json:"hosts"`
 	Statistics Stats        `json:"statistics"`
 	SNMPTraps  *TrapInfo    `json:"snmp_traps,omitempty"`
+	// Rev is a monotonic revision that bumps only when host state
+	// actually changes (not when timers/uptime merely tick). Clients
+	// pass it back as ?since= to fetch a StatusDelta of just what changed.
+	Rev int64 `json:"rev"`
+}
+
+// StatusDelta is the response to GET /api/monitoring/status?since=<rev>.
+// It carries only the hosts that changed since the client's last revision,
+// so a live client can poll cheaply (or stream) instead of pulling the
+// whole host list every time.
+type StatusDelta struct {
+	Rev        int64        `json:"rev"`               // current server revision
+	Full       bool         `json:"full"`              // true => Changed is the complete host set (resync)
+	Daemon     DaemonInfo   `json:"daemon"`            // always included (small); uptime/pid/paused
+	Statistics Stats        `json:"statistics"`        // always included (small)
+	Changed    []HostStatus `json:"changed"`           // hosts new-or-changed since `since`
+	Removed    []string     `json:"removed,omitempty"` // object names removed since `since`
 }
 
 // DaemonInfo represents sysmon daemon information

@@ -54,7 +54,20 @@ data class Stats(
 data class StatusResponse(
     val daemon: DaemonInfo = DaemonInfo(),
     val statistics: Stats = Stats(),
-    val hosts: List<Host> = emptyList()
+    val hosts: List<Host> = emptyList(),
+    val rev: Long = 0
+)
+
+// Response to GET /api/monitoring/status?since=<rev>: only the hosts that
+// changed since the client's last revision, so live polling stays cheap.
+@Serializable
+data class StatusDelta(
+    val rev: Long = 0,
+    val full: Boolean = false,
+    val daemon: DaemonInfo = DaemonInfo(),
+    val statistics: Stats = Stats(),
+    val changed: List<Host> = emptyList(),
+    val removed: List<String> = emptyList()
 )
 
 @Serializable

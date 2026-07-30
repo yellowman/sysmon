@@ -11,68 +11,83 @@ struct LoginView: View {
     private var displayMessage: String? { session.loginNote ?? error }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ZStack {
+            Theme.paper.ignoresSafeArea()
 
-            HStack(spacing: 0) {
-                Text("sys").fontWeight(.heavy)
-                Text("mon").fontWeight(.regular).foregroundColor(Color(white: 0.45))
-            }
-            .font(.system(size: 28))
-            .tracking(-0.5)
+            VStack(spacing: 0) {
+                Spacer()
 
-            Text("NETWORK MONITORING")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(2)
-                .foregroundColor(.gray)
-                .padding(.top, 4)
+                // Wordmark
+                HStack(spacing: 0) {
+                    Text("sys")
+                        .fontWeight(.black)
+                        .foregroundColor(Theme.ink)
+                    Text("mon")
+                        .fontWeight(.regular)
+                        .foregroundColor(Theme.subtle)
+                }
+                .font(.system(size: 34, design: .serif))
+                .tracking(-0.5)
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Theme.up)
+                        .frame(width: 5, height: 5)
+                    Text("NETWORK MONITORING")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(2.5)
+                        .foregroundColor(Theme.subtle)
+                }
+                .padding(.top, 8)
                 .padding(.bottom, 40)
 
-            VStack(spacing: 14) {
-                if let msg = displayMessage {
-                    Text(msg)
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
+                VStack(spacing: 14) {
+                    if let msg = displayMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                            Text(msg)
+                                .font(.system(size: 12))
+                        }
+                        .foregroundColor(Theme.down)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.red.opacity(0.08))
+                        .background(Theme.down.opacity(0.08))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.down.opacity(0.2)))
                         .cornerRadius(8)
+                        .transition(.opacity)
+                    }
+
+                    FieldLabel("SERVER")
+                    TextField("sysmon.example.com", text: $serverURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .textFieldStyle(SysmonFieldStyle())
+
+                    FieldLabel("USERNAME")
+                    TextField("", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(SysmonFieldStyle())
+
+                    FieldLabel("PASSWORD")
+                    SecureField("", text: $password)
+                        .textFieldStyle(SysmonFieldStyle())
+
+                    Button(action: login) {
+                        Text(loading ? "SIGNING IN..." : "SIGN IN")
+                    }
+                    .buttonStyle(SlabButtonStyle(enabled: canSubmit))
+                    .disabled(!canSubmit)
+                    .padding(.top, 8)
                 }
+                .padding(.horizontal, 32)
 
-                FieldLabel("SERVER")
-                TextField("sysmon.example.com", text: $serverURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .textFieldStyle(SysmonFieldStyle())
-
-                FieldLabel("USERNAME")
-                TextField("", text: $username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(SysmonFieldStyle())
-
-                FieldLabel("PASSWORD")
-                SecureField("", text: $password)
-                    .textFieldStyle(SysmonFieldStyle())
-
-                Button(action: login) {
-                    Text(loading ? "SIGNING IN..." : "SIGN IN")
-                        .font(.system(size: 13, weight: .semibold))
-                        .tracking(1)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(canSubmit ? Color.black : Color.gray.opacity(0.3))
-                        .cornerRadius(8)
-                }
-                .disabled(!canSubmit)
-                .padding(.top, 8)
+                Spacer()
+                Spacer()
             }
-            .padding(.horizontal, 32)
-
-            Spacer()
-            Spacer()
+            .animation(.easeOut(duration: 0.2), value: displayMessage)
         }
         .onAppear {
             serverURL = session.serverURL
@@ -112,7 +127,7 @@ struct FieldLabel: View {
         Text(text)
             .font(.system(size: 10, weight: .semibold))
             .tracking(1.5)
-            .foregroundColor(.gray)
+            .foregroundColor(Theme.subtle)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -122,10 +137,10 @@ struct SysmonFieldStyle: TextFieldStyle {
         configuration
             .font(.system(size: 14))
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color(white: 0.97))
+            .padding(.vertical, 11)
+            .background(Theme.surfaceSubtle)
             .cornerRadius(8)
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(white: 0.9), lineWidth: 1))
+                .stroke(Theme.hairline, lineWidth: 1))
     }
 }
