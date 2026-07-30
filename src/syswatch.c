@@ -1651,7 +1651,15 @@ void write_pid_file()
 	pid_t mypid = getpid();
 	FILE *fh;
 
-	if (geteuid() != 0)
+	/*
+	 * No euid check here: this must run BEFORE revoke_root_if_necessary()
+	 * (the old euid==0 guard combined with being called after the
+	 * privilege drop meant the pidfile was silently never written in any
+	 * privilege-dropping setup, so tools reading it saw a stale or
+	 * missing pid). Non-root runs simply get a perror if the path isn't
+	 * writable.
+	 */
+	if (parser_pidfile == NULL || parser_pidfile[0] == '\0')
 	{
 		return;
 	}
@@ -1796,9 +1804,11 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		setup_icmpv6_fd();
 #endif /* HAVE_IPv6 */
 	}
+	/* Write the pidfile while still root — after the privilege drop the
+	 * typical /var/run location is no longer writable. */
+	write_pid_file();
 	revoke_root_if_necessary();
 
-	write_pid_file();
 	while (1)
 	{
 		time(&now_t);

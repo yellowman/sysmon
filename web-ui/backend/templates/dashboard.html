@@ -82,8 +82,8 @@
                                 }" class="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0" x-text="alert.overall_status"></span>
                                 <div class="flex flex-col min-w-0 flex-1">
                                     <div class="flex items-center gap-2 flex-wrap">
-                                        <span class="font-medium text-gray-900 truncate" x-text="alert.description || alert.hostname" :title="alert.description || alert.hostname"></span>
-                                        <span class="text-xs text-gray-500 truncate" x-text="alert.description ? ('(' + alert.hostname + ')') : (alert.ipv4_address && alert.ipv4_address !== alert.hostname ? '(' + alert.ipv4_address + ')' : '')"></span>
+                                        <span class="font-medium text-gray-900 truncate" x-text="alert.object_name || alert.hostname" :title="alert.object_name || alert.hostname"></span>
+                                        <span class="text-xs text-gray-500 truncate" x-text="'(' + alert.hostname + ')'"></span>
                                     </div>
                                     <div class="text-[10px] text-red-500 font-medium" x-show="alert.checks && alert.checks[0] && alert.checks[0].status_message" x-text="alert.checks[0].status_message"></div>
                                     <div class="flex items-center gap-3 text-[10px] text-gray-400">
@@ -111,12 +111,12 @@
                                 </div>
                             </div>
                             <div class="flex flex-col gap-1 flex-shrink-0" @click.prevent.stop>
-                                <button @click="ackHost(alert.hostname)"
+                                <button @click="ackHost(alert.object_name || alert.hostname)"
                                         class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
                                         title="Acknowledge">
                                     <i class="fas fa-check"></i>
                                 </button>
-                                <button @click="showUpdateDialog(alert.hostname)"
+                                <button @click="showUpdateDialog(alert.object_name || alert.hostname)"
                                         class="px-2 py-1 bg-green-600 text-white text-[10px] rounded hover:bg-green-700"
                                         title="Update">
                                     <i class="fas fa-edit"></i>

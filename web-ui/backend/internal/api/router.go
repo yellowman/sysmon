@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -1624,7 +1627,15 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r.sendJSON(w, map[string]string{"status": "sent"})
+	// Test sends deliberately bypass the master enable flag (so an admin
+	// can verify credentials before going live) — but that means a
+	// working test proves nothing about real alerts. Say so explicitly
+	// instead of letting a green test mask a disabled pipeline.
+	resp := map[string]string{"status": "sent"}
+	if !svc.Enabled() {
+		resp["warning"] = "Push is DISABLED in settings — this test was delivered, but real alerts are NOT being sent. Enable push to receive alerts."
+	}
+	r.sendJSON(w, resp)
 }
 
 // -- Push settings (web-only, bbolt-backed) -------------------------------
@@ -1657,6 +1668,15 @@ type fcmConfiguredView struct {
 	// — the UI must not show "not configured" while real bytes sit in
 	// settings.db (and the running service may still be using them).
 	Error string `json:"error,omitempty"`
+	// Live key health from the background verifier (the offline parse
+	// above can't see revocation). KeyValid is nil until the first
+	// check completes. KeyRejected distinguishes "Google refused the
+	// key" (revoked/deleted) from transient network failure reaching
+	// Google, which is not evidence the key is bad.
+	KeyValid     *bool  `json:"key_valid,omitempty"`
+	KeyRejected  bool   `json:"key_rejected,omitempty"`
+	KeyError     string `json:"key_error,omitempty"`
+	KeyCheckedAt string `json:"key_checked_at,omitempty"`
 }
 
 type apnsConfiguredView struct {
@@ -1685,6 +1705,15 @@ func (r *Router) viewPush(pc settings.PushConfig) pushSettingsView {
 		// instead of silently dropping to a "not configured" view.
 		if proj, email, last4, err := push.FCMCredentialMeta(pc.FCMCredentials); err == nil {
 			v.FCM = &fcmConfiguredView{ProjectID: proj, ClientEmail: email, KeyIDLast4: last4}
+			if svc := r.push.Load(); svc != nil {
+				if st := svc.FCMKeyHealth(); st.Checked {
+					valid := st.Valid
+					v.FCM.KeyValid = &valid
+					v.FCM.KeyRejected = st.Rejected
+					v.FCM.KeyError = st.Error
+					v.FCM.KeyCheckedAt = st.CheckedAt
+				}
+			}
 		} else {
 			v.FCM = &fcmConfiguredView{Error: err.Error()}
 		}
@@ -1790,6 +1819,22 @@ func (r *Router) handleSettingsPushFCM(w http.ResponseWriter, req *http.Request)
 		if _, _, _, err := push.FCMCredentialMeta(body); err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		// The metadata check above is offline-only — a revoked or deleted
+		// key still parses fine. Prove Google actually accepts this key by
+		// minting a real OAuth token before storing it. Network trouble
+		// reaching Google is NOT evidence the key is bad, so only a
+		// definitive refusal rejects the upload; the background checker
+		// keeps verifying either way.
+		ctx, cancel := context.WithTimeout(req.Context(), 15*time.Second)
+		defer cancel()
+		if err := push.FCMCredentialLiveCheck(ctx, body); err != nil {
+			var rejected *push.KeyRejectedError
+			if errors.As(err, &rejected) {
+				r.sendError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			log.Printf("settings: could not live-verify FCM key (accepting upload anyway): %v", err)
 		}
 		if err := r.settings.SetFCMCredentials(body); err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
