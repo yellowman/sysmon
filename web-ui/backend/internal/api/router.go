@@ -108,6 +108,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/push/subscriptions", auth.RequireAdmin(r.handlePushSubscriptions))
 	r.mux.HandleFunc("/api/push/remove/", auth.RequireAdmin(r.handlePushAdminRemove))
 	r.mux.HandleFunc("/api/push/log", auth.RequireAdmin(r.handlePushLog))
+	r.mux.HandleFunc("/api/push/health", auth.RequireAdmin(r.handlePushHealth))
 	r.mux.HandleFunc("/api/push/test", r.handlePushTest)
 
 	// API documentation
@@ -1580,6 +1581,25 @@ func (r *Router) handlePushLog(w http.ResponseWriter, req *http.Request) {
 	r.sendJSON(w, map[string]interface{}{
 		"entries": entries,
 		"count":   len(entries),
+	})
+}
+
+// handlePushHealth answers "why aren't alerts arriving?" in one call:
+// every link of the delivery pipeline from the enable switch to the
+// last actual send.
+func (r *Router) handlePushHealth(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+	svc := r.push.Load()
+	if svc == nil {
+		r.sendJSON(w, map[string]interface{}{"service_running": false})
+		return
+	}
+	r.sendJSON(w, map[string]interface{}{
+		"service_running": true,
+		"health":          svc.Health(),
 	})
 }
 

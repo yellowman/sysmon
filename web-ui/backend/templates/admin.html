@@ -332,6 +332,69 @@
         </div>
     </div>
 
+    <!-- Push Delivery Pipeline: one-glance answer to "why aren't alerts
+         arriving?" — every link from the enable switch to the last send. -->
+    <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+            <h2 class="section-title">Push Delivery Pipeline</h2>
+            <button @click="loadPushHealth()" class="text-xs text-blue-600 hover:text-blue-800">
+                <i class="fas fa-sync-alt mr-1"></i>Refresh
+            </button>
+        </div>
+        <div class="p-6">
+            <div x-show="!pushHealth" class="text-sm text-gray-500">Loading…</div>
+            <template x-if="pushHealth && !pushHealth.service_running">
+                <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">
+                    Push service is not running (it failed to initialize at boot — see the server log).
+                    No pushes of any kind can be sent.
+                </div>
+            </template>
+            <template x-if="pushHealth && pushHealth.service_running">
+                <div class="space-y-2 text-sm">
+                    <!-- verdict line first: the broken link, spelled out -->
+                    <div class="rounded p-3 mb-2"
+                         :class="pushVerdict().ok ? 'bg-green-50 border border-green-200 text-green-800'
+                                                  : 'bg-amber-50 border border-amber-200 text-amber-800'">
+                        <i :class="pushVerdict().ok ? 'fas fa-check-circle mr-1' : 'fas fa-exclamation-triangle mr-1'"></i>
+                        <span x-text="pushVerdict().text"></span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                        <div><i :class="pushHealth.health.enabled ? 'fas fa-check text-green-600' : 'fas fa-times text-red-600'"></i>
+                            Master switch: <b x-text="pushHealth.health.enabled ? 'enabled' : 'DISABLED'"></b></div>
+                        <div><i :class="pushHealth.health.watcher_running ? 'fas fa-check text-green-600' : 'fas fa-times text-red-600'"></i>
+                            Alert watcher: <b x-text="pushHealth.health.watcher_running ? 'running' : 'NOT RUNNING'"></b></div>
+                        <div><i :class="pushHealth.health.fcm_configured ? 'fas fa-check text-green-600' : 'fas fa-times text-gray-400'"></i>
+                            FCM client: <span x-text="pushHealth.health.fcm_configured ? 'configured' : 'not configured'"></span></div>
+                        <div><i :class="pushHealth.health.apns_configured ? 'fas fa-check text-green-600' : 'fas fa-times text-gray-400'"></i>
+                            APNs client: <span x-text="pushHealth.health.apns_configured ? 'configured' : 'not configured'"></span></div>
+                        <div><i :class="pushHealth.health.subscribers > 0 ? 'fas fa-check text-green-600' : 'fas fa-times text-red-600'"></i>
+                            Subscribed devices: <b x-text="pushHealth.health.subscribers"></b></div>
+                        <div x-show="pushHealth.health.last_poll_at">
+                            <i :class="pushHealth.health.last_poll_error ? 'fas fa-times text-red-600' : 'fas fa-check text-green-600'"></i>
+                            Watcher last poll: <span x-text="formatTime(pushHealth.health.last_poll_at)"></span>
+                            <span x-show="pushHealth.health.last_poll_error" class="text-red-600" x-text="' — ' + pushHealth.health.last_poll_error"></span>
+                        </div>
+                        <div>
+                            <i :class="pushHealth.health.last_change_at ? 'fas fa-check text-green-600' : 'fas fa-minus text-gray-400'"></i>
+                            Last state change seen:
+                            <span x-text="pushHealth.health.last_change_at
+                                ? (pushHealth.health.last_change + ' at ' + formatTime(pushHealth.health.last_change_at))
+                                : 'none since the watcher started'"></span>
+                        </div>
+                        <div>
+                            <i :class="pushHealth.health.last_push_at ? 'fas fa-check text-green-600' : 'fas fa-minus text-gray-400'"></i>
+                            Last alert push:
+                            <span x-text="pushHealth.health.last_push_at
+                                ? (pushHealth.health.last_push + ' at ' + formatTime(pushHealth.health.last_push_at))
+                                : 'never'"></span>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
     <!-- Push Notification Subscribers -->
     <div class="card mb-6">
         <div class="card-header flex justify-between items-center">
@@ -630,6 +693,7 @@ function adminPage() {
         pushSubsError: '',
         pushLog: [],
         pushCfg: { enabled: false, fcm: null, apns: null, apns_bundle_id: '', apns_production: false },
+        pushHealth: null,
         pushCfgError: '',
         pushCfgNote: '',
         pushBusy: false,
@@ -649,6 +713,7 @@ function adminPage() {
             this.loadPushSubs();
             this.loadPushLog();
             this.loadPushCfg();
+            this.loadPushHealth();
             this.loadUsers();
 
             // Refresh the live tables every 30s. The previous 5s interval
@@ -660,6 +725,7 @@ function adminPage() {
                 this.loadSessionLog();
                 this.loadSessionErrors();
                 this.loadPushSubs();
+                this.loadPushHealth();
             }, 30000);
         },
 
@@ -851,6 +917,36 @@ function adminPage() {
             } catch (e) {
                 alert('Failed to change role: ' + e.message);
             }
+        },
+
+        async loadPushHealth() {
+            try {
+                this.pushHealth = await apiCall('/api/push/health');
+            } catch (e) {
+                console.error('Failed to load push health:', e);
+            }
+        },
+
+        // The broken link in the pipeline, spelled out — first failure
+        // wins, ordered by where it sits in the chain.
+        pushVerdict() {
+            const h = this.pushHealth && this.pushHealth.health;
+            if (!h) return { ok: false, text: 'Push service state unknown.' };
+            if (!h.fcm_configured && !h.apns_configured)
+                return { ok: false, text: 'No push platform is configured — upload FCM or APNs credentials above. No alerts are being sent.' };
+            if (h.fcm_key && h.fcm_key.checked && !h.fcm_key.valid && h.fcm_key.rejected)
+                return { ok: false, text: 'Google rejected the FCM key — Android alerts are dead until a fresh key is uploaded.' };
+            if (!h.enabled)
+                return { ok: false, text: 'Push is DISABLED — the master switch above is off. Test pushes still work (they bypass it), but NO real alerts are being sent.' };
+            if (!h.watcher_running)
+                return { ok: false, text: 'The alert watcher is not running despite push being enabled — restart sysmon-web and check the server log.' };
+            if (h.subscribers === 0)
+                return { ok: false, text: 'No devices are subscribed — sign in on the app so it registers for push. Alerts have nowhere to go.' };
+            if (h.last_poll_error)
+                return { ok: false, text: 'The watcher cannot reach sysmond: ' + h.last_poll_error };
+            if (!h.last_change_at)
+                return { ok: true, text: 'Pipeline healthy — waiting for a host state change. Alerts fire only on transitions the watcher observes; a host that was already down when sysmon-web started will not alert until it changes state again.' };
+            return { ok: true, text: 'Pipeline healthy — last alert push: ' + (h.last_push || 'none yet') + '.' };
         },
 
         async loadPushCfg() {
