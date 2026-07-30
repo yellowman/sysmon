@@ -34,8 +34,47 @@ struct MainView: View {
     }
 }
 
+enum AlertSortKey: String, CaseIterable {
+    case timeDown, name, ip
+
+    var label: String {
+        switch self {
+        case .timeDown: return "Time down"
+        case .name: return "Name"
+        case .ip: return "IP address"
+        }
+    }
+}
+
+// Numeric-aware sort key for IPv4 ("9.x" must precede "10.x"); other
+// address forms fall back to plain string order.
+func ipSortable(_ ip: String) -> String {
+    let parts = ip.split(separator: ".")
+    if parts.count == 4, parts.allSatisfy({ Int($0) != nil }) {
+        return parts.map { String(format: "%03d", Int($0)!) }.joined(separator: ".")
+    }
+    return ip
+}
+
 struct AlertsView: View {
     @ObservedObject private var store = StatusStore.shared
+    @State private var sortKey: AlertSortKey = .timeDown
+    // For timeDown, ascending = smallest time_failed first = newest
+    // outage on top (the default view).
+    @State private var sortAscending = true
+
+    var sortedAlerts: [Host] {
+        let base: [Host]
+        switch sortKey {
+        case .timeDown:
+            base = store.alerts.sorted { ($0.timeFailed ?? 0) < ($1.timeFailed ?? 0) }
+        case .name:
+            base = store.alerts.sorted { $0.hostname.lowercased() < $1.hostname.lowercased() }
+        case .ip:
+            base = store.alerts.sorted { ipSortable($0.ip) < ipSortable($1.ip) }
+        }
+        return sortAscending ? base : base.reversed()
+    }
 
     var body: some View {
         NavigationStack {
@@ -72,7 +111,7 @@ struct AlertsView: View {
                             .padding(.top, 8)
                     } else {
                         VStack(spacing: 8) {
-                            ForEach(store.alerts) { host in
+                            ForEach(sortedAlerts) { host in
                                 NavigationLink { HostDetailView(host: host) }
                                     label: { HostRow(host: host) }
                                     .buttonStyle(.plain)
@@ -87,8 +126,31 @@ struct AlertsView: View {
             .navigationTitle("Alerts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
                     LivePill(offline: store.error != nil)
+                    Menu {
+                        ForEach(AlertSortKey.allCases, id: \.self) { key in
+                            Button {
+                                if sortKey == key {
+                                    sortAscending.toggle()
+                                } else {
+                                    sortKey = key
+                                    sortAscending = true
+                                }
+                            } label: {
+                                HStack {
+                                    Text(key.label)
+                                    if sortKey == key {
+                                        Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Theme.subtle)
+                    }
                 }
             }
             .refreshable { await store.refreshNow() }
