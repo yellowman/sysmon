@@ -44,7 +44,8 @@
     </div>
 
     <!-- Host Details (when loaded) -->
-    <div x-show="!loading && !error && host" class="space-y-6">
+    <template x-if="!loading && !error && host">
+    <div class="space-y-6">
 
         <!-- Main Status Card -->
         <div class="card overflow-hidden">
@@ -333,6 +334,7 @@
         </div>
 
     </div>
+    </template>
 </div>
 
 <script>
