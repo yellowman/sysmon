@@ -94,6 +94,16 @@ type Service struct {
 	fcmKey    FCMKeyStatus
 	kickKeyCh chan struct{}
 
+	// Pipeline telemetry (guarded by mu): what the watcher last did, so
+	// "notifications aren't arriving" is diagnosable at a glance instead
+	// of by log archaeology. See Health().
+	lastPollAt   time.Time
+	lastPollErr  string
+	lastChangeAt time.Time
+	lastChange   string // "host: OLD → NEW"
+	lastPushAt   time.Time
+	lastPushInfo string // "host (OLD → NEW): N recipient(s)"
+
 	monitoring *monitoring.Service
 	prevHosts  map[string]string
 	stopCh     chan struct{}
@@ -371,6 +381,57 @@ func (s *Service) Enabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.config.Enabled
+}
+
+// PipelineHealth is a one-glance answer to "why aren't alerts arriving?"
+// — every link in the chain from the enable switch to the last actual
+// send. Times are RFC3339, empty when the event has never happened.
+type PipelineHealth struct {
+	Enabled        bool         `json:"enabled"`
+	WatcherRunning bool         `json:"watcher_running"`
+	FCMConfigured  bool         `json:"fcm_configured"`
+	APNsConfigured bool         `json:"apns_configured"`
+	Subscribers    int          `json:"subscribers"`
+	FCMKey         FCMKeyStatus `json:"fcm_key"`
+	LastPollAt     string       `json:"last_poll_at,omitempty"`
+	LastPollError  string       `json:"last_poll_error,omitempty"`
+	LastChangeAt   string       `json:"last_change_at,omitempty"`
+	LastChange     string       `json:"last_change,omitempty"`
+	LastPushAt     string       `json:"last_push_at,omitempty"`
+	LastPush       string       `json:"last_push,omitempty"`
+}
+
+// Health snapshots the delivery pipeline state.
+func (s *Service) Health() PipelineHealth {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return PipelineHealth{}
+	}
+	subs := s.subscriberCount()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ts := func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return t.Format(time.RFC3339)
+	}
+	return PipelineHealth{
+		Enabled:        s.config.Enabled,
+		WatcherRunning: s.started,
+		FCMConfigured:  s.fcm != nil,
+		APNsConfigured: s.apns != nil,
+		Subscribers:    subs,
+		FCMKey:         s.fcmKey,
+		LastPollAt:     ts(s.lastPollAt),
+		LastPollError:  s.lastPollErr,
+		LastChangeAt:   ts(s.lastChangeAt),
+		LastChange:     s.lastChange,
+		LastPushAt:     ts(s.lastPushAt),
+		LastPush:       s.lastPushInfo,
+	}
 }
 
 // Start begins the state-change watcher if push is enabled and at least
@@ -792,6 +853,11 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		}
 	}
 
+	s.mu.Lock()
+	s.lastPushAt = time.Now().UTC()
+	s.lastPushInfo = fmt.Sprintf("%s (%s → %s): %d recipient(s)", hostname, prevStatus, status, sent)
+	s.mu.Unlock()
+
 	entry := pushLogEntry{
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Hostname:   hostname,
@@ -853,6 +919,14 @@ func (s *Service) safeSeed() {
 
 func (s *Service) pollAndNotify(initialSeed bool) {
 	status, err := s.monitoring.GetStatus()
+	s.mu.Lock()
+	s.lastPollAt = time.Now().UTC()
+	if err != nil {
+		s.lastPollErr = err.Error()
+	} else {
+		s.lastPollErr = ""
+	}
+	s.mu.Unlock()
 	if err != nil {
 		return
 	}
@@ -888,6 +962,12 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 			host       models.HostStatus
 			prevStatus string
 		}{host, prevStatus})
+	}
+	if len(changes) > 0 {
+		last := changes[len(changes)-1]
+		s.lastChangeAt = time.Now().UTC()
+		s.lastChange = fmt.Sprintf("%s: %s → %s",
+			last.host.Hostname, last.prevStatus, last.host.OverallStatus)
 	}
 	s.mu.Unlock()
 
