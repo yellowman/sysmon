@@ -13,8 +13,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.sysmon.app.Host
+import com.sysmon.app.NotificationHealth
 import com.sysmon.app.StatusStore
 import kotlinx.coroutines.launch
 
@@ -23,6 +27,14 @@ fun AlertsScreen() {
     var refreshing by remember { mutableStateOf(false) }
     var selectedHost by remember { mutableStateOf<Host?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Re-check on every resume: the user may have just come back from the
+    // system settings this banner sends them to.
+    var notifProblem by remember { mutableStateOf<String?>(null) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notifProblem = NotificationHealth.problem(context)
+    }
 
     val alerts = StatusStore.alerts
 
@@ -40,6 +52,12 @@ fun AlertsScreen() {
                 }
             }
         )
+
+        notifProblem?.let {
+            WarningBanner(it, actionLabel = "Open notification settings") {
+                NotificationHealth.openSettings(context)
+            }
+        }
 
         if (StatusStore.daemon?.paused == true) {
             PausedBanner()

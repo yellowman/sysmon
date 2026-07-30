@@ -18,6 +18,13 @@ import (
 // FCMScope is the OAuth scope required for the FCM HTTP v1 API.
 const fcmScope = "https://www.googleapis.com/auth/firebase.messaging"
 
+// androidChannelID pins every send to the notification channel the app
+// creates at startup (SysmonApplication.createNotificationChannel), so
+// the OS→channel mapping is explicit rather than relying on the app's
+// manifest default. MUST match notification_channel_id in
+// android/app/src/main/res/values/strings.xml.
+const androidChannelID = "sysmon_alerts"
+
 // FCMClient talks to the FCM HTTP v1 endpoint
 // (https://fcm.googleapis.com/v1/projects/{project}/messages:send) using
 // short-lived OAuth access tokens minted from a Google service-account
@@ -58,7 +65,8 @@ type fcmV1Android struct {
 }
 
 type fcmV1AndroidNotification struct {
-	Sound string `json:"sound,omitempty"`
+	Sound     string `json:"sound,omitempty"`
+	ChannelID string `json:"channel_id,omitempty"`
 }
 
 // fcmData carries the optional structured payload tagged onto each
@@ -257,9 +265,14 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 			},
 			Data: data.toMap(),
 			Android: &fcmV1Android{
+				// Canonical AndroidMessagePriority enum name. The v1 API
+				// also accepts lowercase "high" (Google's own docs use it),
+				// and an actually-invalid value would be a 400, never a
+				// silent downgrade.
 				Priority: "HIGH",
 				Notification: &fcmV1AndroidNotification{
-					Sound: "default",
+					Sound:     "default",
+					ChannelID: androidChannelID,
 				},
 			},
 		},
