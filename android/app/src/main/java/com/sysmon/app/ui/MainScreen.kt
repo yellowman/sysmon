@@ -20,7 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -37,7 +37,8 @@ enum class Tab(val label: String, val icon: ImageVector) {
 
 @Composable
 fun MainScreen(onLogout: () -> Unit) {
-    var selectedTab by remember { mutableStateOf(Tab.Alerts) }
+    // rememberSaveable so the selected tab survives rotation/process death.
+    var selectedTab by rememberSaveable { mutableStateOf(Tab.Alerts) }
 
     // A tapped push notification bumps this counter; jump to Alerts.
     LaunchedEffect(Session.pushNavigateToAlerts) {

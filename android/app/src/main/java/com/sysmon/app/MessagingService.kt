@@ -20,8 +20,14 @@ class MessagingService : FirebaseMessagingService() {
         // FCM displays notification payloads automatically when the app is
         // in the background. When foregrounded we need to post the
         // notification ourselves.
+        Log.d(TAG, "FCM message received: id=${message.messageId} " +
+            "notification=${message.notification != null} data=${message.data.keys}")
         val title = message.notification?.title ?: message.data["title"] ?: "sysmon"
-        val body = message.notification?.body ?: message.data["body"] ?: return
+        val body = message.notification?.body ?: message.data["body"]
+        if (body == null) {
+            Log.w(TAG, "FCM message had no displayable body — ignoring (id=${message.messageId})")
+            return
+        }
 
         // Tapping the notification opens the app on the Alerts tab.
         val tapIntent = Intent(this, MainActivity::class.java).apply {

@@ -1,6 +1,8 @@
 package com.sysmon.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,7 +59,12 @@ fun SettingsScreen(onLogout: () -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // Scrollable so every row stays reachable in landscape / small screens.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+    ) {
         TopHeader(title = "Settings", subtitle = "Account and notifications")
 
         SectionHeader(label = "Account")
