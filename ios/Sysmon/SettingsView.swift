@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject var session: Session
@@ -37,12 +38,16 @@ struct SettingsView: View {
                         if let msg = statusMessage {
                             Text(msg).font(.system(size: 11)).foregroundColor(Theme.subtle)
                         }
+                        Button(action: sendLocalTest) {
+                            Text("TEST LOCALLY (THIS DEVICE)")
+                        }
+                        .buttonStyle(SlabButtonStyle())
+                        .padding(.top, 4)
                         Button(action: sendTest) {
-                            Text(sending ? "SENDING..." : "SEND TEST NOTIFICATION")
+                            Text(sending ? "SENDING..." : "SEND TEST VIA SERVER (APNS)")
                         }
                         .buttonStyle(SlabButtonStyle(enabled: canTest))
                         .disabled(!canTest)
-                        .padding(.top, 4)
                     }
 
                     section("SESSION") {
@@ -76,6 +81,28 @@ struct SettingsView: View {
 
     private var canTest: Bool {
         !sending && deviceTokens.token != nil
+    }
+
+    // No server, no APNs — proves the display path in isolation. Pairs
+    // with the server test to split "delivery broken" from "display
+    // broken".
+    private func sendLocalTest() {
+        statusMessage = nil
+        let content = UNMutableNotificationContent()
+        content.title = "sysmon local test"
+        content.body = "Posted directly on this device — display path works"
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "sysmon-local-test",
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            Task { @MainActor in
+                if let error {
+                    statusMessage = "Local test failed: \(error.localizedDescription)"
+                } else {
+                    statusMessage = "Posted locally — if you didn't see it, check notification permissions or Focus mode"
+                }
+            }
+        }
     }
 
     private func sendTest() {
