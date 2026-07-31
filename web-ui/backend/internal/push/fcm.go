@@ -140,7 +140,7 @@ func FCMCredentialMeta(credentialsJSON []byte) (projectID, clientEmail, keyIDLas
 }
 
 // KeyRejectedError means Google itself refused the service-account key
-// (revoked, deleted, or fundamentally unusable) — as opposed to a
+// (revoked, deleted, or fundamentally unusable) - as opposed to a
 // transient network failure reaching Google, which is NOT evidence the
 // key is bad.
 type KeyRejectedError struct{ Detail string }
@@ -162,15 +162,15 @@ func classifyTokenError(err error) error {
 			code = re.Response.StatusCode
 		}
 		return &KeyRejectedError{Detail: fmt.Sprintf(
-			"Google rejected the service-account key (HTTP %d): %s — the key has likely been revoked or deleted. Generate a new one in Firebase Console → Project Settings → Service accounts",
+			"Google rejected the service-account key (HTTP %d): %s - the key has likely been revoked or deleted. Generate a new one in Firebase Console → Project Settings → Service accounts",
 			code, body)}
 	}
 	return fmt.Errorf("could not reach Google to verify the key: %w", err)
 }
 
 // FCMCredentialLiveCheck proves Google currently accepts the key by
-// minting a real OAuth access token. FCMCredentialMeta is offline-only —
-// a revoked key still parses fine — so this is the only way to catch a
+// minting a real OAuth access token. FCMCredentialMeta is offline-only -
+// a revoked key still parses fine - so this is the only way to catch a
 // dead key before alert delivery silently stops. Returns nil on success,
 // *KeyRejectedError when Google definitively refused the key, and other
 // errors for network trouble.
@@ -185,7 +185,7 @@ func FCMCredentialLiveCheck(ctx context.Context, credentialsJSON []byte) error {
 	return nil
 }
 
-// FCMSendError classifies a v1 send failure so callers can react —
+// FCMSendError classifies a v1 send failure so callers can react -
 // prune dead tokens, flag a project mismatch, or recheck the key.
 type FCMSendError struct {
 	StatusCode int
@@ -198,7 +198,7 @@ func (e *FCMSendError) Error() string {
 	case "UNREGISTERED":
 		return fmt.Sprintf("FCM: device token is no longer valid (app uninstalled or token rotated) [HTTP %d]", e.StatusCode)
 	case "SENDER_ID_MISMATCH":
-		return fmt.Sprintf("FCM: device token belongs to a DIFFERENT Firebase project than this service-account key — the app was built with a google-services.json from another project [HTTP %d]", e.StatusCode)
+		return fmt.Sprintf("FCM: device token belongs to a DIFFERENT Firebase project than this service-account key - the app was built with a google-services.json from another project [HTTP %d]", e.StatusCode)
 	default:
 		return fmt.Sprintf("FCM v1 error %d (%s): %s", e.StatusCode, e.Reason, e.Body)
 	}

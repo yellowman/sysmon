@@ -7,7 +7,7 @@ struct API {
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
 
-    // Dedicated URLSession that ignores cookies — we authenticate with
+    // Dedicated URLSession that ignores cookies - we authenticate with
     // Bearer tokens and don't want the login-set sysmon_session cookie
     // shadowing our Authorization header on every request.
     private static let session: URLSession = {
@@ -53,7 +53,7 @@ struct API {
         try await deleteVoid("/api/push/subscribe", body: ["device_token": deviceToken])
     }
 
-    // Returns the server's warning, if any (e.g. "push is disabled — this
+    // Returns the server's warning, if any (e.g. "push is disabled - this
     // test was delivered but real alerts are not being sent").
     func sendTestPush(deviceToken: String) async throws -> String? {
         let data = try await send("/api/push/test", method: "POST",
@@ -88,7 +88,7 @@ struct API {
         guard let http = resp as? HTTPURLResponse else {
             throw APIError(status: 0, message: "Invalid response")
         }
-        // A 401 from /api/auth/login means bad credentials — surface the
+        // A 401 from /api/auth/login means bad credentials - surface the
         // server's actual message ("Invalid credentials") rather than
         // pretending a session expired. For every other path, a 401 means
         // the bearer token is dead so clear session state and bounce to

@@ -62,7 +62,7 @@ object Api {
         authedRequest("/api/push/subscribe", "POST", body)
     }
 
-    // Returns the server's warning, if any (e.g. "push is disabled — this
+    // Returns the server's warning, if any (e.g. "push is disabled - this
     // test was delivered but real alerts are not being sent").
     suspend fun sendTestPush(fcmToken: String): String? = withContext(Dispatchers.IO) {
         val body = json.encodeToString(mapOf("device_token" to fcmToken))
@@ -104,7 +104,7 @@ object Api {
         } catch (e: IOException) {
             // HttpURLConnection reuses pooled keep-alive sockets the server
             // may have already closed, surfacing as "unexpected end of
-            // stream" / resets on an otherwise healthy connection —
+            // stream" / resets on an otherwise healthy connection -
             // endemic with fast polling. One immediate retry gets a fresh
             // socket. Only for GETs (idempotent) and only for transport
             // errors, never HTTP-level errors the server actually sent.
@@ -136,7 +136,7 @@ object Api {
             val status = conn.responseCode
             val stream = if (status in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
-            // A 401 from /api/auth/login is just "bad credentials" —
+            // A 401 from /api/auth/login is just "bad credentials" -
             // don't clear the session and let the server's message
             // ("Invalid credentials") propagate. For every other path
             // a 401 means the bearer is dead, so clear state and bounce

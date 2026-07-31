@@ -1,4 +1,4 @@
-// Package settings stores web-only configuration in bbolt — the same
+// Package settings stores web-only configuration in bbolt - the same
 // storage class as auth.db and push.db. These are settings for sysmon-web
 // (the Go process), not for sysmond (the C daemon), so they have no
 // business in sysmon.conf. Credentials (the FCM service-account JSON, the
@@ -94,7 +94,7 @@ func (s *Store) SetPushEnabled(enabled bool) error {
 }
 
 // SetFCMCredentials stores the service-account JSON. Validation is the
-// caller's job (see push.FCMCredentialMeta) — this just persists bytes.
+// caller's job (see push.FCMCredentialMeta) - this just persists bytes.
 func (s *Store) SetFCMCredentials(jsonBytes []byte) error {
 	return s.put(kFCMCredentials, jsonBytes)
 }

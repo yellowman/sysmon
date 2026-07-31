@@ -13,9 +13,9 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     section("ACCOUNT") {
-                        row("Username", session.username ?? "—")
-                        row("Role", (session.role ?? "—").uppercased())
-                        row("Server", session.serverURL.isEmpty ? "—" : session.serverURL)
+                        row("Username", session.username ?? "-")
+                        row("Role", (session.role ?? "-").uppercased())
+                        row("Server", session.serverURL.isEmpty ? "-" : session.serverURL)
                     }
 
                     section("DEVICE") {
@@ -83,14 +83,14 @@ struct SettingsView: View {
         !sending && deviceTokens.token != nil
     }
 
-    // No server, no APNs — proves the display path in isolation. Pairs
+    // No server, no APNs - proves the display path in isolation. Pairs
     // with the server test to split "delivery broken" from "display
     // broken".
     private func sendLocalTest() {
         statusMessage = nil
         let content = UNMutableNotificationContent()
         content.title = "sysmon local test"
-        content.body = "Posted directly on this device — display path works"
+        content.body = "Posted directly on this device - display path works"
         content.sound = .default
         let request = UNNotificationRequest(identifier: "sysmon-local-test",
                                             content: content, trigger: nil)
@@ -99,7 +99,7 @@ struct SettingsView: View {
                 if let error {
                     statusMessage = "Local test failed: \(error.localizedDescription)"
                 } else {
-                    statusMessage = "Posted locally — if you didn't see it, check notification permissions or Focus mode"
+                    statusMessage = "Posted locally - if you didn't see it, check notification permissions or Focus mode"
                 }
             }
         }
@@ -113,7 +113,7 @@ struct SettingsView: View {
             let api = API(baseURL: session.serverURL, token: session.token)
             do {
                 let warning = try await api.sendTestPush(deviceToken: token)
-                statusMessage = warning ?? "Test push sent — check your notifications"
+                statusMessage = warning ?? "Test push sent - check your notifications"
             } catch let e as APIError {
                 statusMessage = "Failed: \(e.message)"
             } catch {

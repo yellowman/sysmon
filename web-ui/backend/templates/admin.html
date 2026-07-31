@@ -176,7 +176,7 @@
 
             <div x-show="pushCfg.runtime_available === false"
                  class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">
-                <b>Push service didn't start at boot</b> &mdash; the server log will say why
+                <b>Push service didn't start at boot</b> - the server log will say why
                 (usually a problem opening <code class="bg-amber-100 px-1 rounded">/var/lib/sysmon/push.db</code>).
                 Saving any setting here will retry initialization. Until that retry succeeds the
                 badges below reflect what's stored on disk, not what's running.
@@ -184,7 +184,7 @@
 
             <div x-show="!pushCfg.enabled && (pushCfg.fcm || pushCfg.apns)"
                  class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">
-                <b>Push is disabled</b> &mdash; credentials are stored but <b>no alert notifications are being sent</b>.
+                <b>Push is disabled</b> - credentials are stored but <b>no alert notifications are being sent</b>.
                 Test pushes still work (they bypass this switch), so a successful test does not mean alerts flow.
                 Flip the toggle above to go live.
             </div>
@@ -222,7 +222,7 @@
 
                 <div x-show="pushCfg.fcm && !pushCfg.fcm.error && pushCfg.fcm.key_rejected"
                      class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3">
-                    <b>Google rejected this service-account key</b> &mdash; it has likely been revoked or
+                    <b>Google rejected this service-account key</b> - it has likely been revoked or
                     deleted in the Google Cloud console. <b>Android push is not working.</b>
                     Generate a fresh key (Firebase Console &rarr; Project Settings &rarr; Service accounts)
                     and upload it here.
@@ -231,7 +231,7 @@
 
                 <div x-show="pushCfg.fcm && !pushCfg.fcm.error && pushCfg.fcm.key_valid === false && !pushCfg.fcm.key_rejected"
                      class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
-                    <b>Could not verify the key with Google</b> &mdash; network trouble reaching Google,
+                    <b>Could not verify the key with Google</b> - network trouble reaching Google,
                     not proof the key is bad. Rechecked hourly; this clears on the next successful check.
                     <div class="mt-1 font-mono" x-text="pushCfg.fcm && pushCfg.fcm.key_error"></div>
                 </div>
@@ -333,7 +333,7 @@
     </div>
 
     <!-- Push Delivery Pipeline: one-glance answer to "why aren't alerts
-         arriving?" — every link from the enable switch to the last send. -->
+         arriving?" - every link from the enable switch to the last send. -->
     <div class="card mb-6">
         <div class="card-header flex justify-between items-center">
             <h2 class="section-title">Push Delivery Pipeline</h2>
@@ -345,7 +345,7 @@
             <div x-show="!pushHealth" class="text-sm text-gray-500">Loading…</div>
             <template x-if="pushHealth && !pushHealth.service_running">
                 <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">
-                    Push service is not running (it failed to initialize at boot — see the server log).
+                    Push service is not running (it failed to initialize at boot - see the server log).
                     No pushes of any kind can be sent.
                 </div>
             </template>
@@ -373,7 +373,7 @@
                         <div x-show="pushHealth.health.last_poll_at">
                             <i :class="pushHealth.health.last_poll_error ? 'fas fa-times text-red-600' : 'fas fa-check text-green-600'"></i>
                             Watcher last poll: <span x-text="formatTime(pushHealth.health.last_poll_at)"></span>
-                            <span x-show="pushHealth.health.last_poll_error" class="text-red-600" x-text="' — ' + pushHealth.health.last_poll_error"></span>
+                            <span x-show="pushHealth.health.last_poll_error" class="text-red-600" x-text="' - ' + pushHealth.health.last_poll_error"></span>
                         </div>
                         <div>
                             <i :class="pushHealth.health.last_change_at ? 'fas fa-check text-green-600' : 'fas fa-minus text-gray-400'"></i>
@@ -443,7 +443,7 @@
                                     <div class="text-xs text-gray-400 font-mono truncate max-w-[200px]" x-text="sub.device_token" :title="sub.device_token"></div>
                                 </td>
                                 <td class="px-4 py-3">
-                                    <span class="text-sm text-gray-700" x-text="sub.owner || '—'"></span>
+                                    <span class="text-sm text-gray-700" x-text="sub.owner || '-'"></span>
                                 </td>
                                 <td class="px-4 py-3">
                                     <span :class="{
@@ -935,7 +935,7 @@ function adminPage() {
         },
 
         // Fire the full server → FCM/APNs → device test at one device,
-        // straight from the browser — same endpoint the app's test button
+        // straight from the browser - same endpoint the app's test button
         // uses, no phone required.
         async testDevice(sub) {
             this.testingToken = sub.device_token;
@@ -948,7 +948,7 @@ function adminPage() {
                 });
                 this.pushTestOk = true;
                 this.pushTestResult = 'Test sent to "' + (sub.label || sub.device_token.slice(0, 12) + '…')
-                    + '" — check that device. ' + (r.warning || '');
+                    + '" - check that device. ' + (r.warning || '');
             } catch (e) {
                 this.pushTestOk = false;
                 this.pushTestResult = 'Test to "' + (sub.label || sub.device_token.slice(0, 12) + '…')
@@ -966,26 +966,26 @@ function adminPage() {
             }
         },
 
-        // The broken link in the pipeline, spelled out — first failure
+        // The broken link in the pipeline, spelled out - first failure
         // wins, ordered by where it sits in the chain.
         pushVerdict() {
             const h = this.pushHealth && this.pushHealth.health;
             if (!h) return { ok: false, text: 'Push service state unknown.' };
             if (!h.fcm_configured && !h.apns_configured)
-                return { ok: false, text: 'No push platform is configured — upload FCM or APNs credentials above. No alerts are being sent.' };
+                return { ok: false, text: 'No push platform is configured - upload FCM or APNs credentials above. No alerts are being sent.' };
             if (h.fcm_key && h.fcm_key.checked && !h.fcm_key.valid && h.fcm_key.rejected)
-                return { ok: false, text: 'Google rejected the FCM key — Android alerts are dead until a fresh key is uploaded.' };
+                return { ok: false, text: 'Google rejected the FCM key - Android alerts are dead until a fresh key is uploaded.' };
             if (!h.enabled)
-                return { ok: false, text: 'Push is DISABLED — the master switch above is off. Test pushes still work (they bypass it), but NO real alerts are being sent.' };
+                return { ok: false, text: 'Push is DISABLED - the master switch above is off. Test pushes still work (they bypass it), but NO real alerts are being sent.' };
             if (!h.watcher_running)
-                return { ok: false, text: 'The alert watcher is not running despite push being enabled — restart sysmon-web and check the server log.' };
+                return { ok: false, text: 'The alert watcher is not running despite push being enabled - restart sysmon-web and check the server log.' };
             if (h.subscribers === 0)
-                return { ok: false, text: 'No devices are subscribed — sign in on the app so it registers for push. Alerts have nowhere to go.' };
+                return { ok: false, text: 'No devices are subscribed - sign in on the app so it registers for push. Alerts have nowhere to go.' };
             if (h.last_poll_error)
                 return { ok: false, text: 'The watcher cannot reach sysmond: ' + h.last_poll_error };
             if (!h.last_change_at)
-                return { ok: true, text: 'Pipeline healthy — waiting for a host state change. Alerts fire only on transitions the watcher observes; a host that was already down when sysmon-web started will not alert until it changes state again.' };
-            return { ok: true, text: 'Pipeline healthy — last alert push: ' + (h.last_push || 'none yet') + '.' };
+                return { ok: true, text: 'Pipeline healthy - waiting for a host state change. Alerts fire only on transitions the watcher observes; a host that was already down when sysmon-web started will not alert until it changes state again.' };
+            return { ok: true, text: 'Pipeline healthy - last alert push: ' + (h.last_push || 'none yet') + '.' };
         },
 
         async loadPushCfg() {

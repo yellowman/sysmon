@@ -124,8 +124,8 @@ type FCMKeyStatus struct {
 }
 
 // ErrServiceStopped is returned by public Service methods after Stop has
-// run. Callers should treat this as "push is unavailable" — typically a
-// 503 — not as a permanent failure of the request itself.
+// run. Callers should treat this as "push is unavailable" - typically a
+// 503 - not as a permanent failure of the request itself.
 var ErrServiceStopped = errors.New("push service is stopped")
 
 // buildClients constructs FCM and APNs clients from a Config, logging
@@ -221,10 +221,10 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 			return err
 		}
 		// Hard-migrate legacy rows. Early Android builds subscribed with
-		// platform "fcm" — rewrite those to "android" (notifyAll fans out
+		// platform "fcm" - rewrite those to "android" (notifyAll fans out
 		// by platform, so they were silently undeliverable). Anything
 		// else unrecognized (or unparseable) is unroutable garbage with
-		// no upgrade path: delete it — the app re-subscribes on every
+		// no upgrade path: delete it - the app re-subscribes on every
 		// launch, so a legitimate device comes right back.
 		b := tx.Bucket(bucketSubscriptions)
 		type fix struct {
@@ -287,7 +287,7 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
 
 	// The key-health checker runs for the service's whole lifetime,
-	// independent of the enabled flag — a stored-but-disabled key still
+	// independent of the enabled flag - a stored-but-disabled key still
 	// deserves a truthful status on the settings panel.
 	s.wg.Add(1)
 	go s.keyCheckLoop()
@@ -384,7 +384,7 @@ func (s *Service) Enabled() bool {
 }
 
 // PipelineHealth is a one-glance answer to "why aren't alerts arriving?"
-// — every link in the chain from the enable switch to the last actual
+// - every link in the chain from the enable switch to the last actual
 // send. Times are RFC3339, empty when the event has never happened.
 type PipelineHealth struct {
 	Enabled        bool         `json:"enabled"`
@@ -443,7 +443,7 @@ func (s *Service) Start() {
 
 // Stop tears the service down with proper draining:
 //  1. Close stopCh so the watcher exits at the next select.
-//  2. Wait for the watcher goroutine to finish — the watcher's bolt
+//  2. Wait for the watcher goroutine to finish - the watcher's bolt
 //     ops are wrapped in the same public API as handler requests, so
 //     they take opsMu.RLock per op; we must not hold the W lock yet
 //     or they'd deadlock.
@@ -497,7 +497,7 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 			json.Unmarshal(existing, &sub)
 			// A device token is a per-install secret held by whoever
 			// physically has the app. When a different account signs in
-			// on the same device it legitimately takes the token over —
+			// on the same device it legitimately takes the token over -
 			// the previous owner logged out. (There's no hijack risk: the
 			// push providers only deliver to the device that actually
 			// holds the token, so re-registering someone else's token
@@ -775,7 +775,7 @@ func (s *Service) SendTest(token string, platform Platform) error {
 		}
 	}
 
-	// Tests used to be invisible — they bypassed both the per-device
+	// Tests used to be invisible - they bypassed both the per-device
 	// stats and the push log, so "the log never shows the test button"
 	// read as "tests don't reach the server". Record them like any
 	// other send, marked as tests. (Outside the RLock above: RecordPush
@@ -876,8 +876,8 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 			}
 		default:
 			// Can't happen after the boot-time migration (Subscribe
-			// rejects anything but ios/android) — but never fail silent.
-			log.Printf("push: WARNING: subscription %q has unknown platform %q — not delivered", sub.Label, sub.Platform)
+			// rejects anything but ios/android) - but never fail silent.
+			log.Printf("push: WARNING: subscription %q has unknown platform %q - not delivered", sub.Label, sub.Platform)
 			continue
 		}
 		if skipped {
@@ -886,7 +886,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		if err != nil {
 			s.RecordPush(sub.DeviceToken, false, pushFailStatus(err))
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
-			// An auth-level refusal means the key itself died — flip the
+			// An auth-level refusal means the key itself died - flip the
 			// settings-panel key status now instead of at the next hourly
 			// check.
 			var kr *KeyRejectedError
@@ -1012,7 +1012,7 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 
 	// If push is disabled or unconfigured we still updated prevHosts
 	// above, so the baseline stays current and re-enabling later doesn't
-	// replay a backlog of stale state changes — we just don't send.
+	// replay a backlog of stale state changes - we just don't send.
 	_, _, enabled := s.clients()
 	if !enabled {
 		return

@@ -65,7 +65,7 @@ type GlobalSettings struct {
 	SaveState     string `json:"savestate,omitempty"`     // path to save state XML file
 
 	// Push notification settings live in the web-ui settings store
-	// (bbolt), not here — sysmond doesn't care about them.
+	// (bbolt), not here - sysmond doesn't care about them.
 
 	// Include paths
 	Includes []string `json:"includes,omitempty"` // included config files

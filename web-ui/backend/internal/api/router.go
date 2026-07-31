@@ -57,8 +57,8 @@ type Router struct {
 
 // NewRouter creates a new API router and returns the wrapped handler
 // plus a shutdown func. The shutdown func stops whichever push service
-// the router currently owns — the boot instance OR one created later by
-// a lazy reinit — so the watcher goroutine and push.db handle are
+// the router currently owns - the boot instance OR one created later by
+// a lazy reinit - so the watcher goroutine and push.db handle are
 // always released by the same owner. Callers should defer it.
 func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, pushFactory PushFactory, authSvc *auth.Service, settingsStore *settings.Store) (http.Handler, func()) {
 	metrics := middleware.NewMetricsCollector()
@@ -76,7 +76,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 		r.push.Store(pushSvc)
 	}
 
-	// Configuration endpoints (admin only — config contains secrets)
+	// Configuration endpoints (admin only - config contains secrets)
 	r.mux.HandleFunc("/api/config", auth.RequireAdmin(r.handleConfig))
 	r.mux.HandleFunc("/api/config/validate", auth.RequireAdmin(r.handleConfigValidate))
 	r.mux.HandleFunc("/api/config/reload", auth.RequireAdmin(r.handleConfigReload))
@@ -132,7 +132,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/admin/session-log", auth.RequireAdmin(r.handleAdminSessionLog))
 	r.mux.HandleFunc("/api/admin/session-errors", auth.RequireAdmin(r.handleAdminSessionErrors))
 
-	// Web-only settings (stored in bbolt, not sysmon.conf) — admin only
+	// Web-only settings (stored in bbolt, not sysmon.conf) - admin only
 	// because the push tab carries FCM credentials / APNs PEMs.
 	r.mux.HandleFunc("/api/settings/push", auth.RequireAdmin(r.handleSettingsPush))
 	r.mux.HandleFunc("/api/settings/push/fcm-credentials", auth.RequireAdmin(r.handleSettingsPushFCM))
@@ -1225,7 +1225,7 @@ func (r *Router) handleAuthLogin(w http.ResponseWriter, req *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		// 10 years — sessions don't expire on the backend; this cookie
+		// 10 years - sessions don't expire on the backend; this cookie
 		// lasts as long as the browser keeps it. Explicit logout, an
 		// admin kick, or a password change still revokes the session.
 		MaxAge: 10 * 365 * 86400,
@@ -1369,7 +1369,7 @@ func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
 	owner := req.Header.Get("X-Session-User")
 	subs := svc.ListSubscriptionsByOwner(owner)
 
-	// Strip api_keys — the app already has its own
+	// Strip api_keys - the app already has its own
 	type safeSub struct {
 		DeviceToken    string `json:"device_token"`
 		Platform       string `json:"platform"`
@@ -1454,7 +1454,7 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 		}
 
 		// Only owners or admins can unsubscribe. api_key alone is not
-		// sufficient — it's just a per-device fingerprint, not an auth
+		// sufficient - it's just a per-device fingerprint, not an auth
 		// credential that should grant ability to cancel subscriptions.
 		owner := req.Header.Get("X-Session-User")
 		role := req.Header.Get("X-Session-Role")
@@ -1648,12 +1648,12 @@ func (r *Router) handlePushTest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Test sends deliberately bypass the master enable flag (so an admin
-	// can verify credentials before going live) — but that means a
+	// can verify credentials before going live) - but that means a
 	// working test proves nothing about real alerts. Say so explicitly
 	// instead of letting a green test mask a disabled pipeline.
 	resp := map[string]string{"status": "sent"}
 	if !svc.Enabled() {
-		resp["warning"] = "Push is DISABLED in settings — this test was delivered, but real alerts are NOT being sent. Enable push to receive alerts."
+		resp["warning"] = "Push is DISABLED in settings - this test was delivered, but real alerts are NOT being sent. Enable push to receive alerts."
 	}
 	r.sendJSON(w, resp)
 }
@@ -1671,7 +1671,7 @@ type pushSettingsView struct {
 	APNsBundleID   string              `json:"apns_bundle_id,omitempty"`
 	APNsProduction bool                `json:"apns_production"`
 	// RuntimeAvailable is false when the push service didn't initialize
-	// at startup (typically a bbolt open failure on push.db) — in that
+	// at startup (typically a bbolt open failure on push.db) - in that
 	// case settings still persist to settings.db, but they won't be
 	// hot-applied: a process restart is required after the underlying
 	// problem is fixed. The admin UI surfaces this clearly so changes
@@ -1685,7 +1685,7 @@ type fcmConfiguredView struct {
 	KeyIDLast4  string `json:"key_id_last4,omitempty"`
 	// Error is set when credentials ARE stored but couldn't be parsed.
 	// This is distinct from the FCM block being absent (nothing stored)
-	// — the UI must not show "not configured" while real bytes sit in
+	// - the UI must not show "not configured" while real bytes sit in
 	// settings.db (and the running service may still be using them).
 	Error string `json:"error,omitempty"`
 	// Live key health from the background verifier (the offline parse
@@ -1840,7 +1840,7 @@ func (r *Router) handleSettingsPushFCM(w http.ResponseWriter, req *http.Request)
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		// The metadata check above is offline-only — a revoked or deleted
+		// The metadata check above is offline-only - a revoked or deleted
 		// key still parses fine. Prove Google actually accepts this key by
 		// minting a real OAuth token before storing it. Network trouble
 		// reaching Google is NOT evidence the key is bad, so only a
@@ -1902,7 +1902,7 @@ func (r *Router) handleSettingsPushAPNs(w http.ResponseWriter, req *http.Request
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		// Carry forward the existing bundle id / production flag — but
+		// Carry forward the existing bundle id / production flag - but
 		// fail loud if the read errors, otherwise a flaky GetPush would
 		// silently zero them out as part of an APNs cert upload.
 		pc, err := r.settings.GetPush()
@@ -1944,7 +1944,7 @@ func pushConfigFrom(pc settings.PushConfig) push.Config {
 
 // reconfigurePush hot-swaps the running push service to match pc. If
 // the push service is nil because its boot-time init failed (e.g.
-// push.db unwritable) and we have a factory, retry NewService now — the
+// push.db unwritable) and we have a factory, retry NewService now - the
 // operator may have fixed the underlying problem since startup. Returns
 // true if the runtime is now in sync with pc.
 func (r *Router) reconfigurePush(pc settings.PushConfig) bool {
@@ -1984,7 +1984,7 @@ func (r *Router) pushRuntimeAvailable() bool {
 
 // commitPushAndRespond reloads the push config from settings.db, pushes
 // it to the runtime, and writes the metadata view to w. This is the only
-// way a push-config handler should return success — runtime and on-disk
+// way a push-config handler should return success - runtime and on-disk
 // state stay in lockstep, with no chance of returning a snapshot that
 // differs from what just got persisted.
 func (r *Router) commitPushAndRespond(w http.ResponseWriter) {
@@ -2000,7 +2000,7 @@ func (r *Router) commitPushAndRespond(w http.ResponseWriter) {
 // readFCMBody accepts the service-account JSON either as the raw request
 // body (Content-Type: application/json) or as the "credentials" form
 // field of a multipart upload (Content-Type: multipart/form-data). Caps
-// at 64 KiB — real service-account JSONs are ~2.5 KiB.
+// at 64 KiB - real service-account JSONs are ~2.5 KiB.
 func readFCMBody(req *http.Request) ([]byte, error) {
 	const maxBytes = 64 * 1024
 	ctype := req.Header.Get("Content-Type")
