@@ -25,6 +25,13 @@
             <button @click="fit()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Fit to view">
                 <i class="fas fa-expand"></i>
             </button>
+            <button @click="savePositions()" x-show="layoutDirty"
+                    class="px-2.5 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700" title="Save hand-placed positions">
+                <i class="fas fa-thumbtack mr-1"></i>Save layout
+            </button>
+            <button @click="resetPositions()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Reset to automatic layout">
+                <i class="fas fa-wand-magic-sparkles"></i>
+            </button>
             <template x-if="!editMode">
                 <button @click="enterEdit()" class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
                     <i class="fas fa-pen-to-square mr-1"></i>Edit
@@ -56,10 +63,13 @@
         <span><span x-text="stats.total"></span> hosts</span>
         <span><span x-text="stats.roots"></span> roots</span>
         <span><span x-text="stats.depth"></span> levels deep</span>
+        <span x-show="stats.multi > 0" class="text-indigo-600">
+            <span x-text="stats.multi"></span> with multiple parents
+        </span>
         <span x-show="stats.hidden > 0" class="text-blue-600">
             <span x-text="stats.hidden"></span> hidden in collapsed branches
         </span>
-        <span class="ml-auto">Drag to pan, scroll to zoom<span x-show="editMode">, click the link handle to draw a dependency</span></span>
+        <span class="ml-auto">Drag a node to move it, drag the canvas to pan, scroll to zoom<span x-show="editMode">; the link handle draws a dependency</span></span>
     </div>
 
     <!-- The canvas is rendered as an SVG STRING swapped in via x-html.
@@ -127,15 +137,21 @@
                         </template>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Depends on</label>
-                    <select x-model="selected.dependencies" @change="onDepChange(selected)"
-                            class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
-                        <option value="">(none - root)</option>
-                        <template x-for="h in hosts" :key="h.id">
-                            <option x-show="h.id !== selected.id" :value="h.id" x-text="h.id"></option>
+                <div class="md:col-span-2">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">
+                        Depends on <span class="text-gray-400">(a host may depend on several)</span>
+                    </label>
+                    <input type="text" x-model="selected.dependencies" @change="onDepChange(selected)"
+                           placeholder="comma-separated, e.g. core-01, dist-a"
+                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                    <div class="flex flex-wrap gap-1 mt-2">
+                        <template x-for="d in deps(selected)" :key="d">
+                            <span class="px-1.5 py-0.5 bg-gray-100 rounded text-xs mono flex items-center gap-1">
+                                <span x-text="d"></span>
+                                <button @click="removeDep(selected, d)" class="text-gray-400 hover:text-red-600">&times;</button>
+                            </span>
                         </template>
-                    </select>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-xs font-medium text-gray-600 mb-1">Port (tcp/http/etc)</label>
@@ -181,6 +197,11 @@ function mapPage() {
         view: { x: 60, y: 40, k: 1 },
         pan: { active: false, sx: 0, sy: 0, ox: 0, oy: 0 },
         panMoved: false,
+        // Hand-placed node positions, persisted server-side so an
+        // arrangement one operator makes is what everyone else sees.
+        positions: {},
+        drag: null,
+        layoutDirty: false,
         statusTimer: null,
 
         async init() {
@@ -188,13 +209,17 @@ function mapPage() {
             // arrives. Live status only tints the nodes and can be slow on
             // a cold cache with hundreds of hosts - never block on it.
             await this.loadConfig();
+            await this.loadPositions();
             // Big trees are unreadable fully expanded, so start collapsed
             // below the second level and let the operator open what matters.
             if (this.hosts.length > 60) this.collapseDeep(2);
             this.layout();
             this.$nextTick(() => this.fit());
             this.loadStatus();   // fire and forget; colors arrive when they do
-            this.statusTimer = setInterval(() => this.loadStatus(), 15000);
+            this.statusTimer = setInterval(() => {
+                this.loadStatus();
+                this.syncPositions();
+            }, 15000);
             this.$watch('search', () => this.layout());
         },
 
@@ -209,6 +234,49 @@ function mapPage() {
                 this.notice = 'Could not load configuration: ' + (e.message || e);
             }
             this.loading = false;
+        },
+
+        async loadPositions() {
+            try {
+                this.positions = (await apiCall('/api/map/layout')) || {};
+            } catch (e) { this.positions = {}; }
+        },
+
+        // Pick up layout changes made in other sessions. Skipped while
+        // this browser has unsaved moves or is mid-drag, so a colleague's
+        // save never yanks a node out from under someone's cursor.
+        async syncPositions() {
+            if (this.layoutDirty || this.drag) return;
+            try {
+                const remote = (await apiCall('/api/map/layout')) || {};
+                if (JSON.stringify(remote) !== JSON.stringify(this.positions)) {
+                    this.positions = remote;
+                    this.layout();
+                }
+            } catch (e) { /* keep whatever we have */ }
+        },
+
+        async savePositions() {
+            try {
+                await apiCall('/api/map/layout', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.positions)
+                });
+                this.layoutDirty = false;
+                this.notice = 'Layout saved.';
+                setTimeout(() => this.notice = '', 3000);
+            } catch (e) {
+                this.notice = 'Could not save layout: ' + (e.message || e);
+            }
+        },
+
+        async resetPositions() {
+            if (!confirm('Reset all hand-placed positions back to the automatic layout?')) return;
+            this.positions = {};
+            await this.savePositions();
+            this.layout();
+            this.$nextTick(() => this.fit());
         },
 
         async loadStatus() {
@@ -234,83 +302,129 @@ function mapPage() {
         // parent), so a layered walk lays it out deterministically - no
         // physics, no overlap, and collapsed branches simply aren't walked,
         // which is what keeps 800+ hosts responsive.
+        // Dependencies are a DAG, not a tree: sysmond accepts multiple
+        // "dep" lines per object, so a host can have several parents.
+        // Depth is therefore the longest path from a root, rows are
+        // ordered by a walk over the primary (first) parent so related
+        // hosts stay adjacent, and every parent gets its own edge.
+        deps(h) {
+            return (h.dependencies || '').split(',')
+                .map(d => d.trim()).filter(Boolean);
+        },
+
         layout() {
             const byId = {};
             this.hosts.forEach(h => { if (h.id) byId[h.id] = h; });
-            const kids = {}, roots = [];
+
+            const kids = {}, parents = {}, roots = [];
             this.hosts.forEach(h => {
-                const p = (h.dependencies || '').trim();
-                if (p && byId[p] && p !== h.id) (kids[p] = kids[p] || []).push(h);
+                const ps = this.deps(h).filter(p => byId[p] && p !== h.id);
+                parents[h.id] = ps;
+                if (ps.length) ps.forEach(p => (kids[p] = kids[p] || []).push(h));
                 else roots.push(h);
             });
             Object.values(kids).forEach(l => l.sort((a, b) => a.id.localeCompare(b.id)));
             roots.sort((a, b) => a.id.localeCompare(b.id));
 
-            // Structural reachability first, ignoring collapse: anything a
-            // root can reach is part of the tree. Without this, hosts hidden
-            // under a collapsed parent look identical to genuine orphans and
-            // get re-drawn as roots.
-            const reachable = new Set();
-            (function mark(list) {
-                list.forEach(h => {
-                    if (reachable.has(h.id)) return;   // also the cycle guard
-                    reachable.add(h.id);
-                    mark(kids[h.id] || []);
+            // Longest-path depth, iterated to a fixed point so a node
+            // always sits to the right of every parent. Bounded so a
+            // dependency cycle can't spin here.
+            const depth = {};
+            roots.forEach(r => { depth[r.id] = 0; });
+            for (let pass = 0; pass < 40; pass++) {
+                let changed = false;
+                this.hosts.forEach(h => {
+                    const ps = parents[h.id] || [];
+                    if (!ps.length) return;
+                    let d = 0, known = false;
+                    ps.forEach(p => {
+                        if (depth[p] !== undefined) { known = true; d = Math.max(d, depth[p] + 1); }
+                    });
+                    if (known && depth[h.id] !== d) { depth[h.id] = d; changed = true; }
                 });
-            })(roots);
+                if (!changed) break;
+            }
+
+            // Visibility: a node shows when at least one parent is shown
+            // and not collapsed. Roots always show.
+            const visible = new Set(roots.map(r => r.id));
+            for (let pass = 0; pass < 40; pass++) {
+                let changed = false;
+                this.hosts.forEach(h => {
+                    if (visible.has(h.id)) return;
+                    const ps = parents[h.id] || [];
+                    if (ps.some(p => visible.has(p) && !this.collapsed[p])) {
+                        visible.add(h.id); changed = true;
+                    }
+                });
+                if (!changed) break;
+            }
+            // Cycle survivors (unreachable from any root) are still worth
+            // showing rather than silently vanishing.
+            this.hosts.forEach(h => {
+                if (h.id && depth[h.id] === undefined) { depth[h.id] = 0; visible.add(h.id); }
+            });
 
             const COL = 215, ROW = 46;
             const nodes = [], pos = {};
             const q = this.search.trim().toLowerCase();
-            let row = 0, maxDepth = 0, hidden = 0;
-            const seen = new Set();
+            let row = 0, maxDepth = 0;
+            const placed = new Set();
 
-            const subtreeSize = (h) => {
-                let n = 0;
-                (kids[h.id] || []).forEach(c => { n += 1 + subtreeSize(c); });
-                return n;
-            };
-
-            const walk = (h, depth) => {
-                if (seen.has(h.id)) return;
-                seen.add(h.id);
-                maxDepth = Math.max(maxDepth, depth);
-                const y = row++ * ROW;
-                pos[h.id] = { x: depth * COL, y };
+            const place = (h) => {
+                if (placed.has(h.id) || !visible.has(h.id)) return;
+                placed.add(h.id);
+                const d = depth[h.id] || 0;
+                maxDepth = Math.max(maxDepth, d);
+                const manual = this.positions[h.id];
+                const x = manual ? manual.x : d * COL;
+                const y = manual ? manual.y : row * ROW;
+                if (!manual) row++;
+                pos[h.id] = { x, y };
                 const childCount = (kids[h.id] || []).length;
                 nodes.push({
                     id: h.id,
                     label: h.id || h.ip || '(unnamed)',
                     sub: [h.type || 'ping', h.ip].filter(Boolean).join('  '),
-                    x: depth * COL, y,
+                    x, y,
                     kids: childCount,
+                    parents: (parents[h.id] || []).length,
+                    moved: !!manual,
                     status: this.statuses[h.id] || '',
                     match: q ? ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) : false
                 });
-                if (this.collapsed[h.id]) { hidden += subtreeSize(h); return; }
-                (kids[h.id] || []).forEach(c => walk(c, depth + 1));
+                // depth-first over children keeps a branch together
+                (kids[h.id] || []).forEach(c => {
+                    if ((parents[c.id] || [])[0] === h.id) place(c);
+                });
             };
-            roots.forEach(r => walk(r, 0));
-            // Only genuinely unreachable hosts (dependency cycles) get
-            // promoted to roots - never ones merely hidden by a collapse.
-            this.hosts.forEach(h => { if (h.id && !reachable.has(h.id)) walk(h, 0); });
+            roots.forEach(place);
+            this.hosts.forEach(h => { if (h.id && visible.has(h.id)) place(h); });
 
             const edges = [];
             this.hosts.forEach(h => {
-                const p = (h.dependencies || '').trim();
-                if (p && pos[p] && pos[h.id]) {
+                if (!pos[h.id]) return;
+                (parents[h.id] || []).forEach(p => {
+                    if (!pos[p]) return;
                     const a = pos[p], b = pos[h.id];
                     const mx = (a.x + 72 + b.x - 72) / 2;
                     edges.push({
                         id: h.id + '<-' + p,
+                        secondary: (parents[h.id] || [])[0] !== p,
                         d: `M ${a.x + 72} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x - 72} ${b.y}`
                     });
-                }
+                });
             });
 
             this.nodes = nodes;
             this.edges = edges;
-            this.stats = { total: this.hosts.length, roots: roots.length, depth: maxDepth + 1, hidden };
+            this.stats = {
+                total: this.hosts.length,
+                roots: roots.length,
+                depth: maxDepth + 1,
+                hidden: this.hosts.length - visible.size,
+                multi: this.hosts.filter(h => (parents[h.id] || []).length > 1).length
+            };
         },
 
         fillFor(n) {
@@ -360,11 +474,17 @@ function mapPage() {
             if (this.linking && this.linking !== n.id) {
                 const child = this.hosts.find(h => h.id === this.linking);
                 if (child) {
+                    const existing = this.deps(child);
                     if (this.wouldCycle(child.id, n.id)) {
                         this.notice = 'That link would create a dependency cycle - ignored.';
                         setTimeout(() => this.notice = '', 4000);
+                    } else if (existing.includes(n.id)) {
+                        this.notice = child.id + ' already depends on ' + n.id + '.';
+                        setTimeout(() => this.notice = '', 3000);
                     } else {
-                        child.dependencies = n.id;
+                        // Append: sysmond supports multiple dependencies,
+                        // so linking adds a parent rather than replacing one.
+                        child.dependencies = existing.concat(n.id).join(', ');
                         this.dirty = true;
                     }
                 }
@@ -381,26 +501,49 @@ function mapPage() {
         },
 
         onDepChange(host) {
-            if (host.dependencies && this.wouldCycle(host.id, host.dependencies)) {
-                this.notice = 'That dependency would create a cycle - reverted.';
-                host.dependencies = '';
-                setTimeout(() => this.notice = '', 4000);
+            const kept = [];
+            for (const d of this.deps(host)) {
+                if (d === host.id) continue;
+                // validate against what we've accepted so far
+                const save = host.dependencies;
+                host.dependencies = kept.join(', ');
+                const bad = this.wouldCycle(host.id, d);
+                host.dependencies = save;
+                if (bad) {
+                    this.notice = 'Dependency "' + d + '" would create a cycle - dropped.';
+                    setTimeout(() => this.notice = '', 4000);
+                } else {
+                    kept.push(d);
+                }
             }
+            host.dependencies = kept.join(', ');
             this.dirty = true;
             this.layout();
         },
 
         // Walking up from the proposed parent must never reach the child.
+        // With multiple parents this is a graph search, not a walk up a
+        // chain - checking only the first dep would miss real cycles.
         wouldCycle(childId, parentId) {
             const byId = {};
             this.hosts.forEach(h => { byId[h.id] = h; });
-            let cur = byId[parentId], hops = 0;
-            while (cur && hops++ < 5000) {
-                if (cur.id === childId) return true;
-                const p = (cur.dependencies || '').trim();
-                cur = p ? byId[p] : null;
+            const seen = new Set();
+            const stack = [parentId];
+            while (stack.length) {
+                const id = stack.pop();
+                if (id === childId) return true;
+                if (seen.has(id)) continue;
+                seen.add(id);
+                const h = byId[id];
+                if (h) this.deps(h).forEach(p => stack.push(p));
             }
             return false;
+        },
+
+        removeDep(host, dep) {
+            host.dependencies = this.deps(host).filter(d => d !== dep).join(', ');
+            this.dirty = true;
+            this.layout();
         },
 
         enterEdit() { this.editMode = true; },
@@ -437,7 +580,11 @@ function mapPage() {
             const old = host.id;
             host.id = newId;
             // keep children pointing at the renamed parent
-            this.hosts.forEach(h => { if ((h.dependencies || '').trim() === old) h.dependencies = newId; });
+            this.hosts.forEach(h => {
+                const d = this.deps(h);
+                if (d.includes(old)) h.dependencies = d.map(x => x === old ? newId : x).join(', ');
+            });
+            if (this.positions[old]) { this.positions[old + ''] = this.positions[old]; this.positions[newId] = this.positions[old]; delete this.positions[old]; }
             this.dirty = true;
             this.layout();
         },
@@ -446,7 +593,11 @@ function mapPage() {
             if (!confirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
             const i = this.hosts.indexOf(host);
             if (i >= 0) this.hosts.splice(i, 1);
-            this.hosts.forEach(h => { if ((h.dependencies || '').trim() === host.id) h.dependencies = ''; });
+            this.hosts.forEach(h => {
+                const d = this.deps(h);
+                if (d.includes(host.id)) h.dependencies = d.filter(x => x !== host.id).join(', ');
+            });
+            delete this.positions[host.id];
             this.selected = null;
             this.dirty = true;
             this.layout();
@@ -504,7 +655,12 @@ function mapPage() {
                 '<g data-viewport>';
 
             for (const e of this.edges) {
-                out += '<path d="' + e.d + '" fill="none" stroke="#cbd5e1" stroke-width="1.5" marker-end="url(#arrow)"/>';
+                // Extra parents render dashed so the primary spine of the
+                // tree stays legible in a DAG.
+                out += '<path d="' + e.d + '" fill="none" stroke="' +
+                    (e.secondary ? '#a5b4fc' : '#cbd5e1') + '" stroke-width="1.5"' +
+                    (e.secondary ? ' stroke-dasharray="4 3"' : '') +
+                    ' marker-end="url(#arrow)"/>';
             }
             for (const n of this.nodes) {
                 const id = this.esc(n.id);
@@ -516,6 +672,9 @@ function mapPage() {
                     this.esc(this.trim(n.label)) + '</text>' +
                     '<text x="0" y="9" text-anchor="middle" font-size="8" fill="#64748b">' +
                     this.esc(n.sub) + '</text>';
+                if (n.moved) {
+                    out += '<circle cx="66" cy="-11" r="2.5" fill="#6366f1"/>';
+                }
                 if (n.kids > 0) {
                     out += '<g data-toggle="' + id + '">' +
                         '<circle cx="-72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
@@ -559,10 +718,34 @@ function mapPage() {
 
         // ---- pan / zoom ----
         panStart(e) {
+            // Grabbing a node moves the node; grabbing the canvas pans.
+            const nodeEl = e.target.closest && e.target.closest('[data-node]');
+            if (nodeEl && !e.target.closest('[data-toggle]') && !e.target.closest('[data-link]')) {
+                const id = nodeEl.getAttribute('data-node');
+                const n = this.nodes.find(x => x.id === id);
+                if (n) {
+                    this.drag = { id, sx: e.clientX, sy: e.clientY, ox: n.x, oy: n.y, moved: false };
+                    this.panMoved = false;
+                    return;
+                }
+            }
             this.pan = { active: true, sx: e.clientX, sy: e.clientY, ox: this.view.x, oy: this.view.y };
             this.panMoved = false;
         },
         panMove(e) {
+            if (this.drag) {
+                const dx = (e.clientX - this.drag.sx) / this.view.k;
+                const dy = (e.clientY - this.drag.sy) / this.view.k;
+                if (Math.abs(dx) + Math.abs(dy) > 3 / this.view.k) this.drag.moved = true;
+                if (!this.drag.moved) return;
+                this.positions[this.drag.id] = {
+                    x: Math.round(this.drag.ox + dx),
+                    y: Math.round(this.drag.oy + dy)
+                };
+                this.layoutDirty = true;
+                this.layout();
+                return;
+            }
             if (!this.pan.active) return;
             const dx = e.clientX - this.pan.sx, dy = e.clientY - this.pan.sy;
             if (Math.abs(dx) + Math.abs(dy) > 4) this.panMoved = true;
@@ -570,7 +753,15 @@ function mapPage() {
             this.view.y = this.pan.oy + dy;
             this.applyTransform();
         },
-        panEnd() { this.pan.active = false; },
+        panEnd() {
+            if (this.drag) {
+                // A drag that actually moved must not also register as a
+                // click (which would open the inspector or complete a link).
+                if (this.drag.moved) this.panMoved = true;
+                this.drag = null;
+            }
+            this.pan.active = false;
+        },
         wheel(e) {
             const k = Math.min(2.5, Math.max(0.1, this.view.k * (e.deltaY < 0 ? 1.12 : 0.89)));
             const rect = e.currentTarget.getBoundingClientRect();

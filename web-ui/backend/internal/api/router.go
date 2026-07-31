@@ -94,6 +94,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
+	r.mux.HandleFunc("/api/map/layout", r.handleMapLayout)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
 	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
 	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
@@ -622,6 +623,46 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 	} else {
 		// No pagination requested, return all traps (backward compatible)
 		r.sendJSON(w, traps)
+	}
+}
+
+// handleMapLayout stores hand-placed node positions for the dependency
+// map. Kept server-side (not localStorage) so a layout an operator
+// arranges is what everyone else sees too.
+func (r *Router) handleMapLayout(w http.ResponseWriter, req *http.Request) {
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
+		return
+	}
+	switch req.Method {
+	case http.MethodGet:
+		data, err := r.settings.GetMapLayout()
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+
+	case http.MethodPut:
+		body, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
+		if err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		var probe map[string]struct{ X, Y float64 }
+		if err := json.Unmarshal(body, &probe); err != nil {
+			r.sendError(w, http.StatusBadRequest, "layout must be an object of {x,y} positions")
+			return
+		}
+		if err := r.settings.SetMapLayout(body); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		r.sendJSON(w, map[string]string{"status": "saved"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
