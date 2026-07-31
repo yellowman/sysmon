@@ -2,7 +2,7 @@
 #
 #   brew install xcodegen && cd ios && xcodegen generate
 #
-# CI does exactly that on every push (.github/workflows/ios.yml), so no
+# CI does exactly this on every push (.github/workflows/ios.yml), so no
 # Mac is required on anyone's desk. Open the generated Sysmon.xcodeproj
 # in Xcode only if you actually have one and want to.
 name: Sysmon
