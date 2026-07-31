@@ -355,6 +355,14 @@ func main() {
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
+
+	// Host up/down transition history, persisted so it survives restarts.
+	if historyStore, err := monitoring.OpenHistory(filepath.Join(stateDir, "history.db")); err != nil {
+		log.Printf("WARNING: alert history disabled: %v", err)
+	} else {
+		monitoringService.SetHistory(historyStore)
+		defer historyStore.Close()
+	}
 	// Refresh the status cache in the background so the per-host sysmond
 	// fetch happens off the request path - UI/app requests serve from a
 	// warm cache instead of each one driving a fresh N-round-trip query.

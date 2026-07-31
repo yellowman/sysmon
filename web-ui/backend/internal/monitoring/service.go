@@ -35,6 +35,8 @@ type Service struct {
 	sessionLog *SessionLogger
 
 	cacheMu      sync.Mutex
+	// history, when set, receives every observed host status transition.
+	history *HistoryStore
 	cachedStatus *models.SysmonStatus
 	cacheTime    time.Time
 	fetching     bool
@@ -169,6 +171,21 @@ type ResponseCapture struct {
 }
 
 // NewService creates a new monitoring service
+// SetHistory attaches a transition-history store; every status change
+// observed by the snapshot differ is appended to it.
+func (s *Service) SetHistory(h *HistoryStore) {
+	s.cacheMu.Lock()
+	s.history = h
+	s.cacheMu.Unlock()
+}
+
+// History returns the attached store, or nil.
+func (s *Service) History() *HistoryStore {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return s.history
+}
+
 func NewService(sysmonAddr string) *Service {
 	return &Service{
 		sysmonAddr: sysmonAddr,
@@ -381,13 +398,18 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		status, err := s.fetchStatus()
 
 		s.cacheMu.Lock()
+		var events []HistoryEvent
 		if err == nil {
-			s.storeSnapshotLocked(status)
+			events = s.storeSnapshotLocked(status)
 		}
+		hist := s.history
 		s.fetching = false
 		close(s.fetchDone)
 		s.cacheMu.Unlock()
 
+		if hist != nil {
+			hist.Append(events)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -414,12 +436,18 @@ func (s *Service) Refresh() {
 	status, err := s.fetchStatus()
 
 	s.cacheMu.Lock()
+	var events []HistoryEvent
 	if err == nil {
-		s.storeSnapshotLocked(status)
+		events = s.storeSnapshotLocked(status)
 	}
+	hist := s.history
 	s.fetching = false
 	close(s.fetchDone)
 	s.cacheMu.Unlock()
+
+	if hist != nil {
+		hist.Append(events)
+	}
 }
 
 // storeSnapshotLocked installs a freshly fetched snapshot and updates the
@@ -427,7 +455,30 @@ func (s *Service) Refresh() {
 // host's state signature changed or a host was added/removed, stamping
 // each changed host with the new rev, so GetDelta can answer "what
 // changed since rev N". It also sets status.Rev.
-func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) {
+func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) []HistoryEvent {
+	// Diff overall status against the previous snapshot for the history
+	// log. Baseline (first snapshot) records nothing.
+	var transitions []HistoryEvent
+	if s.cachedStatus != nil {
+		prev := make(map[string]string, len(s.cachedStatus.Hosts))
+		for i := range s.cachedStatus.Hosts {
+			h := &s.cachedStatus.Hosts[i]
+			prev[hostKey(h)] = h.OverallStatus
+		}
+		for i := range status.Hosts {
+			h := &status.Hosts[i]
+			if old, ok := prev[hostKey(h)]; ok && old != h.OverallStatus {
+				transitions = append(transitions, HistoryEvent{
+					ObjectName:  h.ObjectName,
+					Hostname:    h.Hostname,
+					Description: h.Description,
+					PrevStatus:  old,
+					NewStatus:   h.OverallStatus,
+				})
+			}
+		}
+	}
+
 	newSig := make(map[string]uint64, len(status.Hosts))
 	changed := false
 	for i := range status.Hosts {
@@ -464,6 +515,7 @@ func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) {
 	status.Rev = s.rev
 	s.cachedStatus = status
 	s.cacheTime = time.Now()
+	return transitions
 }
 
 // pruneRemovedLocked bounds the removal log. When it overflows we drop the

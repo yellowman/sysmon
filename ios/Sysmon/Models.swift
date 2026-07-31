@@ -93,6 +93,43 @@ struct StatusDelta: Codable {
     let removed: [String]?
 }
 
+// One observed host state transition, from /api/monitoring/history.
+struct HistoryEvent: Codable, Identifiable, Equatable {
+    let timestamp: String
+    let objectName: String
+    let hostname: String
+    let description: String?
+    let prevStatus: String
+    let newStatus: String
+    let prevDuration: Int64?
+
+    var id: String { timestamp + objectName + prevStatus + newStatus }
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case objectName = "object_name"
+        case hostname
+        case description
+        case prevStatus = "prev_status"
+        case newStatus = "new_status"
+        case prevDuration = "prev_duration_seconds"
+    }
+}
+
+struct HistoryResponse: Codable {
+    let events: [HistoryEvent]?
+    let available: Bool?
+}
+
+private let isoParser = ISO8601DateFormatter()
+
+func relativeTime(_ iso: String) -> String {
+    guard let date = isoParser.date(from: iso) else { return iso }
+    let secs = Int64(Date().timeIntervalSince(date))
+    if secs < 5 { return "just now" }
+    return formatUptime(secs) + " ago"
+}
+
 struct APIError: Error {
     let status: Int
     let message: String
