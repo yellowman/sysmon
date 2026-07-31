@@ -86,7 +86,7 @@ fun AlertsScreen() {
                 title = "Alerts",
                 subtitle = "Hosts requiring attention",
                 refreshing = refreshing,
-                live = StatusStore.error == null,
+                live = !StatusStore.offline,
                 onRefresh = {
                     scope.launch {
                         refreshing = true

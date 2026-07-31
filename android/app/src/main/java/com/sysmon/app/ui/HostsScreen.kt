@@ -46,7 +46,7 @@ fun HostsScreen() {
                 title = "Hosts",
                 subtitle = "${hosts.size} monitored",
                 refreshing = refreshing,
-                live = StatusStore.error == null,
+                live = !StatusStore.offline,
                 onRefresh = {
                     scope.launch {
                         refreshing = true

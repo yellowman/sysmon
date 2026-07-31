@@ -127,7 +127,7 @@ struct AlertsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    LivePill(offline: store.error != nil)
+                    LivePill(offline: store.offline)
                     Menu {
                         ForEach(AlertSortKey.allCases, id: \.self) { key in
                             Button {
@@ -231,7 +231,7 @@ struct HostsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    LivePill(offline: store.error != nil)
+                    LivePill(offline: store.offline)
                 }
             }
             .refreshable { await store.refreshNow() }
