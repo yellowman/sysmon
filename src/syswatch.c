@@ -1355,27 +1355,43 @@ void handle_retval(struct monitorent *handle_this, time_t now)
 
 	} /* endif some other retval check thing */
 
-	/* if state changed but still failing */
+	/* state changed */
 	if (handle_this->retval != handle_this->checkent->lastcheck)
 	{
-		/* reset stuff */
-		handle_this->checkent->downct = 1;
+		int was_ok = (handle_this->checkent->lastcheck == SYSM_OK);
+
 		handle_this->checkent->upct = 0;
 		handle_this->checkent->lastcheck = handle_this->retval;
-		handle_this->checkent->deathtime = now;
-		handle_this->checkent->totaldown++;
 
-		if (debug) print_err(1, "handle_retval downct = %d, max %d", handle_this->checkent->downct, handle_this->checkent->max_down);
-		/* if it's failed too many times and we
-			haven't paged */
-
-		if ((handle_this->checkent->downct >=
-			handle_this->checkent->max_down) &&
-			(handle_this->checkent->contacted == FALSE) &&
-			(handle_this->checkent->contact_when & SYSM_CONTACT_DOWN))
+		if (handle_this->retval != SYSM_OK)
 		{
-			/* page someone */
-			page_someone(handle_this->checkent, SYSM_CONTACT_DOWN, now);
+			handle_this->checkent->downct = 1;
+			handle_this->checkent->totaldown++;
+			/* A new outage starts when we FALL from OK. Changing
+			 * from one failure kind to another is the SAME outage:
+			 * keep the original deathtime so "down for X" and the
+			 * outage clock don't reset midway through. (This block
+			 * also used to stamp deathtime and bump totaldown on
+			 * transitions back to OK - pure bookkeeping damage.) */
+			if (was_ok || handle_this->checkent->deathtime == 0)
+				handle_this->checkent->deathtime = now;
+
+			if (debug) print_err(1, "handle_retval downct = %d, max %d", handle_this->checkent->downct, handle_this->checkent->max_down);
+			/* if it's failed too many times and we
+				haven't paged */
+
+			if ((handle_this->checkent->downct >=
+				handle_this->checkent->max_down) &&
+				(handle_this->checkent->contacted == FALSE) &&
+				(handle_this->checkent->contact_when & SYSM_CONTACT_DOWN))
+			{
+				/* page someone */
+				page_someone(handle_this->checkent, SYSM_CONTACT_DOWN, now);
+			}
+		}
+		else
+		{
+			handle_this->checkent->downct = 0;
 		}
 
 	} /*endif handle_this->retval!=handle_this->checkent->lastcheck*/
