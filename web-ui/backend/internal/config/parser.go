@@ -431,8 +431,20 @@ func Parse(content []byte) (*models.Config, error) {
 				currentHost.Contact = email
 				addContactIfNew(config, email)
 			} else if strings.HasPrefix(line, "dep ") {
+				// sysmond accepts multiple "dep" lines per object and
+				// builds a dependency list from them; assigning here
+				// would silently keep only the last one and drop the
+				// rest on the next save. Accumulate instead - the model
+				// carries them comma-separated, which is also what the
+				// editor UI has always displayed.
 				deps := extractQuoted(strings.TrimPrefix(line, "dep "))
-				currentHost.Dependencies = deps
+				if deps != "" {
+					if currentHost.Dependencies == "" {
+						currentHost.Dependencies = deps
+					} else {
+						currentHost.Dependencies += ", " + deps
+					}
+				}
 			} else if strings.HasPrefix(line, "spawn ") {
 				currentHost.Spawn = extractQuoted(strings.TrimPrefix(line, "spawn "))
 			} else if strings.HasPrefix(line, "port ") {

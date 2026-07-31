@@ -197,8 +197,14 @@ func Generate(config *models.Config) (string, error) {
 		if host.Contact != "" {
 			sb.WriteString(fmt.Sprintf("\tcontact \"%s\";\n", q(host.Contact)))
 		}
-		if host.Dependencies != "" {
-			sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(host.Dependencies)))
+		// Dependencies are carried comma-separated; sysmond wants one
+		// "dep" line each. Writing the joined string would emit a single
+		// dependency with a bogus, comma-laden name.
+		for _, dep := range strings.Split(host.Dependencies, ",") {
+			dep = strings.TrimSpace(dep)
+			if dep != "" {
+				sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(dep)))
+			}
 		}
 		if host.Group != "" {
 			sb.WriteString(fmt.Sprintf("\tgroup \"%s\";\n", q(host.Group)))

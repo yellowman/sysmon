@@ -16,7 +16,15 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var bucketPush = []byte("push")
+var (
+	bucketPush = []byte("push")
+	// bucketMap holds the dependency-map layout: hand-placed node
+	// positions, shared by everyone who opens the map rather than stuck
+	// in one browser's localStorage.
+	bucketMap = []byte("map")
+)
+
+const kMapLayout = "layout"
 
 // Keys within the push bucket.
 const (
@@ -56,7 +64,10 @@ func NewStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("settings: open %q: %w", path, err)
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
-		_, e := tx.CreateBucketIfNotExists(bucketPush)
+		if _, e := tx.CreateBucketIfNotExists(bucketPush); e != nil {
+			return e
+		}
+		_, e := tx.CreateBucketIfNotExists(bucketMap)
 		return e
 	}); err != nil {
 		db.Close()
@@ -157,4 +168,27 @@ func cloneBytes(b []byte) []byte {
 	out := make([]byte, len(b))
 	copy(out, b)
 	return out
+}
+
+// GetMapLayout returns the stored map layout JSON ("{}" when unset).
+func (s *Store) GetMapLayout() ([]byte, error) {
+	var out []byte
+	err := s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketMap).Get([]byte(kMapLayout))
+		if len(v) > 0 {
+			out = append([]byte(nil), v...)
+		}
+		return nil
+	})
+	if len(out) == 0 {
+		out = []byte("{}")
+	}
+	return out, err
+}
+
+// SetMapLayout stores the map layout JSON.
+func (s *Store) SetMapLayout(data []byte) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketMap).Put([]byte(kMapLayout), data)
+	})
 }
