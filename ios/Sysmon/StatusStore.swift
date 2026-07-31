@@ -90,7 +90,9 @@ final class StatusStore: ObservableObject {
             error = e.message
             noteFailure()
         } catch {
-            error = "Connection failed"
+            // `self.` required: a bare catch binds the thrown value to an
+            // implicit constant named `error`, shadowing our published var.
+            self.error = "Connection failed"
             noteFailure()
         }
         loading = false

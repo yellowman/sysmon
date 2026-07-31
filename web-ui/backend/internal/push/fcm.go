@@ -52,6 +52,7 @@ type fcmV1Message struct {
 	Notification *fcmV1Notification `json:"notification,omitempty"`
 	Data         map[string]string  `json:"data,omitempty"`
 	Android      *fcmV1Android      `json:"android,omitempty"`
+	APNS         *fcmV1APNs         `json:"apns,omitempty"`
 }
 
 type fcmV1Notification struct {
@@ -67,6 +68,30 @@ type fcmV1Android struct {
 type fcmV1AndroidNotification struct {
 	Sound     string `json:"sound,omitempty"`
 	ChannelID string `json:"channel_id,omitempty"`
+}
+
+// APNs overlay for iOS tokens registered through Firebase (FCM relays to
+// APNs using the auth key uploaded in the Firebase console). Ignored for
+// Android registration tokens, so it's always safe to include.
+type fcmV1APNs struct {
+	Headers map[string]string `json:"headers,omitempty"`
+	Payload *fcmV1APNsPayload `json:"payload,omitempty"`
+}
+
+type fcmV1APNsPayload struct {
+	APS fcmV1APS `json:"aps"`
+}
+
+type fcmV1APS struct {
+	Alert fcmV1APSAlert `json:"alert"`
+	Sound string        `json:"sound,omitempty"`
+	Badge *int          `json:"badge,omitempty"`
+}
+
+type fcmV1APSAlert struct {
+	Title    string `json:"title,omitempty"`
+	Subtitle string `json:"subtitle,omitempty"`
+	Body     string `json:"body,omitempty"`
 }
 
 // fcmData carries the optional structured payload tagged onto each
@@ -250,8 +275,12 @@ func NewFCMClient(credentialsJSON []byte) (*FCMClient, error) {
 	}, nil
 }
 
-// Send delivers a single notification to one device token.
-func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) error {
+// Send delivers a single notification to one device token. Both the
+// android and apns config blocks are always included: FCM applies
+// whichever matches the token's platform and ignores the other, so one
+// payload shape serves Android registration tokens and Firebase-relayed
+// iOS tokens alike. subtitle and badge only render on iOS.
+func (c *FCMClient) Send(deviceToken string, title, subtitle, body string, badge *int, data fcmData) error {
 	if deviceToken == "" {
 		return fmt.Errorf("FCM Send: empty device token")
 	}
@@ -273,6 +302,23 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 				Notification: &fcmV1AndroidNotification{
 					Sound:     "default",
 					ChannelID: androidChannelID,
+				},
+			},
+			APNS: &fcmV1APNs{
+				Headers: map[string]string{
+					"apns-priority":  "10",
+					"apns-push-type": "alert",
+				},
+				Payload: &fcmV1APNsPayload{
+					APS: fcmV1APS{
+						Alert: fcmV1APSAlert{
+							Title:    title,
+							Subtitle: subtitle,
+							Body:     body,
+						},
+						Sound: "default",
+						Badge: badge,
+					},
 				},
 			},
 		},

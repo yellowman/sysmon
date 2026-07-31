@@ -113,7 +113,9 @@ struct LoginView: View {
             } catch let e as APIError {
                 error = e.message
             } catch {
-                error = "Connection failed"
+                // `self.` required: a bare catch binds the thrown value to
+                // an implicit constant named `error`, shadowing our @State.
+                self.error = "Connection failed"
             }
             loading = false
         }
