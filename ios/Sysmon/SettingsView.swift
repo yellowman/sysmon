@@ -44,7 +44,7 @@ struct SettingsView: View {
                         .buttonStyle(SlabButtonStyle())
                         .padding(.top, 4)
                         Button(action: sendTest) {
-                            Text(sending ? "SENDING..." : "SEND TEST VIA SERVER (APNS)")
+                            Text(sending ? "SENDING..." : "SEND TEST VIA SERVER")
                         }
                         .buttonStyle(SlabButtonStyle(enabled: canTest))
                         .disabled(!canTest)

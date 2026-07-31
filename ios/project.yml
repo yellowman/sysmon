@@ -10,12 +10,19 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "16.0"
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: "11.0.0"
 targets:
   Sysmon:
     type: application
     platform: iOS
     sources:
       - Sysmon
+    dependencies:
+      - package: Firebase
+        product: FirebaseMessaging
     scheme: {}
     settings:
       base:

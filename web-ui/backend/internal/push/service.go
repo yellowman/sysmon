@@ -831,15 +831,22 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 	fcm, apns, _ := s.clients()
 	switch platform {
 	case PlatformIOS:
-		if apns == nil {
-			return fmt.Errorf("APNs not configured")
+		// Firebase-first: with FCM configured, iOS devices register FCM
+		// tokens and Firebase relays to APNs (auth key uploaded once in
+		// the Firebase console, never expires). Direct cert-based APNs
+		// remains the fallback for Firebase-less deployments.
+		if fcm != nil {
+			return fcm.Send(token, title, subtitle, body, nil, fcmData{})
 		}
-		return apns.Send(token, title, subtitle, body, nil)
+		if apns != nil {
+			return apns.Send(token, title, subtitle, body, nil)
+		}
+		return fmt.Errorf("no iOS push transport configured (FCM or APNs)")
 	case PlatformAndroid:
 		if fcm == nil {
 			return fmt.Errorf("FCM not configured")
 		}
-		return fcm.Send(token, title, body, fcmData{})
+		return fcm.Send(token, title, "", body, nil, fcmData{})
 	default:
 		return fmt.Errorf("unknown platform: %s", platform)
 	}
@@ -853,24 +860,28 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 	sent := 0
 	badgePtr := &badge
 
+	data := fcmData{
+		Hostname: hostname,
+		Status:   status,
+		Type:     checkType,
+	}
 	for _, sub := range subs {
 		var err error
 		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
-			if apns != nil {
+			// Firebase-first, direct APNs as the cert-based fallback -
+			// see sendToDevice.
+			if fcm != nil {
+				err = fcm.Send(sub.DeviceToken, title, subtitle, body, badgePtr, data)
+			} else if apns != nil {
 				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
 			} else {
 				skipped = true
 			}
 		case PlatformAndroid:
 			if fcm != nil {
-				data := fcmData{
-					Hostname: hostname,
-					Status:   status,
-					Type:     checkType,
-				}
-				err = fcm.Send(sub.DeviceToken, title, body, data)
+				err = fcm.Send(sub.DeviceToken, title, "", body, nil, data)
 			} else {
 				skipped = true
 			}
