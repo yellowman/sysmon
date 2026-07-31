@@ -39,6 +39,9 @@
             </template>
             <template x-if="editMode">
                 <div class="flex items-center gap-2">
+                    <button @click="openTemplate()" class="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700">
+                        <i class="fas fa-layer-group mr-1"></i>Add from Template
+                    </button>
                     <button @click="addHost()" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">
                         <i class="fas fa-plus mr-1"></i>Add Host
                     </button>
@@ -91,6 +94,89 @@
 
     <div x-show="!loading && stats.total === 0" class="text-center text-gray-400 text-sm mt-4">
         No hosts configured yet<span x-show="editMode"> - click "Add Host" to start</span>.
+    </div>
+
+    <!-- Add from template -->
+    <div x-show="tplOpen" x-cloak class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+         @click.self="tplOpen = false">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h3 class="font-semibold text-gray-900"><i class="fas fa-layer-group mr-2"></i>Add device from template</h3>
+                <button @click="tplOpen = false" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Device type</label>
+                    <select x-model="tplForm.template_id" class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
+                        <template x-for="t in tplList" :key="t.id">
+                            <option :value="t.id" x-text="t.name + (t.vendor ? ' - ' + t.vendor : '')"></option>
+                        </template>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1" x-text="tplDescription()"></p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Object name</label>
+                        <input type="text" x-model="tplForm.name" placeholder="lbmtk5"
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">IP address</label>
+                        <input type="text" x-model="tplForm.ip" placeholder="172.20.8.244"
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Depends on</label>
+                        <select x-model="tplForm.parent" class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
+                            <option value="">(none - root)</option>
+                            <template x-for="h in hosts" :key="h.id">
+                                <option :value="h.id" x-text="h.id"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                        <input type="text" x-model="tplForm.desc" placeholder="Long Mikrotik netPower 16P"
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">SNMP community</label>
+                        <input type="text" x-model="tplForm.community" placeholder="public"
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Contact</label>
+                        <input type="text" x-model="tplForm.contact" placeholder="ops@example.com"
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Spawn (alert command)</label>
+                        <input type="text" x-model="tplForm.spawn" placeholder="sendalert %I %U %s %w %t"
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
+                    </div>
+                </div>
+
+                <div x-show="tplPreview.length" class="border border-gray-200 rounded p-3 bg-gray-50">
+                    <div class="text-xs font-semibold text-gray-600 mb-2">
+                        This creates <span x-text="tplPreview.length"></span> object(s):
+                    </div>
+                    <template x-for="h in tplPreview" :key="h.id">
+                        <div class="text-xs mono text-gray-700 py-0.5">
+                            <span x-text="h.id"></span>
+                            <span class="text-gray-400" x-text="' (' + (h.type||'ping') + (h.snmptype ? '/'+h.snmptype : '') + ')'"></span>
+                            <span class="text-gray-400" x-show="h.dependencies" x-text="' -> ' + h.dependencies"></span>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="tplError" class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2" x-text="tplError"></div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+                <button @click="previewTemplate()" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">Preview</button>
+                <button @click="applyTemplate()" class="px-4 py-2 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700">
+                    <i class="fas fa-plus mr-1"></i>Add to map
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Inspector -->
@@ -203,6 +289,11 @@ function mapPage() {
         // Hand-placed node positions, persisted server-side so an
         // arrangement one operator makes is what everyone else sees.
         positions: {},
+        tplOpen: false,
+        tplList: [],
+        tplPreview: [],
+        tplError: '',
+        tplForm: { template_id: '', name: '', ip: '', parent: '', desc: '', community: 'public', contact: '', spawn: '' },
         drag: null,
         layoutDirty: false,
         statusTimer: null,
@@ -213,6 +304,7 @@ function mapPage() {
             // a cold cache with hundreds of hosts - never block on it.
             await this.loadConfig();
             await this.loadPositions();
+            this.loadTemplates();
             // Big trees are unreadable fully expanded. Open to a depth
             // that fits on screen and let the operator drill in: a real
             // 800-host access network is mostly leaf APs hanging off a
@@ -240,6 +332,64 @@ function mapPage() {
                 this.notice = 'Could not load configuration: ' + (e.message || e);
             }
             this.loading = false;
+        },
+
+        async loadTemplates() {
+            try {
+                const r = await apiCall('/api/templates');
+                this.tplList = r.templates || [];
+                if (!this.tplForm.template_id && this.tplList.length) {
+                    this.tplForm.template_id = this.tplList[0].id;
+                }
+            } catch (e) { this.tplList = []; }
+        },
+
+        tplDescription() {
+            const t = this.tplList.find(x => x.id === this.tplForm.template_id);
+            return t ? (t.description || '') : '';
+        },
+
+        openTemplate() {
+            // Adding from the map: default the parent to whatever node is
+            // selected, which is almost always the switch you just clicked.
+            this.tplForm.parent = this.selected ? this.selected.id : '';
+            this.tplPreview = [];
+            this.tplError = '';
+            this.tplOpen = true;
+            if (!this.tplList.length) this.loadTemplates();
+        },
+
+        async previewTemplate() {
+            this.tplError = '';
+            try {
+                const r = await apiCall('/api/templates/expand', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.tplForm)
+                });
+                this.tplPreview = r.hosts || [];
+            } catch (e) {
+                this.tplPreview = [];
+                this.tplError = e.message || String(e);
+            }
+        },
+
+        async applyTemplate() {
+            await this.previewTemplate();
+            if (this.tplError || !this.tplPreview.length) return;
+            const clash = this.tplPreview.find(h => this.hosts.some(x => x.id === h.id));
+            if (clash) {
+                this.tplError = 'An object named "' + clash.id + '" already exists.';
+                return;
+            }
+            this.tplPreview.forEach(h => this.hosts.push(h));
+            this.dirty = true;
+            this.tplOpen = false;
+            // Open the branch we just added to, so the new device is visible.
+            if (this.tplForm.parent) this.collapsed[this.tplForm.parent] = false;
+            this.layout();
+            this.notice = 'Added ' + this.tplPreview.length + ' object(s) from template. Save to write them to sysmon.conf.';
+            setTimeout(() => this.notice = '', 6000);
         },
 
         async loadPositions() {
