@@ -63,6 +63,9 @@
         <span><span x-text="stats.total"></span> hosts</span>
         <span><span x-text="stats.roots"></span> roots</span>
         <span><span x-text="stats.depth"></span> levels deep</span>
+        <span x-show="stats.ring > 0" class="text-amber-600" title="Hosts in a dependency ring - normal for redundant paths">
+            <span x-text="stats.ring"></span> in rings
+        </span>
         <span x-show="stats.multi > 0" class="text-indigo-600">
             <span x-text="stats.multi"></span> with multiple parents
         </span>
@@ -210,9 +213,12 @@ function mapPage() {
             // a cold cache with hundreds of hosts - never block on it.
             await this.loadConfig();
             await this.loadPositions();
-            // Big trees are unreadable fully expanded, so start collapsed
-            // below the second level and let the operator open what matters.
-            if (this.hosts.length > 60) this.collapseDeep(2);
+            // Big trees are unreadable fully expanded. Open to a depth
+            // that fits on screen and let the operator drill in: a real
+            // 800-host access network is mostly leaf APs hanging off a
+            // handful of switches, so one level shows the backbone.
+            if (this.hosts.length > 300) this.collapseDeep(1);
+            else if (this.hosts.length > 60) this.collapseDeep(2);
             this.layout();
             this.$nextTick(() => this.fit());
             this.loadStatus();   // fire and forget; colors arrive when they do
@@ -326,23 +332,23 @@ function mapPage() {
             Object.values(kids).forEach(l => l.sort((a, b) => a.id.localeCompare(b.id)));
             roots.sort((a, b) => a.id.localeCompare(b.id));
 
-            // Longest-path depth, iterated to a fixed point so a node
-            // always sits to the right of every parent. Bounded so a
-            // dependency cycle can't spin here.
+            // Depth = shortest path from a root, computed by BFS. A
+            // longest-path walk is undefined once dependencies form a
+            // ring (real networks have them: two routers each depending
+            // on the other for redundancy) - it just keeps pushing ring
+            // members further right on every pass, which produced
+            // 200-column-deep layouts on a real 811-host config.
             const depth = {};
-            roots.forEach(r => { depth[r.id] = 0; });
-            for (let pass = 0; pass < 40; pass++) {
-                let changed = false;
-                this.hosts.forEach(h => {
-                    const ps = parents[h.id] || [];
-                    if (!ps.length) return;
-                    let d = 0, known = false;
-                    ps.forEach(p => {
-                        if (depth[p] !== undefined) { known = true; d = Math.max(d, depth[p] + 1); }
+            let frontier = roots.map(r => r.id);
+            frontier.forEach(id => { depth[id] = 0; });
+            for (let d = 1; frontier.length && d < 500; d++) {
+                const next = [];
+                frontier.forEach(id => {
+                    (kids[id] || []).forEach(c => {
+                        if (depth[c.id] === undefined) { depth[c.id] = d; next.push(c.id); }
                     });
-                    if (known && depth[h.id] !== d) { depth[h.id] = d; changed = true; }
                 });
-                if (!changed) break;
+                frontier = next;
             }
 
             // Visibility: a node shows when at least one parent is shown
@@ -416,6 +422,28 @@ function mapPage() {
                 });
             });
 
+            // Ring members: hosts that can reach themselves by following
+            // dependencies. Worth surfacing (they are why a "root" may not
+            // look like one), never worth blocking.
+            const ring = new Set();
+            const canReach = (from, target) => {
+                const seen = new Set(); const st = [...(parents[from] || [])];
+                while (st.length) {
+                    const id = st.pop();
+                    if (id === target) return true;
+                    if (seen.has(id)) continue;
+                    seen.add(id);
+                    (parents[id] || []).forEach(p => st.push(p));
+                }
+                return false;
+            };
+            this.hosts.forEach(h => { if (canReach(h.id, h.id)) ring.add(h.id); });
+            edges.forEach(e => {
+                const [child, parent] = e.id.split('<-');
+                e.ring = ring.has(child) && ring.has(parent);
+            });
+            nodes.forEach(n => { n.ring = ring.has(n.id); });
+
             this.nodes = nodes;
             this.edges = edges;
             this.stats = {
@@ -423,7 +451,8 @@ function mapPage() {
                 roots: roots.length,
                 depth: maxDepth + 1,
                 hidden: this.hosts.length - visible.size,
-                multi: this.hosts.filter(h => (parents[h.id] || []).length > 1).length
+                multi: this.hosts.filter(h => (parents[h.id] || []).length > 1).length,
+                ring: ring.size
             };
         },
 
@@ -475,10 +504,16 @@ function mapPage() {
                 const child = this.hosts.find(h => h.id === this.linking);
                 if (child) {
                     const existing = this.deps(child);
+                    // A dependency ring is NOT an error: redundant paths are
+                    // expressed exactly this way (A depends on B and B on A,
+                    // e.g. two routers with links in both directions). Say
+                    // what happened and let it stand.
                     if (this.wouldCycle(child.id, n.id)) {
-                        this.notice = 'That link would create a dependency cycle - ignored.';
-                        setTimeout(() => this.notice = '', 4000);
-                    } else if (existing.includes(n.id)) {
+                        this.notice = 'Heads up: ' + child.id + ' -> ' + n.id +
+                            ' closes a dependency ring. That is normal for redundant paths.';
+                        setTimeout(() => this.notice = '', 6000);
+                    }
+                    if (existing.includes(n.id)) {
                         this.notice = child.id + ' already depends on ' + n.id + '.';
                         setTimeout(() => this.notice = '', 3000);
                     } else {
@@ -501,21 +536,9 @@ function mapPage() {
         },
 
         onDepChange(host) {
-            const kept = [];
-            for (const d of this.deps(host)) {
-                if (d === host.id) continue;
-                // validate against what we've accepted so far
-                const save = host.dependencies;
-                host.dependencies = kept.join(', ');
-                const bad = this.wouldCycle(host.id, d);
-                host.dependencies = save;
-                if (bad) {
-                    this.notice = 'Dependency "' + d + '" would create a cycle - dropped.';
-                    setTimeout(() => this.notice = '', 4000);
-                } else {
-                    kept.push(d);
-                }
-            }
+            // Only self-dependency is meaningless; rings are kept (see
+            // nodeClick) because redundant topologies rely on them.
+            const kept = this.deps(host).filter(d => d !== host.id);
             host.dependencies = kept.join(', ');
             this.dirty = true;
             this.layout();
@@ -658,7 +681,8 @@ function mapPage() {
                 // Extra parents render dashed so the primary spine of the
                 // tree stays legible in a DAG.
                 out += '<path d="' + e.d + '" fill="none" stroke="' +
-                    (e.secondary ? '#a5b4fc' : '#cbd5e1') + '" stroke-width="1.5"' +
+                    (e.ring ? '#f59e0b' : (e.secondary ? '#a5b4fc' : '#cbd5e1')) +
+                    '" stroke-width="' + (e.ring ? 2 : 1.5) + '"' +
                     (e.secondary ? ' stroke-dasharray="4 3"' : '') +
                     ' marker-end="url(#arrow)"/>';
             }
