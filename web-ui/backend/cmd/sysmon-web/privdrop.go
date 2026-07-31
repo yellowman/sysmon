@@ -15,7 +15,7 @@ import (
 // names that exists on the system. Empty names are skipped. Returning the
 // user's own primary gid (rather than guessing a group of the same name)
 // is what makes the defaults portable: the "nobody" user's primary group
-// is "nogroup" on Debian but "nobody" on OpenBSD/RHEL — deriving the gid
+// is "nogroup" on Debian but "nobody" on OpenBSD/RHEL - deriving the gid
 // from the user sidesteps that entirely.
 func resolveUser(names ...string) (uid, gid int, name string, ok bool) {
 	for _, n := range names {
@@ -64,7 +64,7 @@ func resolveGroup(names ...string) (gid int, ok bool) {
 // backup directories and the audit log exist and are owned by the target
 // uid/gid, so the soon-to-be-unprivileged process can open its bbolt
 // stores, write backups, and append to the audit log. Errors are
-// returned — not swallowed — so main can fail loudly while it still has
+// returned - not swallowed - so main can fail loudly while it still has
 // root and a working diagnostics channel, rather than dropping and then
 // hitting an opaque "permission denied" deep in init.
 //
@@ -107,7 +107,7 @@ func prepareRuntimeDirs(stateDir, backupDir, auditLog string, uid, gid int) erro
 			return fmt.Errorf("chown audit log %s: %w", auditLog, cerr)
 		}
 	default:
-		// Exists but not a regular file (e.g. /dev/null, a fifo) — leave
+		// Exists but not a regular file (e.g. /dev/null, a fifo) - leave
 		// its ownership alone.
 	}
 	return nil
@@ -116,7 +116,7 @@ func prepareRuntimeDirs(stateDir, backupDir, auditLog string, uid, gid int) erro
 // dropPrivileges lowers the whole process to uid/gid: clear supplementary
 // groups, then setgid, then setuid, then verify the drop stuck and that
 // root cannot be regained. Go (>=1.16) applies these across all threads.
-// Order matters — gid before uid, since after setuid we can no longer
+// Order matters - gid before uid, since after setuid we can no longer
 // change groups.
 func dropPrivileges(uid, gid int) error {
 	if err := syscall.Setgroups([]int{gid}); err != nil {

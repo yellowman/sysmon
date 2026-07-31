@@ -20,7 +20,7 @@ final class StatusStore: ObservableObject {
 
     // Debounced connectivity for the LIVE pill: a single failed poll is
     // routine (a blip in coverage, a dropped socket) and the next poll
-    // usually succeeds — flipping on every hiccup would read OFFLINE
+    // usually succeeds - flipping on every hiccup would read OFFLINE
     // half the time on a healthy connection. Only consecutive failures
     // count.
     @Published private(set) var offline = false
@@ -36,7 +36,7 @@ final class StatusStore: ObservableObject {
 
     var alerts: [Host] { hosts.filter { !$0.isOK } }
 
-    // Begin (or resume) polling. Idempotent — safe to call on every
+    // Begin (or resume) polling. Idempotent - safe to call on every
     // scene-active transition and view appearance.
     func start() {
         guard pollTask == nil else { return }

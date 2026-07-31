@@ -225,7 +225,7 @@
         // subsequent poll asks only for what changed via ?since=<rev>, so a
         // steady system transfers a near-empty delta instead of the whole
         // host list. Pages consume the per-poll result and patch only the
-        // changed rows into their Alpine arrays — combined with stable row
+        // changed rows into their Alpine arrays - combined with stable row
         // keys this is what keeps big host lists from re-rendering the
         // entire DOM every refresh.
         function createStatusPoller() {
@@ -237,7 +237,7 @@
                 // Returns {full, hosts, changed, removed, daemon, stats}.
                 // `hosts` is always the complete current list; `changed` /
                 // `removed` describe just this poll's difference (empty on
-                // a full resync — use `full` to decide how to apply).
+                // a full resync - use `full` to decide how to apply).
                 async poll() {
                     const url = this.rev === 0
                         ? '/api/monitoring/status'
@@ -341,7 +341,7 @@
                 const error = await response.json().catch(() => ({ message: response.statusText }));
                 const errorMsg = error.message || 'Request failed';
                 // 429s are rate-limit pushback from the global limiter,
-                // not protocol errors — don't spam the error panel with
+                // not protocol errors - don't spam the error panel with
                 // them, just throw so the caller can show a retry.
                 if (responseCode !== 429) {
                     logProtocolError(url, errorMsg, responseCode);

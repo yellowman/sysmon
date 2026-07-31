@@ -68,9 +68,9 @@ fun SettingsScreen(onLogout: () -> Unit) {
         TopHeader(title = "Settings", subtitle = "Account and notifications")
 
         SectionHeader(label = "Account")
-        InfoRow("Server", Session.serverUrl.ifEmpty { "—" })
-        InfoRow("User", Session.username.ifEmpty { "—" })
-        InfoRow("Role", Session.role.uppercase().ifEmpty { "—" })
+        InfoRow("Server", Session.serverUrl.ifEmpty { "-" })
+        InfoRow("User", Session.username.ifEmpty { "-" })
+        InfoRow("Role", Session.role.uppercase().ifEmpty { "-" })
 
         SectionHeader(label = "Device")
         InfoRow(
@@ -93,9 +93,9 @@ fun SettingsScreen(onLogout: () -> Unit) {
             )
         }
         ButtonRow(label = "Test Locally (this phone)", primary = false) {
-            // No server, no FCM — proves the display path in isolation.
+            // No server, no FCM - proves the display path in isolation.
             message = NotificationHealth.postLocalTest(context)
-                ?: "Posted locally — if you didn't see it, check Do Not Disturb"
+                ?: "Posted locally - if you didn't see it, check Do Not Disturb"
         }
         ButtonRow(
             label = if (sending) "Sending…" else "Send Test via Server (FCM)",
@@ -113,7 +113,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 }
                 runCatching { Api.sendTestPush(current) }
                     .onSuccess { warning ->
-                        message = warning ?: "Sent — check your notifications"
+                        message = warning ?: "Sent - check your notifications"
                     }
                     .onFailure { message = it.message ?: "Failed" }
                 sending = false

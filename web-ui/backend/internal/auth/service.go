@@ -46,7 +46,7 @@ const (
 	// Sessions are valid as long as the app has been opened in the
 	// last 30 days. Any authenticated request bumps this forward.
 	sessionIdleTTL = 30 * 24 * time.Hour
-	// Throttle bolt writes — only extend the session once per day of
+	// Throttle bolt writes - only extend the session once per day of
 	// activity, not on every API call.
 	sessionExtendStep = 24 * time.Hour
 )
@@ -297,7 +297,7 @@ func (s *Service) Logout(token string) {
 // ValidateSession returns the session if it's still valid. Any successful
 // authenticated request extends ExpiresAt to now + sessionIdleTTL, so the
 // session only expires once the app has been off the phone (or unopened)
-// for a full sessionIdleTTL — currently 30 days. Sessions stored before
+// for a full sessionIdleTTL - currently 30 days. Sessions stored before
 // this field existed are treated as having an empty ExpiresAt and never
 // expire on their own; they pick up sliding behaviour on first use.
 func (s *Service) ValidateSession(token string) *Session {

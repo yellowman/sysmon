@@ -263,7 +263,7 @@ function dashboard() {
                 const r = await this.poller.poll();
                 this.daemon = r.daemon;
                 this.stats = r.stats;
-                // Alerts derive from the same host list — no second request.
+                // Alerts derive from the same host list - no second request.
                 this.alerts = r.hosts.filter(h => h.overall_status !== 'OK');
                 if (r.snmp_traps) {
                     this.traps = r.snmp_traps.recent_traps || [];

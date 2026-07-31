@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 // The sysmon design language: ink on paper, editorial type, and status
-// color used sparingly — green/amber/red are the only loud things on
+// color used sparingly - green/amber/red are the only loud things on
 // screen. Every color adapts to light/dark so the app looks deliberate
 // in both. Mirrors android/ui/theme/Theme.kt.
 enum Theme {
@@ -16,7 +16,7 @@ enum Theme {
     static let faint = dyn(0xA8A49C, 0x6E6E6E) // tertiary text, chevrons
     static let hairline = dyn(0xE4E2DC, 0x2A2A2A) // borders
 
-    // Status — slightly brighter in dark mode so they read on near-black.
+    // Status - slightly brighter in dark mode so they read on near-black.
     static let up = dyn(0x1F8A3F, 0x4CC38A)
     static let down = dyn(0xC53030, 0xFF6369)
     static let warn = dyn(0xB58900, 0xE5C07B)
@@ -50,7 +50,7 @@ func statusColor(_ status: String) -> Color {
 }
 
 // A card: surface on paper with a hairline stroke and a whisper of
-// depth. The shadow is imperceptible in dark mode by design — the
+// depth. The shadow is imperceptible in dark mode by design - the
 // surface/paper contrast carries it there.
 struct CardStyle: ViewModifier {
     var padding: CGFloat = 14

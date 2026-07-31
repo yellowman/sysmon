@@ -21,8 +21,8 @@ func NewCacheConfig() *CacheConfig {
 	return &CacheConfig{
 		cacheDurations: map[string]int{
 			"/api/monitoring/": 5,    // Read-only views, change often
-			"/api/config":      -1,   // Mutable admin config — never cache
-			"/api/settings":    -1,   // Push credentials etc. — never cache
+			"/api/config":      -1,   // Mutable admin config - never cache
+			"/api/settings":    -1,   // Push credentials etc. - never cache
 			"/api/metrics":     0,    // Always fresh
 			"/api/backups":     0,    // Changes whenever config is saved
 			"/api/traps":       10,   // Trap views
@@ -40,7 +40,7 @@ func NewCacheConfig() *CacheConfig {
 //
 // It deliberately does NOT do ETag / If-None-Match / 304 conditional
 // handling. That optimization buffers every response to hash it and then
-// returns a bodyless 304 on a validator match — which breaks clients that
+// returns a bodyless 304 on a validator match - which breaks clients that
 // sent the validator but have no cached body to fall back on (fetch with
 // caching disabled, or responses to Authorization-bearing requests that
 // the browser didn't store), surfacing as "JSON.parse: unexpected end of

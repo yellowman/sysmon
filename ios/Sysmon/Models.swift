@@ -88,7 +88,7 @@ struct StatusDelta: Codable {
     let daemon: DaemonInfo?
     let statistics: Stats
     // Optional: Go marshals a nil slice as JSON null, and an idle delta
-    // has no changes — a non-optional array would fail to decode there.
+    // has no changes - a non-optional array would fail to decode there.
     let changed: [Host]?
     let removed: [String]?
 }

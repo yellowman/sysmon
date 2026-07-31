@@ -10,7 +10,7 @@ import (
 )
 
 // seedSubscription writes a raw subscription row straight into the db,
-// bypassing Subscribe's validation — simulating rows created by old
+// bypassing Subscribe's validation - simulating rows created by old
 // builds before platform names were locked down.
 func seedRow(t *testing.T, dbPath, token string, raw []byte) {
 	t.Helper()

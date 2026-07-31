@@ -148,7 +148,7 @@ func Generate(config *models.Config) (string, error) {
 	}
 
 	// Push notification settings are stored in the web-ui settings
-	// store (bbolt), not here — see /api/settings/push. The C daemon
+	// store (bbolt), not here - see /api/settings/push. The C daemon
 	// never used them anyway.
 
 	sb.WriteString("\n")
@@ -205,7 +205,7 @@ func Generate(config *models.Config) (string, error) {
 		}
 		// NOTE: "paused" is web-UI-only runtime state. sysmond has no
 		// "pause" config directive (pausing is done via the TCP PAUSE
-		// command at runtime), so we must NOT emit it — the lexer would
+		// command at runtime), so we must NOT emit it - the lexer would
 		// reject it as an unknown token on reload.
 		if host.Reverse {
 			sb.WriteString("\treverse;\n")
@@ -235,7 +235,7 @@ func Generate(config *models.Config) (string, error) {
 		}
 
 		// Ping/latency thresholds (send_pings/min_pings are NOT lexer
-		// directives — sysmond hardcodes those — so they're omitted).
+		// directives - sysmond hardcodes those - so they're omitted).
 		if host.RTTThreshold > 0 {
 			sb.WriteString(fmt.Sprintf("\trtt_threshold %d;\n", host.RTTThreshold))
 		}

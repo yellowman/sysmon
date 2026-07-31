@@ -40,7 +40,7 @@ class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        // Tapped a notification — route to the Alerts tab.
+        // Tapped a notification - route to the Alerts tab.
         NotificationCenter.default.post(name: .sysmonPushTapped, object: nil)
         completionHandler()
     }

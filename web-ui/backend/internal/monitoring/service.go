@@ -188,7 +188,7 @@ func hostKey(h *models.HostStatus) string {
 }
 
 // hostSignature hashes the fields that represent a host's *state*,
-// deliberately excluding everything that ticks without a real change —
+// deliberately excluding everything that ticks without a real change -
 // TimeUp/TimeFailed (computed from now()), the per-check timestamps and
 // response times, and ALL check counters (down/up/total): sysmond bumps
 // them on every single check run (TotalDown counts failed checks, not
@@ -350,7 +350,7 @@ type XMLObjectStatus struct {
 // request would refetch. The background poller (StartPoller) refreshes
 // well within this window, so user/app requests are served from a warm
 // cache and never block on the expensive per-host sysmond fetch. The TTL
-// is the fallback if the poller stalls or sysmond goes away — after it,
+// is the fallback if the poller stalls or sysmond goes away - after it,
 // requests refetch and surface the real error.
 const statusCacheTTL = 10 * time.Second
 
@@ -365,7 +365,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			return cached, nil
 		}
 
-		// Another goroutine is already fetching — wait for it
+		// Another goroutine is already fetching - wait for it
 		if s.fetching {
 			done := s.fetchDone
 			s.cacheMu.Unlock()
@@ -403,7 +403,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 func (s *Service) Refresh() {
 	s.cacheMu.Lock()
 	if s.fetching {
-		// A fetch is already in progress — that's enough.
+		// A fetch is already in progress - that's enough.
 		s.cacheMu.Unlock()
 		return
 	}
@@ -500,7 +500,7 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
-	// Changed must never marshal as JSON null — strictly-typed clients
+	// Changed must never marshal as JSON null - strictly-typed clients
 	// (kotlinx.serialization, Swift Codable) reject null for a list, which
 	// turned every idle delta poll into a decode error on the apps.
 	d := &models.StatusDelta{Rev: s.rev, Changed: []models.HostStatus{}}
@@ -520,7 +520,7 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 		return d
 	}
 	if since == s.rev {
-		return d // up to date — nothing changed
+		return d // up to date - nothing changed
 	}
 	for i := range cur.Hosts {
 		if s.hostRev[hostKey(&cur.Hosts[i])] > since {
@@ -537,7 +537,7 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 
 // StartPoller runs a background goroutine that refreshes the status cache
 // every interval, so the expensive per-host sysmond fetch happens off the
-// request path and UI/app requests always hit a warm cache. Idempotent —
+// request path and UI/app requests always hit a warm cache. Idempotent -
 // only the first call starts a poller. Primes the cache once immediately.
 func (s *Service) StartPoller(interval time.Duration) {
 	s.pollOnce.Do(func() {

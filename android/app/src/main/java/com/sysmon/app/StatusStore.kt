@@ -34,7 +34,7 @@ object StatusStore {
 
     // Debounced connectivity for the LIVE pill: a single failed poll is
     // routine (stale keep-alive sockets, a blip in coverage) and the next
-    // poll usually succeeds — flipping the pill on every hiccup made it
+    // poll usually succeeds - flipping the pill on every hiccup made it
     // read OFFLINE half the time on a perfectly healthy connection. Only
     // consecutive failures count.
     var offline by mutableStateOf(false)

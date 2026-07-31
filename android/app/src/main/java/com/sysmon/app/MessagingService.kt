@@ -25,7 +25,7 @@ class MessagingService : FirebaseMessagingService() {
         val title = message.notification?.title ?: message.data["title"] ?: "sysmon"
         val body = message.notification?.body ?: message.data["body"]
         if (body == null) {
-            Log.w(TAG, "FCM message had no displayable body — ignoring (id=${message.messageId})")
+            Log.w(TAG, "FCM message had no displayable body - ignoring (id=${message.messageId})")
             return
         }
 
@@ -58,17 +58,17 @@ class MessagingService : FirebaseMessagingService() {
                 Log.d(TAG, "posted alert notification: $title")
             } catch (e: SecurityException) {
                 // POST_NOTIFICATIONS not granted on Android 13+
-                Log.w(TAG, "alert delivered but POST_NOTIFICATIONS not granted — dropped: $title", e)
+                Log.w(TAG, "alert delivered but POST_NOTIFICATIONS not granted - dropped: $title", e)
                 Session.pushStatus =
-                    "Alert received but notifications are blocked — enable them in system settings"
+                    "Alert received but notifications are blocked - enable them in system settings"
             }
         } else {
             // Never fail silent: the message made it all the way to the
             // device and the OS refused to show it. Say so where the user
             // will see it (Settings tab) and in logcat.
-            Log.w(TAG, "alert delivered but notifications are disabled for this app — dropped: $title")
+            Log.w(TAG, "alert delivered but notifications are disabled for this app - dropped: $title")
             Session.pushStatus =
-                "Alert received but notifications are blocked — enable them in system settings"
+                "Alert received but notifications are blocked - enable them in system settings"
         }
     }
 }
