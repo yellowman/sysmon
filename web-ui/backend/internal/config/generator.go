@@ -148,7 +148,7 @@ func Generate(config *models.Config) (string, error) {
 	}
 
 	// Push notification settings are stored in the web-ui settings
-	// store (bbolt), not here — see /api/settings/push. The C daemon
+	// store (bbolt), not here - see /api/settings/push. The C daemon
 	// never used them anyway.
 
 	sb.WriteString("\n")
@@ -197,15 +197,21 @@ func Generate(config *models.Config) (string, error) {
 		if host.Contact != "" {
 			sb.WriteString(fmt.Sprintf("\tcontact \"%s\";\n", q(host.Contact)))
 		}
-		if host.Dependencies != "" {
-			sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(host.Dependencies)))
+		// Dependencies are carried comma-separated; sysmond wants one
+		// "dep" line each. Writing the joined string would emit a single
+		// dependency with a bogus, comma-laden name.
+		for _, dep := range strings.Split(host.Dependencies, ",") {
+			dep = strings.TrimSpace(dep)
+			if dep != "" {
+				sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(dep)))
+			}
 		}
 		if host.Group != "" {
 			sb.WriteString(fmt.Sprintf("\tgroup \"%s\";\n", q(host.Group)))
 		}
 		// NOTE: "paused" is web-UI-only runtime state. sysmond has no
 		// "pause" config directive (pausing is done via the TCP PAUSE
-		// command at runtime), so we must NOT emit it — the lexer would
+		// command at runtime), so we must NOT emit it - the lexer would
 		// reject it as an unknown token on reload.
 		if host.Reverse {
 			sb.WriteString("\treverse;\n")
@@ -235,7 +241,7 @@ func Generate(config *models.Config) (string, error) {
 		}
 
 		// Ping/latency thresholds (send_pings/min_pings are NOT lexer
-		// directives — sysmond hardcodes those — so they're omitted).
+		// directives - sysmond hardcodes those - so they're omitted).
 		if host.RTTThreshold > 0 {
 			sb.WriteString(fmt.Sprintf("\trtt_threshold %d;\n", host.RTTThreshold))
 		}

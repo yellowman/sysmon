@@ -13,6 +13,11 @@
                         class="px-6 py-2 rounded-md font-medium text-sm transition-all duration-200">
                     <i class="fas fa-edit mr-2"></i>Structured
                 </button>
+                <button @click="editorMode = 'map'"
+                        :class="editorMode === 'map' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'"
+                        class="px-6 py-2 rounded-md font-medium text-sm transition-all duration-200">
+                    <i class="fas fa-sitemap mr-2"></i>Map
+                </button>
                 <button @click="editorMode = 'raw'"
                         :class="editorMode === 'raw' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'"
                         class="px-6 py-2 rounded-md font-medium text-sm transition-all duration-200">
@@ -21,9 +26,25 @@
             </div>
             <p class="text-sm text-gray-600">
                 <span x-show="editorMode === 'structured'">Form-based configuration editor with structured inputs</span>
+                <span x-show="editorMode === 'map'">Visual dependency map - click to add hosts and draw links</span>
                 <span x-show="editorMode === 'raw'">Direct text editing of sysmon.conf file</span>
             </p>
         </div>
+    </div>
+
+    <!-- MAP MODE: one implementation lives on the Map page (view-first,
+         with an Edit toggle); this tab just sends you there in edit mode. -->
+    <div x-show="editorMode === 'map'" class="card p-8 text-center">
+        <i class="fas fa-sitemap text-5xl text-gray-300 mb-4"></i>
+        <h2 class="text-lg font-semibold text-gray-900 mb-2">Visual dependency map</h2>
+        <p class="text-sm text-gray-500 mb-5 max-w-lg mx-auto">
+            Lay out every host and its dependencies, click to add hosts, and draw links
+            between them. The map is also available as a read-only view from the main nav.
+        </p>
+        <a href="/map.html?edit=1"
+           class="inline-block px-5 py-2.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 no-underline">
+            <i class="fas fa-pen-to-square mr-2"></i>Open map in edit mode
+        </a>
     </div>
 
     <!-- RAW EDITOR MODE -->
@@ -588,7 +609,7 @@
                             <p class="text-xs text-gray-500 mt-1">
                                 FCM credentials and APNs cert/key are uploaded through the admin UI
                                 and stored in <code class="bg-gray-100 px-1 rounded">/var/lib/sysmon/settings.db</code>,
-                                not in <code class="bg-gray-100 px-1 rounded">sysmon.conf</code> &mdash; sysmond doesn't use them.
+                                not in <code class="bg-gray-100 px-1 rounded">sysmon.conf</code> - sysmond doesn't use them.
                             </p>
                             <a href="/admin.html#push-config" class="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
                                 Open Admin &rarr; Push Configuration
@@ -1254,6 +1275,8 @@ function unifiedConfigPage() {
     return {
         // Mode control
         editorMode: 'structured',
+
+
         originalStructuredConfig: null,
         structuredHasChanges: false,
 

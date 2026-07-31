@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Template only. Download the real file from Firebase Console:
+     Project Settings > Your apps > iOS app > GoogleService-Info.plist,
+     save it next to this file WITHOUT the .example suffix (gitignored).
+     Also upload your APNs auth key (.p8) under Cloud Messaging in the
+     Firebase console, or Apple devices will never receive anything. -->
+<dict>
+    <key>API_KEY</key>
+    <string>REPLACE_ME</string>
+    <key>GCM_SENDER_ID</key>
+    <string>REPLACE_ME</string>
+    <key>PLIST_VERSION</key>
+    <string>1</string>
+    <key>BUNDLE_ID</key>
+    <string>com.sysmon.app</string>
+    <key>PROJECT_ID</key>
+    <string>REPLACE_ME</string>
+    <key>GOOGLE_APP_ID</key>
+    <string>REPLACE_ME</string>
+    <key>IS_GCM_ENABLED</key>
+    <true/>
+</dict>
+</plist>

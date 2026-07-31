@@ -13,7 +13,7 @@ LEX		= @LEX@
 CFILE           = @sysconfdir@/sysmon.conf
 INCLUDES	= -I/usr/local/include
 HELPER_PATH     = $(libexecdir)/sysmon-ping-helper
-CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ $(INCLUDES)
+CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ @SNMP@ $(INCLUDES)
 #@IPV6@
 
 LIBS		= @LIBS@

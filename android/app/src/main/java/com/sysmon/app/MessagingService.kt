@@ -25,7 +25,7 @@ class MessagingService : FirebaseMessagingService() {
         val title = message.notification?.title ?: message.data["title"] ?: "sysmon"
         val body = message.notification?.body ?: message.data["body"]
         if (body == null) {
-            Log.w(TAG, "FCM message had no displayable body — ignoring (id=${message.messageId})")
+            Log.w(TAG, "FCM message had no displayable body - ignoring (id=${message.messageId})")
             return
         }
 
@@ -42,33 +42,47 @@ class MessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(this, getString(R.string.notification_channel_id))
+        // Severity routing, mirroring the server's channel choice for
+        // background (system-posted) notifications: CRITICAL is loud on
+        // the alerts channel; warnings and recoveries land silently on
+        // the low-importance channel.
+        val critical = message.data["status"] == "CRITICAL"
+        val channelId = if (critical) getString(R.string.notification_channel_id)
+            else getString(R.string.notification_channel_warn_id)
+
+        val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(R.drawable.ic_notification)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(
+                if (critical) NotificationCompat.PRIORITY_HIGH
+                else NotificationCompat.PRIORITY_LOW
+            )
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
 
         val manager = NotificationManagerCompat.from(this)
         if (manager.areNotificationsEnabled()) {
-            val id = message.messageId?.hashCode() ?: System.currentTimeMillis().toInt()
+            // Tag by host so a newer notification replaces the older one:
+            // the quiet WARN disappears the moment the CRIT (or the
+            // recovery) for that host arrives.
+            val tag = message.data["object_name"] ?: message.data["hostname"] ?: message.messageId ?: "sysmon"
             try {
-                manager.notify(id, builder.build())
-                Log.d(TAG, "posted alert notification: $title")
+                manager.notify(tag, 0, builder.build())
+                Log.d(TAG, "posted ${if (critical) "critical" else "quiet"} notification [$tag]: $title")
             } catch (e: SecurityException) {
                 // POST_NOTIFICATIONS not granted on Android 13+
-                Log.w(TAG, "alert delivered but POST_NOTIFICATIONS not granted — dropped: $title", e)
+                Log.w(TAG, "alert delivered but POST_NOTIFICATIONS not granted - dropped: $title", e)
                 Session.pushStatus =
-                    "Alert received but notifications are blocked — enable them in system settings"
+                    "Alert received but notifications are blocked - enable them in system settings"
             }
         } else {
             // Never fail silent: the message made it all the way to the
             // device and the OS refused to show it. Say so where the user
             // will see it (Settings tab) and in logcat.
-            Log.w(TAG, "alert delivered but notifications are disabled for this app — dropped: $title")
+            Log.w(TAG, "alert delivered but notifications are disabled for this app - dropped: $title")
             Session.pushStatus =
-                "Alert received but notifications are blocked — enable them in system settings"
+                "Alert received but notifications are blocked - enable them in system settings"
         }
     }
 }

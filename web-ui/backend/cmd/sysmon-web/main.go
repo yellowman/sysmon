@@ -51,7 +51,7 @@ var diagFile *os.File
 
 // daemonizeAndWait re-executes this process detached from the controlling
 // terminal (setsid, std streams to /dev/null) and then BLOCKS until the
-// child reports it is actually serving — or dies trying. Only then does it
+// child reports it is actually serving - or dies trying. Only then does it
 // exit: 0 with the pid on success, non-zero with the child's captured
 // startup output on failure. This closes the classic daemon gap where the
 // parent reports success before the child has bound its socket / dropped
@@ -236,11 +236,11 @@ func main() {
 	// === Phase 1: privileged work, then drop as soon as possible ========
 	//
 	// Bind the listening socket (the only thing that may genuinely need
-	// root — e.g. a unix socket inside httpd's /var/www chroot, or a low
+	// root - e.g. a unix socket inside httpd's /var/www chroot, or a low
 	// TCP port), hand the socket to the web server's user, prepare the
 	// data directories, and immediately drop to an unprivileged user.
-	// Everything after this — opening the bbolt stores, reading config,
-	// serving requests — runs unprivileged.
+	// Everything after this - opening the bbolt stores, reading config,
+	// serving requests - runs unprivileged.
 
 	// Resolve the drop target before binding so we fail fast and loud if
 	// there's no unprivileged account to drop to. The gid defaults to the
@@ -277,7 +277,7 @@ func main() {
 		// it first: if something answers, refuse to start; only a stale
 		// or absent socket is safe to remove and rebind. (net.Listen on
 		// an existing path fails with EADDRINUSE whether or not anyone is
-		// listening, which is why the unconditional Remove existed — but
+		// listening, which is why the unconditional Remove existed - but
 		// that Remove would yank the socket out from under a running
 		// process. The probe distinguishes the two cases.)
 		if c, derr := net.DialTimeout("unix", *socketPath, 250*time.Millisecond); derr == nil {
@@ -311,7 +311,7 @@ func main() {
 				log.Fatalf("Failed to chown socket: %v", err)
 			}
 		}
-		// 0660: owner + group read/write, world none — so only the web
+		// 0660: owner + group read/write, world none - so only the web
 		// server's user/group (set above) can connect.
 		if err := os.Chmod(*socketPath, 0o660); err != nil {
 			log.Fatalf("Failed to chmod socket: %v", err)
@@ -319,7 +319,7 @@ func main() {
 	}
 
 	if amRoot {
-		// Must succeed while we still have root — otherwise the dropped
+		// Must succeed while we still have root - otherwise the dropped
 		// process can't open its stores / write backups / audit, and the
 		// failure surfaces later as an opaque permission error.
 		if err := prepareRuntimeDirs(stateDir, *backupDir, *auditLog, dropUID, dropGID); err != nil {
@@ -355,14 +355,22 @@ func main() {
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
+
+	// Host up/down transition history, persisted so it survives restarts.
+	if historyStore, err := monitoring.OpenHistory(filepath.Join(stateDir, "history.db")); err != nil {
+		log.Printf("WARNING: alert history disabled: %v", err)
+	} else {
+		monitoringService.SetHistory(historyStore)
+		defer historyStore.Close()
+	}
 	// Refresh the status cache in the background so the per-host sysmond
-	// fetch happens off the request path — UI/app requests serve from a
+	// fetch happens off the request path - UI/app requests serve from a
 	// warm cache instead of each one driving a fresh N-round-trip query.
 	monitoringService.StartPoller(2 * time.Second)
 	defer monitoringService.StopPoller()
 
 	// Web-only settings (push credentials etc.) live in their own bbolt
-	// store, not in sysmon.conf — they aren't sysmond's concern.
+	// store, not in sysmon.conf - they aren't sysmond's concern.
 	settingsStore, err := settings.NewStore(filepath.Join(stateDir, "settings.db"))
 	if err != nil {
 		log.Fatalf("Failed to initialize settings store: %v", err)
@@ -385,7 +393,7 @@ func main() {
 	// Initialize push notification service from the settings store. If
 	// init fails, pushService stays nil; the router retries via
 	// pushFactory on the next settings change. Lifecycle (Stop) is owned
-	// by the router — see the shutdown func returned by NewRouter.
+	// by the router - see the shutdown func returned by NewRouter.
 	var pushService *push.Service
 	if pc, err := settingsStore.GetPush(); err != nil {
 		log.Printf("WARNING: could not read push settings: %v", err)
@@ -417,8 +425,8 @@ func main() {
 	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
 	defer stopPush()
 
-	// Everything that can fail at startup — socket bind, privilege drop,
-	// templates, the bbolt stores — is done. Tell the parent we're up
+	// Everything that can fail at startup - socket bind, privilege drop,
+	// templates, the bbolt stores - is done. Tell the parent we're up
 	// (if we were daemonized) before we block in Serve. Anything that
 	// goes wrong before here makes the parent report a failed start;
 	// anything after here is a running-daemon problem, not a start one.

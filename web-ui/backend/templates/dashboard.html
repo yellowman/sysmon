@@ -8,7 +8,7 @@
     <div x-show="daemon && daemon.version" class="flex flex-wrap items-center justify-between mb-6 pb-4 border-b border-gray-200">
         <div class="flex items-center gap-5">
             <span class="text-sm font-semibold text-gray-900">sysmon <span class="mono text-gray-500" x-text="daemon.version"></span></span>
-            <span class="text-xs text-gray-400 mono">PID <span x-text="daemon.pid"></span></span>
+            <span class="text-xs text-gray-400 mono" x-show="daemon.pid > 0">PID <span x-text="daemon.pid"></span></span>
             <span class="text-xs text-gray-400">Uptime <span class="font-medium text-gray-600" x-text="formatUptime(daemon.uptime_seconds)"></span></span>
         </div>
         <div class="flex items-center gap-3">
@@ -263,7 +263,7 @@ function dashboard() {
                 const r = await this.poller.poll();
                 this.daemon = r.daemon;
                 this.stats = r.stats;
-                // Alerts derive from the same host list — no second request.
+                // Alerts derive from the same host list - no second request.
                 this.alerts = r.hosts.filter(h => h.overall_status !== 'OK');
                 if (r.snmp_traps) {
                     this.traps = r.snmp_traps.recent_traps || [];

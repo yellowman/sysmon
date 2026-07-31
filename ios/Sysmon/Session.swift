@@ -108,7 +108,7 @@ class Session: ObservableObject {
         token = nil
         username = nil
         role = nil
-        loginNote = "Session expired — please sign in again"
+        loginNote = "Session expired - please sign in again"
     }
 
     func requestPushPermission() async {
@@ -117,7 +117,7 @@ class Session: ObservableObject {
         if granted {
             UIApplication.shared.registerForRemoteNotifications()
         } else {
-            pushStatus = "Notifications denied — enable in iOS Settings"
+            pushStatus = "Notifications denied - enable in iOS Settings"
         }
     }
 

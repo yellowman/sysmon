@@ -495,7 +495,7 @@ fun PausedBanner() {
             .padding(12.dp)
     ) {
         Text(
-            text = "Monitoring paused — the daemon is not running checks",
+            text = "Monitoring paused - the daemon is not running checks",
             style = MaterialTheme.typography.bodyMedium,
             color = amber
         )
@@ -503,7 +503,7 @@ fun PausedBanner() {
 }
 
 // Amber warning with an optional tappable action, e.g. "Notifications are
-// turned off — OPEN NOTIFICATION SETTINGS".
+// turned off - OPEN NOTIFICATION SETTINGS".
 @Composable
 fun WarningBanner(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
     val amber = warnColor()
@@ -530,6 +530,21 @@ fun WarningBanner(message: String, actionLabel: String? = null, onAction: (() ->
                 modifier = Modifier.padding(top = 6.dp)
             )
         }
+    }
+}
+
+@Composable
+fun CenteredSpinner() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 

@@ -18,6 +18,15 @@ final class StatusStore: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var loading = true
 
+    // Debounced connectivity for the LIVE pill: a single failed poll is
+    // routine (a blip in coverage, a dropped socket) and the next poll
+    // usually succeeds - flipping on every hiccup would read OFFLINE
+    // half the time on a healthy connection. Only consecutive failures
+    // count.
+    @Published private(set) var offline = false
+    private var failStreak = 0
+    private let offlineAfterFailures = 3
+
     // Poll cadence while the app is foregrounded.
     private let pollInterval: UInt64 = 5_000_000_000 // 5s
 
@@ -27,7 +36,7 @@ final class StatusStore: ObservableObject {
 
     var alerts: [Host] { hosts.filter { !$0.isOK } }
 
-    // Begin (or resume) polling. Idempotent — safe to call on every
+    // Begin (or resume) polling. Idempotent - safe to call on every
     // scene-active transition and view appearance.
     func start() {
         guard pollTask == nil else { return }
@@ -71,13 +80,30 @@ final class StatusStore: ObservableObject {
                 applyDelta(delta)
             }
             error = nil
+            failStreak = 0
+            offline = false
+        } catch is CancellationError {
+            return // never count a cancelled poll as a network failure
+        } catch let e as URLError where e.code == .cancelled {
+            return // URLSession's flavor of cancellation (stop() mid-request)
         } catch let e as APIError {
             error = e.message
+            noteFailure()
         } catch {
-            error = "Connection failed"
+            // `self.` required: a bare catch binds the thrown value to an
+            // implicit constant named `error`, shadowing our published var.
+            self.error = "Connection failed"
+            noteFailure()
         }
         loading = false
         publishAlertCount()
+    }
+
+    private func noteFailure() {
+        failStreak += 1
+        if failStreak >= offlineAfterFailures {
+            offline = true
+        }
     }
 
     private func applyFull(_ list: [Host], stats: Stats, daemon: DaemonInfo?, rev: Int64) {
@@ -90,10 +116,10 @@ final class StatusStore: ObservableObject {
 
     private func applyDelta(_ d: StatusDelta) {
         if d.full {
-            applyFull(d.changed, stats: d.statistics, daemon: d.daemon, rev: d.rev)
+            applyFull(d.changed ?? [], stats: d.statistics, daemon: d.daemon, rev: d.rev)
             return
         }
-        for h in d.changed { hostIndex[h.id] = h }
+        for h in d.changed ?? [] { hostIndex[h.id] = h }
         for name in d.removed ?? [] { hostIndex.removeValue(forKey: name) }
         stats = d.statistics
         daemon = d.daemon
@@ -102,7 +128,12 @@ final class StatusStore: ObservableObject {
     }
 
     private func rebuildHosts() {
-        hosts = hostIndex.values.sorted { $0.hostname < $1.hostname }
+        // Secondary key: dictionary order is nondeterministic and Swift's
+        // sort is unstable, so hosts sharing a hostname (multiple objects
+        // on one IP) would visually swap rows between polls without it.
+        hosts = hostIndex.values.sorted {
+            ($0.hostname, $0.id) < ($1.hostname, $1.id)
+        }
     }
 
     private func publishAlertCount() {
@@ -121,6 +152,8 @@ final class StatusStore: ObservableObject {
         stats = nil
         daemon = nil
         error = nil
+        failStreak = 0
+        offline = false
         loading = true
     }
 }

@@ -10,3 +10,4 @@ src/sysmon-ping-helper
 web-ui/backend/sysmon-web
 web-ui/backend/sysmon-web-ui
 autom4te.cache/
+ios/Sysmon/GoogleService-Info.plist
