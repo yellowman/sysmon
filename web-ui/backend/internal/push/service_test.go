@@ -86,6 +86,45 @@ func TestNewServiceHardMigratesLegacyPlatforms(t *testing.T) {
 	}
 }
 
+func TestSendTestIsRecorded(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "push.db")
+	svc, err := NewService(Config{}, dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	defer svc.Stop()
+
+	if _, err := svc.Subscribe("tok-test-device", PlatformAndroid, "pixel", "chris", "", ""); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// No FCM client configured → the send fails, but the attempt must
+	// still show up in the per-device stats and the push log so tests
+	// are never invisible.
+	if err := svc.SendTest("tok-test-device", PlatformAndroid); err == nil {
+		t.Fatalf("expected send error with no FCM client")
+	}
+
+	subs := svc.ListSubscriptions()
+	if len(subs) != 1 {
+		t.Fatalf("expected 1 subscription, got %d", len(subs))
+	}
+	if subs[0].LastPushStatus != "failed (test)" {
+		t.Errorf("LastPushStatus = %q, want %q", subs[0].LastPushStatus, "failed (test)")
+	}
+	if subs[0].FailCount != 1 {
+		t.Errorf("FailCount = %d, want 1", subs[0].FailCount)
+	}
+
+	log := svc.GetPushLog(10)
+	if len(log) != 1 {
+		t.Fatalf("expected 1 push log entry, got %d", len(log))
+	}
+	if log[0].Status != "TEST" || log[0].Recipients != 0 {
+		t.Errorf("log entry = %+v, want Status TEST with 0 recipients", log[0])
+	}
+}
+
 func TestPushFailStatusClassification(t *testing.T) {
 	cases := []struct {
 		name string
