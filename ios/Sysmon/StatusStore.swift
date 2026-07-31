@@ -18,6 +18,15 @@ final class StatusStore: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var loading = true
 
+    // Debounced connectivity for the LIVE pill: a single failed poll is
+    // routine (a blip in coverage, a dropped socket) and the next poll
+    // usually succeeds — flipping on every hiccup would read OFFLINE
+    // half the time on a healthy connection. Only consecutive failures
+    // count.
+    @Published private(set) var offline = false
+    private var failStreak = 0
+    private let offlineAfterFailures = 3
+
     // Poll cadence while the app is foregrounded.
     private let pollInterval: UInt64 = 5_000_000_000 // 5s
 
@@ -71,13 +80,26 @@ final class StatusStore: ObservableObject {
                 applyDelta(delta)
             }
             error = nil
+            failStreak = 0
+            offline = false
+        } catch is CancellationError {
+            return // never count a cancelled poll as a network failure
         } catch let e as APIError {
             error = e.message
+            noteFailure()
         } catch {
             error = "Connection failed"
+            noteFailure()
         }
         loading = false
         publishAlertCount()
+    }
+
+    private func noteFailure() {
+        failStreak += 1
+        if failStreak >= offlineAfterFailures {
+            offline = true
+        }
     }
 
     private func applyFull(_ list: [Host], stats: Stats, daemon: DaemonInfo?, rev: Int64) {
@@ -121,6 +143,8 @@ final class StatusStore: ObservableObject {
         stats = nil
         daemon = nil
         error = nil
+        failStreak = 0
+        offline = false
         loading = true
     }
 }

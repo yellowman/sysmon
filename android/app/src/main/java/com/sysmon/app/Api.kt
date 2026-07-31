@@ -95,6 +95,26 @@ object Api {
         body: String?,
         token: String?
     ): String {
+        return try {
+            doRequest(url, method, body, token)
+        } catch (e: IOException) {
+            // HttpURLConnection reuses pooled keep-alive sockets the server
+            // may have already closed, surfacing as "unexpected end of
+            // stream" / resets on an otherwise healthy connection —
+            // endemic with fast polling. One immediate retry gets a fresh
+            // socket. Only for GETs (idempotent) and only for transport
+            // errors, never HTTP-level errors the server actually sent.
+            if (e is HttpError || method != "GET") throw e
+            doRequest(url, method, body, token)
+        }
+    }
+
+    private fun doRequest(
+        url: String,
+        method: String,
+        body: String?,
+        token: String?
+    ): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
