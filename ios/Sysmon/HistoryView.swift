@@ -45,7 +45,7 @@ struct HistoryView: View {
                         EmptyState(
                             icon: "clock.arrow.circlepath",
                             text: events.isEmpty
-                                ? "No transitions recorded yet"
+                                ? "No transitions in the last 48 hours"
                                 : "No events match the filter"
                         )
                         .padding(.vertical, 40)

@@ -72,7 +72,7 @@ fun HistoryScreen() {
         item {
             TopHeader(
                 title = "History",
-                subtitle = "Recent up/down transitions",
+                subtitle = "Transitions, last 48 hours",
                 refreshing = refreshing,
                 onRefresh = {
                     scope.launch {
@@ -131,7 +131,7 @@ fun HistoryScreen() {
             error != null && events.isEmpty() -> item { ErrorBanner(error!!) }
             filtered.isEmpty() -> item {
                 EmptyState(
-                    if (events.isEmpty()) "No transitions recorded yet"
+                    if (events.isEmpty()) "No transitions in the last 48 hours"
                     else "No events match the filter"
                 )
             }
