@@ -40,9 +40,14 @@ fun MainScreen(onLogout: () -> Unit) {
     // rememberSaveable so the selected tab survives rotation/process death.
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Alerts) }
 
-    // A tapped push notification bumps this counter; jump to Alerts.
+    // A tapped push notification bumps this counter; jump to Alerts — but
+    // only for taps not yet handled. lastHandledNav is saved across
+    // rotation, so a recreated composition seeing an old counter value
+    // doesn't re-fire the jump and override the user's current tab.
+    var lastHandledNav by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(Session.pushNavigateToAlerts) {
-        if (Session.pushNavigateToAlerts > 0) {
+        if (Session.pushNavigateToAlerts > lastHandledNav) {
+            lastHandledNav = Session.pushNavigateToAlerts
             selectedTab = Tab.Alerts
         }
     }

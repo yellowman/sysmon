@@ -112,10 +112,10 @@ final class StatusStore: ObservableObject {
 
     private func applyDelta(_ d: StatusDelta) {
         if d.full {
-            applyFull(d.changed, stats: d.statistics, daemon: d.daemon, rev: d.rev)
+            applyFull(d.changed ?? [], stats: d.statistics, daemon: d.daemon, rev: d.rev)
             return
         }
-        for h in d.changed { hostIndex[h.id] = h }
+        for h in d.changed ?? [] { hostIndex[h.id] = h }
         for name in d.removed ?? [] { hostIndex.removeValue(forKey: name) }
         stats = d.statistics
         daemon = d.daemon
