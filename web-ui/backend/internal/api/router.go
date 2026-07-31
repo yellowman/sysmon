@@ -153,6 +153,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/host-detail.html", r.handleHostDetailPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
 	r.mux.HandleFunc("/history.html", r.handleHistoryPage)
+	r.mux.HandleFunc("/map.html", r.handleMapPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)

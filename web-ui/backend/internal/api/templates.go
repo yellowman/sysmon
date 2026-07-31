@@ -25,6 +25,7 @@ func InitTemplates(dir string) error {
 		"hosts-detail.html",
 		"traps.html",
 		"history.html",
+		"map.html",
 		"config.html",
 		"admin.html",
 		"metrics.html",
@@ -135,6 +136,10 @@ func (r *Router) handleHostDetailPage(w http.ResponseWriter, req *http.Request) 
 
 func (r *Router) handleTrapsPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "traps.html", PageData{Active: "traps"})
+}
+
+func (r *Router) handleMapPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "map.html", PageData{Active: "map"})
 }
 
 func (r *Router) handleHistoryPage(w http.ResponseWriter, req *http.Request) {
