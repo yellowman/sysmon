@@ -22,6 +22,7 @@ import (
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
 	"sysmon-web/internal/settings"
+	"sysmon-web/internal/templates"
 )
 
 // Router holds the API handlers
@@ -95,6 +96,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
 	r.mux.HandleFunc("/api/map/layout", r.handleMapLayout)
+	r.mux.HandleFunc("/api/templates", r.handleTemplates)
+	r.mux.HandleFunc("/api/templates/expand", r.handleTemplateExpand)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
 	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
 	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
@@ -624,6 +627,83 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 		// No pagination requested, return all traps (backward compatible)
 		r.sendJSON(w, traps)
 	}
+}
+
+// handleTemplates lists device templates (shipped set merged with any
+// stored customisations) and saves the custom set.
+func (r *Router) handleTemplates(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodGet:
+		var stored []templates.Template
+		if r.settings != nil {
+			if data, err := r.settings.GetTemplates(); err == nil {
+				stored, _ = templates.Decode(data)
+			}
+		}
+		r.sendJSON(w, map[string]interface{}{"templates": templates.Merge(stored)})
+
+	case http.MethodPut:
+		if r.settings == nil {
+			r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
+		if err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, err := templates.Decode(body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "templates must be a JSON array: "+err.Error())
+			return
+		}
+		if err := r.settings.SetTemplates(body); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		r.sendJSON(w, map[string]string{"status": "saved"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleTemplateExpand turns a template plus device parameters into the
+// objects to add. Expansion lives on the server so the same rules apply
+// to every caller, and so it can be tested.
+func (r *Router) handleTemplateExpand(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+	var p templates.Params
+	if err := json.NewDecoder(req.Body).Decode(&p); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	var stored []templates.Template
+	if r.settings != nil {
+		if data, err := r.settings.GetTemplates(); err == nil {
+			stored, _ = templates.Decode(data)
+		}
+	}
+	var found *templates.Template
+	for _, t := range templates.Merge(stored) {
+		if t.ID == p.TemplateID {
+			tt := t
+			found = &tt
+			break
+		}
+	}
+	if found == nil {
+		r.sendError(w, http.StatusNotFound, "Unknown template: "+p.TemplateID)
+		return
+	}
+	hosts, err := templates.Expand(found, p)
+	if err != nil {
+		r.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	r.sendJSON(w, map[string]interface{}{"hosts": hosts, "count": len(hosts)})
 }
 
 // handleMapLayout stores hand-placed node positions for the dependency

@@ -22,6 +22,9 @@ var (
 	// positions, shared by everyone who opens the map rather than stuck
 	// in one browser's localStorage.
 	bucketMap = []byte("map")
+	// bucketTemplates holds device templates (custom ones, plus
+	// overrides of the shipped set).
+	bucketTemplates = []byte("templates")
 )
 
 const kMapLayout = "layout"
@@ -67,7 +70,10 @@ func NewStore(path string) (*Store, error) {
 		if _, e := tx.CreateBucketIfNotExists(bucketPush); e != nil {
 			return e
 		}
-		_, e := tx.CreateBucketIfNotExists(bucketMap)
+		if _, e := tx.CreateBucketIfNotExists(bucketMap); e != nil {
+			return e
+		}
+		_, e := tx.CreateBucketIfNotExists(bucketTemplates)
 		return e
 	}); err != nil {
 		db.Close()
@@ -190,5 +196,28 @@ func (s *Store) GetMapLayout() ([]byte, error) {
 func (s *Store) SetMapLayout(data []byte) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketMap).Put([]byte(kMapLayout), data)
+	})
+}
+
+// GetTemplates returns the stored device templates JSON ("[]" when unset).
+func (s *Store) GetTemplates() ([]byte, error) {
+	var out []byte
+	err := s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketTemplates).Get([]byte("list"))
+		if len(v) > 0 {
+			out = append([]byte(nil), v...)
+		}
+		return nil
+	})
+	if len(out) == 0 {
+		out = []byte("[]")
+	}
+	return out, err
+}
+
+// SetTemplates stores the device template list JSON.
+func (s *Store) SetTemplates(data []byte) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketTemplates).Put([]byte("list"), data)
 	})
 }
