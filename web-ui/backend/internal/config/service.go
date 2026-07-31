@@ -354,10 +354,19 @@ func (s *Service) logAudit(action, user, ip, details string) {
 
 // reloadSysmon sends SIGHUP to sysmon daemon
 func (s *Service) reloadSysmon() error {
-	// Read PID from /var/run/sysmond.pid
-	pidContent, err := os.ReadFile("/var/run/sysmond.pid")
+	// Use the pidfile the running config actually declares. Hardcoding
+	// /var/run/sysmond.pid meant reload failed silently for anyone using
+	// "config pidfile" to put it elsewhere (or on a platform with a
+	// different default).
+	pidPath := "/var/run/sysmond.pid"
+	if snapshot, err := s.getConfigUnlocked(); err == nil &&
+		snapshot != nil && snapshot.Config.Global.PidFile != "" {
+		pidPath = snapshot.Config.Global.PidFile
+	}
+
+	pidContent, err := os.ReadFile(pidPath)
 	if err != nil {
-		return fmt.Errorf("failed to read PID file: %w", err)
+		return fmt.Errorf("could not read sysmond pidfile %s: %w (is sysmond running, and does 'config pidfile' point where the daemon can write it?)", pidPath, err)
 	}
 
 	var pid int

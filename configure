@@ -4668,7 +4668,8 @@ LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
        for ac_header in net-snmp/version.h
 do :
-  ac_fn_c_check_header_compile "$LINENO" "net-snmp/version.h" "ac_cv_header_net_snmp_version_h" "$ac_includes_default"
+  ac_fn_c_check_header_compile "$LINENO" "net-snmp/version.h" "ac_cv_header_net_snmp_version_h" "$ac_includes_default
+#include <net-snmp/net-snmp-config.h>"
 if test "x$ac_cv_header_net_snmp_version_h" = xyes
 then :
   printf "%s\n" "#define HAVE_NET_SNMP_VERSION_H 1" >>confdefs.h
