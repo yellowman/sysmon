@@ -11,13 +11,16 @@ import (
 
 var bucketHistoryEvents = []byte("events")
 
-// historyMax bounds the event log; the oldest entries are pruned once it
-// overflows. At a few transitions per host per day this is months of
-// history.
-const historyMax = 5000
+// History is deliberately near-term: events expire after historyMaxAge.
+// historyMax is a safety backstop against event storms (flapping hosts)
+// within that window.
+const (
+	historyMaxAge = 48 * time.Hour
+	historyMax    = 5000
+)
 
 // HistoryEvent is one observed host state transition - the raw material
-// of "what has been going up and down".
+// of "what has been going up and down" over the last 48 hours.
 type HistoryEvent struct {
 	Timestamp   string `json:"timestamp"` // RFC3339
 	ObjectName  string `json:"object_name"`
@@ -37,7 +40,6 @@ type HistoryStore struct {
 	mu         sync.Mutex
 	db         *bolt.DB
 	lastChange map[string]time.Time // per object; in-memory, so durations reset on restart
-	appends    int
 }
 
 func OpenHistory(path string) (*HistoryStore, error) {
@@ -92,24 +94,32 @@ func (h *HistoryStore) Append(events []HistoryEvent) {
 		return nil
 	})
 
-	// Prune occasionally rather than on every write.
-	h.appends += len(events)
-	if h.appends >= 200 {
-		h.appends = 0
-		h.prune()
-	}
+	// Transitions are rare, so pruning on every append is cheap.
+	h.prune(now)
 }
 
-// prune drops the oldest entries beyond historyMax. Caller holds mu.
-func (h *HistoryStore) prune() {
+// prune drops entries older than historyMaxAge, plus the oldest entries
+// beyond the historyMax backstop. Keys are chronological, so both walks
+// stop at the first survivor. Caller holds mu.
+func (h *HistoryStore) prune(now time.Time) {
+	cutoff := now.Add(-historyMaxAge)
 	h.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketHistoryEvents)
-		excess := b.Stats().KeyN - historyMax
-		if excess <= 0 {
-			return nil
-		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil && excess > 0; k, _ = c.Next() {
+		excess := b.Stats().KeyN - historyMax
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			expired := false
+			var ev HistoryEvent
+			if json.Unmarshal(v, &ev) == nil {
+				if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
+					expired = t.Before(cutoff)
+				}
+			} else {
+				expired = true // unparseable rows are dead weight
+			}
+			if !expired && excess <= 0 {
+				break
+			}
 			if err := b.Delete(k); err != nil {
 				return err
 			}
@@ -119,19 +129,26 @@ func (h *HistoryStore) prune() {
 	})
 }
 
-// Recent returns up to limit events, newest first.
+// Recent returns up to limit events from the last 48 hours, newest
+// first. The age check happens here too, not just in prune, so a quiet
+// system never serves stale events between prunes.
 func (h *HistoryStore) Recent(limit int) []HistoryEvent {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	cutoff := time.Now().UTC().Add(-historyMaxAge)
 	out := make([]HistoryEvent, 0, limit)
 	h.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketHistoryEvents).Cursor()
 		for k, v := c.Last(); k != nil && len(out) < limit; k, v = c.Prev() {
 			var ev HistoryEvent
-			if json.Unmarshal(v, &ev) == nil {
-				out = append(out, ev)
+			if json.Unmarshal(v, &ev) != nil {
+				continue
 			}
+			if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil && t.Before(cutoff) {
+				break // keys are chronological: everything further back is older
+			}
+			out = append(out, ev)
 		}
 		return nil
 	})
