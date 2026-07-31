@@ -28,8 +28,13 @@ type apnsPayload struct {
 
 type apnsAps struct {
 	Alert apnsAlert `json:"alert"`
-	Sound string    `json:"sound"`
+	Sound string    `json:"sound,omitempty"`
 	Badge *int      `json:"badge,omitempty"`
+	// "time-sensitive" for critical alerts (breaks through focus modes
+	// when the app has the entitlement; silently downgraded otherwise),
+	// "passive" for warnings (no banner, no sound, no wake - lands
+	// quietly in Notification Center).
+	InterruptionLevel string `json:"interruption-level,omitempty"`
 }
 
 type apnsAlert struct {
@@ -87,18 +92,27 @@ func APNsCertMeta(certPEM, keyPEM []byte) (subject string, notAfter time.Time, e
 	return leaf.Subject.CommonName, leaf.NotAfter, nil
 }
 
-func (c *APNsClient) Send(deviceToken string, title, subtitle, body string, badge *int) error {
-	payload := apnsPayload{
-		Aps: apnsAps{
-			Alert: apnsAlert{
-				Title:    title,
-				Subtitle: subtitle,
-				Body:     body,
-			},
-			Sound: "default",
-			Badge: badge,
+// Send delivers one notification. critical=true means sound +
+// time-sensitive (host down); false means silent + passive (warnings,
+// recoveries). collapseID makes newer notifications for the same host
+// replace older ones, so a WARN disappears when the CRIT (or the
+// recovery) for that host arrives.
+func (c *APNsClient) Send(deviceToken string, title, subtitle, body string, badge *int, critical bool, collapseID string) error {
+	aps := apnsAps{
+		Alert: apnsAlert{
+			Title:    title,
+			Subtitle: subtitle,
+			Body:     body,
 		},
+		Badge: badge,
 	}
+	if critical {
+		aps.Sound = "default"
+		aps.InterruptionLevel = "time-sensitive"
+	} else {
+		aps.InterruptionLevel = "passive"
+	}
+	payload := apnsPayload{Aps: aps}
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -113,8 +127,15 @@ func (c *APNsClient) Send(deviceToken string, title, subtitle, body string, badg
 
 	req.Header.Set("apns-topic", c.bundleID)
 	req.Header.Set("apns-push-type", "alert")
-	req.Header.Set("apns-priority", "10")
+	if critical {
+		req.Header.Set("apns-priority", "10")
+	} else {
+		req.Header.Set("apns-priority", "5")
+	}
 	req.Header.Set("apns-expiration", "0")
+	if collapseID != "" {
+		req.Header.Set("apns-collapse-id", collapseKey64(collapseID))
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

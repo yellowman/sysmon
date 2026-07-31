@@ -829,6 +829,10 @@ func (s *Service) subscriberCount() int {
 
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
 	fcm, apns, _ := s.clients()
+	// Test pushes present as critical so the full sound/heads-up path is
+	// what gets verified.
+	const critical = true
+	const collapse = "sysmon-test"
 	switch platform {
 	case PlatformIOS:
 		// Firebase-first: with FCM configured, iOS devices register FCM
@@ -836,23 +840,26 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 		// the Firebase console, never expires). Direct cert-based APNs
 		// remains the fallback for Firebase-less deployments.
 		if fcm != nil {
-			return fcm.Send(token, title, subtitle, body, nil, fcmData{})
+			return fcm.Send(token, title, subtitle, body, nil, fcmData{}, critical, collapse)
 		}
 		if apns != nil {
-			return apns.Send(token, title, subtitle, body, nil)
+			return apns.Send(token, title, subtitle, body, nil, critical, collapse)
 		}
 		return fmt.Errorf("no iOS push transport configured (FCM or APNs)")
 	case PlatformAndroid:
 		if fcm == nil {
 			return fmt.Errorf("FCM not configured")
 		}
-		return fcm.Send(token, title, "", body, nil, fcmData{})
+		return fcm.Send(token, title, "", body, nil, fcmData{}, critical, collapse)
 	default:
 		return fmt.Errorf("unknown platform: %s", platform)
 	}
 }
 
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int) {
+// critical drives sound/heads-up vs silent delivery; collapseKey (the
+// object name) makes newer notifications for a host replace older ones,
+// so a WARN vanishes when the CRIT or the recovery arrives.
+func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int, critical bool, collapseKey string) {
 	// Snapshot the clients once so a concurrent Reconfigure can't swap
 	// them mid-fan-out, and so we don't hold a lock across slow sends.
 	fcm, apns, _ := s.clients()
@@ -862,6 +869,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 
 	data := fcmData{
 		Hostname: hostname,
+		Object:   collapseKey,
 		Status:   status,
 		Type:     checkType,
 	}
@@ -873,15 +881,15 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 			// Firebase-first, direct APNs as the cert-based fallback -
 			// see sendToDevice.
 			if fcm != nil {
-				err = fcm.Send(sub.DeviceToken, title, subtitle, body, badgePtr, data)
+				err = fcm.Send(sub.DeviceToken, title, subtitle, body, badgePtr, data, critical, collapseKey)
 			} else if apns != nil {
-				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
+				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr, critical, collapseKey)
 			} else {
 				skipped = true
 			}
 		case PlatformAndroid:
 			if fcm != nil {
-				err = fcm.Send(sub.DeviceToken, title, "", body, nil, data)
+				err = fcm.Send(sub.DeviceToken, title, "", body, nil, data, critical, collapseKey)
 			} else {
 				skipped = true
 			}
@@ -1065,5 +1073,10 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, bad
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
 		host.Hostname, prevStatus, host.OverallStatus)
 
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge)
+	critical := strings.ToUpper(host.OverallStatus) == "CRITICAL"
+	collapseKey := host.ObjectName
+	if collapseKey == "" {
+		collapseKey = host.Hostname
+	}
+	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge, critical, collapseKey)
 }

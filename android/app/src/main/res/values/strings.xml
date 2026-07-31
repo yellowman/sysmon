@@ -3,5 +3,8 @@
     <string name="app_name">Sysmon</string>
     <string name="notification_channel_id">sysmon_alerts</string>
     <string name="notification_channel_name">Host Alerts</string>
-    <string name="notification_channel_description">Host up/down state changes</string>
+    <string name="notification_channel_description">Hosts going down (sound, heads-up)</string>
+    <string name="notification_channel_warn_id">sysmon_warnings</string>
+    <string name="notification_channel_warn_name">Warnings &amp; Recoveries</string>
+    <string name="notification_channel_warn_description">Warnings and recoveries (silent)</string>
 </resources>

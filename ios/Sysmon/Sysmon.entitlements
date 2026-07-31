@@ -7,6 +7,8 @@
         Change to <string>production</string> for App Store release builds,
         or let Xcode auto-manage this file via Signing & Capabilities.
     -->
+    <key>com.apple.developer.usernotifications.time-sensitive</key>
+    <true/>
     <key>aps-environment</key>
     <string>development</string>
 </dict>
