@@ -124,8 +124,8 @@ type FCMKeyStatus struct {
 }
 
 // ErrServiceStopped is returned by public Service methods after Stop has
-// run. Callers should treat this as "push is unavailable" — typically a
-// 503 — not as a permanent failure of the request itself.
+// run. Callers should treat this as "push is unavailable" - typically a
+// 503 - not as a permanent failure of the request itself.
 var ErrServiceStopped = errors.New("push service is stopped")
 
 // buildClients constructs FCM and APNs clients from a Config, logging
@@ -221,10 +221,10 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 			return err
 		}
 		// Hard-migrate legacy rows. Early Android builds subscribed with
-		// platform "fcm" — rewrite those to "android" (notifyAll fans out
+		// platform "fcm" - rewrite those to "android" (notifyAll fans out
 		// by platform, so they were silently undeliverable). Anything
 		// else unrecognized (or unparseable) is unroutable garbage with
-		// no upgrade path: delete it — the app re-subscribes on every
+		// no upgrade path: delete it - the app re-subscribes on every
 		// launch, so a legitimate device comes right back.
 		b := tx.Bucket(bucketSubscriptions)
 		type fix struct {
@@ -287,7 +287,7 @@ func NewService(cfg Config, dbPath string, mon *monitoring.Service) (*Service, e
 	log.Printf("push: database opened at %s (%d subscriptions)", dbPath, count)
 
 	// The key-health checker runs for the service's whole lifetime,
-	// independent of the enabled flag — a stored-but-disabled key still
+	// independent of the enabled flag - a stored-but-disabled key still
 	// deserves a truthful status on the settings panel.
 	s.wg.Add(1)
 	go s.keyCheckLoop()
@@ -384,7 +384,7 @@ func (s *Service) Enabled() bool {
 }
 
 // PipelineHealth is a one-glance answer to "why aren't alerts arriving?"
-// — every link in the chain from the enable switch to the last actual
+// - every link in the chain from the enable switch to the last actual
 // send. Times are RFC3339, empty when the event has never happened.
 type PipelineHealth struct {
 	Enabled        bool         `json:"enabled"`
@@ -443,7 +443,7 @@ func (s *Service) Start() {
 
 // Stop tears the service down with proper draining:
 //  1. Close stopCh so the watcher exits at the next select.
-//  2. Wait for the watcher goroutine to finish — the watcher's bolt
+//  2. Wait for the watcher goroutine to finish - the watcher's bolt
 //     ops are wrapped in the same public API as handler requests, so
 //     they take opsMu.RLock per op; we must not hold the W lock yet
 //     or they'd deadlock.
@@ -497,7 +497,7 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 			json.Unmarshal(existing, &sub)
 			// A device token is a per-install secret held by whoever
 			// physically has the app. When a different account signs in
-			// on the same device it legitimately takes the token over —
+			// on the same device it legitimately takes the token over -
 			// the previous owner logged out. (There's no hijack risk: the
 			// push providers only deliver to the device that actually
 			// holds the token, so re-registering someone else's token
@@ -757,19 +757,65 @@ func (s *Service) IsOwner(token, owner string) bool {
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
-	s.opsMu.RLock()
-	defer s.opsMu.RUnlock()
-	if s.stopped {
-		return ErrServiceStopped
+	err := func() error {
+		s.opsMu.RLock()
+		defer s.opsMu.RUnlock()
+		if s.stopped {
+			return ErrServiceStopped
+		}
+		return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
+	}()
+	if errors.Is(err, ErrServiceStopped) {
+		return err
 	}
-	err := s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
 	if err != nil {
 		var kr *KeyRejectedError
 		if errors.As(err, &kr) {
 			s.kickKeyCheck()
 		}
 	}
+
+	// Tests used to be invisible - they bypassed both the per-device
+	// stats and the push log, so "the log never shows the test button"
+	// read as "tests don't reach the server". Record them like any
+	// other send, marked as tests. (Outside the RLock above: RecordPush
+	// and appendPushLog take their own, and recursive RLock can
+	// deadlock against a queued Stop.)
+	status := "ok (test)"
+	sent := 1
+	if err != nil {
+		status = pushFailStatus(err) + " (test)"
+		sent = 0
+	}
+	s.RecordPush(token, err == nil, status)
+	label := token
+	if len(label) > 12 {
+		label = label[:12] + "…"
+	}
+	s.appendPushLog(pushLogEntry{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Hostname:   "Test push → " + label,
+		Status:     "TEST",
+		Recipients: sent,
+	})
 	return err
+}
+
+// appendPushLog writes an entry to the push log bucket, guarded against
+// a concurrent Stop.
+func (s *Service) appendPushLog(entry pushLogEntry) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return
+	}
+	if data, err := json.Marshal(entry); err == nil {
+		s.db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(bucketPushLog)
+			id, _ := b.NextSequence()
+			return b.Put([]byte(fmt.Sprintf("%010d", id)), data)
+		})
+	}
 }
 
 func (s *Service) subscriberCount() int {
@@ -783,23 +829,37 @@ func (s *Service) subscriberCount() int {
 
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
 	fcm, apns, _ := s.clients()
+	// Test pushes present as critical so the full sound/heads-up path is
+	// what gets verified.
+	const critical = true
+	const collapse = "sysmon-test"
 	switch platform {
 	case PlatformIOS:
-		if apns == nil {
-			return fmt.Errorf("APNs not configured")
+		// Firebase-first: with FCM configured, iOS devices register FCM
+		// tokens and Firebase relays to APNs (auth key uploaded once in
+		// the Firebase console, never expires). Direct cert-based APNs
+		// remains the fallback for Firebase-less deployments.
+		if fcm != nil {
+			return fcm.Send(token, title, subtitle, body, nil, fcmData{}, critical, collapse)
 		}
-		return apns.Send(token, title, subtitle, body, nil)
+		if apns != nil {
+			return apns.Send(token, title, subtitle, body, nil, critical, collapse)
+		}
+		return fmt.Errorf("no iOS push transport configured (FCM or APNs)")
 	case PlatformAndroid:
 		if fcm == nil {
 			return fmt.Errorf("FCM not configured")
 		}
-		return fcm.Send(token, title, body, fcmData{})
+		return fcm.Send(token, title, "", body, nil, fcmData{}, critical, collapse)
 	default:
 		return fmt.Errorf("unknown platform: %s", platform)
 	}
 }
 
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int) {
+// critical drives sound/heads-up vs silent delivery; collapseKey (the
+// object name) makes newer notifications for a host replace older ones,
+// so a WARN vanishes when the CRIT or the recovery arrives.
+func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int, critical bool, collapseKey string) {
 	// Snapshot the clients once so a concurrent Reconfigure can't swap
 	// them mid-fan-out, and so we don't hold a lock across slow sends.
 	fcm, apns, _ := s.clients()
@@ -807,31 +867,36 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 	sent := 0
 	badgePtr := &badge
 
+	data := fcmData{
+		Hostname: hostname,
+		Object:   collapseKey,
+		Status:   status,
+		Type:     checkType,
+	}
 	for _, sub := range subs {
 		var err error
 		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
-			if apns != nil {
-				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr)
+			// Firebase-first, direct APNs as the cert-based fallback -
+			// see sendToDevice.
+			if fcm != nil {
+				err = fcm.Send(sub.DeviceToken, title, subtitle, body, badgePtr, data, critical, collapseKey)
+			} else if apns != nil {
+				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr, critical, collapseKey)
 			} else {
 				skipped = true
 			}
 		case PlatformAndroid:
 			if fcm != nil {
-				data := fcmData{
-					Hostname: hostname,
-					Status:   status,
-					Type:     checkType,
-				}
-				err = fcm.Send(sub.DeviceToken, title, body, data)
+				err = fcm.Send(sub.DeviceToken, title, "", body, nil, data, critical, collapseKey)
 			} else {
 				skipped = true
 			}
 		default:
 			// Can't happen after the boot-time migration (Subscribe
-			// rejects anything but ios/android) — but never fail silent.
-			log.Printf("push: WARNING: subscription %q has unknown platform %q — not delivered", sub.Label, sub.Platform)
+			// rejects anything but ios/android) - but never fail silent.
+			log.Printf("push: WARNING: subscription %q has unknown platform %q - not delivered", sub.Label, sub.Platform)
 			continue
 		}
 		if skipped {
@@ -840,7 +905,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		if err != nil {
 			s.RecordPush(sub.DeviceToken, false, pushFailStatus(err))
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
-			// An auth-level refusal means the key itself died — flip the
+			// An auth-level refusal means the key itself died - flip the
 			// settings-panel key status now instead of at the next hourly
 			// check.
 			var kr *KeyRejectedError
@@ -858,20 +923,13 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 	s.lastPushInfo = fmt.Sprintf("%s (%s → %s): %d recipient(s)", hostname, prevStatus, status, sent)
 	s.mu.Unlock()
 
-	entry := pushLogEntry{
+	s.appendPushLog(pushLogEntry{
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Hostname:   hostname,
 		Status:     status,
 		PrevStatus: prevStatus,
 		Recipients: sent,
-	}
-	if data, err := json.Marshal(entry); err == nil {
-		s.db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket(bucketPushLog)
-			id, _ := b.NextSequence()
-			return b.Put([]byte(fmt.Sprintf("%010d", id)), data)
-		})
-	}
+	})
 }
 
 func (s *Service) watchLoop() {
@@ -973,7 +1031,7 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 
 	// If push is disabled or unconfigured we still updated prevHosts
 	// above, so the baseline stays current and re-enabling later doesn't
-	// replay a backlog of stale state changes — we just don't send.
+	// replay a backlog of stale state changes - we just don't send.
 	_, _, enabled := s.clients()
 	if !enabled {
 		return
@@ -1015,5 +1073,10 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, bad
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
 		host.Hostname, prevStatus, host.OverallStatus)
 
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge)
+	critical := strings.ToUpper(host.OverallStatus) == "CRITICAL"
+	collapseKey := host.ObjectName
+	if collapseKey == "" {
+		collapseKey = host.Hostname
+	}
+	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge, critical, collapseKey)
 }

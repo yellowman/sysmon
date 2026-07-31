@@ -43,8 +43,14 @@
                         <a href="/hosts.html" class="nav-link {{if eq .Active "hosts"}}active{{end}}">
                             <i class="fas fa-server mr-2"></i>Hosts
                         </a>
+                        <a href="/map.html" class="nav-link {{if eq .Active "map"}}active{{end}}">
+                            <i class="fas fa-sitemap mr-2"></i>Map
+                        </a>
                         <a href="/traps.html" class="nav-link {{if eq .Active "traps"}}active{{end}}">
                             <i class="fas fa-exclamation-triangle mr-2"></i>SNMP Traps
+                        </a>
+                        <a href="/history.html" class="nav-link {{if eq .Active "history"}}active{{end}}">
+                            <i class="fas fa-clock-rotate-left mr-2"></i>History
                         </a>
                         <a href="/config.html" class="nav-link {{if eq .Active "config"}}active{{end}}">
                             <i class="fas fa-cog mr-2"></i>Configuration
@@ -74,7 +80,9 @@
             <div class="px-4 py-3 space-y-2">
                 <a href="/" class="mobile-nav {{if eq .Active "dashboard"}}active{{end}}"><i class="fas fa-tachometer-alt mr-2 w-5 text-center"></i>Dashboard</a>
                 <a href="/hosts.html" class="mobile-nav {{if eq .Active "hosts"}}active{{end}}"><i class="fas fa-server mr-2 w-5 text-center"></i>Hosts</a>
+                <a href="/map.html" class="mobile-nav {{if eq .Active "map"}}active{{end}}"><i class="fas fa-sitemap mr-2 w-5 text-center"></i>Map</a>
                 <a href="/traps.html" class="mobile-nav {{if eq .Active "traps"}}active{{end}}"><i class="fas fa-exclamation-triangle mr-2 w-5 text-center"></i>SNMP Traps</a>
+                <a href="/history.html" class="mobile-nav {{if eq .Active "history"}}active{{end}}"><i class="fas fa-clock-rotate-left mr-2 w-5 text-center"></i>History</a>
                 <a href="/config.html" class="mobile-nav {{if eq .Active "config"}}active{{end}}"><i class="fas fa-cog mr-2 w-5 text-center"></i>Configuration</a>
                 <a href="/admin.html" class="mobile-nav {{if eq .Active "admin"}}active{{end}}"><i class="fas fa-tools mr-2 w-5 text-center"></i>Admin</a>
                 <a href="/metrics.html" class="mobile-nav {{if eq .Active "metrics"}}active{{end}}"><i class="fas fa-chart-line mr-2 w-5 text-center"></i>Metrics</a>
@@ -225,7 +233,7 @@
         // subsequent poll asks only for what changed via ?since=<rev>, so a
         // steady system transfers a near-empty delta instead of the whole
         // host list. Pages consume the per-poll result and patch only the
-        // changed rows into their Alpine arrays — combined with stable row
+        // changed rows into their Alpine arrays - combined with stable row
         // keys this is what keeps big host lists from re-rendering the
         // entire DOM every refresh.
         function createStatusPoller() {
@@ -237,7 +245,7 @@
                 // Returns {full, hosts, changed, removed, daemon, stats}.
                 // `hosts` is always the complete current list; `changed` /
                 // `removed` describe just this poll's difference (empty on
-                // a full resync — use `full` to decide how to apply).
+                // a full resync - use `full` to decide how to apply).
                 async poll() {
                     const url = this.rev === 0
                         ? '/api/monitoring/status'
@@ -341,7 +349,7 @@
                 const error = await response.json().catch(() => ({ message: response.statusText }));
                 const errorMsg = error.message || 'Request failed';
                 // 429s are rate-limit pushback from the global limiter,
-                // not protocol errors — don't spam the error panel with
+                // not protocol errors - don't spam the error panel with
                 // them, just throw so the caller can show a retry.
                 if (responseCode !== 429) {
                     logProtocolError(url, errorMsg, responseCode);

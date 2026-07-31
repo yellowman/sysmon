@@ -11,7 +11,7 @@ import android.provider.Settings
  * FCM can deliver a message to the phone (Firebase shows "Received")
  * while the OS silently refuses to display it: notifications disabled
  * for the app (Android 13+ opt-in, or user toggled off), the alerts
- * channel disabled, or the channel silenced by an earlier install —
+ * channel disabled, or the channel silenced by an earlier install -
  * Android snapshots channel importance at first creation, so code can't
  * raise it later. None of these produce any error anywhere, so the app
  * has to check and say so itself.
@@ -22,22 +22,22 @@ object NotificationHealth {
     fun problem(context: Context): String? {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return null
         if (!manager.areNotificationsEnabled()) {
-            return "Notifications are turned off for Sysmon — alerts will not appear"
+            return "Notifications are turned off for Sysmon - alerts will not appear"
         }
         val channel = manager.getNotificationChannel(
             context.getString(R.string.notification_channel_id)
         ) ?: return null // will be created on next app start; nothing to report
         return when {
             channel.importance == NotificationManager.IMPORTANCE_NONE ->
-                "The Host Alerts notification channel is disabled — alerts will not appear"
+                "The Host Alerts notification channel is disabled - alerts will not appear"
             channel.importance < NotificationManager.IMPORTANCE_DEFAULT ->
-                "The Host Alerts channel is set to silent — alerts won't pop up or make a sound"
+                "The Host Alerts channel is set to silent - alerts won't pop up or make a sound"
             else -> null
         }
     }
 
     /**
-     * Post a notification directly on this phone — no server, no FCM.
+     * Post a notification directly on this phone - no server, no FCM.
      * Pairs with the server test to split "delivery broken" from
      * "display broken": if this shows but the server test doesn't, the
      * problem is between the server and Firebase; if neither shows, the
@@ -50,7 +50,7 @@ object NotificationHealth {
                 context, context.getString(R.string.notification_channel_id)
             )
                 .setContentTitle("sysmon local test")
-                .setContentText("Posted directly on this phone — display path works")
+                .setContentText("Posted directly on this phone - display path works")
                 .setSmallIcon(R.drawable.ic_notification)
                 .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
@@ -59,12 +59,12 @@ object NotificationHealth {
                 .notify(("local-test").hashCode(), notification)
             null
         } catch (e: SecurityException) {
-            "Notification permission not granted — enable it in system settings"
+            "Notification permission not granted - enable it in system settings"
         }
     }
 
     /**
-     * Open the system notification settings — the channel's own page when
+     * Open the system notification settings - the channel's own page when
      * the app-level toggle is fine (channel problems are fixed there),
      * otherwise the app's notification page.
      */

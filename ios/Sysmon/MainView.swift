@@ -6,7 +6,7 @@ struct MainView: View {
     @State private var tab: Tab = .alerts
     private let store = StatusStore.shared
 
-    enum Tab { case alerts, hosts, settings }
+    enum Tab { case alerts, hosts, history, settings }
 
     var body: some View {
         TabView(selection: $tab) {
@@ -17,6 +17,9 @@ struct MainView: View {
             HostsView()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
                 .tag(Tab.hosts)
+            HistoryView()
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(Tab.history)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
@@ -127,7 +130,7 @@ struct AlertsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    LivePill(offline: store.error != nil)
+                    LivePill(offline: store.offline)
                     Menu {
                         ForEach(AlertSortKey.allCases, id: \.self) { key in
                             Button {
@@ -231,7 +234,7 @@ struct HostsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    LivePill(offline: store.error != nil)
+                    LivePill(offline: store.offline)
                 }
             }
             .refreshable { await store.refreshNow() }
@@ -414,7 +417,7 @@ struct HostDetailView: View {
             let api = API(baseURL: session.serverURL, token: session.token)
             do {
                 try await api.ackHost(objectName: host.id)
-                ackNote = "Acknowledged — sysmond will suppress further alerts."
+                ackNote = "Acknowledged - sysmond will suppress further alerts."
             } catch let e as APIError {
                 ackNote = e.message
             } catch {
@@ -508,7 +511,7 @@ struct PausedBanner: View {
         HStack(spacing: 8) {
             Image(systemName: "pause.circle.fill")
                 .font(.system(size: 14))
-            Text("Monitoring paused — the daemon is not running checks")
+            Text("Monitoring paused - the daemon is not running checks")
                 .font(.system(size: 12, weight: .medium))
             Spacer()
         }

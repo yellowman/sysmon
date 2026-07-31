@@ -516,7 +516,9 @@ void    handle_pingv6_responses()
         struct monitorent *here;
         struct pingv6data *localstruct = NULL;
         struct pingv6data rcvd_data;
-        struct sockaddr_in from;
+        /* Must be sockaddr_in6: with sockaddr_in the kernel truncated the
+         * reply's source address, which is also why it was never checked. */
+        struct sockaddr_in6 from;
         char rcvd_pkt[ICMP_PACKET_SIZE];
         int ret, fromlen;
 
@@ -577,7 +579,12 @@ void    handle_pingv6_responses()
                         if (debug)
                                 print_err(1, "comparing rcvd_data echo_id w/ ident sent (got %d and %d was sent)", rcvd_data.i6cmphdr->icmp6_id, localstruct->ident);
 
-                        if (rcvd_data.i6cmphdr->icmp6_id == localstruct->ident)
+                        /* Ident AND source address - see the comment in
+                         * icmp.c handle_icmp_responses(). */
+                        if (rcvd_data.i6cmphdr->icmp6_id == localstruct->ident &&
+                            localstruct->to != NULL &&
+                            memcmp(&from.sin6_addr, &localstruct->to->sin6_addr,
+                                   sizeof(from.sin6_addr)) == 0)
                         {
                                 if (debug_pingv6)
                                 {
@@ -585,6 +592,9 @@ void    handle_pingv6_responses()
                                 }
                                 /* Increment our count */
                                 localstruct->nreceived++;
+
+                                /* a reply belongs to exactly one check */
+                                break;
                         }
                 }
         }

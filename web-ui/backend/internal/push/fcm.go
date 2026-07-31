@@ -18,12 +18,25 @@ import (
 // FCMScope is the OAuth scope required for the FCM HTTP v1 API.
 const fcmScope = "https://www.googleapis.com/auth/firebase.messaging"
 
-// androidChannelID pins every send to the notification channel the app
-// creates at startup (SysmonApplication.createNotificationChannel), so
-// the OS→channel mapping is explicit rather than relying on the app's
-// manifest default. MUST match notification_channel_id in
-// android/app/src/main/res/values/strings.xml.
-const androidChannelID = "sysmon_alerts"
+// Notification channel IDs pinned server-side, so the OS→channel mapping
+// is explicit rather than relying on the app's manifest default. MUST
+// match the channels the Android app creates at startup
+// (SysmonApplication) and the ids in
+// android/app/src/main/res/values/strings.xml. Critical alerts ride the
+// high-importance channel (sound, heads-up); warnings and recoveries
+// ride the low-importance one (silent, shade-only).
+const (
+	androidChannelID     = "sysmon_alerts"
+	androidWarnChannelID = "sysmon_warnings"
+)
+
+// collapseKey64 truncates a collapse key to APNs' 64-byte limit.
+func collapseKey64(s string) string {
+	if len(s) > 64 {
+		return s[:64]
+	}
+	return s
+}
 
 // FCMClient talks to the FCM HTTP v1 endpoint
 // (https://fcm.googleapis.com/v1/projects/{project}/messages:send) using
@@ -52,6 +65,7 @@ type fcmV1Message struct {
 	Notification *fcmV1Notification `json:"notification,omitempty"`
 	Data         map[string]string  `json:"data,omitempty"`
 	Android      *fcmV1Android      `json:"android,omitempty"`
+	APNS         *fcmV1APNs         `json:"apns,omitempty"`
 }
 
 type fcmV1Notification struct {
@@ -67,6 +81,35 @@ type fcmV1Android struct {
 type fcmV1AndroidNotification struct {
 	Sound     string `json:"sound,omitempty"`
 	ChannelID string `json:"channel_id,omitempty"`
+	// Same tag -> newer notification replaces the older one, so a WARN
+	// vanishes when the CRIT (or the recovery) for that host arrives.
+	Tag string `json:"tag,omitempty"`
+}
+
+// APNs overlay for iOS tokens registered through Firebase (FCM relays to
+// APNs using the auth key uploaded in the Firebase console). Ignored for
+// Android registration tokens, so it's always safe to include.
+type fcmV1APNs struct {
+	Headers map[string]string `json:"headers,omitempty"`
+	Payload *fcmV1APNsPayload `json:"payload,omitempty"`
+}
+
+type fcmV1APNsPayload struct {
+	APS fcmV1APS `json:"aps"`
+}
+
+type fcmV1APS struct {
+	Alert fcmV1APSAlert `json:"alert"`
+	Sound string        `json:"sound,omitempty"`
+	Badge *int          `json:"badge,omitempty"`
+	// See apnsAps.InterruptionLevel.
+	InterruptionLevel string `json:"interruption-level,omitempty"`
+}
+
+type fcmV1APSAlert struct {
+	Title    string `json:"title,omitempty"`
+	Subtitle string `json:"subtitle,omitempty"`
+	Body     string `json:"body,omitempty"`
 }
 
 // fcmData carries the optional structured payload tagged onto each
@@ -74,17 +117,21 @@ type fcmV1AndroidNotification struct {
 // check type). All values must be strings in the v1 API.
 type fcmData struct {
 	Hostname string
+	Object   string // object name - the app's notification-replacement key
 	Status   string
 	Type     string
 }
 
 func (d fcmData) toMap() map[string]string {
-	if d.Hostname == "" && d.Status == "" && d.Type == "" {
+	if d.Hostname == "" && d.Object == "" && d.Status == "" && d.Type == "" {
 		return nil
 	}
-	m := make(map[string]string, 3)
+	m := make(map[string]string, 4)
 	if d.Hostname != "" {
 		m["hostname"] = d.Hostname
+	}
+	if d.Object != "" {
+		m["object_name"] = d.Object
 	}
 	if d.Status != "" {
 		m["status"] = d.Status
@@ -140,7 +187,7 @@ func FCMCredentialMeta(credentialsJSON []byte) (projectID, clientEmail, keyIDLas
 }
 
 // KeyRejectedError means Google itself refused the service-account key
-// (revoked, deleted, or fundamentally unusable) — as opposed to a
+// (revoked, deleted, or fundamentally unusable) - as opposed to a
 // transient network failure reaching Google, which is NOT evidence the
 // key is bad.
 type KeyRejectedError struct{ Detail string }
@@ -162,15 +209,15 @@ func classifyTokenError(err error) error {
 			code = re.Response.StatusCode
 		}
 		return &KeyRejectedError{Detail: fmt.Sprintf(
-			"Google rejected the service-account key (HTTP %d): %s — the key has likely been revoked or deleted. Generate a new one in Firebase Console → Project Settings → Service accounts",
+			"Google rejected the service-account key (HTTP %d): %s - the key has likely been revoked or deleted. Generate a new one in Firebase Console → Project Settings → Service accounts",
 			code, body)}
 	}
 	return fmt.Errorf("could not reach Google to verify the key: %w", err)
 }
 
 // FCMCredentialLiveCheck proves Google currently accepts the key by
-// minting a real OAuth access token. FCMCredentialMeta is offline-only —
-// a revoked key still parses fine — so this is the only way to catch a
+// minting a real OAuth access token. FCMCredentialMeta is offline-only -
+// a revoked key still parses fine - so this is the only way to catch a
 // dead key before alert delivery silently stops. Returns nil on success,
 // *KeyRejectedError when Google definitively refused the key, and other
 // errors for network trouble.
@@ -185,7 +232,7 @@ func FCMCredentialLiveCheck(ctx context.Context, credentialsJSON []byte) error {
 	return nil
 }
 
-// FCMSendError classifies a v1 send failure so callers can react —
+// FCMSendError classifies a v1 send failure so callers can react -
 // prune dead tokens, flag a project mismatch, or recheck the key.
 type FCMSendError struct {
 	StatusCode int
@@ -198,7 +245,7 @@ func (e *FCMSendError) Error() string {
 	case "UNREGISTERED":
 		return fmt.Sprintf("FCM: device token is no longer valid (app uninstalled or token rotated) [HTTP %d]", e.StatusCode)
 	case "SENDER_ID_MISMATCH":
-		return fmt.Sprintf("FCM: device token belongs to a DIFFERENT Firebase project than this service-account key — the app was built with a google-services.json from another project [HTTP %d]", e.StatusCode)
+		return fmt.Sprintf("FCM: device token belongs to a DIFFERENT Firebase project than this service-account key - the app was built with a google-services.json from another project [HTTP %d]", e.StatusCode)
 	default:
 		return fmt.Sprintf("FCM v1 error %d (%s): %s", e.StatusCode, e.Reason, e.Body)
 	}
@@ -250,10 +297,54 @@ func NewFCMClient(credentialsJSON []byte) (*FCMClient, error) {
 	}, nil
 }
 
-// Send delivers a single notification to one device token.
-func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) error {
+// Send delivers a single notification to one device token. Both the
+// android and apns config blocks are always included: FCM applies
+// whichever matches the token's platform and ignores the other, so one
+// payload shape serves Android registration tokens and Firebase-relayed
+// iOS tokens alike. subtitle and badge only render on iOS.
+//
+// critical=true (host down) means sound + heads-up/time-sensitive;
+// false (warnings, recoveries) means silent, low-importance delivery.
+// collapseKey makes newer notifications for the same host replace older
+// ones on both platforms.
+func (c *FCMClient) Send(deviceToken string, title, subtitle, body string, badge *int, data fcmData, critical bool, collapseKey string) error {
 	if deviceToken == "" {
 		return fmt.Errorf("FCM Send: empty device token")
+	}
+
+	androidPriority := "NORMAL"
+	androidNotif := &fcmV1AndroidNotification{
+		ChannelID: androidWarnChannelID,
+		Tag:       collapseKey,
+	}
+	aps := fcmV1APS{
+		Alert: fcmV1APSAlert{
+			Title:    title,
+			Subtitle: subtitle,
+			Body:     body,
+		},
+		Badge:             badge,
+		InterruptionLevel: "passive",
+	}
+	apnsPriority := "5"
+	if critical {
+		// Canonical AndroidMessagePriority enum name. The v1 API also
+		// accepts lowercase "high" (Google's own docs use it), and an
+		// actually-invalid value would be a 400, never a silent
+		// downgrade.
+		androidPriority = "HIGH"
+		androidNotif.Sound = "default"
+		androidNotif.ChannelID = androidChannelID
+		aps.Sound = "default"
+		aps.InterruptionLevel = "time-sensitive"
+		apnsPriority = "10"
+	}
+	apnsHeaders := map[string]string{
+		"apns-priority":  apnsPriority,
+		"apns-push-type": "alert",
+	}
+	if collapseKey != "" {
+		apnsHeaders["apns-collapse-id"] = collapseKey64(collapseKey)
 	}
 
 	req := fcmV1Request{
@@ -265,15 +356,12 @@ func (c *FCMClient) Send(deviceToken string, title, body string, data fcmData) e
 			},
 			Data: data.toMap(),
 			Android: &fcmV1Android{
-				// Canonical AndroidMessagePriority enum name. The v1 API
-				// also accepts lowercase "high" (Google's own docs use it),
-				// and an actually-invalid value would be a 400, never a
-				// silent downgrade.
-				Priority: "HIGH",
-				Notification: &fcmV1AndroidNotification{
-					Sound:     "default",
-					ChannelID: androidChannelID,
-				},
+				Priority:     androidPriority,
+				Notification: androidNotif,
+			},
+			APNS: &fcmV1APNs{
+				Headers: apnsHeaders,
+				Payload: &fcmV1APNsPayload{APS: aps},
 			},
 		},
 	}

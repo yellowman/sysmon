@@ -32,6 +32,16 @@ object StatusStore {
     var loading by mutableStateOf(true)
         private set
 
+    // Debounced connectivity for the LIVE pill: a single failed poll is
+    // routine (stale keep-alive sockets, a blip in coverage) and the next
+    // poll usually succeeds - flipping the pill on every hiccup made it
+    // read OFFLINE half the time on a perfectly healthy connection. Only
+    // consecutive failures count.
+    var offline by mutableStateOf(false)
+        private set
+    private var failStreak = 0
+    private const val OFFLINE_AFTER_FAILURES = 3
+
     private const val POLL_MS = 5000L
 
     private var rev = 0L
@@ -68,15 +78,23 @@ object StatusStore {
 
     private suspend fun fetch() {
         if (!Session.isLoggedIn()) return
-        runCatching {
+        try {
             if (rev == 0L) {
                 val status = Api.status()
                 applyFull(status.hosts, status.statistics, status.daemon, status.rev)
             } else {
                 applyDelta(Api.statusDelta(rev))
             }
-        }.onSuccess { error = null }
-            .onFailure { error = it.message }
+            error = null
+            failStreak = 0
+            offline = false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e // never count a cancelled poll as a network failure
+        } catch (e: Exception) {
+            error = e.message
+            failStreak++
+            if (failStreak >= OFFLINE_AFTER_FAILURES) offline = true
+        }
         loading = false
         Session.alertCount = alerts.size
     }
@@ -116,6 +134,8 @@ object StatusStore {
         stats = null
         daemon = null
         error = null
+        failStreak = 0
+        offline = false
         loading = true
     }
 }

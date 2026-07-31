@@ -368,7 +368,7 @@ func Parse(content []byte) (*models.Config, error) {
 				strings.HasPrefix(line, "push-apns-keyfile ") ||
 				strings.HasPrefix(line, "push-apns-bundleid ") ||
 				line == "push-apns-production" {
-				// Legacy directives — push configuration moved to the
+				// Legacy directives - push configuration moved to the
 				// web-ui settings store (bbolt). Parsed-and-ignored here
 				// for backwards compat with old sysmon.conf files; remove
 				// them from your sysmon.conf and configure push in the
@@ -431,8 +431,20 @@ func Parse(content []byte) (*models.Config, error) {
 				currentHost.Contact = email
 				addContactIfNew(config, email)
 			} else if strings.HasPrefix(line, "dep ") {
+				// sysmond accepts multiple "dep" lines per object and
+				// builds a dependency list from them; assigning here
+				// would silently keep only the last one and drop the
+				// rest on the next save. Accumulate instead - the model
+				// carries them comma-separated, which is also what the
+				// editor UI has always displayed.
 				deps := extractQuoted(strings.TrimPrefix(line, "dep "))
-				currentHost.Dependencies = deps
+				if deps != "" {
+					if currentHost.Dependencies == "" {
+						currentHost.Dependencies = deps
+					} else {
+						currentHost.Dependencies += ", " + deps
+					}
+				}
 			} else if strings.HasPrefix(line, "spawn ") {
 				currentHost.Spawn = extractQuoted(strings.TrimPrefix(line, "spawn "))
 			} else if strings.HasPrefix(line, "port ") {
@@ -563,10 +575,10 @@ func Parse(content []byte) (*models.Config, error) {
 			} else if strings.HasPrefix(line, "page ") {
 				currentHost.Contact = extractQuoted(strings.TrimPrefix(line, "page "))
 			} else if strings.HasPrefix(line, "child ") {
-				// child is inverse of dep — store as dependency for display
+				// child is inverse of dep - store as dependency for display
 				currentHost.Dependencies = extractQuoted(strings.TrimPrefix(line, "child "))
 			} else if strings.HasPrefix(line, "also-notify ") {
-				// additional contact — append to existing contact
+				// additional contact - append to existing contact
 				extra := extractQuoted(strings.TrimPrefix(line, "also-notify "))
 				if currentHost.Contact != "" && extra != "" {
 					currentHost.Contact = currentHost.Contact + "," + extra

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
@@ -32,6 +33,7 @@ import com.sysmon.app.StatusStore
 enum class Tab(val label: String, val icon: ImageVector) {
     Alerts("ALERTS", Icons.Outlined.Notifications),
     Hosts("HOSTS", Icons.Outlined.Storage),
+    History("HISTORY", Icons.Outlined.History),
     Settings("SETTINGS", Icons.Outlined.Settings)
 }
 
@@ -40,9 +42,14 @@ fun MainScreen(onLogout: () -> Unit) {
     // rememberSaveable so the selected tab survives rotation/process death.
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Alerts) }
 
-    // A tapped push notification bumps this counter; jump to Alerts.
+    // A tapped push notification bumps this counter; jump to Alerts - but
+    // only for taps not yet handled. lastHandledNav is saved across
+    // rotation, so a recreated composition seeing an old counter value
+    // doesn't re-fire the jump and override the user's current tab.
+    var lastHandledNav by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(Session.pushNavigateToAlerts) {
-        if (Session.pushNavigateToAlerts > 0) {
+        if (Session.pushNavigateToAlerts > lastHandledNav) {
+            lastHandledNav = Session.pushNavigateToAlerts
             selectedTab = Tab.Alerts
         }
     }
@@ -102,6 +109,7 @@ fun MainScreen(onLogout: () -> Unit) {
                 when (selectedTab) {
                     Tab.Alerts -> AlertsScreen()
                     Tab.Hosts -> HostsScreen()
+                    Tab.History -> HistoryScreen()
                     Tab.Settings -> SettingsScreen(onLogout)
                 }
             }

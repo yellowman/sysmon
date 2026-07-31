@@ -1,0 +1,156 @@
+package monitoring
+
+import (
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+
+	bolt "go.etcd.io/bbolt"
+)
+
+var bucketHistoryEvents = []byte("events")
+
+// History is deliberately near-term: events expire after historyMaxAge.
+// historyMax is a safety backstop against event storms (flapping hosts)
+// within that window.
+const (
+	historyMaxAge = 48 * time.Hour
+	historyMax    = 5000
+)
+
+// HistoryEvent is one observed host state transition - the raw material
+// of "what has been going up and down" over the last 48 hours.
+type HistoryEvent struct {
+	Timestamp   string `json:"timestamp"` // RFC3339
+	ObjectName  string `json:"object_name"`
+	Hostname    string `json:"hostname"`
+	Description string `json:"description,omitempty"`
+	PrevStatus  string `json:"prev_status"`
+	NewStatus   string `json:"new_status"`
+	// Seconds the host had spent in PrevStatus, when known. 0 means
+	// unknown (first transition observed after a sysmon-web restart).
+	PrevDuration int64 `json:"prev_duration_seconds,omitempty"`
+}
+
+// HistoryStore persists host transitions to bbolt so the record survives
+// restarts. Fed by the monitoring poller's snapshot diff, so it works
+// regardless of whether push notifications are enabled.
+type HistoryStore struct {
+	mu         sync.Mutex
+	db         *bolt.DB
+	lastChange map[string]time.Time // per object; in-memory, so durations reset on restart
+}
+
+func OpenHistory(path string) (*HistoryStore, error) {
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		return nil, fmt.Errorf("open history database: %w", err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(bucketHistoryEvents)
+		return err
+	}); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init history database: %w", err)
+	}
+	return &HistoryStore{db: db, lastChange: make(map[string]time.Time)}, nil
+}
+
+func (h *HistoryStore) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.db.Close()
+}
+
+// Append records a batch of transitions, filling in how long each host
+// had been in its previous state where we know it.
+func (h *HistoryStore) Append(events []HistoryEvent) {
+	if len(events) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	now := time.Now().UTC()
+	h.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketHistoryEvents)
+		for i := range events {
+			ev := &events[i]
+			ev.Timestamp = now.Format(time.RFC3339)
+			if last, ok := h.lastChange[ev.ObjectName]; ok {
+				ev.PrevDuration = int64(now.Sub(last).Seconds())
+			}
+			h.lastChange[ev.ObjectName] = now
+			data, err := json.Marshal(ev)
+			if err != nil {
+				continue
+			}
+			id, _ := b.NextSequence()
+			if err := b.Put([]byte(fmt.Sprintf("%012d", id)), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	// Transitions are rare, so pruning on every append is cheap.
+	h.prune(now)
+}
+
+// prune drops entries older than historyMaxAge, plus the oldest entries
+// beyond the historyMax backstop. Keys are chronological, so both walks
+// stop at the first survivor. Caller holds mu.
+func (h *HistoryStore) prune(now time.Time) {
+	cutoff := now.Add(-historyMaxAge)
+	h.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketHistoryEvents)
+		c := b.Cursor()
+		excess := b.Stats().KeyN - historyMax
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			expired := false
+			var ev HistoryEvent
+			if json.Unmarshal(v, &ev) == nil {
+				if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
+					expired = t.Before(cutoff)
+				}
+			} else {
+				expired = true // unparseable rows are dead weight
+			}
+			if !expired && excess <= 0 {
+				break
+			}
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+			excess--
+		}
+		return nil
+	})
+}
+
+// Recent returns up to limit events from the last 48 hours, newest
+// first. The age check happens here too, not just in prune, so a quiet
+// system never serves stale events between prunes.
+func (h *HistoryStore) Recent(limit int) []HistoryEvent {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	cutoff := time.Now().UTC().Add(-historyMaxAge)
+	out := make([]HistoryEvent, 0, limit)
+	h.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketHistoryEvents).Cursor()
+		for k, v := c.Last(); k != nil && len(out) < limit; k, v = c.Prev() {
+			var ev HistoryEvent
+			if json.Unmarshal(v, &ev) != nil {
+				continue
+			}
+			if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil && t.Before(cutoff) {
+				break // keys are chronological: everything further back is older
+			}
+			out = append(out, ev)
+		}
+		return nil
+	})
+	return out
+}

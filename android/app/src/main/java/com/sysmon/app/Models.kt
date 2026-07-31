@@ -83,6 +83,30 @@ data class ApiError(val error: String = "", val message: String = "")
 @Serializable
 data class TestPushResponse(val status: String = "", val warning: String? = null)
 
+@Serializable
+data class HistoryEvent(
+    val timestamp: String = "",
+    @SerialName("object_name") val objectName: String = "",
+    val hostname: String = "",
+    val description: String = "",
+    @SerialName("prev_status") val prevStatus: String = "",
+    @SerialName("new_status") val newStatus: String = "",
+    @SerialName("prev_duration_seconds") val prevDuration: Long = 0
+)
+
+@Serializable
+data class HistoryResponse(
+    val events: List<HistoryEvent> = emptyList(),
+    val available: Boolean = true
+)
+
+fun relativeTime(iso: String): String = runCatching {
+    val secs = java.time.Duration.between(
+        java.time.Instant.parse(iso), java.time.Instant.now()
+    ).seconds
+    if (secs < 5) "just now" else formatUptime(secs) + " ago"
+}.getOrDefault(iso)
+
 fun formatUptime(seconds: Long): String {
     if (seconds <= 0) return "0s"
     val d = seconds / 86400

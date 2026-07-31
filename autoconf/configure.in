@@ -354,7 +354,13 @@ LIBS_SAVE="$LIBS"
 
 LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
-AC_CHECK_HEADERS(net-snmp/version.h,IS_NET_SNMP="yes")
+dnl net-snmp/version.h uses the NETSNMP_IMPORT macro, which is only
+dnl defined once net-snmp-config.h has been included. Checking it on its
+dnl own fails to compile on every modern net-snmp, so SNMP support was
+dnl silently dropped from the build - a daemon that then rejects every
+dnl "type snmp" object at config load. Include the config header first.
+AC_CHECK_HEADERS(net-snmp/version.h,IS_NET_SNMP="yes",,
+[#include <net-snmp/net-snmp-config.h>])
 if test "$IS_NET_SNMP" = "yes"; then
         AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
         AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")

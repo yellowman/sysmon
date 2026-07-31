@@ -35,6 +35,8 @@ type Service struct {
 	sessionLog *SessionLogger
 
 	cacheMu      sync.Mutex
+	// history, when set, receives every observed host status transition.
+	history *HistoryStore
 	cachedStatus *models.SysmonStatus
 	cacheTime    time.Time
 	fetching     bool
@@ -169,6 +171,21 @@ type ResponseCapture struct {
 }
 
 // NewService creates a new monitoring service
+// SetHistory attaches a transition-history store; every status change
+// observed by the snapshot differ is appended to it.
+func (s *Service) SetHistory(h *HistoryStore) {
+	s.cacheMu.Lock()
+	s.history = h
+	s.cacheMu.Unlock()
+}
+
+// History returns the attached store, or nil.
+func (s *Service) History() *HistoryStore {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return s.history
+}
+
 func NewService(sysmonAddr string) *Service {
 	return &Service{
 		sysmonAddr: sysmonAddr,
@@ -188,7 +205,7 @@ func hostKey(h *models.HostStatus) string {
 }
 
 // hostSignature hashes the fields that represent a host's *state*,
-// deliberately excluding everything that ticks without a real change —
+// deliberately excluding everything that ticks without a real change -
 // TimeUp/TimeFailed (computed from now()), the per-check timestamps and
 // response times, and ALL check counters (down/up/total): sysmond bumps
 // them on every single check run (TotalDown counts failed checks, not
@@ -350,7 +367,7 @@ type XMLObjectStatus struct {
 // request would refetch. The background poller (StartPoller) refreshes
 // well within this window, so user/app requests are served from a warm
 // cache and never block on the expensive per-host sysmond fetch. The TTL
-// is the fallback if the poller stalls or sysmond goes away — after it,
+// is the fallback if the poller stalls or sysmond goes away - after it,
 // requests refetch and surface the real error.
 const statusCacheTTL = 10 * time.Second
 
@@ -365,7 +382,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 			return cached, nil
 		}
 
-		// Another goroutine is already fetching — wait for it
+		// Another goroutine is already fetching - wait for it
 		if s.fetching {
 			done := s.fetchDone
 			s.cacheMu.Unlock()
@@ -381,13 +398,18 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		status, err := s.fetchStatus()
 
 		s.cacheMu.Lock()
+		var events []HistoryEvent
 		if err == nil {
-			s.storeSnapshotLocked(status)
+			events = s.storeSnapshotLocked(status)
 		}
+		hist := s.history
 		s.fetching = false
 		close(s.fetchDone)
 		s.cacheMu.Unlock()
 
+		if hist != nil {
+			hist.Append(events)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -403,7 +425,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 func (s *Service) Refresh() {
 	s.cacheMu.Lock()
 	if s.fetching {
-		// A fetch is already in progress — that's enough.
+		// A fetch is already in progress - that's enough.
 		s.cacheMu.Unlock()
 		return
 	}
@@ -414,12 +436,18 @@ func (s *Service) Refresh() {
 	status, err := s.fetchStatus()
 
 	s.cacheMu.Lock()
+	var events []HistoryEvent
 	if err == nil {
-		s.storeSnapshotLocked(status)
+		events = s.storeSnapshotLocked(status)
 	}
+	hist := s.history
 	s.fetching = false
 	close(s.fetchDone)
 	s.cacheMu.Unlock()
+
+	if hist != nil {
+		hist.Append(events)
+	}
 }
 
 // storeSnapshotLocked installs a freshly fetched snapshot and updates the
@@ -427,7 +455,30 @@ func (s *Service) Refresh() {
 // host's state signature changed or a host was added/removed, stamping
 // each changed host with the new rev, so GetDelta can answer "what
 // changed since rev N". It also sets status.Rev.
-func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) {
+func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) []HistoryEvent {
+	// Diff overall status against the previous snapshot for the history
+	// log. Baseline (first snapshot) records nothing.
+	var transitions []HistoryEvent
+	if s.cachedStatus != nil {
+		prev := make(map[string]string, len(s.cachedStatus.Hosts))
+		for i := range s.cachedStatus.Hosts {
+			h := &s.cachedStatus.Hosts[i]
+			prev[hostKey(h)] = h.OverallStatus
+		}
+		for i := range status.Hosts {
+			h := &status.Hosts[i]
+			if old, ok := prev[hostKey(h)]; ok && old != h.OverallStatus {
+				transitions = append(transitions, HistoryEvent{
+					ObjectName:  h.ObjectName,
+					Hostname:    h.Hostname,
+					Description: h.Description,
+					PrevStatus:  old,
+					NewStatus:   h.OverallStatus,
+				})
+			}
+		}
+	}
+
 	newSig := make(map[string]uint64, len(status.Hosts))
 	changed := false
 	for i := range status.Hosts {
@@ -464,6 +515,7 @@ func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) {
 	status.Rev = s.rev
 	s.cachedStatus = status
 	s.cacheTime = time.Now()
+	return transitions
 }
 
 // pruneRemovedLocked bounds the removal log. When it overflows we drop the
@@ -500,7 +552,10 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
-	d := &models.StatusDelta{Rev: s.rev}
+	// Changed must never marshal as JSON null - strictly-typed clients
+	// (kotlinx.serialization, Swift Codable) reject null for a list, which
+	// turned every idle delta poll into a decode error on the apps.
+	d := &models.StatusDelta{Rev: s.rev, Changed: []models.HostStatus{}}
 	cur := s.cachedStatus
 	if cur == nil {
 		d.Full = true
@@ -511,11 +566,13 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 
 	if since <= 0 || since < s.minDeltaRev || since > s.rev {
 		d.Full = true
-		d.Changed = cur.Hosts
+		if cur.Hosts != nil {
+			d.Changed = cur.Hosts
+		}
 		return d
 	}
 	if since == s.rev {
-		return d // up to date — nothing changed
+		return d // up to date - nothing changed
 	}
 	for i := range cur.Hosts {
 		if s.hostRev[hostKey(&cur.Hosts[i])] > since {
@@ -532,7 +589,7 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 
 // StartPoller runs a background goroutine that refreshes the status cache
 // every interval, so the expensive per-host sysmond fetch happens off the
-// request path and UI/app requests always hit a warm cache. Idempotent —
+// request path and UI/app requests always hit a warm cache. Idempotent -
 // only the first call starts a poller. Primes the cache once immediately.
 func (s *Service) StartPoller(interval time.Duration) {
 	s.pollOnce.Do(func() {

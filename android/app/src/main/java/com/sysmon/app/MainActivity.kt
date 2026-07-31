@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
                 Session.pushStatus = null
                 registerForFcm()
             } else {
-                Session.pushStatus = "Notifications denied — enable in system settings"
+                Session.pushStatus = "Notifications denied - enable in system settings"
             }
         }
 
@@ -53,6 +53,12 @@ class MainActivity : ComponentActivity() {
             extras.containsKey("hostname")
         if (fromPush) {
             Session.requestNavigateToAlerts()
+            // Consume the extras: on rotation the recreated activity gets
+            // this same intent back, and without stripping them every
+            // config change re-fired the jump - yanking the user back to
+            // the Alerts tab forever after one notification tap.
+            intent.removeExtra(EXTRA_NAVIGATE)
+            intent.removeExtra("hostname")
         }
     }
 

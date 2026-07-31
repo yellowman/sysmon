@@ -26,7 +26,7 @@ object SysmonColors {
     val Unknown = Color(0xFFB58900)
     val Acked = Color(0xFF555555)
 
-    // Brighter status variants for dark mode — the light-mode inks go
+    // Brighter status variants for dark mode - the light-mode inks go
     // muddy on near-black.
     val UpBright = Color(0xFF4CC38A)
     val DownBright = Color(0xFFFF6369)

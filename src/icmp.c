@@ -190,7 +190,17 @@ void	handle_icmp_responses()
 				print_err(1, "comparing rcvd_data echo_id w/ ident sent (got %d and %d was sent)", rcvd_data.icp->ICMP_ECHO_ID, localstruct->ident);
 
 #endif /* DEBUG */
-			if (rcvd_data.icp->ICMP_ECHO_ID == localstruct->ident)
+			/* Ident alone is not proof of ownership: idents are 16
+			 * bits and recycled, and the network can duplicate,
+			 * delay, or reflect echo replies. Without also matching
+			 * the reply's SOURCE ADDRESS to the host this check is
+			 * pinging, a stray reply can "revive" an unrelated down
+			 * host for one cycle - and one network event can blip
+			 * many down hosts at once, resetting their outage
+			 * clocks and re-paging contacts. */
+			if (rcvd_data.icp->ICMP_ECHO_ID == localstruct->ident &&
+			    localstruct->to != NULL &&
+			    from.sin_addr.s_addr == localstruct->to->sin_addr.s_addr)
 			{
 				if (debug_icmp_replies_only || here->checkent->trace)
 				{
@@ -199,8 +209,8 @@ void	handle_icmp_responses()
 				/* Increment our count */
 			        localstruct->nreceived++;
 
-				/* go on already */
-				continue;
+				/* a reply belongs to exactly one check */
+				break;
 			}
 		}
 	}
@@ -1255,9 +1265,13 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		/* Parse ICMP header */
 		icmp_hdr = (struct ICMPHDR *)(recv_buf + ip_hdr_len);
 
-		/* Check if this is our ICMP echo reply */
+		/* Check if this is our ICMP echo reply - ident AND source
+		 * address, since the raw socket sees every echo reply on the
+		 * machine (see handle_icmp_responses). */
 		if (icmp_hdr->ICMP_TYPE == ICMP_ECHOREPLY &&
-		    icmp_hdr->ICMP_ECHO_ID == ping->ident) {
+		    icmp_hdr->ICMP_ECHO_ID == ping->ident &&
+		    ping->to != NULL &&
+		    from.sin_addr.s_addr == ping->to->sin_addr.s_addr) {
 
 			/* Calculate RTT */
 			rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, &recv_time);
