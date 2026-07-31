@@ -84,6 +84,8 @@ final class StatusStore: ObservableObject {
             offline = false
         } catch is CancellationError {
             return // never count a cancelled poll as a network failure
+        } catch let e as URLError where e.code == .cancelled {
+            return // URLSession's flavor of cancellation (stop() mid-request)
         } catch let e as APIError {
             error = e.message
             noteFailure()
@@ -124,7 +126,12 @@ final class StatusStore: ObservableObject {
     }
 
     private func rebuildHosts() {
-        hosts = hostIndex.values.sorted { $0.hostname < $1.hostname }
+        // Secondary key: dictionary order is nondeterministic and Swift's
+        // sort is unstable, so hosts sharing a hostname (multiple objects
+        // on one IP) would visually swap rows between polls without it.
+        hosts = hostIndex.values.sorted {
+            ($0.hostname, $0.id) < ($1.hostname, $1.id)
+        }
     }
 
     private func publishAlertCount() {
