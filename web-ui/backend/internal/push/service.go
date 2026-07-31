@@ -757,19 +757,65 @@ func (s *Service) IsOwner(token, owner string) bool {
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
-	s.opsMu.RLock()
-	defer s.opsMu.RUnlock()
-	if s.stopped {
-		return ErrServiceStopped
+	err := func() error {
+		s.opsMu.RLock()
+		defer s.opsMu.RUnlock()
+		if s.stopped {
+			return ErrServiceStopped
+		}
+		return s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
+	}()
+	if errors.Is(err, ErrServiceStopped) {
+		return err
 	}
-	err := s.sendToDevice(token, platform, "sysmon test", "", "push notifications are working")
 	if err != nil {
 		var kr *KeyRejectedError
 		if errors.As(err, &kr) {
 			s.kickKeyCheck()
 		}
 	}
+
+	// Tests used to be invisible — they bypassed both the per-device
+	// stats and the push log, so "the log never shows the test button"
+	// read as "tests don't reach the server". Record them like any
+	// other send, marked as tests. (Outside the RLock above: RecordPush
+	// and appendPushLog take their own, and recursive RLock can
+	// deadlock against a queued Stop.)
+	status := "ok (test)"
+	sent := 1
+	if err != nil {
+		status = pushFailStatus(err) + " (test)"
+		sent = 0
+	}
+	s.RecordPush(token, err == nil, status)
+	label := token
+	if len(label) > 12 {
+		label = label[:12] + "…"
+	}
+	s.appendPushLog(pushLogEntry{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Hostname:   "Test push → " + label,
+		Status:     "TEST",
+		Recipients: sent,
+	})
 	return err
+}
+
+// appendPushLog writes an entry to the push log bucket, guarded against
+// a concurrent Stop.
+func (s *Service) appendPushLog(entry pushLogEntry) {
+	s.opsMu.RLock()
+	defer s.opsMu.RUnlock()
+	if s.stopped {
+		return
+	}
+	if data, err := json.Marshal(entry); err == nil {
+		s.db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(bucketPushLog)
+			id, _ := b.NextSequence()
+			return b.Put([]byte(fmt.Sprintf("%010d", id)), data)
+		})
+	}
 }
 
 func (s *Service) subscriberCount() int {
@@ -858,20 +904,13 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 	s.lastPushInfo = fmt.Sprintf("%s (%s → %s): %d recipient(s)", hostname, prevStatus, status, sent)
 	s.mu.Unlock()
 
-	entry := pushLogEntry{
+	s.appendPushLog(pushLogEntry{
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Hostname:   hostname,
 		Status:     status,
 		PrevStatus: prevStatus,
 		Recipients: sent,
-	}
-	if data, err := json.Marshal(entry); err == nil {
-		s.db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket(bucketPushLog)
-			id, _ := b.NextSequence()
-			return b.Put([]byte(fmt.Sprintf("%010d", id)), data)
-		})
-	}
+	})
 }
 
 func (s *Service) watchLoop() {

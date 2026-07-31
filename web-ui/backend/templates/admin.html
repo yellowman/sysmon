@@ -524,7 +524,8 @@
                              'border-red-500 bg-red-50': entry.status === 'CRITICAL',
                              'border-yellow-500 bg-yellow-50': entry.status === 'WARNING',
                              'border-green-500 bg-green-50': entry.status === 'OK',
-                             'border-gray-400 bg-gray-50': !['CRITICAL','WARNING','OK'].includes(entry.status)
+                             'border-blue-400 bg-blue-50': entry.status === 'TEST',
+                             'border-gray-400 bg-gray-50': !['CRITICAL','WARNING','OK','TEST'].includes(entry.status)
                          }">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center space-x-2">
@@ -533,9 +534,12 @@
                                       :class="{
                                           'bg-red-100 text-red-800': entry.status === 'CRITICAL',
                                           'bg-yellow-100 text-yellow-800': entry.status === 'WARNING',
-                                          'bg-green-100 text-green-800': entry.status === 'OK'
+                                          'bg-green-100 text-green-800': entry.status === 'OK',
+                                          'bg-blue-100 text-blue-800': entry.status === 'TEST'
                                       }"
-                                      x-text="entry.prev_status + ' → ' + entry.status"></span>
+                                      x-text="entry.status === 'TEST'
+                                          ? (entry.recipients > 0 ? 'TEST · SENT' : 'TEST · FAILED')
+                                          : (entry.prev_status + ' → ' + entry.status)"></span>
                             </div>
                             <div class="text-xs text-gray-500 mt-0.5" x-text="formatTime(entry.timestamp)"></div>
                         </div>
