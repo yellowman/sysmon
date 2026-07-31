@@ -534,6 +534,21 @@ fun WarningBanner(message: String, actionLabel: String? = null, onAction: (() ->
 }
 
 @Composable
+fun CenteredSpinner() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+@Composable
 fun EmptyState(message: String) {
     Box(
         modifier = Modifier
