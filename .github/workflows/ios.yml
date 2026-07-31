@@ -1,0 +1,65 @@
+# Build the iOS app on GitHub's macOS runners - no locally owned Mac
+# involved. Produces an UNSIGNED .ipa artifact on every push that
+# touches ios/. Install it with a re-signing sideloader (AltStore,
+# Sideloadly - both work with a free Apple ID), or add signing secrets
+# later for TestFlight/App Store distribution.
+#
+# This is also the compile check for the Swift code: the repo's dev
+# environment has no Swift toolchain, so a green run here is the proof
+# the app builds.
+name: iOS build
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (unsigned device binary)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Sysmon.xcodeproj \
+            -scheme Sysmon \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            build
+
+      - name: Package unsigned IPA
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Sysmon.app Payload/
+          zip -qry Sysmon-unsigned.ipa Payload
+          ls -la Sysmon-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sysmon-unsigned-ipa
+          path: ios/Sysmon-unsigned.ipa
+          retention-days: 30
