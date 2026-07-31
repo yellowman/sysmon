@@ -43,6 +43,9 @@
                         <a href="/hosts.html" class="nav-link {{if eq .Active "hosts"}}active{{end}}">
                             <i class="fas fa-server mr-2"></i>Hosts
                         </a>
+                        <a href="/map.html" class="nav-link {{if eq .Active "map"}}active{{end}}">
+                            <i class="fas fa-sitemap mr-2"></i>Map
+                        </a>
                         <a href="/traps.html" class="nav-link {{if eq .Active "traps"}}active{{end}}">
                             <i class="fas fa-exclamation-triangle mr-2"></i>SNMP Traps
                         </a>
@@ -77,6 +80,7 @@
             <div class="px-4 py-3 space-y-2">
                 <a href="/" class="mobile-nav {{if eq .Active "dashboard"}}active{{end}}"><i class="fas fa-tachometer-alt mr-2 w-5 text-center"></i>Dashboard</a>
                 <a href="/hosts.html" class="mobile-nav {{if eq .Active "hosts"}}active{{end}}"><i class="fas fa-server mr-2 w-5 text-center"></i>Hosts</a>
+                <a href="/map.html" class="mobile-nav {{if eq .Active "map"}}active{{end}}"><i class="fas fa-sitemap mr-2 w-5 text-center"></i>Map</a>
                 <a href="/traps.html" class="mobile-nav {{if eq .Active "traps"}}active{{end}}"><i class="fas fa-exclamation-triangle mr-2 w-5 text-center"></i>SNMP Traps</a>
                 <a href="/history.html" class="mobile-nav {{if eq .Active "history"}}active{{end}}"><i class="fas fa-clock-rotate-left mr-2 w-5 text-center"></i>History</a>
                 <a href="/config.html" class="mobile-nav {{if eq .Active "config"}}active{{end}}"><i class="fas fa-cog mr-2 w-5 text-center"></i>Configuration</a>

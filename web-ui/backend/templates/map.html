@@ -1,0 +1,605 @@
+{{template "base" .}}
+
+{{define "title"}}Map{{end}}
+
+{{define "content"}}
+<div x-data="mapPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
+        <div>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Dependency Map</h1>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide">
+                <span x-show="!editMode">Live view of every host and what it depends on</span>
+                <span x-show="editMode">Edit mode - add hosts, draw dependencies, then save</span>
+            </p>
+        </div>
+        <div class="flex items-center gap-2">
+            <input type="text" x-model="search" placeholder="Find host..."
+                   class="px-3 py-1.5 border border-gray-200 rounded text-sm w-44">
+            <button @click="expandAll()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Expand all">
+                <i class="fas fa-angles-down"></i>
+            </button>
+            <button @click="collapseAll()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Collapse to roots">
+                <i class="fas fa-angles-up"></i>
+            </button>
+            <button @click="fit()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Fit to view">
+                <i class="fas fa-expand"></i>
+            </button>
+            <template x-if="!editMode">
+                <button @click="enterEdit()" class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
+                    <i class="fas fa-pen-to-square mr-1"></i>Edit
+                </button>
+            </template>
+            <template x-if="editMode">
+                <div class="flex items-center gap-2">
+                    <button @click="addHost()" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                        <i class="fas fa-plus mr-1"></i>Add Host
+                    </button>
+                    <button @click="save()" :disabled="saving || !dirty"
+                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">
+                        <i class="fas fa-save mr-1"></i><span x-text="saving ? 'Saving...' : 'Save'"></span>
+                    </button>
+                    <button @click="exitEdit()" class="px-3 py-1.5 text-gray-600 text-sm rounded hover:bg-gray-100">Done</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Status / hints -->
+    <div x-show="linking" class="mb-3 text-sm bg-blue-50 border border-blue-200 rounded p-3 text-blue-900">
+        Linking <b x-text="linking"></b> - click the host it should depend on, or
+        <button @click="linking = null" class="underline">cancel</button>.
+    </div>
+    <div x-show="notice" x-cloak class="mb-3 text-sm bg-amber-50 border border-amber-200 rounded p-3 text-amber-900" x-text="notice"></div>
+
+    <div class="flex items-center gap-4 mb-2 text-xs text-gray-500">
+        <span><span x-text="stats.total"></span> hosts</span>
+        <span><span x-text="stats.roots"></span> roots</span>
+        <span><span x-text="stats.depth"></span> levels deep</span>
+        <span x-show="stats.hidden > 0" class="text-blue-600">
+            <span x-text="stats.hidden"></span> hidden in collapsed branches
+        </span>
+        <span class="ml-auto">Drag to pan, scroll to zoom<span x-show="editMode">, click the link handle to draw a dependency</span></span>
+    </div>
+
+    <!-- The canvas is rendered as an SVG STRING swapped in via x-html.
+         Alpine's x-for cannot drive SVG children (inside <svg> the HTML
+         parser creates SVG-namespaced "template" elements with no
+         .content), and one innerHTML swap also beats thousands of
+         per-node reactive bindings at 800+ hosts. Clicks are delegated. -->
+    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden"
+         x-ref="canvas"
+         :style="'height:68vh;cursor:' + (pan.active ? 'grabbing' : 'grab')"
+         x-html="svgMarkup"
+         x-effect="svgMarkup, $nextTick(() => applyTransform())"
+         @click="onCanvasClick($event)"
+         @mousedown="panStart($event)" @mousemove="panMove($event)"
+         @mouseup="panEnd()" @mouseleave="panEnd()" @wheel.prevent="wheel($event)"></div>
+
+    <div x-show="!loading && stats.total === 0" class="text-center text-gray-400 text-sm mt-4">
+        No hosts configured yet<span x-show="editMode"> - click "Add Host" to start</span>.
+    </div>
+
+    <!-- Inspector -->
+    <div x-show="selected" x-cloak class="mt-4 card p-4">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-gray-900">
+                <span x-text="selected?.id"></span>
+                <span x-show="statusOf(selected?.id)" class="ml-2 px-1.5 py-0.5 rounded text-xs font-medium"
+                      :class="badgeClass(statusOf(selected?.id))" x-text="statusOf(selected?.id)"></span>
+            </h3>
+            <button @click="selected = null" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+
+        <!-- read-only view -->
+        <template x-if="selected && !editMode">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div><div class="text-xs text-gray-400">Address</div><div class="mono" x-text="selected.ip || '-'"></div></div>
+                <div><div class="text-xs text-gray-400">Type</div><div x-text="selected.type || 'ping'"></div></div>
+                <div><div class="text-xs text-gray-400">Depends on</div><div class="mono" x-text="selected.dependencies || '(root)'"></div></div>
+                <div><div class="text-xs text-gray-400">Description</div><div x-text="selected.notes || '-'"></div></div>
+                <div class="col-span-2 md:col-span-4">
+                    <a :href="'/host-detail.html?hostname=' + encodeURIComponent(selected.id)"
+                       class="text-blue-600 text-xs hover:underline">Open host detail &rarr;</a>
+                </div>
+            </div>
+        </template>
+
+        <!-- editable -->
+        <template x-if="selected && editMode">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Object name</label>
+                    <input type="text" :value="selected.id" @change="renameHost(selected, $event.target.value)"
+                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">IP address / hostname</label>
+                    <input type="text" x-model="selected.ip" @input="dirty = true"
+                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Check type</label>
+                    <select x-model="selected.type" @change="dirty = true; layout()"
+                            class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
+                        <template x-for="t in ['ping','pingv6','tcp','http','dns','smtp','imap','pop3','snmp','ssh','radius','nntp']" :key="t">
+                            <option :value="t" x-text="t"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Depends on</label>
+                    <select x-model="selected.dependencies" @change="onDepChange(selected)"
+                            class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
+                        <option value="">(none - root)</option>
+                        <template x-for="h in hosts" :key="h.id">
+                            <option x-show="h.id !== selected.id" :value="h.id" x-text="h.id"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Port (tcp/http/etc)</label>
+                    <input type="number" x-model.number="selected.port" @input="dirty = true"
+                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                    <input type="text" x-model="selected.notes" @input="dirty = true; layout()"
+                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
+                </div>
+                <div class="md:col-span-2 flex justify-between items-center pt-1">
+                    <button @click="startLink(selected)" class="text-blue-600 text-xs hover:underline">
+                        <i class="fas fa-link mr-1"></i>Draw dependency from this host
+                    </button>
+                    <button @click="deleteHost(selected)" class="px-3 py-1.5 text-red-600 text-sm rounded hover:bg-red-50">
+                        <i class="fas fa-trash mr-1"></i>Delete host
+                    </button>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+function mapPage() {
+    return {
+        hosts: [],
+        version: '',
+        statuses: {},
+        nodes: [],
+        edges: [],
+        collapsed: {},
+        stats: { total: 0, roots: 0, depth: 0, hidden: 0 },
+        selected: null,
+        linking: null,
+        editMode: new URLSearchParams(location.search).get('edit') === '1',
+        dirty: false,
+        saving: false,
+        loading: true,
+        notice: '',
+        search: '',
+        view: { x: 60, y: 40, k: 1 },
+        pan: { active: false, sx: 0, sy: 0, ox: 0, oy: 0 },
+        panMoved: false,
+        statusTimer: null,
+
+        async init() {
+            // The map is drawn from the CONFIG, so paint as soon as that
+            // arrives. Live status only tints the nodes and can be slow on
+            // a cold cache with hundreds of hosts - never block on it.
+            await this.loadConfig();
+            // Big trees are unreadable fully expanded, so start collapsed
+            // below the second level and let the operator open what matters.
+            if (this.hosts.length > 60) this.collapseDeep(2);
+            this.layout();
+            this.$nextTick(() => this.fit());
+            this.loadStatus();   // fire and forget; colors arrive when they do
+            this.statusTimer = setInterval(() => this.loadStatus(), 15000);
+            this.$watch('search', () => this.layout());
+        },
+
+        destroy() { if (this.statusTimer) clearInterval(this.statusTimer); },
+
+        async loadConfig() {
+            try {
+                const r = await apiCall('/api/config');
+                this.hosts = (r.config && r.config.hosts) || [];
+                this.version = r.version || '';
+            } catch (e) {
+                this.notice = 'Could not load configuration: ' + (e.message || e);
+            }
+            this.loading = false;
+        },
+
+        async loadStatus() {
+            try {
+                const r = await apiCall('/api/monitoring/status');
+                const m = {};
+                (r.hosts || []).forEach(h => { m[h.object_name || h.hostname] = h.overall_status; });
+                this.statuses = m;
+                this.layout();
+            } catch (e) { /* map works fine without live status */ }
+        },
+
+        statusOf(id) { return this.statuses[id] || ''; },
+
+        badgeClass(s) {
+            if (s === 'CRITICAL') return 'bg-red-100 text-red-800';
+            if (s === 'WARNING') return 'bg-yellow-100 text-yellow-800';
+            if (s === 'OK') return 'bg-green-100 text-green-800';
+            return 'bg-gray-100 text-gray-600';
+        },
+
+        // sysmon dependencies form a forest (each object names at most one
+        // parent), so a layered walk lays it out deterministically - no
+        // physics, no overlap, and collapsed branches simply aren't walked,
+        // which is what keeps 800+ hosts responsive.
+        layout() {
+            const byId = {};
+            this.hosts.forEach(h => { if (h.id) byId[h.id] = h; });
+            const kids = {}, roots = [];
+            this.hosts.forEach(h => {
+                const p = (h.dependencies || '').trim();
+                if (p && byId[p] && p !== h.id) (kids[p] = kids[p] || []).push(h);
+                else roots.push(h);
+            });
+            Object.values(kids).forEach(l => l.sort((a, b) => a.id.localeCompare(b.id)));
+            roots.sort((a, b) => a.id.localeCompare(b.id));
+
+            // Structural reachability first, ignoring collapse: anything a
+            // root can reach is part of the tree. Without this, hosts hidden
+            // under a collapsed parent look identical to genuine orphans and
+            // get re-drawn as roots.
+            const reachable = new Set();
+            (function mark(list) {
+                list.forEach(h => {
+                    if (reachable.has(h.id)) return;   // also the cycle guard
+                    reachable.add(h.id);
+                    mark(kids[h.id] || []);
+                });
+            })(roots);
+
+            const COL = 215, ROW = 46;
+            const nodes = [], pos = {};
+            const q = this.search.trim().toLowerCase();
+            let row = 0, maxDepth = 0, hidden = 0;
+            const seen = new Set();
+
+            const subtreeSize = (h) => {
+                let n = 0;
+                (kids[h.id] || []).forEach(c => { n += 1 + subtreeSize(c); });
+                return n;
+            };
+
+            const walk = (h, depth) => {
+                if (seen.has(h.id)) return;
+                seen.add(h.id);
+                maxDepth = Math.max(maxDepth, depth);
+                const y = row++ * ROW;
+                pos[h.id] = { x: depth * COL, y };
+                const childCount = (kids[h.id] || []).length;
+                nodes.push({
+                    id: h.id,
+                    label: h.id || h.ip || '(unnamed)',
+                    sub: [h.type || 'ping', h.ip].filter(Boolean).join('  '),
+                    x: depth * COL, y,
+                    kids: childCount,
+                    status: this.statuses[h.id] || '',
+                    match: q ? ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) : false
+                });
+                if (this.collapsed[h.id]) { hidden += subtreeSize(h); return; }
+                (kids[h.id] || []).forEach(c => walk(c, depth + 1));
+            };
+            roots.forEach(r => walk(r, 0));
+            // Only genuinely unreachable hosts (dependency cycles) get
+            // promoted to roots - never ones merely hidden by a collapse.
+            this.hosts.forEach(h => { if (h.id && !reachable.has(h.id)) walk(h, 0); });
+
+            const edges = [];
+            this.hosts.forEach(h => {
+                const p = (h.dependencies || '').trim();
+                if (p && pos[p] && pos[h.id]) {
+                    const a = pos[p], b = pos[h.id];
+                    const mx = (a.x + 72 + b.x - 72) / 2;
+                    edges.push({
+                        id: h.id + '<-' + p,
+                        d: `M ${a.x + 72} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x - 72} ${b.y}`
+                    });
+                }
+            });
+
+            this.nodes = nodes;
+            this.edges = edges;
+            this.stats = { total: this.hosts.length, roots: roots.length, depth: maxDepth + 1, hidden };
+        },
+
+        fillFor(n) {
+            if (n.match) return '#dbeafe';
+            if (n.status === 'CRITICAL') return '#fee2e2';
+            if (n.status === 'WARNING') return '#fef3c7';
+            if (n.status === 'OK') return '#f0fdf4';
+            return '#f8fafc';
+        },
+        strokeFor(n) {
+            if (this.linking === n.id) return '#2563eb';
+            if (this.selected && this.selected.id === n.id) return '#0f172a';
+            if (n.match) return '#3b82f6';
+            if (n.status === 'CRITICAL') return '#ef4444';
+            if (n.status === 'WARNING') return '#f59e0b';
+            return '#cbd5e1';
+        },
+        trim(s) { s = s || ''; return s.length > 21 ? s.slice(0, 20) + '…' : s; },
+
+        toggle(id) {
+            this.collapsed[id] = !this.collapsed[id];
+            this.layout();
+        },
+        collapseDeep(fromDepth) {
+            // collapse every node that has children at or below fromDepth
+            const byId = {}, kids = {};
+            this.hosts.forEach(h => { byId[h.id] = h; });
+            this.hosts.forEach(h => {
+                const p = (h.dependencies || '').trim();
+                if (p && byId[p]) (kids[p] = kids[p] || []).push(h);
+            });
+            const roots = this.hosts.filter(h => {
+                const p = (h.dependencies || '').trim();
+                return !p || !byId[p];
+            });
+            const walk = (h, d) => {
+                if (d >= fromDepth && (kids[h.id] || []).length) this.collapsed[h.id] = true;
+                (kids[h.id] || []).forEach(c => walk(c, d + 1));
+            };
+            roots.forEach(r => walk(r, 0));
+        },
+        expandAll() { this.collapsed = {}; this.layout(); },
+        collapseAll() { this.collapseDeep(0); this.layout(); },
+
+        nodeClick(n) {
+            const host = this.hosts.find(h => h.id === n.id);
+            if (this.linking && this.linking !== n.id) {
+                const child = this.hosts.find(h => h.id === this.linking);
+                if (child) {
+                    if (this.wouldCycle(child.id, n.id)) {
+                        this.notice = 'That link would create a dependency cycle - ignored.';
+                        setTimeout(() => this.notice = '', 4000);
+                    } else {
+                        child.dependencies = n.id;
+                        this.dirty = true;
+                    }
+                }
+                this.linking = null;
+                this.layout();
+                return;
+            }
+            this.selected = host || null;
+        },
+
+        startLink(n) {
+            if (!this.editMode) return;
+            this.linking = this.linking === n.id ? null : n.id;
+        },
+
+        onDepChange(host) {
+            if (host.dependencies && this.wouldCycle(host.id, host.dependencies)) {
+                this.notice = 'That dependency would create a cycle - reverted.';
+                host.dependencies = '';
+                setTimeout(() => this.notice = '', 4000);
+            }
+            this.dirty = true;
+            this.layout();
+        },
+
+        // Walking up from the proposed parent must never reach the child.
+        wouldCycle(childId, parentId) {
+            const byId = {};
+            this.hosts.forEach(h => { byId[h.id] = h; });
+            let cur = byId[parentId], hops = 0;
+            while (cur && hops++ < 5000) {
+                if (cur.id === childId) return true;
+                const p = (cur.dependencies || '').trim();
+                cur = p ? byId[p] : null;
+            }
+            return false;
+        },
+
+        enterEdit() { this.editMode = true; },
+        exitEdit() {
+            if (this.dirty && !confirm('Discard unsaved map changes?')) return;
+            this.editMode = false;
+            this.linking = null;
+            this.selected = null;
+            if (this.dirty) { this.dirty = false; this.loadConfig().then(() => this.layout()); }
+        },
+
+        addHost() {
+            let name = 'new-host', i = 1;
+            while (this.hosts.some(h => h.id === name)) name = 'new-host-' + (++i);
+            const host = {
+                id: name, hostname: '', ip: '', type: 'ping', notes: '',
+                dependencies: this.selected ? this.selected.id : ''
+            };
+            this.hosts.push(host);
+            this.dirty = true;
+            this.selected = host;
+            if (host.dependencies) this.collapsed[host.dependencies] = false;
+            this.layout();
+        },
+
+        renameHost(host, newId) {
+            newId = (newId || '').trim();
+            if (!newId || newId === host.id) return;
+            if (this.hosts.some(h => h !== host && h.id === newId)) {
+                this.notice = 'Another host already uses that name.';
+                setTimeout(() => this.notice = '', 4000);
+                return;
+            }
+            const old = host.id;
+            host.id = newId;
+            // keep children pointing at the renamed parent
+            this.hosts.forEach(h => { if ((h.dependencies || '').trim() === old) h.dependencies = newId; });
+            this.dirty = true;
+            this.layout();
+        },
+
+        deleteHost(host) {
+            if (!confirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
+            const i = this.hosts.indexOf(host);
+            if (i >= 0) this.hosts.splice(i, 1);
+            this.hosts.forEach(h => { if ((h.dependencies || '').trim() === host.id) h.dependencies = ''; });
+            this.selected = null;
+            this.dirty = true;
+            this.layout();
+        },
+
+        async save() {
+            const bad = this.hosts.find(h => !h.id || !h.ip || !h.type);
+            if (bad) {
+                this.notice = 'Every host needs a name, an address, and a check type (check "' + (bad.id || 'unnamed') + '").';
+                return;
+            }
+            this.saving = true;
+            this.notice = '';
+            try {
+                // Re-read, swap in our host list, write back: the map only
+                // owns hosts, so global/spawn/contact settings survive
+                // untouched even if someone edited them meanwhile.
+                const cur = await apiCall('/api/config');
+                const cfg = cur.config || {};
+                cfg.hosts = this.hosts;
+                const r = await apiCall('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        version: cur.version || this.version || '',
+                        config: cfg,
+                        comment: 'Updated via dependency map'
+                    })
+                });
+                this.version = r.version || this.version;
+                this.dirty = false;
+                this.notice = 'Saved. Reload sysmond to apply.';
+                setTimeout(() => this.notice = '', 5000);
+            } catch (e) {
+                this.notice = 'Save failed: ' + (e.message || e);
+            }
+            this.saving = false;
+        },
+
+        // Escape text for safe inclusion in the generated SVG.
+        esc(t) {
+            return String(t == null ? '' : t)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        },
+
+        get svgMarkup() {
+            let out = '<svg width="100%" height="100%" style="user-select:none;">' +
+                '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" ' +
+                'markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+                '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>' +
+                // No transform here: pan/zoom is applied imperatively via
+                // applyTransform(), so dragging never rebuilds the markup.
+                // At 810 nodes a rebuild costs ~1s; an attribute write is free.
+                '<g data-viewport>';
+
+            for (const e of this.edges) {
+                out += '<path d="' + e.d + '" fill="none" stroke="#cbd5e1" stroke-width="1.5" marker-end="url(#arrow)"/>';
+            }
+            for (const n of this.nodes) {
+                const id = this.esc(n.id);
+                out += '<g transform="translate(' + n.x + ',' + n.y + ')" data-node="' + id + '" style="cursor:pointer;">' +
+                    '<rect x="-72" y="-17" width="144" height="34" rx="7" fill="' + this.fillFor(n) +
+                    '" stroke="' + this.strokeFor(n) + '" stroke-width="' +
+                    ((this.linking === n.id || (this.selected && this.selected.id === n.id) || n.match) ? 2.5 : 1.25) + '"/>' +
+                    '<text x="0" y="-3" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0f172a">' +
+                    this.esc(this.trim(n.label)) + '</text>' +
+                    '<text x="0" y="9" text-anchor="middle" font-size="8" fill="#64748b">' +
+                    this.esc(n.sub) + '</text>';
+                if (n.kids > 0) {
+                    out += '<g data-toggle="' + id + '">' +
+                        '<circle cx="-72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
+                        '<text x="-72" y="3" text-anchor="middle" font-size="9" fill="#475569" style="pointer-events:none;">' +
+                        (this.collapsed[n.id] ? ('+' + n.kids) : '\u2212') + '</text></g>';
+                }
+                if (this.editMode) {
+                    out += '<g data-link="' + id + '">' +
+                        '<circle cx="72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
+                        '<text x="72" y="3" text-anchor="middle" font-size="8" fill="#475569" style="pointer-events:none;">\u2197</text></g>';
+                }
+                out += '</g>';
+            }
+            return out + '</g></svg>';
+        },
+
+        onCanvasClick(e) {
+            if (this.panMoved) { this.panMoved = false; return; }  // ignore click that ended a drag
+            const toggle = e.target.closest('[data-toggle]');
+            if (toggle) { this.toggle(toggle.getAttribute('data-toggle')); return; }
+            const link = e.target.closest('[data-link]');
+            if (link) {
+                const host = this.hosts.find(h => h.id === link.getAttribute('data-link'));
+                if (host) this.startLink(host);
+                return;
+            }
+            const node = e.target.closest('[data-node]');
+            if (node) {
+                const n = this.nodes.find(x => x.id === node.getAttribute('data-node'));
+                if (n) this.nodeClick(n);
+            }
+        },
+
+        applyTransform() {
+            const g = this.$refs.canvas && this.$refs.canvas.querySelector('[data-viewport]');
+            if (g) {
+                g.setAttribute('transform',
+                    'translate(' + this.view.x + ',' + this.view.y + ') scale(' + this.view.k + ')');
+            }
+        },
+
+        // ---- pan / zoom ----
+        panStart(e) {
+            this.pan = { active: true, sx: e.clientX, sy: e.clientY, ox: this.view.x, oy: this.view.y };
+            this.panMoved = false;
+        },
+        panMove(e) {
+            if (!this.pan.active) return;
+            const dx = e.clientX - this.pan.sx, dy = e.clientY - this.pan.sy;
+            if (Math.abs(dx) + Math.abs(dy) > 4) this.panMoved = true;
+            this.view.x = this.pan.ox + dx;
+            this.view.y = this.pan.oy + dy;
+            this.applyTransform();
+        },
+        panEnd() { this.pan.active = false; },
+        wheel(e) {
+            const k = Math.min(2.5, Math.max(0.1, this.view.k * (e.deltaY < 0 ? 1.12 : 0.89)));
+            const rect = e.currentTarget.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            this.view.x = mx - (mx - this.view.x) * (k / this.view.k);
+            this.view.y = my - (my - this.view.y) * (k / this.view.k);
+            this.view.k = k;
+            this.applyTransform();
+        },
+        fit() {
+            if (!this.nodes.length) { this.view = { x: 60, y: 40, k: 1 }; this.applyTransform(); return; }
+            const xs = this.nodes.map(n => n.x), ys = this.nodes.map(n => n.y);
+            const minX = Math.min(...xs) - 90, maxX = Math.max(...xs) + 90;
+            const minY = Math.min(...ys) - 35;
+            const rect = this.$refs.canvas.getBoundingClientRect();
+            // Fit the tree's WIDTH (depth is what must be visible at a
+            // glance) and keep a readability floor - a deep tree is
+            // hundreds of rows tall, and fitting that vertically would
+            // shrink every label into an unreadable smear. Vertical
+            // exploration is what panning is for.
+            const k = Math.min(1.2, Math.max(0.4, (rect.width / (maxX - minX)) * 0.94));
+            this.view = {
+                k,
+                x: (rect.width - (maxX - minX) * k) / 2 - minX * k,
+                y: 24 - minY * k
+            };
+            this.applyTransform();
+        }
+    };
+}
+</script>
+{{end}}
