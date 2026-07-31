@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
@@ -32,6 +33,7 @@ import com.sysmon.app.StatusStore
 enum class Tab(val label: String, val icon: ImageVector) {
     Alerts("ALERTS", Icons.Outlined.Notifications),
     Hosts("HOSTS", Icons.Outlined.Storage),
+    History("HISTORY", Icons.Outlined.History),
     Settings("SETTINGS", Icons.Outlined.Settings)
 }
 
@@ -107,6 +109,7 @@ fun MainScreen(onLogout: () -> Unit) {
                 when (selectedTab) {
                     Tab.Alerts -> AlertsScreen()
                     Tab.Hosts -> HostsScreen()
+                    Tab.History -> HistoryScreen()
                     Tab.Settings -> SettingsScreen(onLogout)
                 }
             }

@@ -1,0 +1,135 @@
+{{template "base" .}}
+
+{{define "title"}}History{{end}}
+
+{{define "content"}}
+<div x-data="historyPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex flex-wrap items-center justify-between mb-6 gap-3">
+        <div>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Alert History</h1>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide">Every host state transition the server has observed</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <input type="text" x-model="search" placeholder="Filter by host..."
+                   class="px-3 py-1.5 border border-gray-200 rounded text-sm w-48">
+            <select x-model="filter" class="px-2 py-1.5 border border-gray-200 rounded text-xs">
+                <option value="all">All events</option>
+                <option value="downs">Downs only</option>
+                <option value="recoveries">Recoveries only</option>
+            </select>
+            <button @click="fetchHistory()" class="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+                <i class="fas fa-sync-alt mr-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div x-show="loading" class="text-center py-16">
+        <div class="inline-block w-8 h-8 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin"></div>
+    </div>
+
+    <!-- Not available -->
+    <div x-show="!loading && !available" class="card p-6 text-sm text-amber-800 bg-amber-50 border-amber-200">
+        History is not available - the server could not open its history store at boot (see the server log).
+    </div>
+
+    <!-- Empty -->
+    <div x-show="!loading && available && filtered.length === 0" class="text-center py-16 text-gray-500">
+        <i class="fas fa-clock-rotate-left text-5xl text-gray-300 mb-3"></i>
+        <p x-text="events.length === 0 ? 'No transitions recorded yet - history builds as hosts change state' : 'No events match the filter'"></p>
+    </div>
+
+    <!-- Event list -->
+    <div x-show="!loading && filtered.length > 0" class="card overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">When</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Host</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transition</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Was in previous state</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-100">
+                <template x-for="(ev, idx) in filtered" :key="idx">
+                    <tr :class="ev.new_status === 'CRITICAL' ? 'bg-red-50/50' : (ev.new_status === 'OK' ? 'bg-green-50/40' : 'bg-amber-50/40')">
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-sm text-gray-900" x-text="formatRelativeTime(ev.timestamp)"></div>
+                            <div class="text-xs text-gray-400" x-text="formatTime(ev.timestamp)"></div>
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="text-sm font-medium text-gray-900 mono" x-text="ev.object_name || ev.hostname"></div>
+                            <div class="text-xs text-gray-400" x-text="ev.description || ev.hostname"></div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <span class="px-1.5 py-0.5 rounded text-xs font-medium"
+                                  :class="badgeClass(ev.prev_status)" x-text="ev.prev_status"></span>
+                            <i class="fas fa-arrow-right text-gray-300 text-xs mx-1"></i>
+                            <span class="px-1.5 py-0.5 rounded text-xs font-medium"
+                                  :class="badgeClass(ev.new_status)" x-text="ev.new_status"></span>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap"
+                            x-text="ev.prev_duration_seconds ? formatUptime(ev.prev_duration_seconds) : '-'"></td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-xs text-gray-400 mt-3" x-show="available"
+       x-text="'Showing ' + filtered.length + ' of ' + events.length + ' recorded transitions (newest first, up to 500)'"></p>
+</div>
+
+<script>
+function historyPage() {
+    return {
+        events: [],
+        available: true,
+        loading: true,
+        filter: 'all',
+        search: '',
+        refreshInterval: null,
+
+        init() {
+            this.fetchHistory();
+            this.refreshInterval = setInterval(() => this.fetchHistory(), 30000);
+        },
+
+        destroy() {
+            if (this.refreshInterval) clearInterval(this.refreshInterval);
+        },
+
+        get filtered() {
+            return this.events.filter(ev => {
+                if (this.filter === 'downs' && ev.new_status === 'OK') return false;
+                if (this.filter === 'recoveries' && ev.new_status !== 'OK') return false;
+                if (this.search) {
+                    const q = this.search.toLowerCase();
+                    const hay = (ev.object_name + ' ' + ev.hostname + ' ' + (ev.description || '')).toLowerCase();
+                    if (!hay.includes(q)) return false;
+                }
+                return true;
+            });
+        },
+
+        badgeClass(status) {
+            if (status === 'CRITICAL') return 'bg-red-100 text-red-800';
+            if (status === 'WARNING') return 'bg-yellow-100 text-yellow-800';
+            if (status === 'OK') return 'bg-green-100 text-green-800';
+            return 'bg-gray-100 text-gray-600';
+        },
+
+        async fetchHistory() {
+            try {
+                const r = await apiCall('/api/monitoring/history?limit=500');
+                this.events = r.events || [];
+                this.available = r.available !== false;
+            } catch (e) {
+                console.error('Failed to fetch history:', e);
+            }
+            this.loading = false;
+        }
+    };
+}
+</script>
+{{end}}

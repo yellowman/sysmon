@@ -93,6 +93,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
+	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
 	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
 	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
@@ -151,6 +152,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/hosts.html", r.handleHostsPage)
 	r.mux.HandleFunc("/host-detail.html", r.handleHostDetailPage)
 	r.mux.HandleFunc("/traps.html", r.handleTrapsPage)
+	r.mux.HandleFunc("/history.html", r.handleHistoryPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
@@ -620,6 +622,28 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 		// No pagination requested, return all traps (backward compatible)
 		r.sendJSON(w, traps)
 	}
+}
+
+// handleMonitoringHistory returns recent host up/down transitions,
+// newest first.
+func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+	hist := r.monitoring.History()
+	if hist == nil {
+		r.sendJSON(w, map[string]interface{}{"events": []interface{}{}, "count": 0, "available": false})
+		return
+	}
+	limit := 200
+	if v := req.URL.Query().Get("limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+	events := hist.Recent(limit)
+	r.sendJSON(w, map[string]interface{}{"events": events, "count": len(events), "available": true})
 }
 
 func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {

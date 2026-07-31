@@ -6,7 +6,7 @@ struct MainView: View {
     @State private var tab: Tab = .alerts
     private let store = StatusStore.shared
 
-    enum Tab { case alerts, hosts, settings }
+    enum Tab { case alerts, hosts, history, settings }
 
     var body: some View {
         TabView(selection: $tab) {
@@ -17,6 +17,9 @@ struct MainView: View {
             HostsView()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
                 .tag(Tab.hosts)
+            HistoryView()
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(Tab.history)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)

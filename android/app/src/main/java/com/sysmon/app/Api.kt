@@ -45,6 +45,11 @@ object Api {
         json.decodeFromString(ListSerializer(Host.serializer()), response)
     }
 
+    suspend fun history(limit: Int = 300): List<HistoryEvent> = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/monitoring/history?limit=$limit", "GET", null)
+        json.decodeFromString(HistoryResponse.serializer(), response).events
+    }
+
     // Acknowledge an active alert. Admin-only on the server.
     suspend fun ackHost(objectName: String) = withContext(Dispatchers.IO) {
         val escaped = java.net.URLEncoder.encode(objectName, "UTF-8").replace("+", "%20")
