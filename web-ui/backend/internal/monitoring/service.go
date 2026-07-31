@@ -500,7 +500,10 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
-	d := &models.StatusDelta{Rev: s.rev}
+	// Changed must never marshal as JSON null — strictly-typed clients
+	// (kotlinx.serialization, Swift Codable) reject null for a list, which
+	// turned every idle delta poll into a decode error on the apps.
+	d := &models.StatusDelta{Rev: s.rev, Changed: []models.HostStatus{}}
 	cur := s.cachedStatus
 	if cur == nil {
 		d.Full = true
@@ -511,7 +514,9 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 
 	if since <= 0 || since < s.minDeltaRev || since > s.rev {
 		d.Full = true
-		d.Changed = cur.Hosts
+		if cur.Hosts != nil {
+			d.Changed = cur.Hosts
+		}
 		return d
 	}
 	if since == s.rev {

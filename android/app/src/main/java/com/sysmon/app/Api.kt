@@ -13,6 +13,10 @@ object Api {
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        // Go marshals nil slices/maps as JSON null; without coercion a
+        // "changed": null in an idle delta throws and every quiet poll
+        // failed. Coerce null to the field's default instead.
+        coerceInputValues = true
     }
 
     class HttpError(val status: Int, message: String) : IOException(message)
