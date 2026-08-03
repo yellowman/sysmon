@@ -128,6 +128,8 @@
          x-effect="svgMarkup, $nextTick(() => { applyTransform(); applySelection(); })"
          @click="onCanvasClick($event)"
          x-effect="selected, $nextTick(() => applySelection())"
+         @contextmenu.prevent="onContextMenu($event)"
+         @scroll="ctx = null"
          @mousedown="panStart($event)" @mousemove="panMove($event)"
          @mouseup="panEnd()" @mouseleave="panEnd()" @wheel.prevent="wheel($event)"></div>
 
@@ -215,6 +217,44 @@
                 </button>
             </div>
         </div>
+    </div>
+
+    <!-- Right-click menu. Anchored where the click landed, dismissed by
+         any click elsewhere, escape, or scrolling the map. -->
+    <div x-show="ctx" x-cloak
+         @click.outside="ctx = null" @keydown.escape.window="ctx = null"
+         :style="ctx ? ('position:fixed;left:' + ctx.x + 'px;top:' + ctx.y + 'px;z-index:60') : 'display:none'"
+         class="bg-white rounded-lg shadow-2xl border border-gray-200 py-1 w-64">
+        <div class="px-3 py-2 border-b border-gray-100">
+            <div class="text-xs text-gray-400">Host</div>
+            <div class="text-sm font-semibold text-gray-900 mono truncate" x-text="ctx?.host?.id"></div>
+        </div>
+        <button @click="newDependentHost(ctx.host)"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2">
+            <i class="fas fa-code-branch text-blue-600 w-4"></i>
+            <span>Create new dependent host</span>
+        </button>
+        <button @click="dependentFromTemplate(ctx.host)"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 flex items-center gap-2">
+            <i class="fas fa-layer-group text-emerald-600 w-4"></i>
+            <span>Add dependent from template...</span>
+        </button>
+        <div class="border-t border-gray-100 my-1"></div>
+        <button @click="openInspector(ctx.host); ctx = null"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2">
+            <i class="fas fa-sliders text-gray-500 w-4"></i>
+            <span>Edit this host</span>
+        </button>
+        <button @click="startLink(ctx.host); ctx = null" x-show="editMode"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2">
+            <i class="fas fa-link text-gray-500 w-4"></i>
+            <span>Draw dependency from here</span>
+        </button>
+        <a :href="'/host-detail.html?hostname=' + encodeURIComponent(ctx?.host?.id || '')"
+           class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 no-underline text-gray-900">
+            <i class="fas fa-chart-line text-gray-500 w-4"></i>
+            <span>Open host detail</span>
+        </a>
     </div>
 
     <!-- Every object name, for the dependency autocompletes. Browsers
@@ -356,6 +396,8 @@ function mapPage() {
         // One editable row per dependency. Backed by the host's
         // comma-separated string, but the operator never sees a comma.
         depRows: [],
+        // Right-click menu: {x, y, host} in viewport pixels.
+        ctx: null,
         linking: null,
         editMode: new URLSearchParams(location.search).get('edit') === '1',
         dirty: false,
@@ -775,6 +817,65 @@ function mapPage() {
         expandAll() { this.collapsed = {}; this.layout(); },
         collapseAll() { this.collapseDeep(0); this.layout(); },
 
+        onContextMenu(e) {
+            const el = e.target.closest && e.target.closest('[data-node]');
+            if (!el) { this.ctx = null; return; }
+            const host = this.hosts.find(h => h.id === el.getAttribute('data-node'));
+            if (!host) { this.ctx = null; return; }
+            // Keep the menu on screen near the pointer.
+            this.ctx = {
+                host,
+                x: Math.min(e.clientX, window.innerWidth - 280),
+                y: Math.min(e.clientY, window.innerHeight - 260)
+            };
+        },
+
+        // Open the inspector modal for a host (shared by click and menu).
+        openInspector(host) {
+            this.selected = host || null;
+            this.depRows = host ? this.deps(host) : [];
+            this.$nextTick(() => this.applySelection());
+        },
+
+        // Create a host that depends on the right-clicked one, drop it on
+        // the map beside its parent, and open it for editing.
+        newDependentHost(parent) {
+            this.ctx = null;
+            if (!parent) return;
+            let base = parent.id + '-child', name = base, n = 2;
+            while (this.hosts.some(h => h.id === name)) name = base + n++;
+            const host = {
+                id: name, hostname: name, ip: '', type: 'ping',
+                notes: '', contact: parent.contact || '', spawn: parent.spawn || '',
+                dependencies: parent.id
+            };
+            this.hosts.push(host);
+            // Place it just right of and below the parent so it is visible
+            // immediately rather than wherever auto-layout would drop it.
+            const pn = this.nodes.find(n2 => n2.id === parent.id);
+            if (pn) {
+                this.positions[name] = { x: Math.round(pn.x + 215), y: Math.round(pn.y + 46) };
+                this.layoutDirty = true;
+            }
+            this.collapsed[parent.id] = false;
+            this.dirty = true;
+            if (!this.editMode) this.editMode = true;   // creating implies editing
+            this.layout();
+            this.openInspector(host);
+            this.notice = 'Created ' + name + ' depending on ' + parent.id +
+                '. Set its address, then Save.';
+            setTimeout(() => this.notice = '', 6000);
+        },
+
+        // Same intent, but stamp out a whole device from a template.
+        dependentFromTemplate(parent) {
+            this.ctx = null;
+            if (!parent) return;
+            if (!this.editMode) this.editMode = true;
+            this.openTemplate();
+            this.tplForm.parent = parent.id;
+        },
+
         nodeClick(n) {
             const host = this.hosts.find(h => h.id === n.id);
             if (this.linking && this.linking !== n.id) {
@@ -1094,6 +1195,7 @@ function mapPage() {
 
         // ---- pan / zoom ----
         panStart(e) {
+            this.ctx = null;
             // Grabbing a node moves the node; grabbing the canvas pans.
             // Node dragging is an editing gesture: in view mode a drag that
             // starts on a node pans the canvas, so browsing never nudges
