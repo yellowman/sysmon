@@ -3,6 +3,33 @@
 {{define "title"}}Map{{end}}
 
 {{define "content"}}
+<style>
+  /* Chunky, grabbable scrollbars. The OS default overlay bars are a
+     couple of pixels wide and fade out - fine for a document, useless
+     for dragging around a map. */
+  /* Firefox only: setting these in Chrome makes it ignore every
+     ::-webkit-scrollbar rule below and fall back to thin overlay bars. */
+  @supports not selector(::-webkit-scrollbar) {
+    [x-ref="canvas"] {
+      scrollbar-width: auto;
+      scrollbar-color: #94a3b8 #f1f5f9;
+    }
+  }
+  [x-ref="canvas"]::-webkit-scrollbar { width: 16px; height: 16px; }
+  [x-ref="canvas"]::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+  }
+  [x-ref="canvas"]::-webkit-scrollbar-thumb {
+    background: #94a3b8;
+    border: 3px solid #f1f5f9;
+    border-radius: 8px;
+    min-height: 44px;                      /* always big enough to grab */
+    min-width: 44px;
+  }
+  [x-ref="canvas"]::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  [x-ref="canvas"]::-webkit-scrollbar-corner { background: #f1f5f9; }
+</style>
 <div x-data="mapPage()" x-init="init()">
     <!-- Header -->
     <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
@@ -29,8 +56,10 @@
                     class="px-2.5 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700" title="Save hand-placed positions">
                 <i class="fas fa-thumbtack mr-1"></i>Save layout
             </button>
-            <button @click="resetPositions()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Reset to automatic layout">
-                <i class="fas fa-wand-magic-sparkles"></i>
+            <button @click="resetPositions()"
+                    class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200"
+                    title="Discard hand-placed positions and re-run the automatic layout">
+                <i class="fas fa-wand-magic-sparkles mr-1"></i>Reset layout
             </button>
             <template x-if="!editMode">
                 <button @click="enterEdit()" class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
@@ -91,8 +120,9 @@
          x-ref="canvas"
          :style="'height:' + canvasHeight + 'px;min-height:420px;cursor:' + (pan.active ? 'grabbing' : 'grab')"
          x-html="svgMarkup"
-         x-effect="svgMarkup, $nextTick(() => applyTransform())"
+         x-effect="svgMarkup, $nextTick(() => { applyTransform(); applySelection(); })"
          @click="onCanvasClick($event)"
+         x-effect="selected, $nextTick(() => applySelection())"
          @mousedown="panStart($event)" @mousemove="panMove($event)"
          @mouseup="panEnd()" @mouseleave="panEnd()" @wheel.prevent="wheel($event)"></div>
 
@@ -183,16 +213,22 @@
         </div>
     </div>
 
-    <!-- Inspector -->
-    <div x-show="selected" x-cloak class="mt-4 card p-4">
-        <div class="flex items-center justify-between mb-3">
+    <!-- Host inspector: a modal, so clicking a node in a big map does not
+         send you hunting below the fold for the panel. -->
+    <div x-show="selected" x-cloak
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto"
+         @click.self="selected = null" @keydown.escape.window="selected = null">
+      <div class="bg-white rounded-lg shadow-2xl w-full max-w-3xl mt-16 mb-8">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <h3 class="font-semibold text-gray-900">
                 <span x-text="selected?.id"></span>
                 <span x-show="statusOf(selected?.id)" class="ml-2 px-1.5 py-0.5 rounded text-xs font-medium"
                       :class="badgeClass(statusOf(selected?.id))" x-text="statusOf(selected?.id)"></span>
+                <span x-show="editMode" class="ml-2 text-xs font-normal text-gray-400">editing</span>
             </h3>
             <button @click="selected = null" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
         </div>
+        <div class="p-6">
 
         <!-- read-only view -->
         <template x-if="selected && !editMode">
@@ -266,6 +302,12 @@
                 </div>
             </div>
         </template>
+        </div>
+        <div class="px-6 py-3 border-t border-gray-200 flex justify-end">
+            <button @click="selected = null"
+                    class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">Close</button>
+        </div>
+      </div>
     </div>
 </div>
 
@@ -635,7 +677,6 @@ function mapPage() {
         },
         strokeFor(n) {
             if (this.linking === n.id) return '#2563eb';
-            if (this.selected && this.selected.id === n.id) return '#0f172a';
             if (n.match) return '#3b82f6';
             if (n.status === 'CRITICAL') return '#ef4444';
             if (n.status === 'WARNING') return '#f59e0b';
@@ -698,6 +739,7 @@ function mapPage() {
                 return;
             }
             this.selected = host || null;
+            this.$nextTick(() => this.applySelection());
         },
 
         startLink(n) {
@@ -844,10 +886,13 @@ function mapPage() {
                 '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" ' +
                 'markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
                 '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>' +
-                // No transform here: pan/zoom is applied imperatively via
-                // applyTransform(), so dragging never rebuilds the markup.
-                // At 810 nodes a rebuild costs ~1s; an attribute write is free.
-                '<g data-viewport>';
+                // The transform is baked in so the FIRST paint is already in
+                // the right place. Leaving it off meant every rebuild showed
+                // one frame of un-panned, left-justified map before
+                // applyTransform() ran - the flash. Pan/zoom still updates
+                // this attribute imperatively (no rebuild) afterwards.
+                '<g data-viewport transform="translate(' + this.view.x + ',' +
+                this.view.y + ') scale(' + this.view.k + ')">';
 
             for (const e of this.edges) {
                 // Extra parents render dashed so the primary spine of the
@@ -863,7 +908,9 @@ function mapPage() {
                 out += '<g transform="translate(' + n.x + ',' + n.y + ')" data-node="' + id + '" style="cursor:pointer;">' +
                     '<rect x="-72" y="-17" width="144" height="34" rx="7" fill="' + this.fillFor(n) +
                     '" stroke="' + this.strokeFor(n) + '" stroke-width="' +
-                    ((this.linking === n.id || (this.selected && this.selected.id === n.id) || n.match) ? 2.5 : 1.25) + '"/>' +
+                    ((this.linking === n.id || n.match) ? 2.5 : 1.25) +
+                    '" data-base-stroke="' + this.strokeFor(n) +
+                    '" data-base-width="' + ((this.linking === n.id || n.match) ? 2.5 : 1.25) + '"/>' +
                     '<text x="0" y="-3" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0f172a">' +
                     this.esc(this.trim(n.label)) + '</text>' +
                     '<text x="0" y="9" text-anchor="middle" font-size="8" fill="#64748b">' +
@@ -915,6 +962,24 @@ function mapPage() {
             };
         },
 
+        // Selection highlight is a two-attribute write on the affected
+        // nodes. Deriving it inside svgMarkup meant a click rebuilt all
+        // 800 nodes - slow, and the rebuild is what flashed.
+        applySelection() {
+            const root = this.$refs.canvas;
+            if (!root) return;
+            root.querySelectorAll('[data-node] rect').forEach(r => {
+                r.setAttribute('stroke', r.dataset.baseStroke || '#cbd5e1');
+                r.setAttribute('stroke-width', r.dataset.baseWidth || '1.25');
+            });
+            if (!this.selected) return;
+            const el = root.querySelector('[data-node="' + CSS.escape(this.selected.id) + '"] rect');
+            if (el) {
+                el.setAttribute('stroke', '#0f172a');
+                el.setAttribute('stroke-width', '2.5');
+            }
+        },
+
         applyTransform() {
             const root = this.$refs.canvas;
             if (!root) return;
@@ -936,7 +1001,10 @@ function mapPage() {
         // ---- pan / zoom ----
         panStart(e) {
             // Grabbing a node moves the node; grabbing the canvas pans.
-            const nodeEl = e.target.closest && e.target.closest('[data-node]');
+            // Node dragging is an editing gesture: in view mode a drag that
+            // starts on a node pans the canvas, so browsing never nudges
+            // the layout by accident.
+            const nodeEl = this.editMode && e.target.closest && e.target.closest('[data-node]');
             if (nodeEl && !e.target.closest('[data-toggle]') && !e.target.closest('[data-link]')) {
                 const id = nodeEl.getAttribute('data-node');
                 const n = this.nodes.find(x => x.id === id);
@@ -953,7 +1021,9 @@ function mapPage() {
             if (this.drag) {
                 const dx = (e.clientX - this.drag.sx) / this.view.k;
                 const dy = (e.clientY - this.drag.sy) / this.view.k;
-                if (Math.abs(dx) + Math.abs(dy) > 3 / this.view.k) this.drag.moved = true;
+                // Generous threshold: a click with a shaky hand should stay
+                // a click, not a 2px reposition.
+                if (Math.abs(dx) + Math.abs(dy) > 12 / this.view.k) this.drag.moved = true;
                 if (!this.drag.moved) return;
                 this.positions[this.drag.id] = {
                     x: Math.round(this.drag.ox + dx),
