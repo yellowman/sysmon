@@ -34,9 +34,9 @@ type Service struct {
 	sysmonAddr string
 	sessionLog *SessionLogger
 
-	cacheMu      sync.Mutex
+	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.
-	history *HistoryStore
+	history      *HistoryStore
 	cachedStatus *models.SysmonStatus
 	cacheTime    time.Time
 	fetching     bool
@@ -57,6 +57,21 @@ type Service struct {
 
 	pollOnce sync.Once
 	pollStop chan struct{}
+
+	// authKeyFn supplies sysmond's configured authkey. CONF - the bulk
+	// object dump - is privileged; without a key we fall back to asking
+	// for each object separately.
+	authKeyFn func() string
+}
+
+// SetAuthKeyProvider tells the service how to find sysmond's authkey.
+func (s *Service) SetAuthKeyProvider(fn func() string) { s.authKeyFn = fn }
+
+func (s *Service) authKey() string {
+	if s.authKeyFn == nil {
+		return ""
+	}
+	return s.authKeyFn()
 }
 
 // maxRemovedTracked caps the removal log; removals are rare in a
@@ -621,6 +636,186 @@ func (s *Service) StopPoller() {
 	}
 }
 
+// hostFromXML converts one <ObjectStatus> block into the API model. Shared
+// by the bulk CONF path and the per-object SHOWOBJ fallback so the two can
+// never drift apart.
+func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time) (models.HostStatus, string) {
+	// Create host status entry
+	host := models.HostStatus{
+		ObjectName:    xmlObj.Object,
+		Hostname:      xmlObj.HostName,
+		Description:   xmlObj.ObjectMessage,
+		IPv4Address:   "",
+		OverallStatus: "OK",
+		StatusColor:   "green",
+		Contact:       xmlObj.ObjectContact,
+		DownCount:     xmlObj.DownCt,
+		UpCount:       xmlObj.UpCt,
+		TotalDown:     xmlObj.TotalDown,
+		TotalChecked:  xmlObj.TotalChecked,
+		Checks:        []models.CheckResult{},
+	}
+
+	// If HostName is an IP address, populate IPv4Address field
+	// Otherwise leave it empty (it's a DNS name or hostname)
+	if net.ParseIP(xmlObj.HostName) != nil {
+		host.IPv4Address = xmlObj.HostName
+	}
+
+	// Calculate timing information and last change time
+	currentTime := time.Now()
+
+	if xmlObj.ObjectState != 0 {
+		// Currently DOWN
+		if xmlObj.DeathTime > 0 {
+			deathTime := time.Unix(xmlObj.DeathTime, 0)
+			host.LastChangeTime = &deathTime
+			host.LastOutage = &deathTime
+			host.TimeFailed = int64(currentTime.Sub(deathTime).Seconds())
+			host.TimeUp = 0
+		}
+	} else {
+		// Currently UP
+		if xmlObj.LastTimeUp > 0 {
+			lastTimeUp := time.Unix(xmlObj.LastTimeUp, 0)
+			host.LastChangeTime = &lastTimeUp
+			host.TimeUp = int64(currentTime.Sub(lastTimeUp).Seconds())
+			host.TimeFailed = 0
+		} else if !daemonStart.IsZero() {
+			// sysmond only sets ObjectLastTimeUp after a recovery; a
+			// host that has been up since the daemon started reports 0.
+			// Fall back to the daemon start time so "up for X" isn't
+			// blank for perfectly healthy hosts.
+			host.TimeUp = int64(currentTime.Sub(daemonStart).Seconds())
+			host.TimeFailed = 0
+		}
+		// LastOutage is when it last went down (before coming back up)
+		if xmlObj.DeathTime > 0 {
+			lastOutage := time.Unix(xmlObj.DeathTime, 0)
+			host.LastOutage = &lastOutage
+		}
+	}
+
+	// Status logic:
+	// - ObjectState == 0: UP/OK (green)
+	// - ObjectState != 0 && ObjectContacted == 0: DOWN but not alerted yet (yellow/WARNING)
+	// - ObjectState != 0 && ObjectContacted == 1: DOWN and alerted (red/CRITICAL)
+	if xmlObj.ObjectState != 0 {
+		if xmlObj.ObjectContacted == 0 {
+			// Down but not alerted yet - WARNING (yellow)
+			host.OverallStatus = "WARNING"
+			host.StatusColor = "yellow"
+		} else {
+			// Down and already alerted - CRITICAL (red)
+			host.OverallStatus = "CRITICAL"
+			host.StatusColor = "red"
+		}
+	}
+
+	// Add check details
+	// Set last check time to current time since XML doesn't provide per-check timestamps
+	// The actual last check is very recent (within checkinterval seconds)
+	check := models.CheckResult{
+		Type:          xmlObj.ObjectType,
+		Port:          xmlObj.ObjectPort,
+		Status:        host.OverallStatus,
+		LastCheckTime: time.Now(),
+		StatusMessage: xmlObj.ObjectMessage,
+	}
+	host.Checks = append(host.Checks, check)
+
+	if xmlObj.ObjectContact != "" {
+		host.Contact = xmlObj.ObjectContact
+	}
+
+	return host, xmlObj.ObjectType
+}
+
+// accumulateHost folds one host into the run's statistics.
+func accumulateHost(status *models.SysmonStatus, host models.HostStatus, checkType string, hostsUp, hostsDown *int) {
+	switch host.OverallStatus {
+	case "WARNING":
+		status.Statistics.WarningHosts++
+	case "CRITICAL":
+		*hostsDown++
+	default:
+		*hostsUp++
+	}
+	if checkType != "" {
+		status.Statistics.ChecksByType[checkType]++
+	}
+	status.Statistics.ChecksByStatus[host.OverallStatus]++
+	status.Hosts = append(status.Hosts, host)
+}
+
+// fetchAllObjectsXML pulls every object's status in one command.
+//
+// CONF is a bulk send_object_xml() walk - byte for byte what SHOWOBJ
+// returns, just for all of them - so this is one round trip instead of
+// one per object. On an 800-object config that is the difference between
+// a poll taking half a minute and taking a second.
+//
+// It is privileged, so it needs sysmond's authkey. Returns ok=false (not
+// an error) whenever the bulk path is unavailable - no key, a daemon that
+// refuses, a daemon too old to know the command - and the caller falls
+// back to asking object by object.
+func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs []XMLObjectStatus, ok bool) {
+	key := s.authKey()
+	if key == "" {
+		return nil, false
+	}
+	if err := authenticate(conn, reader, key); err != nil {
+		s.sessionLog.Log("AUTH", "bulk fetch unavailable", true, err.Error())
+		return nil, false
+	}
+
+	if _, err := conn.Write([]byte("CONF\n")); err != nil {
+		return nil, false
+	}
+
+	var block strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		trimmed := strings.TrimSpace(line)
+
+		// "444 Permission Denied" / "444 - Unk": no bulk path here.
+		if strings.HasPrefix(trimmed, "444") || strings.HasPrefix(trimmed, "403") {
+			s.sessionLog.Log("CONF", trimmed, true, "falling back to per-object fetch")
+			return nil, false
+		}
+		if strings.HasPrefix(trimmed, "333") {
+			break // end of dump
+		}
+
+		block.WriteString(line)
+		if strings.Contains(line, "</ObjectStatus>") {
+			var xmlObj XMLObjectStatus
+			if perr := xml.Unmarshal([]byte(block.String()), &xmlObj); perr != nil {
+				// One unreadable object should not cost us the whole
+				// poll - the per-object path would have skipped it too.
+				s.sessionLog.Log("CONF", block.String(), true, perr.Error())
+			} else {
+				objs = append(objs, xmlObj)
+			}
+			block.Reset()
+			// Keep the clock honest against a slow dump rather than
+			// holding one deadline over the whole transfer.
+			conn.SetDeadline(time.Now().Add(30 * time.Second))
+		}
+
+		if err != nil {
+			s.sessionLog.Log("CONF", "", true, fmt.Sprintf("read error after %d objects: %v", len(objs), err))
+			return nil, false
+		}
+	}
+
+	if len(objs) == 0 {
+		return nil, false
+	}
+	s.sessionLog.Log("CONF", fmt.Sprintf("Retrieved %d objects in one command", len(objs)), false, "")
+	return objs, true
+}
+
 func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
@@ -629,7 +824,10 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	}
 	defer conn.Close()
 
-	// Allow enough time for large host counts (SHOWOBJ per host)
+	// Per-chunk, not per-fetch: a hung daemon is still caught in seconds,
+	// but a big config walking object by object is not cut off halfway.
+	// (30s was less than an 800-object walk takes, so the fetch used to
+	// time out on exactly the configs that most needed it.)
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	reader := bufio.NewReader(conn)
 
@@ -753,7 +951,24 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 		Parsed:   resp.Code == "333",
 	})
 
+	// One command for everything, when the daemon will give it to us.
+	bulkObjs, bulkOK := s.fetchAllObjectsXML(conn, reader)
+	if bulkOK {
+		objectNames = objectNames[:0]
+		for _, xmlObj := range bulkObjs {
+			host, checkType := hostFromXML(xmlObj, daemonInfo.StartTime)
+			accumulateHost(status, host, checkType, &hostsUp, &hostsDown)
+			objectNames = append(objectNames, xmlObj.Object)
+		}
+	}
+
 	for _, objName := range objectNames {
+		if bulkOK {
+			break // already have every object from the one command
+		}
+		// Each object gets its own slice of time. One deadline for the
+		// whole walk would fire on any config big enough to need it.
+		conn.SetDeadline(time.Now().Add(30 * time.Second))
 		// Send SHOWOBJ command
 		_, err = conn.Write([]byte(fmt.Sprintf("SHOWOBJ %s\n", objName)))
 		if err != nil {
@@ -880,105 +1095,8 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 			}
 		}
 
-		// Create host status entry
-		host := models.HostStatus{
-			ObjectName:    xmlObj.Object,
-			Hostname:      xmlObj.HostName,
-			Description:   xmlObj.ObjectMessage,
-			IPv4Address:   "",
-			OverallStatus: "OK",
-			StatusColor:   "green",
-			Contact:       xmlObj.ObjectContact,
-			DownCount:     xmlObj.DownCt,
-			UpCount:       xmlObj.UpCt,
-			TotalDown:     xmlObj.TotalDown,
-			TotalChecked:  xmlObj.TotalChecked,
-			Checks:        []models.CheckResult{},
-		}
-
-		// If HostName is an IP address, populate IPv4Address field
-		// Otherwise leave it empty (it's a DNS name or hostname)
-		if net.ParseIP(xmlObj.HostName) != nil {
-			host.IPv4Address = xmlObj.HostName
-		}
-
-		// Calculate timing information and last change time
-		currentTime := time.Now()
-
-		if xmlObj.ObjectState != 0 {
-			// Currently DOWN
-			if xmlObj.DeathTime > 0 {
-				deathTime := time.Unix(xmlObj.DeathTime, 0)
-				host.LastChangeTime = &deathTime
-				host.LastOutage = &deathTime
-				host.TimeFailed = int64(currentTime.Sub(deathTime).Seconds())
-				host.TimeUp = 0
-			}
-		} else {
-			// Currently UP
-			if xmlObj.LastTimeUp > 0 {
-				lastTimeUp := time.Unix(xmlObj.LastTimeUp, 0)
-				host.LastChangeTime = &lastTimeUp
-				host.TimeUp = int64(currentTime.Sub(lastTimeUp).Seconds())
-				host.TimeFailed = 0
-			} else if !daemonInfo.StartTime.IsZero() {
-				// sysmond only sets ObjectLastTimeUp after a recovery; a
-				// host that has been up since the daemon started reports 0.
-				// Fall back to the daemon start time so "up for X" isn't
-				// blank for perfectly healthy hosts.
-				host.TimeUp = int64(currentTime.Sub(daemonInfo.StartTime).Seconds())
-				host.TimeFailed = 0
-			}
-			// LastOutage is when it last went down (before coming back up)
-			if xmlObj.DeathTime > 0 {
-				lastOutage := time.Unix(xmlObj.DeathTime, 0)
-				host.LastOutage = &lastOutage
-			}
-		}
-
-		// Status logic:
-		// - ObjectState == 0: UP/OK (green)
-		// - ObjectState != 0 && ObjectContacted == 0: DOWN but not alerted yet (yellow/WARNING)
-		// - ObjectState != 0 && ObjectContacted == 1: DOWN and alerted (red/CRITICAL)
-		if xmlObj.ObjectState != 0 {
-			if xmlObj.ObjectContacted == 0 {
-				// Down but not alerted yet - WARNING (yellow)
-				host.OverallStatus = "WARNING"
-				host.StatusColor = "yellow"
-				status.Statistics.WarningHosts++
-			} else {
-				// Down and already alerted - CRITICAL (red)
-				host.OverallStatus = "CRITICAL"
-				host.StatusColor = "red"
-				hostsDown++
-			}
-		} else {
-			hostsUp++
-		}
-
-		// Add check details
-		// Set last check time to current time since XML doesn't provide per-check timestamps
-		// The actual last check is very recent (within checkinterval seconds)
-		check := models.CheckResult{
-			Type:          xmlObj.ObjectType,
-			Port:          xmlObj.ObjectPort,
-			Status:        host.OverallStatus,
-			LastCheckTime: time.Now(),
-			StatusMessage: xmlObj.ObjectMessage,
-		}
-		host.Checks = append(host.Checks, check)
-
-		// Increment statistics counters for dashboard charts
-		if xmlObj.ObjectType != "" {
-			status.Statistics.ChecksByType[xmlObj.ObjectType]++
-		}
-		status.Statistics.ChecksByStatus[host.OverallStatus]++
-
-		if xmlObj.ObjectContact != "" {
-			host.Contact = xmlObj.ObjectContact
-		}
-
-		status.Hosts = append(status.Hosts, host)
+		host, checkType := hostFromXML(xmlObj, daemonInfo.StartTime)
+		accumulateHost(status, host, checkType, &hostsUp, &hostsDown)
 	}
 
 	// Sort hosts: CRITICAL first, then WARNING, then OK
