@@ -17,9 +17,6 @@ int debug_adj_builder = 0;
 
 int max_numnei = 0;
 
-/* Say the "traps moved to sysmon-web" line once, not on every reload. */
-static bool warned_traps_moved = FALSE;
-
 void debug_made_deps(struct all_elements_list *);
 
 int match_facility(char *factomatch)
@@ -388,19 +385,29 @@ void copy_alerts(struct all_elements_list *old, struct all_elements_list *new)
 void update_globs_from_parser()
 {
 	set_defaults();
-	/*
-	 * `config snmp-trap;` is still accepted, but it is sysmon-web that
-	 * listens on UDP 162 now - it binds the port before dropping
-	 * privileges, decodes the packet, and alerts. sysmond does nothing
-	 * with traps, and says so once rather than silently ignoring a
-	 * directive somebody deliberately turned on.
-	 */
-	if (parser_catch_snmptrap && (!ckconfigonly) && (!warned_traps_moved))
+	if (parser_catch_snmptrap && (!ckconfigonly))
 	{
-		warned_traps_moved = TRUE;
-		print_err(1, "config snmp-trap: snmp traps are received by sysmon-web now, not sysmond");
+		if (snmp_trap_fd == -1)
+		{
+			snmp_trap_fd = init_udp_socket(SNMP_TRAP_PORTNUM);
+			if (snmp_trap_fd == -1)
+			{
+				/* Port 162 is privileged. The first config read
+				 * happens while we are still root, so this only
+				 * fails when snmp-trap is switched on by a SIGHUP
+				 * reload after the privilege drop - and then it
+				 * needs a restart, not another reload. */
+				print_err(1, "could not bind UDP %d for snmp traps%s",
+					SNMP_TRAP_PORTNUM,
+					(geteuid() != 0) ?
+					  " - traps were enabled after privileges were dropped, restart sysmond to listen" :
+					  " - is another trap receiver already running?");
+			} else {
+				print_err(0, "listening for snmp traps on UDP %d",
+					SNMP_TRAP_PORTNUM);
+			}
+		}
 	}
-
 	if (parser_pmesg != NULL)
 	{
 		if (pmesg != NULL)

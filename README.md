@@ -25,6 +25,12 @@ notifications, and CI that builds everything on every push.
   TCP, DNS, HTTP, SMTP, IMAP, POP3, NNTP, SSH, Radius, SNMP, and more
 - Dependency trees: when a router dies, its children don't page you
 - Flap damping, ack/notification thresholds, per-contact schedules
+- **SNMP trap reception, decoded**: v1 and v2c traps are parsed - trap
+  identity, severity, vendor and every varbind - so an alert reads
+  "linkDown on GigabitEthernet0/1" instead of "a trap arrived". Traps
+  from unknown sources are logged too, because they are usually a device
+  nobody got around to monitoring. Only packets that really are traps
+  can page you; junk aimed at port 162 no longer wakes anyone
 - Privilege dropping with a small setuid ping helper
 - Echo replies verified by source address, not just ICMP ident - stray
   or reflected packets can't "revive" an unrelated down host
@@ -47,15 +53,10 @@ notifications, and CI that builds everything on every push.
   sysmon.conf), live FCM key verification against Google, a per-device
   Test button, and a **Push Delivery Pipeline** panel that names the
   exact broken link when notifications aren't flowing
-- **SNMP trap receiver**: sysmon-web owns UDP 162 (bound at startup,
-  before it drops privileges) and decodes v1/v2c traps itself - trap
-  identity, severity, vendor, the interface named, and every varbind with
-  its MIB name and meaning (`ifOperStatus (down)`). A trap on an object
-  with `trap_alert;` pages the phones and lands in the history; junk that
-  is not a trap never does. **Only addresses that belong to a configured
-  object are processed at all** - anything else is dropped unread and
-  counted, so an internet-facing port 162 costs one map lookup per
-  packet. Traps are kept for **31 days**
+- **SNMP trap browser**: the decoded trap stream from sysmond - name,
+  severity, interface, matched object, and every varbind with its MIB
+  name and meaning (`ifOperStatus (down)`), filterable by source and
+  severity
 - Dependency map: the whole config as a graph, drag nodes into place
   (the layout is shared with every other session), right-click a host to
   add a dependent under it or stamp one out from a device template

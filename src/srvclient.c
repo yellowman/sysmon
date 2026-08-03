@@ -408,6 +408,11 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	}
 
 	/* Trap alert configuration */
+	if (obj->data->trap_alert) {
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT,
+			1, XML_TRAP_ALERT);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
 
 	/* ===== PHASE 1: Extended Configuration Fields ===== */
 
@@ -833,6 +838,256 @@ void do_client_http(struct clientstatus *client, char *request)
 	print_err(1, "do_client_http: url = %s", url1+1);
 }
 
+/*
+ * Escape text for XML. Everything in a trap record came off the wire from
+ * whoever felt like sending a UDP packet to port 162, so none of it may be
+ * pasted into a document unescaped. Truncates rather than overflowing.
+ */
+static char *xml_escape(const char *in, char *out, size_t outlen)
+{
+	size_t used = 0;
+	const char *rep;
+	size_t rlen;
+
+	if (outlen == 0)
+		return out;
+	out[0] = '\0';
+	if (in == NULL)
+		return out;
+
+	for (; *in != '\0'; in++)
+	{
+		switch (*in)
+		{
+			case '&':  rep = "&amp;";  break;
+			case '<':  rep = "&lt;";   break;
+			case '>':  rep = "&gt;";   break;
+			case '"':  rep = "&quot;"; break;
+			case '\'': rep = "&apos;"; break;
+			default:   rep = NULL;     break;
+		}
+
+		if (rep != NULL)
+		{
+			rlen = strlen(rep);
+			if (used + rlen >= outlen)
+				break;
+			memcpy(out + used, rep, rlen);
+			used += rlen;
+		} else {
+			/* Control characters have no business in XML. */
+			if ((unsigned char)*in < 0x20)
+				continue;
+			if (used + 1 >= outlen)
+				break;
+			out[used++] = *in;
+		}
+	}
+	out[used] = '\0';
+	return out;
+}
+
+/*
+ * TRAPS
+ *
+ * Hand back the recent SNMP traps sysmond has caught, decoded. In XML mode
+ * this is the full record - identity, severity, the interface it named and
+ * every varbind - which is what the web UI renders. In plain mode it is one
+ * summary line per trap for a human on a telnet session.
+ */
+void send_traps(struct clientstatus *client)
+{
+	char buffer[LARGE_TEMPBUF_SIZE];
+	char esc[TRAP_OID_LEN * 6 + 8];
+	struct trap_record *r;
+	int i, v;
+
+	#define TRAP_SEND(buf) \
+		if (sendline(client->filedes, buf) == -1) { \
+			client->filedes = -1; \
+			return; \
+		}
+
+	if (!client->xml)
+	{
+		for (i = 0; (r = trap_history_get(i)) != NULL; i++)
+		{
+			snprintf(buffer, sizeof(buffer), "%ld:%s:%s:%s:%s:%s",
+				(long)r->when, r->source, r->content.name,
+				r->content.severity,
+				r->matched[0] != '\0' ? r->matched : "-",
+				r->content.description);
+			TRAP_SEND(buffer);
+		}
+		snprintf(buffer, sizeof(buffer), "333 %d traps held, %lu seen since start",
+			trap_history_count(), trap_history_total());
+		TRAP_SEND(buffer);
+		return;
+	}
+
+	snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAPS);
+	TRAP_SEND(buffer);
+
+	for (i = 0; (r = trap_history_get(i)) != NULL; i++)
+	{
+		struct trap_content *c = &r->content;
+
+		snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAP);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_SOURCE,
+			xml_escape(r->source, esc, sizeof(esc)), XML_TRAP_SOURCE);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_TRAP_TIME,
+			(long)r->when, XML_TRAP_TIME);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_BYTES,
+			r->bytes, XML_TRAP_BYTES);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VERSION,
+			c->version == 0 ? "v1" : (c->version == 1 ? "v2c" :
+			(c->version == 3 ? "v3" : "unknown")), XML_TRAP_VERSION);
+		TRAP_SEND(buffer);
+
+		/* The community is a credential. Only an authenticated client
+		   has any business seeing which one a device is using. */
+		if (client->authlvl > 0 && c->community[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_COMMUNITY,
+				xml_escape(c->community, esc, sizeof(esc)), XML_TRAP_COMMUNITY);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_NAME,
+			xml_escape(c->name, esc, sizeof(esc)), XML_TRAP_NAME);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_DESC,
+			xml_escape(c->description, esc, sizeof(esc)), XML_TRAP_DESC);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_SEVERITY,
+			xml_escape(c->severity, esc, sizeof(esc)), XML_TRAP_SEVERITY);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_CATEGORY,
+			xml_escape(c->category, esc, sizeof(esc)), XML_TRAP_CATEGORY);
+		TRAP_SEND(buffer);
+
+		if (c->trap_oid[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_OID,
+				xml_escape(c->trap_oid, esc, sizeof(esc)), XML_TRAP_OID);
+			TRAP_SEND(buffer);
+		}
+		if (c->enterprise[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_ENTERPRISE,
+				xml_escape(c->enterprise, esc, sizeof(esc)), XML_TRAP_ENTERPRISE);
+			TRAP_SEND(buffer);
+		}
+		if (c->agent[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_AGENT,
+				xml_escape(c->agent, esc, sizeof(esc)), XML_TRAP_AGENT);
+			TRAP_SEND(buffer);
+		}
+		if (c->vendor[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VENDOR,
+				xml_escape(c->vendor, esc, sizeof(esc)), XML_TRAP_VENDOR);
+			TRAP_SEND(buffer);
+		}
+		if (c->iface[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_IFACE,
+				xml_escape(c->iface, esc, sizeof(esc)), XML_TRAP_IFACE);
+			TRAP_SEND(buffer);
+		}
+		if (c->ifindex >= 0)
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_IFINDEX,
+				c->ifindex, XML_TRAP_IFINDEX);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "<%s>%lu</%s>", XML_TRAP_UPTIME,
+			c->uptime, XML_TRAP_UPTIME);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_DECODED,
+			c->decoded ? 1 : 0, XML_TRAP_DECODED);
+		TRAP_SEND(buffer);
+
+		if (r->matched[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_MATCHED,
+				xml_escape(r->matched, esc, sizeof(esc)), XML_TRAP_MATCHED);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT_EN,
+			r->alert_enabled ? 1 : 0, XML_TRAP_ALERT_EN);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT_SENT,
+			r->alert_sent ? 1 : 0, XML_TRAP_ALERT_SENT);
+		TRAP_SEND(buffer);
+
+		for (v = 0; v < c->nvarbinds && v < TRAP_MAX_VARBIND; v++)
+		{
+			struct trap_varbind *b = &c->vb[v];
+
+			snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAP_VARBIND);
+			TRAP_SEND(buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_OID,
+				xml_escape(b->oid, esc, sizeof(esc)), XML_TRAP_VB_OID);
+			TRAP_SEND(buffer);
+
+			if (b->name[0] != '\0')
+			{
+				snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_NAME,
+					xml_escape(b->name, esc, sizeof(esc)), XML_TRAP_VB_NAME);
+				TRAP_SEND(buffer);
+			}
+
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_TYPE,
+				xml_escape(b->type, esc, sizeof(esc)), XML_TRAP_VB_TYPE);
+			TRAP_SEND(buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_VALUE,
+				xml_escape(b->value, esc, sizeof(esc)), XML_TRAP_VB_VALUE);
+			TRAP_SEND(buffer);
+
+			if (b->note[0] != '\0')
+			{
+				snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_NOTE,
+					xml_escape(b->note, esc, sizeof(esc)), XML_TRAP_VB_NOTE);
+				TRAP_SEND(buffer);
+			}
+
+			snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAP_VARBIND);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAP);
+		TRAP_SEND(buffer);
+	}
+
+	snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAPS);
+	TRAP_SEND(buffer);
+
+	snprintf(buffer, sizeof(buffer), "333 %d traps held, %lu seen since start",
+		trap_history_count(), trap_history_total());
+	TRAP_SEND(buffer);
+
+	#undef TRAP_SEND
+}
+
 void send_uptime(struct clientstatus *client, time_t now_t)
 {
 	char buffer[256];
@@ -934,6 +1189,10 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	else if (strncmp(buff, "TRACE ", 6) == 0)
 	{
 		srv_client_do_trace(here, buff);
+	}
+	else if (strncmp(buff, "TRAPS", 5) == 0)
+	{
+		send_traps(here);
 	}
 	else if (strncmp(buff, "AUTH", 4) == 0)
 	{

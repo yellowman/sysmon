@@ -23,7 +23,6 @@ import (
 	"sysmon-web/internal/push"
 	"sysmon-web/internal/settings"
 	"sysmon-web/internal/templates"
-	"sysmon-web/internal/traps"
 )
 
 // Router holds the API handlers
@@ -47,12 +46,8 @@ type Router struct {
 	pushFactory PushFactory
 	auth        *auth.Service
 	settings    *settings.Store
-	// traps is the SNMP trap listener. nil when traps are switched off in
-	// sysmon.conf, or when the socket could not be bound - every handler
-	// that touches it copes with that.
-	traps   *traps.Service
-	mux     *http.ServeMux
-	metrics *middleware.MetricsCollector
+	mux         *http.ServeMux
+	metrics     *middleware.MetricsCollector
 
 	// Cached sysmond PID (the daemon doesn't report it; we read the
 	// pidfile). Cached so delta polls don't hit config+disk every request.
@@ -66,7 +61,7 @@ type Router struct {
 // the router currently owns - the boot instance OR one created later by
 // a lazy reinit - so the watcher goroutine and push.db handle are
 // always released by the same owner. Callers should defer it.
-func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, pushFactory PushFactory, authSvc *auth.Service, settingsStore *settings.Store, trapSvc *traps.Service) (http.Handler, func()) {
+func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Service, pushFactory PushFactory, authSvc *auth.Service, settingsStore *settings.Store) (http.Handler, func()) {
 	metrics := middleware.NewMetricsCollector()
 
 	r := &Router{
@@ -75,7 +70,6 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 		pushFactory: pushFactory,
 		auth:        authSvc,
 		settings:    settingsStore,
-		traps:       trapSvc,
 		mux:         http.NewServeMux(),
 		metrics:     metrics,
 	}
@@ -589,28 +583,14 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 	r.sendJSON(w, alerts)
 }
 
-// handleMonitoringTraps serves the traps this process received. sysmond
-// has nothing to do with traps any more - the listener is ours, so this
-// reads the local store instead of querying the daemon.
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {
-	if r.traps == nil {
-		// Not an error: traps are off (no `config snmp-trap;`) or the port
-		// could not be bound. Say so in-band so the page can explain
-		// itself rather than showing an empty list with no reason.
-		r.sendJSON(w, map[string]interface{}{
-			"recent_traps": []models.Trap{},
-			"trap_sources": []models.TrapSource{},
-			"summary": models.TrapSummary{
-				TrapsByType:     map[string]int{},
-				TrapsBySeverity: map[string]int{},
-			},
-			"listener": map[string]interface{}{"listening": false},
-		})
+	// Authenticating to sysmond is what unlocks the community string in
+	// the trap records; without it the daemon withholds that field.
+	traps, err := r.monitoring.GetTraps(r.getSysmonAuthKey())
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-
-	traps := r.traps.Info(0)
-	stats := r.traps.Stats()
 
 	// Check if pagination is requested
 	if req.URL.Query().Get("page") != "" || req.URL.Query().Get("limit") != "" {
@@ -643,17 +623,11 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 			"total_pages":  totalPages,
 			"trap_sources": traps.TrapSources,
 			"summary":      traps.Summary,
-			"listener":     stats,
 		}
 		r.sendJSON(w, response)
 	} else {
 		// No pagination requested, return all traps (backward compatible)
-		r.sendJSON(w, map[string]interface{}{
-			"recent_traps": traps.RecentTraps,
-			"trap_sources": traps.TrapSources,
-			"summary":      traps.Summary,
-			"listener":     stats,
-		})
+		r.sendJSON(w, traps)
 	}
 }
 

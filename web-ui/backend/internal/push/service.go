@@ -932,41 +932,6 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 	})
 }
 
-// NotifyTrap pushes a decoded SNMP trap to the subscribed devices.
-//
-// Severity comes from the trap itself, and drives loudness the same way a
-// host going down does: a linkDown is critical and gets sound and a
-// heads-up, a linkUp or a reboot notice arrives silently in the shade. The
-// collapse key is per object and per trap name, so a device that flaps a
-// link all night leaves one notification saying the current truth instead
-// of two hundred saying it changed.
-func (s *Service) NotifyTrap(object, hostname, trapName, severity, description string) {
-	if _, _, enabled := s.clients(); !enabled {
-		return
-	}
-	if hostname == "" {
-		hostname = object
-	}
-
-	title := fmt.Sprintf("%s %s", hostname, trapName)
-	subtitle := ""
-	body := description
-	if body == "" {
-		body = fmt.Sprintf("SNMP trap %s received from %s", trapName, hostname)
-	}
-
-	critical := strings.EqualFold(severity, "critical")
-	collapseKey := object
-	if collapseKey == "" {
-		collapseKey = hostname
-	}
-	collapseKey = "trap:" + collapseKey + ":" + trapName
-
-	log.Printf("push: trap %s from %s (%s), notifying subscribers", trapName, hostname, severity)
-	s.notifyAll(title, subtitle, body, hostname, "TRAP "+strings.ToUpper(severity), "-",
-		"snmp-trap", 0, critical, collapseKey)
-}
-
 func (s *Service) watchLoop() {
 	defer s.wg.Done()
 	defer func() {
