@@ -83,9 +83,13 @@
          parser creates SVG-namespaced "template" elements with no
          .content), and one innerHTML swap also beats thousands of
          per-node reactive bindings at 800+ hosts. Clicks are delegated. -->
-    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden"
+    <!-- Fills the space between the toolbar and the bottom of the window
+         (min-height keeps it usable on short screens), and scrolls: the
+         SVG is sized to the drawing, so the browser's own scrollbars do
+         the work and panning stays available for quick moves. -->
+    <div class="bg-white rounded-lg border border-gray-200 overflow-auto"
          x-ref="canvas"
-         :style="'height:68vh;cursor:' + (pan.active ? 'grabbing' : 'grab')"
+         :style="'height:' + canvasHeight + 'px;min-height:420px;cursor:' + (pan.active ? 'grabbing' : 'grab')"
          x-html="svgMarkup"
          x-effect="svgMarkup, $nextTick(() => applyTransform())"
          @click="onCanvasClick($event)"
@@ -289,6 +293,7 @@ function mapPage() {
         // Hand-placed node positions, persisted server-side so an
         // arrangement one operator makes is what everyone else sees.
         positions: {},
+        canvasHeight: 600,
         tplOpen: false,
         tplList: [],
         tplPreview: [],
@@ -305,6 +310,11 @@ function mapPage() {
             await this.loadConfig();
             await this.loadPositions();
             this.loadTemplates();
+            this.$nextTick(() => this.sizeCanvas());
+            window.addEventListener('resize', () => {
+                this.sizeCanvas();
+                this.applyTransform();
+            });
             // Big trees are unreadable fully expanded. Open to a depth
             // that fits on screen and let the operator drill in: a real
             // 800-host access network is mostly leaf APs hanging off a
@@ -332,6 +342,16 @@ function mapPage() {
                 this.notice = 'Could not load configuration: ' + (e.message || e);
             }
             this.loading = false;
+        },
+
+        // Height = window minus everything above the canvas, minus a
+        // small bottom margin. Recomputed on resize so the map keeps
+        // filling the screen.
+        sizeCanvas() {
+            const el = this.$refs.canvas;
+            if (!el) return;
+            const top = el.getBoundingClientRect().top;
+            this.canvasHeight = Math.max(420, Math.round(window.innerHeight - top - 24));
         },
 
         async loadTemplates() {
@@ -818,7 +838,9 @@ function mapPage() {
         },
 
         get svgMarkup() {
-            let out = '<svg width="100%" height="100%" style="user-select:none;">' +
+            const ext = this.svgExtent();
+            let out = '<svg data-canvas width="' + ext.w + '" height="' + ext.h +
+                '" style="user-select:none;display:block;">' +
                 '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" ' +
                 'markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
                 '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>' +
@@ -882,11 +904,32 @@ function mapPage() {
             }
         },
 
+        // The SVG is sized to the transformed drawing so the container's
+        // scrollbars reflect the real extent of the map.
+        svgExtent() {
+            if (!this.nodes.length) return { w: 1200, h: 800 };
+            const xs = this.nodes.map(n => n.x), ys = this.nodes.map(n => n.y);
+            return {
+                w: Math.max(1200, (Math.max(...xs) + 160) * this.view.k + this.view.x),
+                h: Math.max(800, (Math.max(...ys) + 120) * this.view.k + this.view.y)
+            };
+        },
+
         applyTransform() {
-            const g = this.$refs.canvas && this.$refs.canvas.querySelector('[data-viewport]');
+            const root = this.$refs.canvas;
+            if (!root) return;
+            const g = root.querySelector('[data-viewport]');
             if (g) {
                 g.setAttribute('transform',
                     'translate(' + this.view.x + ',' + this.view.y + ') scale(' + this.view.k + ')');
+            }
+            // Resize the SVG with the content so scrollbars track the real
+            // extent. Attribute writes only - never a markup rebuild.
+            const svg = root.querySelector('[data-canvas]');
+            if (svg) {
+                const ext = this.svgExtent();
+                svg.setAttribute('width', ext.w);
+                svg.setAttribute('height', ext.h);
             }
         },
 
@@ -950,19 +993,22 @@ function mapPage() {
             const xs = this.nodes.map(n => n.x), ys = this.nodes.map(n => n.y);
             const minX = Math.min(...xs) - 90, maxX = Math.max(...xs) + 90;
             const minY = Math.min(...ys) - 35;
-            const rect = this.$refs.canvas.getBoundingClientRect();
+            const rect = { width: this.$refs.canvas.clientWidth, height: this.$refs.canvas.clientHeight };
             // Fit the tree's WIDTH (depth is what must be visible at a
             // glance) and keep a readability floor - a deep tree is
             // hundreds of rows tall, and fitting that vertically would
             // shrink every label into an unreadable smear. Vertical
             // exploration is what panning is for.
-            const k = Math.min(1.2, Math.max(0.4, (rect.width / (maxX - minX)) * 0.94));
+            // Bias toward legibility: start closer in (nodes are meant to
+            // be read, not surveyed) and let scrolling handle the rest.
+            const k = Math.min(1.6, Math.max(0.75, (rect.width / (maxX - minX)) * 1.15));
             this.view = {
                 k,
                 x: (rect.width - (maxX - minX) * k) / 2 - minX * k,
                 y: 24 - minY * k
             };
             this.applyTransform();
+            this.$refs.canvas.scrollTo({ top: 0, left: 0 });
         }
     };
 }
