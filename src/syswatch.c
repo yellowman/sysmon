@@ -27,6 +27,7 @@ bool not_started_yet = TRUE;
 bool do_syslog = TRUE;
 time_t last_queued_at = 0;
 bool last_queued_warn = FALSE;
+int snmp_trap_fd = -1;
 unsigned long elements_to_monitor = 0; /* gets updated with how many
 						elements we monitor */
 unsigned short int killed = 0;
@@ -971,6 +972,14 @@ void needssleep(time_t now_t)
 			maxfd = here->filedes;
 	}
 
+	/* if the snmp trap fd is set, watch it and reset maxfd accordingly */
+	if (snmp_trap_fd != -1)
+	{
+		FD_SET(snmp_trap_fd, &rd);
+		if (snmp_trap_fd > maxfd)
+			maxfd = snmp_trap_fd;
+	}
+
 	/* if icmp enabled, watch icmp fd */
 	if (glob_icmp_fd > maxfd && (!disable_icmp))
 	{
@@ -1020,6 +1029,16 @@ void needssleep(time_t now_t)
 			handle_pingv6_responses();
 		}
 	}
+	/* if snmp traps are enabled */
+	if (snmp_trap_fd != -1)
+	{
+		/* and there are pending snmp trap packets */
+		if (FD_ISSET(snmp_trap_fd, &rd))
+		{
+			process_snmp_trap(snmp_trap_fd);
+		}
+	}
+
 	/*
 	 * current queue
 	 */

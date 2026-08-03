@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,11 +22,9 @@ import (
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
 	"sysmon-web/internal/settings"
-	"sysmon-web/internal/traps"
 )
 
-// stateDir holds the bbolt stores (auth.db, push.db, settings.db,
-// history.db, traps.db).
+// stateDir holds the bbolt stores (auth.db, push.db, settings.db).
 const stateDir = "/var/lib/sysmon"
 
 // defaultSocket is the FastCGI socket path when -socket isn't given, on
@@ -181,61 +178,6 @@ func signalReady() {
 	}
 }
 
-// bindTrapSocket opens the SNMP trap port if sysmon.conf asks for it.
-//
-// Two decisions, one place each, deliberately: sysmon.conf says WHETHER
-// traps are received (`config snmp-trap;`) and WHICH objects alert on them
-// (`trap_alert;`) - that is a description of the network, and both daemons
-// read it. -trap-listen says WHERE this process binds, which is plumbing
-// like -listen and -socket, and belongs on the command line with them.
-//
-// Returns nil - never fatal - when traps are switched off, when the config
-// cannot be read, or when the bind fails: a monitoring web UI that refuses
-// to start because port 162 is busy would be a worse daemon than one that
-// says so and carries on.
-func bindTrapSocket(listenAddr, configPath string) *net.UDPConn {
-	if listenAddr == "" {
-		return nil
-	}
-
-	cfg, err := config.ParseFile(configPath)
-	if err != nil {
-		log.Printf("traps: cannot read %s to see whether traps are enabled: %v", configPath, err)
-		return nil
-	}
-	if !cfg.Global.SNMPTrap {
-		return nil
-	}
-
-	addr, err := net.ResolveUDPAddr("udp", listenAddr)
-	if err != nil {
-		log.Printf("traps: bad -trap-listen address %q: %v", listenAddr, err)
-		return nil
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		hint := "is another trap receiver already running?"
-		if syscall.Geteuid() != 0 && addr.Port < 1024 {
-			hint = "port " + strconv.Itoa(addr.Port) + " is privileged and sysmon-web is not running as root"
-		}
-		log.Printf("WARNING: could not listen for SNMP traps on %s: %v - %s", listenAddr, err, hint)
-		return nil
-	}
-	return conn
-}
-
-// refreshTrapTargets reloads the set of addresses whose traps we accept.
-// Anything not in it is dropped unread, so this has to keep up with the
-// config; it is cheap enough to just re-read on a timer.
-func refreshTrapTargets(svc *traps.Service, cfgSvc *config.Service) {
-	snap, err := cfgSvc.GetConfig()
-	if err != nil {
-		log.Printf("traps: could not reload the object list: %v", err)
-		return
-	}
-	svc.SetHosts(snap.Config.Hosts)
-}
-
 func main() {
 	// Command line flags
 	socketPath := flag.String("socket", defaultSocket, "FastCGI socket path")
@@ -249,7 +191,6 @@ func main() {
 	socketGroup := flag.String("socket-group", "", "group for the FastCGI socket (default: first of www, www-data, nobody)")
 	procUser := flag.String("user", "", "drop to this user when started as root (default: first of _sysmon, nobody)")
 	procGroup := flag.String("group", "", "drop to this group when started as root (default: first of _sysmon, nobody)")
-	trapListen := flag.String("trap-listen", ":162", "UDP address to receive SNMP traps on (empty disables)")
 	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
@@ -377,13 +318,6 @@ func main() {
 		}
 	}
 
-	// SNMP traps arrive on UDP 162, which is privileged - so the socket is
-	// bound here, in the same breath as the listening socket, and read from
-	// later as an unprivileged process. sysmond used to do this; it does
-	// not any more, and enabling traps still means `config snmp-trap;` in
-	// sysmon.conf, which is the file both daemons already read.
-	trapConn := bindTrapSocket(*trapListen, *configPath)
-
 	if amRoot {
 		// Must succeed while we still have root - otherwise the dropped
 		// process can't open its stores / write backups / audit, and the
@@ -432,11 +366,9 @@ func main() {
 	})
 
 	// Host up/down transition history, persisted so it survives restarts.
-	var historyStore *monitoring.HistoryStore
-	if hs, err := monitoring.OpenHistory(filepath.Join(stateDir, "history.db")); err != nil {
+	if historyStore, err := monitoring.OpenHistory(filepath.Join(stateDir, "history.db")); err != nil {
 		log.Printf("WARNING: alert history disabled: %v", err)
 	} else {
-		historyStore = hs
 		monitoringService.SetHistory(historyStore)
 		defer historyStore.Close()
 	}
@@ -445,42 +377,6 @@ func main() {
 	// warm cache instead of each one driving a fresh N-round-trip query.
 	monitoringService.StartPoller(2 * time.Second)
 	defer monitoringService.StopPoller()
-
-	// SNMP traps. The socket was bound above (before the privilege drop);
-	// everything from here - decoding, matching, storing, alerting - runs
-	// unprivileged. trapService is nil when traps are off or the bind
-	// failed, and every user of it tolerates that.
-	var trapService *traps.Service
-	if trapConn != nil {
-		trapStore, err := traps.OpenStore(filepath.Join(stateDir, "traps.db"))
-		if err != nil {
-			log.Printf("WARNING: SNMP traps disabled: %v", err)
-			trapConn.Close()
-		} else {
-			defer trapStore.Close()
-			trapService = traps.NewService(trapConn, trapStore)
-			// Only configured objects are accepted, so the allow-list has
-			// to exist before the first packet.
-			refreshTrapTargets(trapService, configService)
-			trapService.Start()
-			defer trapService.Stop()
-
-			stopRefresh := make(chan struct{})
-			defer close(stopRefresh)
-			go func() {
-				t := time.NewTicker(30 * time.Second)
-				defer t.Stop()
-				for {
-					select {
-					case <-stopRefresh:
-						return
-					case <-t.C:
-						refreshTrapTargets(trapService, configService)
-					}
-				}
-			}()
-		}
-	}
 
 	// Web-only settings (push credentials etc.) live in their own bbolt
 	// store, not in sysmon.conf - they aren't sysmond's concern.
@@ -526,29 +422,6 @@ func main() {
 		}
 	}
 
-	// A trap on an object with trap_alert set is an alert like any other:
-	// it goes to the phones and into the 48-hour transition history, so it
-	// appears in the History tab next to the up/down events rather than
-	// only in the trap browser.
-	if trapService != nil {
-		trapService.OnAlert(func(rec traps.Record) {
-			c := rec.Content
-			if pushService != nil {
-				pushService.NotifyTrap(rec.Matched, rec.Matched, c.Name, c.Severity, c.Description)
-			}
-			if historyStore != nil {
-				historyStore.Append([]monitoring.HistoryEvent{{
-					Timestamp:   rec.When.Format(time.RFC3339),
-					ObjectName:  rec.Matched,
-					Hostname:    rec.Source,
-					Description: c.Description,
-					PrevStatus:  "-",
-					NewStatus:   "TRAP " + strings.ToUpper(c.Severity),
-				}})
-			}
-		})
-	}
-
 	// Initialize auth service
 	authService, err := auth.NewService(filepath.Join(stateDir, "auth.db"))
 	if err != nil {
@@ -558,7 +431,7 @@ func main() {
 
 	// Create API router. The returned stopPush shuts down whichever push
 	// service the router ends up owning (boot instance or a lazy reinit).
-	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore, trapService)
+	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
 	defer stopPush()
 
 	// Everything that can fail at startup - socket bind, privilege drop,
