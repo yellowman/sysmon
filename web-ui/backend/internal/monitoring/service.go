@@ -1046,30 +1046,9 @@ func (s *Service) GetHostStatus(name string) (*models.HostStatus, error) {
 	return nil, fmt.Errorf("host %s not found", name)
 }
 
-// GetTraps gets all SNMP traps
-func (s *Service) GetTraps() (*models.TrapInfo, error) {
-	status, err := s.GetStatus()
-	if err != nil {
-		return nil, err
-	}
-
-	if status.SNMPTraps == nil {
-		return &models.TrapInfo{
-			RecentTraps: []models.Trap{},
-			TrapSources: []models.TrapSource{},
-			Summary: models.TrapSummary{
-				TrapsByType:     make(map[string]int),
-				TrapsBySeverity: make(map[string]int),
-			},
-		}, nil
-	}
-
-	return status.SNMPTraps, nil
-}
-
 // GetTrapsBySource gets traps from a specific source
-func (s *Service) GetTrapsBySource(sourceIP string) ([]models.Trap, error) {
-	traps, err := s.GetTraps()
+func (s *Service) GetTrapsBySource(sourceIP string, authKey string) ([]models.Trap, error) {
+	traps, err := s.GetTraps(authKey)
 	if err != nil {
 		return nil, err
 	}

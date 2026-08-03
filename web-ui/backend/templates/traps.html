@@ -265,8 +265,8 @@
                                 </div>
                                 <div x-show="selectedTrap.trap_alert_enabled">
                                     <span class="text-gray-600">Alert Sent:</span>
-                                    <span :class="selectedTrap.alert_sent ? 'text-green-600' : 'text-orange-600'"
-                                          x-text="selectedTrap.alert_sent ? 'Yes' : 'Pending'"></span>
+                                    <span :class="selectedTrap.alert_sent ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="selectedTrap.alert_sent ? 'Yes' : 'No'"></span>
                                 </div>
                             </div>
                         </div>

@@ -445,6 +445,60 @@ struct monitorent {
 	time_t last_wakeup_time;        /* When last woken up */
 	};
 
+/*
+ * Decoded SNMP trap content (trapdecode.c).
+ *
+ * Sizes are fixed and small on purpose: this is filled from a UDP packet
+ * anybody can send, so there is nothing to allocate, nothing to free, and
+ * a hard ceiling on the work one packet can cause.
+ */
+#define TRAP_MAX_VARBIND	16	/* varbinds kept per trap */
+#define TRAP_OID_LEN		192	/* dotted OID string */
+#define TRAP_VAL_LEN		160	/* varbind value / description */
+#define TRAP_NAME_LEN		48	/* trap or varbind short name */
+#define TRAP_HISTORY_MAX	128	/* traps remembered for the web UI */
+
+struct trap_varbind {
+	char oid[TRAP_OID_LEN];
+	char name[TRAP_NAME_LEN];	/* friendly name, when we know the OID */
+	char type[16];			/* INTEGER, STRING, TimeTicks, ... */
+	char value[TRAP_VAL_LEN];
+	char note[TRAP_VAL_LEN];	/* decoded meaning, eg "down" for a 2 */
+};
+
+struct trap_content {
+	int version;			/* 0 = v1, 1 = v2c, 3 = v3 */
+	bool decoded;			/* FALSE => we could not read the packet */
+	bool alertable;			/* TRUE => this really was an SNMP trap */
+	bool inform;			/* TRUE => InformRequest, not a trap */
+	char community[64];
+	char trap_oid[TRAP_OID_LEN];	/* snmpTrapOID.0, or the v1 equivalent */
+	char enterprise[TRAP_OID_LEN];
+	char agent[IP_ADDR_STR_SIZE];	/* v1 agent-addr: the device's own idea */
+	char name[TRAP_NAME_LEN];	/* linkDown, coldStart, ... */
+	char description[TRAP_VAL_LEN];
+	char severity[16];		/* critical | warning | informational */
+	char category[24];		/* link | restart | security | ... */
+	char vendor[32];
+	char iface[64];			/* interface the trap names, if any */
+	int ifindex;			/* -1 when the trap named none */
+	int generic;			/* v1 generic trap number, -1 if n/a */
+	int specific;			/* v1 specific trap number */
+	unsigned long uptime;		/* sysUpTime in hundredths of a second */
+	int nvarbinds;
+	struct trap_varbind vb[TRAP_MAX_VARBIND];
+};
+
+struct trap_record {
+	char source[IP_ADDR_STR_SIZE];	/* who sent the packet */
+	time_t when;
+	int bytes;
+	char matched[OBJECT_NAME_SIZE];	/* object this source maps to, if any */
+	bool alert_enabled;		/* object had trap_alert set */
+	bool alert_sent;
+	struct trap_content content;
+};
+
 /* client status */
 struct clientstatus {
 	time_t lastactivity;
@@ -602,6 +656,36 @@ struct bootp_pkt {
 #define XML_PKTLOSS_TOTAL_LOST "PacketLossTotalLost"
 #define XML_PKTLOSS_HIST_SAMP  "PacketLossHistorySamples"
 #define XML_PKTLOSS_HISTORY    "PacketLossHistory"
+
+/* snmp trap history (TRAPS command) */
+#define XML_TRAPS		"SysmonTraps"
+#define XML_TRAP		"Trap"
+#define XML_TRAP_SOURCE		"TrapSource"
+#define XML_TRAP_TIME		"TrapTime"
+#define XML_TRAP_BYTES		"TrapBytes"
+#define XML_TRAP_VERSION	"TrapVersion"
+#define XML_TRAP_COMMUNITY	"TrapCommunity"
+#define XML_TRAP_OID		"TrapOID"
+#define XML_TRAP_ENTERPRISE	"TrapEnterprise"
+#define XML_TRAP_AGENT		"TrapAgentAddress"
+#define XML_TRAP_NAME		"TrapName"
+#define XML_TRAP_DESC		"TrapDescription"
+#define XML_TRAP_SEVERITY	"TrapSeverity"
+#define XML_TRAP_CATEGORY	"TrapCategory"
+#define XML_TRAP_VENDOR		"TrapVendor"
+#define XML_TRAP_IFACE		"TrapInterface"
+#define XML_TRAP_IFINDEX	"TrapIfIndex"
+#define XML_TRAP_UPTIME		"TrapUptime"
+#define XML_TRAP_DECODED	"TrapDecoded"
+#define XML_TRAP_MATCHED	"TrapMatchedHost"
+#define XML_TRAP_ALERT_EN	"TrapAlertEnabled"
+#define XML_TRAP_ALERT_SENT	"TrapAlertSent"
+#define XML_TRAP_VARBIND	"Varbind"
+#define XML_TRAP_VB_OID		"VarbindOID"
+#define XML_TRAP_VB_NAME	"VarbindName"
+#define XML_TRAP_VB_TYPE	"VarbindType"
+#define XML_TRAP_VB_VALUE	"VarbindValue"
+#define XML_TRAP_VB_NOTE	"VarbindNote"
 
 
 /* misc defines for any/all external functions */
@@ -940,7 +1024,15 @@ void stop_check_dns(struct monitorent *);
 void service_test_snmp(struct monitorent *);
 void start_test_snmp(struct monitorent *);
 struct graph_elements *find_object_by_ip(char *);
-void send_trap_alert(struct graph_elements *, struct in_addr);
+void send_trap_alert(struct graph_elements *, char *, struct trap_content *);
+
+/* trapdecode.c */
+bool decode_snmp_trap(const unsigned char *, size_t, struct trap_content *);
+void trap_history_add(const char *, time_t, int, struct trap_content *,
+	const char *, bool, bool);
+int trap_history_count(void);
+unsigned long trap_history_total(void);
+struct trap_record *trap_history_get(int);
 
 /* radius check */
 void start_check_radius(struct monitorent *, time_t);
@@ -950,6 +1042,7 @@ void md5_calc (unsigned char *, unsigned char *, unsigned int);
 
 /* srvclient.c */
 void send_object_xml(int, FILE*, struct graph_elements *);
+void send_traps(struct clientstatus *);
 void client_send_statechange(char *, int , int);
 
 /* in lib.c */

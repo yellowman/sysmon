@@ -41,46 +41,101 @@ int snmp_debug = 0;
 
 void process_snmp_trap(int skt)
 {
-	char buffer[4096];
+	unsigned char buffer[4096];
 	int len;
 	struct sockaddr_in from;
 	socklen_t fromlen = sizeof(from);
-	struct in_addr trap_source;
-	char ip_string[INET_ADDRSTRLEN];
+	char ip_string[IP_ADDR_STR_SIZE];
 	struct graph_elements *obj;
+	struct trap_content trap;
+	time_t now;
+	bool alert_sent = FALSE;
+	bool alert_enabled = FALSE;
 
 	/* Receive trap packet */
-	len = recvfrom(skt, buffer, 4095, 0, (struct sockaddr*)&from, &fromlen);
+	len = recvfrom(skt, buffer, sizeof(buffer), 0, (struct sockaddr*)&from, &fromlen);
 
 	if (len == -1) {
-		perror("snmp.c:recvfrom");
+		if (errno != EINTR && errno != EAGAIN)
+			perror("snmp.c:recvfrom");
 		return;
 	}
 
 	/* Extract source IP */
-	trap_source = from.sin_addr;
-	inet_ntop(AF_INET, &trap_source, ip_string, sizeof(ip_string));
+	if (inet_ntop(AF_INET, &from.sin_addr, ip_string, sizeof(ip_string)) == NULL)
+		snprintf(ip_string, sizeof(ip_string), "unknown");
 
-	/* Always log the trap */
-	print_err(1, "caught a snmp trap from %s that was %d bytes", ip_string, len);
+	time(&now);
+
+	/*
+	 * Read what the device actually said. decode_snmp_trap() always
+	 * leaves something printable behind, so the log line and the trap
+	 * history are useful even when the packet is junk.
+	 */
+	decode_snmp_trap(buffer, (size_t)len, &trap);
+
+	obj = find_object_by_ip(ip_string);
+
+	/*
+	 * A v1 trap carries the agent's own address, which is what matters
+	 * when a proxy or a NAT forwards it: the packet comes from the
+	 * relay, but the event belongs to the device named inside.
+	 */
+	if (obj == NULL && trap.agent[0] != '\0' &&
+	    strcmp(trap.agent, ip_string) != 0) {
+		obj = find_object_by_ip(trap.agent);
+		if (obj != NULL && debug)
+			print_err(1, "trap relayed by %s matched agent-addr %s",
+				ip_string, trap.agent);
+	}
+
+	if (trap.decoded) {
+		print_err(1, "snmp trap from %s: %s (%s%s%s) - %s [%d bytes, %s]",
+			ip_string, trap.name, trap.severity,
+			trap.vendor[0] != '\0' ? ", " : "", trap.vendor,
+			trap.description, len,
+			trap.version == 0 ? "v1" : "v2c");
+	} else {
+		print_err(1, "snmp trap from %s: %s [%d bytes]",
+			ip_string, trap.description, len);
+	}
 
 	/* Debug: dump packet in hex */
 	if (debug) {
 		print_in_hex(buffer, len);
 	}
 
-	/* NEW: Check if any object matches this IP and has trap_alert enabled */
-	obj = find_object_by_ip(ip_string);
-
 	if (obj != NULL && obj->data->trap_alert) {
-		/* Trigger alert */
-		send_trap_alert(obj, trap_source);
+		alert_enabled = TRUE;
+		/*
+		 * Only page for something that really was a trap. Before the
+		 * packet was decoded, any UDP datagram from a monitored
+		 * address woke somebody up - which made a page trivial to
+		 * provoke with a spoofed packet, and meant a stray scanner
+		 * could do it by accident.
+		 */
+		if (trap.alertable) {
+			send_trap_alert(obj, ip_string, &trap);
+			alert_sent = TRUE;
+		} else {
+			print_err(1, "not paging %s: the packet from %s was not an snmp trap",
+				obj->data->hostname, ip_string);
+		}
 	} else if (debug && obj != NULL) {
-		print_err(1, "trap from %s - object found but trap_alert not enabled",
-			obj->data->hostname);
+		print_err(1, "trap from %s - object %s found but trap_alert not enabled",
+			ip_string, obj->data->hostname);
 	} else if (debug) {
 		print_err(1, "trap from %s - no matching object found", ip_string);
 	}
+
+	/*
+	 * Remember it either way. A trap from an address nobody configured
+	 * is exactly the thing an operator wants to see in the web UI - it
+	 * is usually a device that should have been monitored all along.
+	 */
+	trap_history_add(ip_string, now, len, &trap,
+		obj != NULL ? (char *)obj->unique_name : NULL,
+		alert_enabled, alert_sent);
 }
 
 #ifdef ENABLE_SNMP
@@ -479,11 +534,16 @@ struct graph_elements *find_object_by_ip(char *ip_string)
  * send_trap_alert - Send an alert when SNMP trap is received
  *
  * Triggers the alert system to notify the configured contact that
- * an SNMP trap was received from this device.
+ * an SNMP trap was received from this device, and tells them what the
+ * device said. A page that reads "linkDown on Gi0/1 (critical)" is
+ * actionable at 3am; "a trap arrived" is not.
  */
-void send_trap_alert(struct graph_elements *obj, struct in_addr source)
+void send_trap_alert(struct graph_elements *obj, char *source,
+	struct trap_content *trap)
 {
 	time_t now;
+	char pagemsg[LARGE_TEMPBUF_SIZE];
+	unsigned char *saved_message;
 
 	if (obj == NULL || obj->data == NULL) {
 		print_err(1, "send_trap_alert: NULL object pointer");
@@ -492,12 +552,37 @@ void send_trap_alert(struct graph_elements *obj, struct in_addr source)
 
 	if (debug) {
 		print_err(1, "Sending trap alert for %s (%s)",
-			obj->data->hostname, inet_ntoa(source));
+			obj->data->hostname, source != NULL ? source : "?");
 	}
 
 	/* Get current time */
 	time(&now);
 
+	/*
+	 * %w in a page message expands to the object's description. Point
+	 * it at the trap for the duration of the page so the contact - and
+	 * any spawn command - receives the decoded content, then put the
+	 * configured description back. page_someone() forks for spawn
+	 * commands, and the child gets its own copy of this string.
+	 */
+	if (trap != NULL && trap->name[0] != '\0') {
+		snprintf(pagemsg, sizeof(pagemsg), "%s%sSNMP trap %s (%s)%s%s from %s: %s",
+			obj->data->message != NULL ? (char *)obj->data->message : "",
+			obj->data->message != NULL ? " - " : "",
+			trap->name, trap->severity,
+			trap->iface[0] != '\0' ? " on " : "", trap->iface,
+			source != NULL ? source : "an unknown address",
+			trap->description);
+	} else {
+		snprintf(pagemsg, sizeof(pagemsg), "SNMP trap from %s",
+			source != NULL ? source : "an unknown address");
+	}
+
+	saved_message = obj->data->message;
+	obj->data->message = (unsigned char *)pagemsg;
+
 	/* Use existing alert infrastructure */
 	page_someone(obj->data, SYSM_SNMP_TRAP, now);
+
+	obj->data->message = saved_message;
 }
