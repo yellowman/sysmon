@@ -8,6 +8,30 @@
     <div class="mb-6">
         <h1 class="text-xl font-extrabold tracking-tight text-gray-900 mb-4">SNMP Traps</h1>
 
+        <!-- Where traps come from. sysmon-web owns the trap socket, so it
+             can say exactly what it is doing: listening or not, on what,
+             and what it refused. -->
+        <div x-show="!loading && !listener.listening"
+             class="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+            <i class="fas fa-ear-deaf mr-2"></i>
+            Not listening for traps. Add <code class="mono">config snmp-trap;</code> to sysmon.conf
+            and restart sysmon-web - UDP 162 is privileged, so the port is claimed at startup.
+        </div>
+        <div x-show="!loading && listener.listening"
+             class="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 flex flex-wrap gap-x-6 gap-y-1">
+            <span><i class="fas fa-satellite-dish mr-1 text-emerald-600"></i>
+                Listening on <span class="mono" x-text="listener.address"></span></span>
+            <span x-text="(listener.configured_addresses || 0) + ' configured address(es) accepted'"></span>
+            <span x-text="'kept for ' + (listener.retention_days || 0) + ' days'"></span>
+            <span x-show="listener.dropped_unconfigured" class="text-amber-700"
+                  x-text="listener.dropped_unconfigured + ' packet(s) ignored from addresses no object claims'"></span>
+            <template x-if="listener.unknown_sources && listener.unknown_sources.length">
+                <span class="text-amber-700">
+                    (<span class="mono" x-text="listener.unknown_sources.map(u => u.source_ip).join(', ')"></span>)
+                </span>
+            </template>
+        </div>
+
         <!-- Summary Cards -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <div class="card p-4">
@@ -285,6 +309,7 @@ function trapsPage() {
         traps: [],
         sources: [],
         summary: {},
+        listener: {},
         filterSource: '',
         filterSeverity: '',
         selectedTrap: null,
@@ -352,6 +377,7 @@ function trapsPage() {
                     this.traps = data.data || [];
                     this.sources = data.trap_sources || [];
                     this.summary = data.summary || {};
+                    this.listener = data.listener || {};
                     this.totalTraps = data.total;
                     this.totalPages = data.total_pages;
                     this.currentPage = data.page;
@@ -360,6 +386,7 @@ function trapsPage() {
                     this.traps = data.recent_traps || [];
                     this.sources = data.trap_sources || [];
                     this.summary = data.summary || {};
+                    this.listener = data.listener || {};
                     this.totalTraps = this.traps.length;
                     this.totalPages = 1;
                     this.currentPage = 1;

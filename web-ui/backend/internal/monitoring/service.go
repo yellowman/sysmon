@@ -1046,23 +1046,6 @@ func (s *Service) GetHostStatus(name string) (*models.HostStatus, error) {
 	return nil, fmt.Errorf("host %s not found", name)
 }
 
-// GetTrapsBySource gets traps from a specific source
-func (s *Service) GetTrapsBySource(sourceIP string, authKey string) ([]models.Trap, error) {
-	traps, err := s.GetTraps(authKey)
-	if err != nil {
-		return nil, err
-	}
-
-	filtered := []models.Trap{}
-	for _, trap := range traps.RecentTraps {
-		if trap.SourceIP == sourceIP {
-			filtered = append(filtered, trap)
-		}
-	}
-
-	return filtered, nil
-}
-
 // GetStatistics gets monitoring statistics
 func (s *Service) GetStatistics() (*models.Stats, error) {
 	status, err := s.GetStatus()

@@ -43,7 +43,7 @@ all:	@PROGS@
 DAEMON_OBJECTS = heartbeat.o syswatch.o page.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
-		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o pingv6.o logging.o dns.o ssh.o
+		radius.o md5.o parser.o snpp.o snmp.o pingv6.o logging.o dns.o ssh.o
 
 sysmon: client.o talktcp.o lib.o  dnscache.o
 	-$(RM) sysmon
@@ -83,17 +83,8 @@ install:	all
 strip:
 	-strip @PROGS@
 
-# The trap decoder parses UDP packets from anyone who can reach port 162,
-# so it gets its own round-trip + fuzz harness. Run it under the
-# sanitizers; that combination is what makes the fuzzing worth anything.
-trapdecode-test: trapdecode_test.c trapdecode.c config.h
-	$(CC) $(CFLAGS) -o trapdecode-test trapdecode_test.c trapdecode.c
-
-check: trapdecode-test
-	./trapdecode-test
-
 clean:
-	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test core sysmond.core sysmon.core
+	-$(RM) *.o @PROGS@ sysmon-ping-helper core sysmond.core sysmon.core
 
 heartbeat.o: 	config.h Makefile heartbeat.c
 syswatch.o:	config.h Makefile syswatch.c
@@ -120,7 +111,6 @@ radius.o:	config.h Makefile radius.c
 md5.o:		config.h Makefile md5.c md5.h
 snpp.o:		config.h Makefile snpp.c
 snmp.o:		config.h Makefile snmp.c
-trapdecode.o:	config.h Makefile trapdecode.c
 pingv6.o:	config.h Makefile pingv6.c
 logging.o:	config.h Makefile logging.c
 ssh.o:		config.h Makefile ssh.c
