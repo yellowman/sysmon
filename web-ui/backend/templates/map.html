@@ -157,9 +157,13 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Object name</label>
-                        <input type="text" x-model="tplForm.name" placeholder="lbmtk5"
-                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
+                        <label class="block text-xs font-medium text-gray-600 mb-1">
+                            Object name
+                            <span x-show="!tplForm.name.trim()" class="text-red-600 font-semibold">- required</span>
+                        </label>
+                        <input type="text" x-model="tplForm.name" x-ref="tplName" placeholder="lbmtk5"
+                               :class="tplForm.name.trim() ? 'border-gray-200' : 'border-red-500 ring-1 ring-red-400 bg-red-50'"
+                               class="w-full px-3 py-2 border rounded text-sm mono">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">IP address</label>
@@ -270,16 +274,17 @@
          send you hunting below the fold for the panel. -->
     <div x-show="selected" x-cloak
          class="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto"
-         @click.self="selected = null" @keydown.escape.window="selected = null">
+         @click.self="closeInspector()" @keydown.escape.window="closeInspector()">
       <div class="bg-white rounded-lg shadow-2xl w-full max-w-3xl mt-16 mb-8">
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <h3 class="font-semibold text-gray-900">
                 <span x-text="selected?.id"></span>
                 <span x-show="statusOf(selected?.id)" class="ml-2 px-1.5 py-0.5 rounded text-xs font-medium"
                       :class="badgeClass(statusOf(selected?.id))" x-text="statusOf(selected?.id)"></span>
+                <span x-show="draft && selected === draft" class="text-gray-400 font-normal">New host</span>
                 <span x-show="editMode" class="ml-2 text-xs font-normal text-gray-400">editing</span>
             </h3>
-            <button @click="selected = null" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            <button @click="closeInspector()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
         </div>
         <div class="p-6">
 
@@ -301,9 +306,24 @@
         <template x-if="selected && editMode">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Object name</label>
-                    <input type="text" :value="selected.id" @change="renameHost(selected, $event.target.value)"
-                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">
+                        Object name
+                        <span x-show="draft && selected === draft" class="text-red-600 font-semibold">- required</span>
+                    </label>
+                    <!-- A new host arrives here nameless, with the cursor in
+                         this box and a red border: the operator names the
+                         thing they are adding. A generated "-child2" is only
+                         ever shipped by accident. -->
+                    <input type="text" x-ref="nameInput" x-model="nameField"
+                           @input="nameError = nameProblem(nameField)"
+                           @change="commitName()" @keydown.enter.prevent="commitName()"
+                           placeholder="name this object"
+                           :class="nameError ? 'border-red-500 ring-1 ring-red-400 bg-red-50' : 'border-gray-200'"
+                           class="w-full px-3 py-1.5 border rounded text-sm mono">
+                    <p x-show="nameError" class="text-xs text-red-600 mt-1" x-text="nameError"></p>
+                    <p x-show="!nameError && draft && selected === draft" class="text-xs text-gray-500 mt-1">
+                        This becomes the object name in sysmon.conf.
+                    </p>
                 </div>
                 <div>
                     <label class="block text-xs font-medium text-gray-600 mb-1">IP address / hostname</label>
@@ -368,15 +388,17 @@
                         <i class="fas fa-link mr-1"></i>Draw dependency from this host
                     </button>
                     <button @click="deleteHost(selected)" class="px-3 py-1.5 text-red-600 text-sm rounded hover:bg-red-50">
-                        <i class="fas fa-trash mr-1"></i>Delete host
+                        <i class="fas fa-trash mr-1"></i><span
+                            x-text="draft && selected === draft ? 'Discard this host' : 'Delete host'">Delete host</span>
                     </button>
                 </div>
             </div>
         </template>
         </div>
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end">
-            <button @click="selected = null"
-                    class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">Close</button>
+            <button @click="closeInspector()"
+                    class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200"
+                    x-text="draft && selected === draft ? 'Discard' : 'Close'">Close</button>
         </div>
       </div>
     </div>
@@ -396,6 +418,13 @@ function mapPage() {
         // One editable row per dependency. Backed by the host's
         // comma-separated string, but the operator never sees a comma.
         depRows: [],
+        // A host created from the map but not yet named. Deliberately NOT
+        // in `hosts` until it has a name: a nameless object cannot be
+        // drawn, cannot be depended on, and must never reach sysmon.conf.
+        draft: null,
+        draftParent: '',
+        nameField: '',
+        nameError: '',
         // Right-click menu: {x, y, host} in viewport pixels.
         ctx: null,
         linking: null,
@@ -496,11 +525,16 @@ function mapPage() {
         openTemplate() {
             // Adding from the map: default the parent to whatever node is
             // selected, which is almost always the switch you just clicked.
-            this.tplForm.parent = this.selected ? this.selected.id : '';
+            this.tplForm.parent = (this.selected && this.selected !== this.draft) ? this.selected.id : '';
+            // Name and address are per-device; carrying the last one over
+            // only produces a duplicate-name error.
+            this.tplForm.name = '';
+            this.tplForm.ip = '';
             this.tplPreview = [];
             this.tplError = '';
             this.tplOpen = true;
             if (!this.tplList.length) this.loadTemplates();
+            this.$nextTick(() => this.$refs.tplName && this.$refs.tplName.focus());
         },
 
         async previewTemplate() {
@@ -832,39 +866,108 @@ function mapPage() {
 
         // Open the inspector modal for a host (shared by click and menu).
         openInspector(host) {
+            // Moving to another host abandons an unnamed draft; it was
+            // never a real object.
+            if (this.draft && host !== this.draft) { this.draft = null; this.draftParent = ''; }
             this.selected = host || null;
             this.depRows = host ? this.deps(host) : [];
-            this.$nextTick(() => this.applySelection());
+            this.nameField = host ? (host.id || '') : '';
+            this.nameError = host ? this.nameProblem(this.nameField) : '';
+            this.$nextTick(() => {
+                this.applySelection();
+                if (this.draft && this.draft === host) this.focusName();
+            });
         },
 
-        // Create a host that depends on the right-clicked one, drop it on
-        // the map beside its parent, and open it for editing.
-        newDependentHost(parent) {
-            this.ctx = null;
-            if (!parent) return;
-            let base = parent.id + '-child', name = base, n = 2;
-            while (this.hosts.some(h => h.id === name)) name = base + n++;
-            const host = {
-                id: name, hostname: name, ip: '', type: 'ping',
-                notes: '', contact: parent.contact || '', spawn: parent.spawn || '',
-                dependencies: parent.id
-            };
+        // x-if builds the edit form a tick late, so retry briefly rather
+        // than leaving the operator to hunt for the field.
+        focusName(tries) {
+            const el = this.$refs.nameInput;
+            if (el) { el.focus(); el.select(); return; }
+            if ((tries || 0) < 6) setTimeout(() => this.focusName((tries || 0) + 1), 30);
+        },
+
+        // Object names become identifiers in sysmon.conf, so the characters
+        // the parser treats as syntax are refused here rather than at save.
+        nameProblem(v) {
+            const name = (v || '').trim();
+            if (!name) return 'Give this object a name.';
+            if (/[\s,;"'{}]/.test(name)) return 'No spaces, commas, semicolons, quotes or braces.';
+            if (this.hosts.some(h => h !== this.selected && h.id === name)) {
+                return 'Another host already uses that name.';
+            }
+            return '';
+        },
+
+        // Blur or Enter on the name box: finish creating the draft, or
+        // rename an existing host.
+        commitName() {
+            const name = (this.nameField || '').trim();
+            this.nameError = this.nameProblem(name);
+            if (this.nameError) { this.focusName(); return; }
+            if (this.draft && this.selected === this.draft) { this.commitDraft(name); return; }
+            if (this.selected && name !== this.selected.id) this.renameHost(this.selected, name);
+        },
+
+        // The draft becomes a real host the moment it has a name: only then
+        // can it be laid out, linked to, or written to the config.
+        commitDraft(name) {
+            const host = this.draft;
+            const parent = this.draftParent;
+            host.id = name;
+            host.hostname = name;
             this.hosts.push(host);
-            // Place it just right of and below the parent so it is visible
+            this.draft = null;
+            this.draftParent = '';
+            // Place it just right of and below its parent so it is visible
             // immediately rather than wherever auto-layout would drop it.
-            const pn = this.nodes.find(n2 => n2.id === parent.id);
+            const pn = this.nodes.find(n => n.id === parent);
             if (pn) {
                 this.positions[name] = { x: Math.round(pn.x + 215), y: Math.round(pn.y + 46) };
                 this.layoutDirty = true;
             }
-            this.collapsed[parent.id] = false;
+            if (parent) this.collapsed[parent] = false;
             this.dirty = true;
-            if (!this.editMode) this.editMode = true;   // creating implies editing
             this.layout();
-            this.openInspector(host);
-            this.notice = 'Created ' + name + ' depending on ' + parent.id +
+            this.$nextTick(() => this.applySelection());
+            this.notice = 'Created ' + name + (parent ? ' depending on ' + parent : '') +
                 '. Set its address, then Save.';
             setTimeout(() => this.notice = '', 6000);
+        },
+
+        discardDraft() {
+            this.draft = null;
+            this.draftParent = '';
+            this.selected = null;
+            this.nameField = '';
+            this.nameError = '';
+        },
+
+        closeInspector() {
+            if (this.draft && this.selected === this.draft) {
+                this.discardDraft();
+                this.notice = 'Discarded the new host - it was never named.';
+                setTimeout(() => this.notice = '', 4000);
+                return;
+            }
+            this.selected = null;
+            this.nameError = '';
+        },
+
+        // Start a host that depends on the right-clicked one. It opens as a
+        // draft with the cursor in the name box - nothing is added to the
+        // map until it has a name of the operator's choosing.
+        newDependentHost(parent) {
+            this.ctx = null;
+            if (!parent) return;
+            if (!this.editMode) this.editMode = true;   // creating implies editing
+            this.draftParent = parent.id;
+            this.draft = {
+                id: '', hostname: '', ip: '', type: 'ping',
+                notes: '', contact: parent.contact || '', spawn: parent.spawn || '',
+                dependencies: parent.id
+            };
+            this.openInspector(this.draft);
         },
 
         // Same intent, but stamp out a whole device from a template.
@@ -905,9 +1008,7 @@ function mapPage() {
                 this.layout();
                 return;
             }
-            this.selected = host || null;
-            this.depRows = host ? this.deps(host) : [];
-            this.$nextTick(() => this.applySelection());
+            this.openInspector(host);
         },
 
         startLink(n) {
@@ -981,22 +1082,20 @@ function mapPage() {
             if (this.dirty && !confirm('Discard unsaved map changes?')) return;
             this.editMode = false;
             this.linking = null;
-            this.selected = null;
+            this.discardDraft();
             if (this.dirty) { this.dirty = false; this.loadConfig().then(() => this.layout()); }
         },
 
+        // Same draft-first flow as the right-click menu: name it, then it
+        // exists. Any host currently selected becomes its parent.
         addHost() {
-            let name = 'new-host', i = 1;
-            while (this.hosts.some(h => h.id === name)) name = 'new-host-' + (++i);
-            const host = {
-                id: name, hostname: '', ip: '', type: 'ping', notes: '',
-                dependencies: this.selected ? this.selected.id : ''
+            const parent = (this.selected && this.selected !== this.draft) ? this.selected.id : '';
+            this.draftParent = parent;
+            this.draft = {
+                id: '', hostname: '', ip: '', type: 'ping', notes: '',
+                dependencies: parent
             };
-            this.hosts.push(host);
-            this.dirty = true;
-            this.selected = host;
-            if (host.dependencies) this.collapsed[host.dependencies] = false;
-            this.layout();
+            this.openInspector(this.draft);
         },
 
         renameHost(host, newId) {
@@ -1020,6 +1119,8 @@ function mapPage() {
         },
 
         deleteHost(host) {
+            // An unnamed draft is not in the config yet - just drop it.
+            if (this.draft && host === this.draft) { this.discardDraft(); return; }
             if (!confirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
             const i = this.hosts.indexOf(host);
             if (i >= 0) this.hosts.splice(i, 1);
