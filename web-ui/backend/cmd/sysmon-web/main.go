@@ -183,6 +183,12 @@ func signalReady() {
 
 // bindTrapSocket opens the SNMP trap port if sysmon.conf asks for it.
 //
+// Two decisions, one place each, deliberately: sysmon.conf says WHETHER
+// traps are received (`config snmp-trap;`) and WHICH objects alert on them
+// (`trap_alert;`) - that is a description of the network, and both daemons
+// read it. -trap-listen says WHERE this process binds, which is plumbing
+// like -listen and -socket, and belongs on the command line with them.
+//
 // Returns nil - never fatal - when traps are switched off, when the config
 // cannot be read, or when the bind fails: a monitoring web UI that refuses
 // to start because port 162 is busy would be a worse daemon than one that
@@ -199,12 +205,6 @@ func bindTrapSocket(listenAddr, configPath string) *net.UDPConn {
 	}
 	if !cfg.Global.SNMPTrap {
 		return nil
-	}
-
-	// `config trapport N;` overrides the port, but an explicit -trap-listen
-	// wins over both - it is the only way to say "bind an address".
-	if listenAddr == ":162" && cfg.Global.SNMPTrapPort != 0 && cfg.Global.SNMPTrapPort != 162 {
-		listenAddr = fmt.Sprintf(":%d", cfg.Global.SNMPTrapPort)
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", listenAddr)
