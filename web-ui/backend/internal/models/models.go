@@ -22,8 +22,7 @@ type GlobalSettings struct {
 	FlapTime       int `json:"flaptime,omitempty"`       // flap detection time in seconds
 
 	// Ports
-	ClientPort   int `json:"clientport,omitempty"` // TCP port for sysmon client (default 1345)
-	SNMPTrapPort int `json:"trapport,omitempty"`   // UDP port for SNMP traps (default 162)
+	ClientPort int `json:"clientport,omitempty"` // TCP port for sysmon client (default 1345)
 
 	// Alert settings
 	PageInterval int    `json:"pageinterval,omitempty"` // reminder interval in minutes
