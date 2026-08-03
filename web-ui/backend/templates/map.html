@@ -283,27 +283,35 @@
                     <label class="block text-xs font-medium text-gray-600 mb-1">
                         Depends on <span class="text-gray-400">(a host may depend on several)</span>
                     </label>
-                    <!-- The datalist matches the whole field value, which is
-                         useless for a comma-separated list, so type-ahead
-                         runs against the segment being edited and appends
-                         the pick to what is already there. -->
-                    <div class="flex gap-2">
-                        <input type="text" x-model="selected.dependencies" @change="onDepChange(selected)"
-                               placeholder="comma-separated, e.g. core-01, dist-a"
-                               class="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm mono">
-                        <input type="text" list="host-names" x-model="depPick"
-                               @change="addDepFromPicker(selected)"
-                               placeholder="add a dependency..."
-                               class="w-56 px-3 py-1.5 border border-gray-200 rounded text-sm mono bg-blue-50/40">
-                    </div>
-                    <div class="flex flex-wrap gap-1 mt-2">
-                        <template x-for="d in deps(selected)" :key="d">
-                            <span class="px-1.5 py-0.5 bg-gray-100 rounded text-xs mono flex items-center gap-1">
-                                <span x-text="d"></span>
-                                <button @click="removeDep(selected, d)" class="text-gray-400 hover:text-red-600">&times;</button>
-                            </span>
+                    <!-- One box per dependency: a datalist can only match a
+                         whole field value, so a comma-separated string could
+                         never autocomplete. Each row is its own input, each
+                         with type-ahead over every object name. -->
+                    <div class="space-y-2">
+                        <template x-for="(d, i) in depRows" :key="'dep-' + i">
+                            <div class="flex items-center gap-2">
+                                <input type="text" list="host-names"
+                                       x-model="depRows[i]"
+                                       @change="syncDeps(selected)"
+                                       placeholder="start typing a host name..."
+                                       class="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                                <button @click="removeDepRow(selected, i)"
+                                        class="px-2 py-1.5 text-gray-400 hover:text-red-600" title="Remove this dependency">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
                         </template>
+                        <div class="flex items-center gap-3">
+                            <button @click="addDepRow()"
+                                    class="px-3 py-1.5 bg-blue-50 text-blue-700 text-xs rounded hover:bg-blue-100">
+                                <i class="fas fa-plus mr-1"></i>Add dependency
+                            </button>
+                            <span x-show="!depRows.length" class="text-xs text-gray-400">
+                                No dependencies - this host is a root.
+                            </span>
+                        </div>
                     </div>
+
                 </div>
                 <div>
                     <label class="block text-xs font-medium text-gray-600 mb-1">Port (tcp/http/etc)</label>
@@ -345,7 +353,9 @@ function mapPage() {
         collapsed: {},
         stats: { total: 0, roots: 0, depth: 0, hidden: 0 },
         selected: null,
-        depPick: '',
+        // One editable row per dependency. Backed by the host's
+        // comma-separated string, but the operator never sees a comma.
+        depRows: [],
         linking: null,
         editMode: new URLSearchParams(location.search).get('edit') === '1',
         dirty: false,
@@ -737,19 +747,30 @@ function mapPage() {
             // collapse every node that has children at or below fromDepth
             const byId = {}, kids = {};
             this.hosts.forEach(h => { byId[h.id] = h; });
+            // Multi-parent aware: reading dependencies as a single name
+            // made every dual-homed host look like a root here.
             this.hosts.forEach(h => {
-                const p = (h.dependencies || '').trim();
-                if (p && byId[p]) (kids[p] = kids[p] || []).push(h);
+                this.deps(h).forEach(p => {
+                    if (byId[p]) (kids[p] = kids[p] || []).push(h);
+                });
             });
             const roots = this.hosts.filter(h => {
                 const p = (h.dependencies || '').trim();
                 return !p || !byId[p];
             });
+            // Visited set is mandatory: dependency rings are real (two
+            // routers each depending on the other for redundancy), so a
+            // plain descent revisits them forever.
+            const seen = new Set();
             const walk = (h, d) => {
+                if (seen.has(h.id)) return;
+                seen.add(h.id);
                 if (d >= fromDepth && (kids[h.id] || []).length) this.collapsed[h.id] = true;
                 (kids[h.id] || []).forEach(c => walk(c, d + 1));
             };
             roots.forEach(r => walk(r, 0));
+            // Hosts only reachable through a ring still need collapsing.
+            this.hosts.forEach(h => walk(h, fromDepth));
         },
         expandAll() { this.collapsed = {}; this.layout(); },
         collapseAll() { this.collapseDeep(0); this.layout(); },
@@ -784,6 +805,7 @@ function mapPage() {
                 return;
             }
             this.selected = host || null;
+            this.depRows = host ? this.deps(host) : [];
             this.$nextTick(() => this.applySelection());
         },
 
@@ -820,16 +842,31 @@ function mapPage() {
             return false;
         },
 
-        // Append a picked name to the dependency list, ignoring blanks,
-        // self-references and duplicates.
-        addDepFromPicker(host) {
-            const pick = (this.depPick || '').trim();
-            this.depPick = '';
-            if (!pick || !host || pick === host.id) return;
-            const cur = this.deps(host);
-            if (cur.includes(pick)) return;
-            host.dependencies = cur.concat(pick).join(', ');
-            this.onDepChange(host);
+        // Write the rows back to the host, dropping blanks, duplicates
+        // and self-references. Blank rows stay on screen (they are boxes
+        // waiting to be filled) but never reach the config.
+        syncDeps(host) {
+            if (!host) return;
+            const seen = new Set();
+            const clean = [];
+            for (const raw of this.depRows) {
+                const d = (raw || '').trim();
+                if (!d || d === host.id || seen.has(d)) continue;
+                seen.add(d);
+                clean.push(d);
+            }
+            host.dependencies = clean.join(', ');
+            this.dirty = true;
+            this.layout();
+        },
+
+        addDepRow() {
+            this.depRows.push('');
+        },
+
+        removeDepRow(host, i) {
+            this.depRows.splice(i, 1);
+            this.syncDeps(host);
         },
 
         removeDep(host, dep) {
