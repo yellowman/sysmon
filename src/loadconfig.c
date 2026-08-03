@@ -390,6 +390,22 @@ void update_globs_from_parser()
 		if (snmp_trap_fd == -1)
 		{
 			snmp_trap_fd = init_udp_socket(SNMP_TRAP_PORTNUM);
+			if (snmp_trap_fd == -1)
+			{
+				/* Port 162 is privileged. The first config read
+				 * happens while we are still root, so this only
+				 * fails when snmp-trap is switched on by a SIGHUP
+				 * reload after the privilege drop - and then it
+				 * needs a restart, not another reload. */
+				print_err(1, "could not bind UDP %d for snmp traps%s",
+					SNMP_TRAP_PORTNUM,
+					(geteuid() != 0) ?
+					  " - traps were enabled after privileges were dropped, restart sysmond to listen" :
+					  " - is another trap receiver already running?");
+			} else {
+				print_err(0, "listening for snmp traps on UDP %d",
+					SNMP_TRAP_PORTNUM);
+			}
 		}
 	}
 	if (parser_pmesg != NULL)

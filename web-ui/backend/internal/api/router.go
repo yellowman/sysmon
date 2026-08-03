@@ -584,7 +584,9 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 }
 
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {
-	traps, err := r.monitoring.GetTraps()
+	// Authenticating to sysmond is what unlocks the community string in
+	// the trap records; without it the daemon withholds that field.
+	traps, err := r.monitoring.GetTraps(r.getSysmonAuthKey())
 	if err != nil {
 		r.sendError(w, http.StatusServiceUnavailable, err.Error())
 		return
