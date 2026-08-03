@@ -22,11 +22,17 @@ config dnsexpire 7200;
 # Do not queue more than this many objects to be checked at once
 config maxqueued 50;
 
-# Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
-# the socket is bound at startup while sysmond is still root - enabling
-# this on a running daemon needs a restart, not a SIGHUP.
-# Traps are decoded (v1 and v2c) and logged with what the device said.
-# To page on them, add "trap_alert;" to the object with that IP as well.
+# Catch SNMP traps on UDP 162. Off by default.
+#
+# sysmon-web is the trap receiver, not sysmond: it binds the port at
+# startup (162 is privileged) before dropping privileges, decodes v1 and
+# v2c traps, and alerts. sysmond reads this directive and ignores it.
+# Restart sysmon-web after switching it on - a reload cannot claim a
+# privileged port.
+#
+# Traps are only accepted from addresses that belong to an object in this
+# file; everything else is dropped unread. To page on a device's traps,
+# add "trap_alert;" to its object as well.
 #config snmp-trap;		# catch snmp-traps
 
 object my.default.gateway-obj {

@@ -186,7 +186,6 @@ type SysmonStatus struct {
 	Daemon     DaemonInfo   `json:"daemon"`
 	Hosts      []HostStatus `json:"hosts"`
 	Statistics Stats        `json:"statistics"`
-	SNMPTraps  *TrapInfo    `json:"snmp_traps,omitempty"`
 	// Rev is a monotonic revision that bumps only when host state
 	// actually changes (not when timers/uptime merely tick). Clients
 	// pass it back as ?since= to fetch a StatusDelta of just what changed.
