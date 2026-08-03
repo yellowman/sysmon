@@ -421,6 +421,15 @@ func main() {
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService(*sysmonAddr)
+	// CONF - sysmond's bulk object dump, and the difference between a
+	// one-round-trip poll and one round trip per host - is privileged.
+	monitoringService.SetAuthKeyProvider(func() string {
+		snap, err := configService.GetConfig()
+		if err != nil {
+			return ""
+		}
+		return snap.Config.Global.AuthKey
+	})
 
 	// Host up/down transition history, persisted so it survives restarts.
 	var historyStore *monitoring.HistoryStore
