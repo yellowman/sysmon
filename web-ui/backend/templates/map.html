@@ -56,6 +56,11 @@
                     class="px-2.5 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700" title="Save hand-placed positions">
                 <i class="fas fa-thumbtack mr-1"></i>Save layout
             </button>
+            <button @click="revertPositions()" x-show="layoutDirty"
+                    class="px-2.5 py-1.5 bg-amber-100 text-amber-800 text-xs rounded hover:bg-amber-200"
+                    title="Discard moves made since the last save">
+                <i class="fas fa-rotate-left mr-1"></i>Revert
+            </button>
             <button @click="resetPositions()"
                     class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200"
                     title="Discard hand-placed positions and re-run the automatic layout">
@@ -161,12 +166,11 @@
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Depends on</label>
-                        <select x-model="tplForm.parent" class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
-                            <option value="">(none - root)</option>
-                            <template x-for="h in hosts" :key="h.id">
-                                <option :value="h.id" x-text="h.id"></option>
-                            </template>
-                        </select>
+                        <!-- Typeahead rather than a select: an 800-object
+                             dropdown is unusable. -->
+                        <input type="text" list="host-names" x-model="tplForm.parent"
+                               placeholder="start typing a host name..."
+                               class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Description</label>
@@ -212,6 +216,15 @@
             </div>
         </div>
     </div>
+
+    <!-- Every object name, for the dependency autocompletes. Browsers
+         filter a datalist as you type, so an operator never has to
+         remember whether it was "awbreyswitch" or "awbrey-switch". -->
+    <datalist id="host-names">
+        <template x-for="h in hosts" :key="'dl-' + h.id">
+            <option :value="h.id" :label="h.notes || h.ip || ''"></option>
+        </template>
+    </datalist>
 
     <!-- Host inspector: a modal, so clicking a node in a big map does not
          send you hunting below the fold for the panel. -->
@@ -270,9 +283,19 @@
                     <label class="block text-xs font-medium text-gray-600 mb-1">
                         Depends on <span class="text-gray-400">(a host may depend on several)</span>
                     </label>
-                    <input type="text" x-model="selected.dependencies" @change="onDepChange(selected)"
-                           placeholder="comma-separated, e.g. core-01, dist-a"
-                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                    <!-- The datalist matches the whole field value, which is
+                         useless for a comma-separated list, so type-ahead
+                         runs against the segment being edited and appends
+                         the pick to what is already there. -->
+                    <div class="flex gap-2">
+                        <input type="text" x-model="selected.dependencies" @change="onDepChange(selected)"
+                               placeholder="comma-separated, e.g. core-01, dist-a"
+                               class="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                        <input type="text" list="host-names" x-model="depPick"
+                               @change="addDepFromPicker(selected)"
+                               placeholder="add a dependency..."
+                               class="w-56 px-3 py-1.5 border border-gray-200 rounded text-sm mono bg-blue-50/40">
+                    </div>
                     <div class="flex flex-wrap gap-1 mt-2">
                         <template x-for="d in deps(selected)" :key="d">
                             <span class="px-1.5 py-0.5 bg-gray-100 rounded text-xs mono flex items-center gap-1">
@@ -322,6 +345,7 @@ function mapPage() {
         collapsed: {},
         stats: { total: 0, roots: 0, depth: 0, hidden: 0 },
         selected: null,
+        depPick: '',
         linking: null,
         editMode: new URLSearchParams(location.search).get('edit') === '1',
         dirty: false,
@@ -335,6 +359,9 @@ function mapPage() {
         // Hand-placed node positions, persisted server-side so an
         // arrangement one operator makes is what everyone else sees.
         positions: {},
+        // Snapshot of what the server last stored, so moves can be
+        // discarded without re-running the automatic layout.
+        savedPositions: {},
         canvasHeight: 600,
         tplOpen: false,
         tplList: [],
@@ -353,6 +380,9 @@ function mapPage() {
             await this.loadPositions();
             this.loadTemplates();
             this.$nextTick(() => this.sizeCanvas());
+            window.addEventListener('beforeunload', (e) => {
+                if (this.layoutDirty || this.dirty) { e.preventDefault(); e.returnValue = ''; }
+            });
             window.addEventListener('resize', () => {
                 this.sizeCanvas();
                 this.applyTransform();
@@ -458,6 +488,7 @@ function mapPage() {
             try {
                 this.positions = (await apiCall('/api/map/layout')) || {};
             } catch (e) { this.positions = {}; }
+            this.savedPositions = JSON.parse(JSON.stringify(this.positions));
         },
 
         // Pick up layout changes made in other sessions. Skipped while
@@ -481,6 +512,7 @@ function mapPage() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.positions)
                 });
+                this.savedPositions = JSON.parse(JSON.stringify(this.positions));
                 this.layoutDirty = false;
                 this.notice = 'Layout saved.';
                 setTimeout(() => this.notice = '', 3000);
@@ -489,8 +521,21 @@ function mapPage() {
             }
         },
 
+        // Undo: throw away moves made since the last save and put every
+        // node back where the server has it. Nothing is written.
+        revertPositions() {
+            this.positions = JSON.parse(JSON.stringify(this.savedPositions));
+            this.layoutDirty = false;
+            this.layout();
+            this.notice = 'Reverted to the last saved layout.';
+            setTimeout(() => this.notice = '', 4000);
+        },
+
+        // Different thing entirely: discard ALL hand placement (including
+        // what was saved) and go back to automatic placement. This one
+        // does write, so it needs confirming.
         async resetPositions() {
-            if (!confirm('Reset all hand-placed positions back to the automatic layout?')) return;
+            if (!confirm('Discard every hand-placed position, including saved ones, and return to automatic layout?')) return;
             this.positions = {};
             await this.savePositions();
             this.layout();
@@ -773,6 +818,18 @@ function mapPage() {
                 if (h) this.deps(h).forEach(p => stack.push(p));
             }
             return false;
+        },
+
+        // Append a picked name to the dependency list, ignoring blanks,
+        // self-references and duplicates.
+        addDepFromPicker(host) {
+            const pick = (this.depPick || '').trim();
+            this.depPick = '';
+            if (!pick || !host || pick === host.id) return;
+            const cur = this.deps(host);
+            if (cur.includes(pick)) return;
+            host.dependencies = cur.concat(pick).join(', ');
+            this.onDepChange(host);
         },
 
         removeDep(host, dep) {
