@@ -1779,6 +1779,18 @@ void revoke_root_if_necessary()
 			drop_user, pw->pw_uid);
 	}
 
+	/*
+	 * Create the generation directory and hand it to the user we are
+	 * about to become. It has to happen here, on this side of the drop:
+	 * afterwards /var/lib is not writable, and the alternative is asking
+	 * an operator to mkdir it by hand on every box in the fleet.
+	 *
+	 * This is also the only directory the daemon is ever given. The seed
+	 * config stays owned by whoever owns /etc, and nothing here will make
+	 * it writable.
+	 */
+	confgen_prepare(pw->pw_uid, pw->pw_gid);
+
 	/* Drop privileges */
 	if (setgid(pw->pw_gid) != 0)
 	{
@@ -1824,6 +1836,33 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 #endif /* HAVE_LIBPTHREAD */
 
 	setup_client_listen(listenport);
+
+	/*
+	 * Say plainly how - or whether - anything can talk to this daemon.
+	 *
+	 * The client socket used to be unconditional, and for most of this
+	 * daemon's life it was an unauthenticated port opened by a process
+	 * running as root. It is off unless asked for now, which means a box
+	 * with neither a listener nor an aggregator monitors and pages
+	 * perfectly well but cannot be looked at - a reasonable thing to want
+	 * and a very easy thing to do by accident, so it gets said out loud.
+	 */
+	if (listenport > 0)
+	{
+		print_err(1, "listening for sysmon clients on TCP %d", listenport);
+	}
+	else if (aggregator_host != NULL)
+	{
+		print_err(0, "no client socket; reporting to sysmon-web at %s:%d",
+			aggregator_host, aggregator_port);
+	}
+	else
+	{
+		print_err(1, "WARNING: no client socket and no aggregator - this daemon "
+			"will monitor and page, but nothing can query it. Set "
+			"\"config aggregator\" to report to a sysmon-web, or "
+			"\"config listen 1345\" (or -p) for the sysmon client.");
+	}
 	if (!disable_icmp)
 	{
 		setup_icmp_fd();
@@ -1926,7 +1965,12 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			{
 				print_err(0, "calling sync_after_sighup");
 			}
-			hupdata = sync_after_sighup(currenthead, configfile);
+			/* Which config is live can change between reloads: a
+			   delivery swaps the current generation, a rollback swaps
+			   it back, and a revert drops it and returns to the seed.
+			   Ask rather than remember. */
+			hupdata = sync_after_sighup(currenthead,
+				(char *)confgen_active_config());
 
 			currenthead = hupdata;
 			/* Must do this to avoid qsort having out of bounds issues
@@ -2120,7 +2164,13 @@ void do_tree_periodic(time_t now)
 int main(int argc, char **argv)
 {
 	int pid = 0; /* pid of child */
-	int listenport = SYSMON_PORTNUM; /* (default) port to listen on */
+	/*
+	 * -1 means "nobody has said". The client socket is opt-in: a -p on
+	 * the command line or "config listen" in the config turns it on, and
+	 * without either the daemon never binds anything. See the comment on
+	 * the listen directive in parser.l for why.
+	 */
+	int listenport = -1;
 	char myhostname[80]; /* my hostname */
 	struct rlimit thislimit; /* used for resetting fd limits */
 	struct timeval tv;
@@ -2205,15 +2255,50 @@ int main(int argc, char **argv)
 
 
 
-	/* Parse the configuration */
+	/*
+	 * Two parses, and only when this box is managed.
+	 *
+	 * The first is the seed - /etc/sysmon.conf, or whatever -f named.
+	 * It is read for one reason beyond being the fallback: it is where
+	 * "config generation-dir" lives, and that has to be known before
+	 * anything can look for a managed copy. The setting is locked
+	 * immediately afterwards, so a delivered config cannot move the
+	 * directory the daemon is currently running out of. (On a box with
+	 * real filesystem permissions it could not take effect anyway - the
+	 * daemon owns one directory and no others.)
+	 *
+	 * The second parse, if there is a managed generation, is the config
+	 * this daemon actually runs.
+	 */
 	currenthead = loadconfig(configfile);
 	update_globs_from_parser();
+	confgen_lock_statedir();
 
-	/* Which generation the config on disk is. Read after the parse
-	   because "config generation-dir" may have moved where it is kept -
-	   and read at all so a box that reboots does not come back claiming
-	   to be unmanaged and get re-delivered what it already runs. */
-	confgen_load_state();
+	/*
+	 * Command line wins over config: -p is somebody at a terminal saying
+	 * what they want right now, and it is also how the config gets
+	 * overridden when the config is the thing being debugged.
+	 */
+	if (listenport < 0)
+		listenport = (parser_listenport >= 0) ? parser_listenport : 0;
+
+	{
+		const char *active = confgen_active_config();
+
+		if (strcmp(active, configfile) != 0)
+		{
+			print_err(1, "running managed generation %lu from %s",
+				confgen_generation(), confgen_statedir());
+			free_tree(currenthead);
+			currenthead = loadconfig((char *)active);
+			update_globs_from_parser();
+		}
+		else
+		{
+			print_err(0, "running %s; generations would be kept in %s",
+				configfile, confgen_statedir());
+		}
+	}
 	if (max_numnei > maxqueued && (!quiet))
 	{
 		print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",

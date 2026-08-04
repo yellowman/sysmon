@@ -2,35 +2,53 @@
  * confgen.c - config generations: what this daemon is running, and how a
  * sysmon-web replaces it.
  *
- * The config file stays the source of truth on this box. sysmon-web holds
- * desired state, this daemon holds actual state, and these four commands
- * reconcile them:
- *
  *   CONFIG-GEN       what am I running?      -> generation number + hash
  *   CONFIG-GET       give me what you run    -> every file, byte for byte
- *   CONFIG-PUT       run this instead        -> validate, swap, reload
- *   CONFIG-ROLLBACK  undo the last PUT       -> restore, reload
+ *   CONFIG-PUT       run this instead        -> stage, validate, swap, reload
+ *   CONFIG-ROLLBACK  undo the last PUT       -> swap back, reload
+ *   CONFIG-REVERT    stop being managed      -> go back to the seed config
  *
- * Three properties matter more than anything else here:
+ * The seed config - /etc/sysmon.conf, or whatever -f names - is read-only
+ * to this daemon, forever. It is what a box boots with, what an operator
+ * edits with vi, and what the box falls back to if everything else here is
+ * deleted. A managed config never touches it.
  *
- * 1. The running config is never replaced by one that does not parse.
- *    Validation is this daemon's own lexer, in a forked child, on the real
- *    files - not sysmon-web's Go parser, which is a second implementation
- *    of the same grammar and can disagree. The only opinion that counts is
- *    the one held by the process that has to run it.
+ * Instead a managed box keeps its config in a directory it owns:
  *
- * 2. A rejected config costs nothing. The in-memory tree is untouched
- *    until validation passes, so checks and pages carry on throughout, and
- *    the previous files are restored before the reply is even sent.
+ *     <gendir>/main            the entry file's name, e.g. "sysmon.conf"
+ *     <gendir>/current  ->     gen-0000000007
+ *     <gendir>/previous ->     gen-0000000006
+ *     <gendir>/gen-0000000007/ the file set of that generation
  *
- * 3. Nothing outside this daemon's own config directory can be written,
- *    whatever the other end asks for. An aggregator is trusted to manage
- *    the monitoring config; it is not trusted to write /etc/passwd.
+ * The daemon loads <gendir>/current/<main> when it exists and the seed
+ * otherwise, so "unmanage this box" is exactly "remove the current
+ * symlink", and a box whose state directory is wiped comes back on its
+ * original config rather than on nothing.
+ *
+ * Four properties hold, and each of them is why something below is shaped
+ * the way it is:
+ *
+ * 1. /etc is never written. The daemon drops privileges; asking an
+ *    operator to make /etc writable by nobody in order to manage a config
+ *    is a bad trade, and it is not one this makes them take.
+ *
+ * 2. The running config is never replaced by one this daemon would refuse.
+ *    A delivery is staged in a new directory and parsed there, by this
+ *    daemon's own lexer in a forked child, before anything swaps.
+ *
+ * 3. A rejected delivery costs nothing. Nothing on disk changes and
+ *    nothing in memory changes; the staging directory is simply removed.
+ *
+ * 4. No path from the other end is ever used to build a filename. A
+ *    delivery carries flat names - no slashes, no dots - and this side
+ *    decides which directory they land in. An aggregator is trusted with
+ *    the monitoring config; it is not trusted with the filesystem.
  */
 
 #include "config.h"
 
 #include <sys/wait.h>
+#include <dirent.h>
 
 #ifdef HAVE_TLS
 #include <openssl/evp.h>
@@ -41,17 +59,57 @@
  * the config is read rather than re-derived by scanning for "include",
  * because the parser is the authority on what it followed - and a hash
  * over a guess is worse than no hash.
+ *
+ * Each entry has two halves that must not be confused:
+ *
+ *   name - what the config calls it: the string in the include directive,
+ *          or the main file's basename. This is the identity: it is what
+ *          gets hashed and what a delivery names. It carries no directory,
+ *          so it means the same thing on a box whose seed is in /etc and
+ *          on one whose seed is in /usr/local/etc.
+ *
+ *   path - where it actually is right now, which changes every time a
+ *          generation is swapped in. Used to read; never hashed.
  */
 #define CONFSET_MAX 64
 
-static char *confset[CONFSET_MAX];
+/*
+ * Each generation directory records the load order of its files. A
+ * directory listing cannot supply it, and the order is part of the hash -
+ * so without this, a generation could be put back on disk but never
+ * hashed again, and a rollback would have no way to say what it restored.
+ */
+#define GEN_ORDER_FILE ".order"
+
+static struct {
+	char *name;
+	char *path;
+	bool flat; /* name is a plain filename, so this file can be managed */
+} confset[CONFSET_MAX];
+
 static int confset_n = 0;
 
-/* Where generation state and the rollback copy live. */
+/*
+ * Where generations live. Read from the seed config only - it is a
+ * property of the box, not of the config being delivered to it - so a
+ * delivered config cannot move the directory the daemon is currently
+ * running out of.
+ */
 static char *gen_statedir = NULL;
+static bool gen_statedir_locked = FALSE;
 
-/* What we are running. Generation 0 means "never managed". */
+/* Name of the entry file, e.g. "sysmon.conf". */
+static char gen_mainname[PATH_MAX] = "";
+
+/* Absolute path of the config actually loaded, managed or seed. */
+static char gen_active[PATH_MAX] = "";
+
+/* What we are running. Generation 0 means "running the seed". */
 static unsigned long running_generation = 0;
+
+/* ------------------------------------------------------------------ */
+/* The file set                                                         */
+/* ------------------------------------------------------------------ */
 
 void confset_reset(void)
 {
@@ -59,35 +117,61 @@ void confset_reset(void)
 
 	for (i = 0; i < confset_n; i++)
 	{
-		FREE(confset[i]);
-		confset[i] = NULL;
+		FREE(confset[i].name);
+		FREE(confset[i].path);
+		confset[i].name = NULL;
+		confset[i].path = NULL;
 	}
 	confset_n = 0;
 }
 
-void confset_record(const char *path)
+/*
+ * A name is manageable when it is a plain filename: no directory
+ * separator, not "." or "..", not empty. Everything a delivery can name
+ * has to pass this, and so does everything adopted from a box - because a
+ * config whose includes point outside their own directory cannot be
+ * copied into a managed directory and still mean the same thing.
+ */
+static bool flat_name(const char *name)
+{
+	if (name == NULL || *name == '\0')
+		return FALSE;
+	if (strchr(name, '/') != NULL)
+		return FALSE;
+	/* A leading dot is refused rather than merely "." and "..": the
+	   generation directory keeps its load order in a dotfile, and a
+	   delivery that could name that file could rewrite the order its own
+	   files are read in. Config files do not begin with dots. */
+	if (name[0] == '.')
+		return FALSE;
+	if (strlen(name) >= 128)
+		return FALSE;
+	return TRUE;
+}
+
+void confset_record(const char *name, const char *path)
 {
 	char resolved[PATH_MAX];
+	const char *base;
 	int i;
 
 	if (path == NULL || *path == '\0')
 		return;
 
-	/*
-	 * Absolute, always. A relative include is resolved against whatever
-	 * the daemon's working directory happened to be when it parsed - and
-	 * the daemon later moves to /, so the same string would name a
-	 * different file, or no file at all. The hash and the write-
-	 * containment check both key on this path, so it has to mean one
-	 * thing forever.
-	 */
+	/* No name given means the main file: it is known by its basename. */
+	if (name == NULL || *name == '\0')
+	{
+		base = strrchr(path, '/');
+		name = (base != NULL) ? base + 1 : path;
+	}
+
 	if (realpath(path, resolved) != NULL)
 		path = resolved;
 
 	/* An include pulled in twice is one file, and must be hashed once. */
 	for (i = 0; i < confset_n; i++)
 	{
-		if (strcmp(confset[i], path) == 0)
+		if (strcmp(confset[i].path, path) == 0)
 			return;
 	}
 
@@ -98,9 +182,18 @@ void confset_record(const char *path)
 		return;
 	}
 
-	confset[confset_n] = STRDUP((unsigned char *)path, "confgen:confset");
-	if (confset[confset_n] != NULL)
-		confset_n++;
+	confset[confset_n].name = STRDUP((unsigned char *)name, "confgen:name");
+	confset[confset_n].path = STRDUP((unsigned char *)path, "confgen:path");
+	if (confset[confset_n].name == NULL || confset[confset_n].path == NULL)
+	{
+		if (confset[confset_n].name != NULL)
+			FREE(confset[confset_n].name);
+		if (confset[confset_n].path != NULL)
+			FREE(confset[confset_n].path);
+		return;
+	}
+	confset[confset_n].flat = flat_name(name);
+	confset_n++;
 }
 
 int confset_count(void)
@@ -108,16 +201,58 @@ int confset_count(void)
 	return confset_n;
 }
 
+const char *confset_name(int i)
+{
+	if (i < 0 || i >= confset_n)
+		return NULL;
+	return confset[i].name;
+}
+
 const char *confset_path(int i)
 {
 	if (i < 0 || i >= confset_n)
 		return NULL;
-	return confset[i];
+	return confset[i].path;
 }
 
 /*
- * Read a whole file. Returns malloc'd bytes and sets *len; NULL on error.
+ * Can this config be managed at all? Only if every file in it is named by
+ * a plain filename. An `include "/etc/sysmon.d/x.conf"` is a perfectly
+ * good config and stays a perfectly good config - it just cannot be copied
+ * into a managed directory without changing what it points at, so this
+ * side says so rather than quietly copying a file that would then never be
+ * read.
  */
+bool confgen_manageable(char *why, size_t whylen)
+{
+	int i;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+
+	if (confset_n == 0)
+	{
+		snprintf(why, whylen, "no config files are tracked");
+		return FALSE;
+	}
+	for (i = 0; i < confset_n; i++)
+	{
+		if (!confset[i].flat)
+		{
+			snprintf(why, whylen,
+				"include \"%s\" names a path rather than a plain filename; "
+				"a managed config keeps all its files in one directory",
+				confset[i].name);
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Small file helpers                                                   */
+/* ------------------------------------------------------------------ */
+
 static unsigned char *slurp(const char *path, long *len)
 {
 	FILE *fh;
@@ -176,14 +311,50 @@ static int write_whole(const char *path, const unsigned char *data, long len)
 	return 0;
 }
 
+/* Remove a flat directory of files. Never recurses: a generation
+   directory holds files and nothing else, and anything that is not a
+   plain file in there is left alone rather than followed. */
+static void remove_gen_dir(const char *dir)
+{
+	DIR *d;
+	struct dirent *e;
+	char path[PATH_MAX];
+	struct stat st;
+
+	d = opendir(dir);
+	if (d == NULL)
+		return;
+	while ((e = readdir(d)) != NULL)
+	{
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+		/* Delivered files fail flat_name() on a leading dot, so the
+		   order manifest has to be named explicitly here. */
+		if (!flat_name(e->d_name) && strcmp(e->d_name, GEN_ORDER_FILE) != 0)
+			continue;
+		if (strchr(e->d_name, '/') != NULL)
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+		if (lstat(path, &st) == 0 && S_ISREG(st.st_mode))
+			unlink(path);
+	}
+	closedir(d);
+	rmdir(dir);
+}
+
 #ifdef HAVE_TLS
 
 /*
  * The content hash both ends compare.
  *
- * SHA-256 over, for each file in load order: the path's length, the path,
- * the content's length, the content - each length as 8 bytes big-endian so
- * no concatenation of two different file sets can collide.
+ * SHA-256 over, for each file in load order: the length of its name, the
+ * name, the length of its content, the content - each length as 8 bytes
+ * big-endian so no two file sets can produce the same stream.
+ *
+ * The *name*, not the path. A config is the same config whether it is
+ * sitting in /etc as a seed or in a generation directory as the running
+ * copy, and the hash has to say so - otherwise adopting a box and then
+ * delivering its own bytes back would look like a change, forever.
  *
  * Bytes are hashed exactly as they sit on disk. Nothing is normalised, no
  * whitespace is touched, no line endings are translated. That is the whole
@@ -212,51 +383,53 @@ static void hash_u64(EVP_MD_CTX *ctx, unsigned long v)
  * but the direct ones are deprecated from 3.0 onward, and this is the one
  * spelling that compiles clean everywhere the daemon is expected to build.
  */
-bool confgen_hash(char *out, size_t outlen)
+/*
+ * The hashing itself, over (name, bytes) pairs. Three things need it and
+ * they get their pairs from different places - what is loaded, what has
+ * just been delivered, and what is sitting in a generation directory - so
+ * the rule that both ends of the fleet must agree on lives in exactly one
+ * function.
+ */
+struct hash_ctx {
+	EVP_MD_CTX *md;
+};
+
+static bool hash_begin(struct hash_ctx *h)
 {
-	EVP_MD_CTX *ctx;
+	h->md = EVP_MD_CTX_new();
+	if (h->md == NULL)
+		return FALSE;
+	if (EVP_DigestInit_ex(h->md, EVP_sha256(), NULL) != 1)
+	{
+		EVP_MD_CTX_free(h->md);
+		h->md = NULL;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+static void hash_pair(struct hash_ctx *h, const char *name,
+	const unsigned char *data, long len)
+{
+	hash_u64(h->md, (unsigned long)strlen(name));
+	EVP_DigestUpdate(h->md, name, strlen(name));
+	hash_u64(h->md, (unsigned long)len);
+	EVP_DigestUpdate(h->md, data, (size_t)len);
+}
+
+static bool hash_end(struct hash_ctx *h, char *out)
+{
 	unsigned char md[EVP_MAX_MD_SIZE];
 	unsigned int mdlen = 0;
-	unsigned char *content;
-	long len;
-	int i;
 	unsigned int j;
+	int i;
 
-	if (out == NULL || outlen < 65)
-		return FALSE;
-	out[0] = '\0';
-
-	ctx = EVP_MD_CTX_new();
-	if (ctx == NULL)
-		return FALSE;
-	if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1)
+	if (EVP_DigestFinal_ex(h->md, md, &mdlen) != 1)
 	{
-		EVP_MD_CTX_free(ctx);
+		EVP_MD_CTX_free(h->md);
 		return FALSE;
 	}
-
-	for (i = 0; i < confset_n; i++)
-	{
-		content = slurp(confset[i], &len);
-		if (content == NULL)
-		{
-			print_err(1, "confgen: cannot read %s to hash it", confset[i]);
-			EVP_MD_CTX_free(ctx);
-			return FALSE;
-		}
-		hash_u64(ctx, (unsigned long)strlen(confset[i]));
-		EVP_DigestUpdate(ctx, confset[i], strlen(confset[i]));
-		hash_u64(ctx, (unsigned long)len);
-		EVP_DigestUpdate(ctx, content, (size_t)len);
-		FREE(content);
-	}
-
-	if (EVP_DigestFinal_ex(ctx, md, &mdlen) != 1)
-	{
-		EVP_MD_CTX_free(ctx);
-		return FALSE;
-	}
-	EVP_MD_CTX_free(ctx);
+	EVP_MD_CTX_free(h->md);
 
 	for (i = 0, j = 0; j < mdlen; j++)
 	{
@@ -268,10 +441,73 @@ bool confgen_hash(char *out, size_t outlen)
 	return TRUE;
 }
 
+/* The config that is loaded right now. */
+bool confgen_hash(char *out, size_t outlen)
+{
+	struct hash_ctx h;
+	unsigned char *content;
+	long len;
+	int i;
+
+	if (out == NULL || outlen < 65)
+		return FALSE;
+	out[0] = '\0';
+	if (!hash_begin(&h))
+		return FALSE;
+
+	for (i = 0; i < confset_n; i++)
+	{
+		content = slurp(confset[i].path, &len);
+		if (content == NULL)
+		{
+			print_err(1, "confgen: cannot read %s to hash it", confset[i].path);
+			EVP_MD_CTX_free(h.md);
+			return FALSE;
+		}
+		hash_pair(&h, confset[i].name, content, len);
+		FREE(content);
+	}
+	return hash_end(&h, out);
+}
+
+/*
+ * A set that has just been delivered, straight from memory.
+ *
+ * This is what goes back in the reply to CONFIG-PUT, and it has to be the
+ * delivered bytes rather than what is loaded: the reload has not happened
+ * yet at that point, so hashing the loaded config would report the
+ * generation the box is leaving as though it were the one it is joining.
+ */
+bool confgen_hash_files(struct confgen_file *files, int nfiles,
+	char *out, size_t outlen)
+{
+	struct hash_ctx h;
+	int i;
+
+	if (out == NULL || outlen < 65)
+		return FALSE;
+	out[0] = '\0';
+	if (!hash_begin(&h))
+		return FALSE;
+
+	for (i = 0; i < nfiles; i++)
+		hash_pair(&h, files[i].name, files[i].data, files[i].len);
+	return hash_end(&h, out);
+}
+
 #else /* !HAVE_TLS */
 
 bool confgen_hash(char *out, size_t outlen)
 {
+	if (out != NULL && outlen > 0)
+		out[0] = '\0';
+	return FALSE;
+}
+
+bool confgen_hash_files(struct confgen_file *files, int nfiles,
+	char *out, size_t outlen)
+{
+	(void)files; (void)nfiles;
 	if (out != NULL && outlen > 0)
 		out[0] = '\0';
 	return FALSE;
@@ -411,92 +647,102 @@ unsigned char *confgen_b64decode(const char *in, long *outlen)
 }
 
 /* ------------------------------------------------------------------ */
-/* Where state lives                                                    */
+/* The state directory                                                  */
 /* ------------------------------------------------------------------ */
 
 /*
- * Default state directory is the config file's own directory, because
- * that is the one directory an operator has already decided this daemon
- * may own. "config generation-dir" moves it, which matters when the
- * config lives somewhere the dropped-privilege user cannot write.
+ * Default: somewhere the daemon can own, never /etc. The seed config
+ * belongs to the operator and to the package manager; the running copy
+ * belongs to the daemon, and mixing the two is what forced /etc to be
+ * writable by the dropped-privilege user in the first place.
  */
-static const char *statedir(void)
+#ifdef __linux__
+#define GENDIR_DEFAULT "/var/lib/sysmon"
+#else
+#define GENDIR_DEFAULT "/var/db/sysmon"
+#endif
+
+const char *confgen_statedir(void)
 {
-	static char derived[PATH_MAX];
-	char *slash;
-
-	if (gen_statedir != NULL)
-		return gen_statedir;
-
-	snprintf(derived, sizeof(derived), "%s", configfile);
-	slash = strrchr(derived, '/');
-	if (slash == NULL)
-		snprintf(derived, sizeof(derived), ".");
-	else if (slash == derived)
-		derived[1] = '\0';
-	else
-		*slash = '\0';
-	return derived;
+	return (gen_statedir != NULL) ? gen_statedir : GENDIR_DEFAULT;
 }
 
+/*
+ * Set from "config generation-dir". Honoured once, from the seed config:
+ * a delivered config must not be able to move the directory the daemon is
+ * currently running out of, and an operator asking "where does this box
+ * keep its config" wants one answer that does not depend on which
+ * generation happens to be live.
+ */
 void confgen_set_statedir(const char *dir)
 {
-	if (gen_statedir != NULL)
-		FREE(gen_statedir);
-	gen_statedir = NULL;
+	if (gen_statedir_locked)
+		return;
 	if (dir != NULL && *dir != '\0')
+	{
+		if (gen_statedir != NULL)
+			FREE(gen_statedir);
 		gen_statedir = STRDUP((unsigned char *)dir, "confgen:statedir");
+	}
+}
+
+void confgen_lock_statedir(void)
+{
+	gen_statedir_locked = TRUE;
 }
 
 static void statepath(char *out, size_t outlen, const char *leaf)
 {
-	snprintf(out, outlen, "%s/%s", statedir(), leaf);
+	snprintf(out, outlen, "%s/%s", confgen_statedir(), leaf);
 }
 
-/*
- * The generation number survives a restart, so a box that reboots does not
- * come back claiming to be unmanaged and get re-delivered a config it is
- * already running.
- */
-void confgen_load_state(void)
+static void gendir_path(char *out, size_t outlen, unsigned long gen)
 {
-	char path[PATH_MAX];
-	FILE *fh;
-	unsigned long gen = 0;
-
-	statepath(path, sizeof(path), "sysmon.generation");
-	fh = fopen(path, "r");
-	if (fh == NULL)
-	{
-		running_generation = 0;
-		return;
-	}
-	if (fscanf(fh, "%lu", &gen) == 1)
-		running_generation = gen;
-	fclose(fh);
+	snprintf(out, outlen, "%s/gen-%010lu", confgen_statedir(), gen);
 }
 
-static void save_state(void)
+/* The generation a symlink points at, or 0 if there is no such link. */
+static unsigned long linked_generation(const char *link)
+{
+	char path[PATH_MAX], target[PATH_MAX];
+	ssize_t n;
+	char *dash;
+
+	statepath(path, sizeof(path), link);
+	n = readlink(path, target, sizeof(target) - 1);
+	if (n <= 0)
+		return 0;
+	target[n] = '\0';
+
+	dash = strrchr(target, '-');
+	if (dash == NULL)
+		return 0;
+	return strtoul(dash + 1, NULL, 10);
+}
+
+/* Point <gendir>/<link> at gen-NNNN, atomically. */
+static bool point_link(const char *link, unsigned long gen)
 {
 	char path[PATH_MAX], tmp[PATH_MAX + 8];
-	FILE *fh;
+	char target[64];
 
-	statepath(path, sizeof(path), "sysmon.generation");
+	statepath(path, sizeof(path), link);
 	snprintf(tmp, sizeof(tmp), "%s.new", path);
+	snprintf(target, sizeof(target), "gen-%010lu", gen);
 
-	fh = fopen(tmp, "w");
-	if (fh == NULL)
+	unlink(tmp);
+	if (symlink(target, tmp) == -1)
 	{
-		print_err(1, "confgen: cannot write %s: %s", tmp, strerror(errno));
-		return;
+		print_err(1, "confgen: cannot create %s: %s", tmp, strerror(errno));
+		return FALSE;
 	}
-	fprintf(fh, "%lu\n", running_generation);
-	fclose(fh);
 	if (rename(tmp, path) == -1)
 	{
-		print_err(1, "confgen: cannot replace %s: %s", path, strerror(errno));
+		print_err(1, "confgen: cannot move %s into place: %s", path, strerror(errno));
 		unlink(tmp);
+		return FALSE;
 	}
+	return TRUE;
 }
 
 unsigned long confgen_generation(void)
@@ -504,109 +750,147 @@ unsigned long confgen_generation(void)
 	return running_generation;
 }
 
-/* ------------------------------------------------------------------ */
-/* Containment                                                          */
-/* ------------------------------------------------------------------ */
-
 /*
- * May we write this path?
+ * The config this daemon should load: the managed copy when there is one,
+ * the seed otherwise.
  *
- * Yes if it is a file the parser already opened - that is by definition
- * part of this daemon's config - or if it sits directly in the config
- * file's own directory. Anything else is refused, including anything with
- * a ".." in it, whatever the aggregator claims. The aggregator is trusted
- * with the monitoring config; it is not trusted with the filesystem.
+ * "Otherwise" is doing real work here. A box whose state directory has
+ * been wiped, or whose disk filled before a generation finished landing,
+ * comes back up on the config an operator wrote - not on nothing, and not
+ * on half of something.
  */
-static bool path_allowed(const char *path)
+const char *confgen_active_config(void)
 {
-	char dir[PATH_MAX];
-	char *slash;
-	size_t dirlen;
-	int i;
+	char candidate[PATH_MAX];
+	char namepath[PATH_MAX];
+	FILE *fh;
+	unsigned long gen;
+	struct stat st;
 
-	if (path == NULL || path[0] != '/')
-		return FALSE;
-	if (strstr(path, "/../") != NULL)
-		return FALSE;
-	if (strlen(path) >= 4 && strcmp(path + strlen(path) - 3, "/..") == 0)
-		return FALSE;
-
-	for (i = 0; i < confset_n; i++)
+	/* The entry file's name, remembered from when the box was adopted. */
+	statepath(namepath, sizeof(namepath), "main");
+	fh = fopen(namepath, "r");
+	if (fh != NULL)
 	{
-		if (strcmp(confset[i], path) == 0)
-			return TRUE;
+		if (fgets(gen_mainname, sizeof(gen_mainname), fh) != NULL)
+		{
+			char *nl = strchr(gen_mainname, '\n');
+			if (nl != NULL)
+				*nl = '\0';
+		}
+		fclose(fh);
+	}
+	if (!flat_name(gen_mainname))
+	{
+		const char *base = strrchr(configfile, '/');
+		snprintf(gen_mainname, sizeof(gen_mainname), "%s",
+			(base != NULL) ? base + 1 : configfile);
 	}
 
-	snprintf(dir, sizeof(dir), "%s", configfile);
-	slash = strrchr(dir, '/');
-	if (slash == NULL)
-		return FALSE;
-	*slash = '\0';
-	dirlen = strlen(dir);
-	if (dirlen == 0)
-		return FALSE;
+	gen = linked_generation("current");
+	if (gen > 0)
+	{
+		snprintf(candidate, sizeof(candidate), "%s/current/%s",
+			confgen_statedir(), gen_mainname);
+		if (stat(candidate, &st) == 0 && S_ISREG(st.st_mode))
+		{
+			running_generation = gen;
+			snprintf(gen_active, sizeof(gen_active), "%s", candidate);
+			return gen_active;
+		}
+		print_err(1, "confgen: generation %lu is incomplete - falling back to %s",
+			gen, configfile);
+	}
 
-	if (strncmp(path, dir, dirlen) != 0 || path[dirlen] != '/')
-		return FALSE;
-	/* directly inside it, not in a subdirectory */
-	return strchr(path + dirlen + 1, '/') == NULL;
+	running_generation = 0;
+	snprintf(gen_active, sizeof(gen_active), "%s", configfile);
+	return gen_active;
 }
-
-/* ------------------------------------------------------------------ */
-/* Backup and restore                                                   */
-/* ------------------------------------------------------------------ */
 
 /*
- * The previous generation is kept on the box, not fetched to roll back.
- * A config that broke the daemon's ability to reach its aggregator is
- * exactly the config you most need to undo.
+ * Is this file part of the managed copy?
+ *
+ * Include resolution depends on the answer. Inside the managed directory
+ * an include names a sibling and nothing else - not a file in the working
+ * directory, which is / by the time the daemon is running and is a place
+ * anyone might be able to create a file. Outside it, resolution is what it
+ * always was.
  */
-static void backup_leaf(char *out, size_t outlen, int idx)
+bool confgen_is_managed_file(const char *path)
 {
-	snprintf(out, outlen, "%s/sysmon.prev.%03d", statedir(), idx);
+	char dir[PATH_MAX];
+	size_t n;
+
+	if (path == NULL)
+		return FALSE;
+
+	/*
+	 * Anything under the state directory, whether or not a generation is
+	 * live right now. That matters during validation: a delivery is
+	 * parsed in its staging directory *before* it becomes current, and if
+	 * this asked "is a generation live" it would resolve the staged
+	 * config's includes by the other rule - so the daemon would validate
+	 * one set of files and then run a different one.
+	 */
+	snprintf(dir, sizeof(dir), "%s/", confgen_statedir());
+	n = strlen(dir);
+	return strncmp(path, dir, n) == 0;
 }
 
-static bool save_previous(void)
+/*
+ * Create the state directory while still root, and hand it to the user the
+ * daemon is about to become. Called before the privilege drop, because
+ * afterwards /var/lib is not writable and the alternative is asking an
+ * operator to mkdir it by hand on every box in the fleet.
+ */
+void confgen_prepare(uid_t uid, gid_t gid)
 {
-	char manifest[PATH_MAX], tmp[PATH_MAX + 8], leaf[PATH_MAX];
-	FILE *mf;
-	unsigned char *content;
-	long len;
-	int i;
+	const char *dir = confgen_statedir();
+	struct stat st;
 
-	statepath(manifest, sizeof(manifest), "sysmon.prev.manifest");
-	snprintf(tmp, sizeof(tmp), "%s.new", manifest);
+	if (stat(dir, &st) == -1)
+	{
+		if (mkdir(dir, 0750) == -1)
+		{
+			print_err(1, "confgen: cannot create %s: %s - this box cannot be "
+				"managed remotely until it exists", dir, strerror(errno));
+			return;
+		}
+		print_err(0, "confgen: created %s", dir);
+	}
+	else if (!S_ISDIR(st.st_mode))
+	{
+		print_err(1, "confgen: %s is not a directory", dir);
+		return;
+	}
 
-	mf = fopen(tmp, "w");
-	if (mf == NULL)
+	if (geteuid() == 0 && chown(dir, uid, gid) == -1)
+	{
+		print_err(1, "confgen: cannot give %s to uid %d: %s",
+			dir, (int)uid, strerror(errno));
+	}
+	chmod(dir, 0750);
+}
+
+/* Remember the entry file's name for next boot. */
+static bool save_mainname(void)
+{
+	char path[PATH_MAX], tmp[PATH_MAX + 8];
+	FILE *fh;
+
+	statepath(path, sizeof(path), "main");
+	snprintf(tmp, sizeof(tmp), "%s.new", path);
+
+	fh = fopen(tmp, "w");
+	if (fh == NULL)
 	{
 		print_err(1, "confgen: cannot write %s: %s", tmp, strerror(errno));
 		return FALSE;
 	}
-
-	for (i = 0; i < confset_n; i++)
-	{
-		content = slurp(confset[i], &len);
-		if (content == NULL)
-		{
-			fclose(mf);
-			unlink(tmp);
-			return FALSE;
-		}
-		backup_leaf(leaf, sizeof(leaf), i);
-		if (write_whole(leaf, content, len) == -1)
-		{
-			print_err(1, "confgen: cannot write %s: %s", leaf, strerror(errno));
-			FREE(content);
-			fclose(mf);
-			unlink(tmp);
-			return FALSE;
-		}
-		FREE(content);
-		fprintf(mf, "%s\n", confset[i]);
-	}
-	fclose(mf);
-	if (rename(tmp, manifest) == -1)
+	fprintf(fh, "%s\n", gen_mainname);
+	if (fclose(fh) != 0)
+		return FALSE;
+	if (rename(tmp, path) == -1)
 	{
 		unlink(tmp);
 		return FALSE;
@@ -614,57 +898,85 @@ static bool save_previous(void)
 	return TRUE;
 }
 
-/*
- * Puts the saved copies back. Used both when validation rejects a delivery
- * and when an operator asks for a rollback.
- */
-static bool restore_previous(void)
-{
-	char manifest[PATH_MAX], leaf[PATH_MAX], line[PATH_MAX];
-	FILE *mf;
-	unsigned char *content;
-	long len;
-	int i = 0;
-	bool ok = TRUE;
+/* Keep a few generations behind the live one; drop the rest. */
+#define GENERATIONS_KEPT 5
 
-	statepath(manifest, sizeof(manifest), "sysmon.prev.manifest");
-	mf = fopen(manifest, "r");
-	if (mf == NULL)
+static void prune_generations(void)
+{
+	DIR *d;
+	struct dirent *e;
+	unsigned long cur = linked_generation("current");
+	unsigned long prev = linked_generation("previous");
+	char path[PATH_MAX];
+
+	d = opendir(confgen_statedir());
+	if (d == NULL)
+		return;
+	while ((e = readdir(d)) != NULL)
+	{
+		unsigned long gen;
+
+		if (strncmp(e->d_name, "gen-", 4) != 0)
+			continue;
+		gen = strtoul(e->d_name + 4, NULL, 10);
+		if (gen == 0 || gen == cur || gen == prev)
+			continue;
+		if (cur > GENERATIONS_KEPT && gen >= cur - GENERATIONS_KEPT)
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", confgen_statedir(), e->d_name);
+		remove_gen_dir(path);
+	}
+	closedir(d);
+}
+
+/* A generation sitting on disk, read back in its recorded load order. */
+static bool hash_generation(unsigned long gen, char *out, size_t outlen)
+{
+	char dir[PATH_MAX], path[PATH_MAX + 160], line[256];
+	FILE *order;
+
+	if (out == NULL || outlen < 65)
+		return FALSE;
+	out[0] = '\0';
+
+	gendir_path(dir, sizeof(dir), gen);
+	snprintf(path, sizeof(path), "%s/%s", dir, GEN_ORDER_FILE);
+	order = fopen(path, "r");
+	if (order == NULL)
 		return FALSE;
 
-	while (fgets(line, sizeof(line), mf) != NULL)
 	{
-		char *nl = strchr(line, '\n');
-		if (nl != NULL)
-			*nl = '\0';
-		if (line[0] == '\0')
-			continue;
+		struct hash_ctx h;
+		unsigned char *content;
+		long len;
 
-		backup_leaf(leaf, sizeof(leaf), i);
-		i++;
+		if (!hash_begin(&h))
+		{
+			fclose(order);
+			return FALSE;
+		}
+		while (fgets(line, sizeof(line), order) != NULL)
+		{
+			char *nl = strchr(line, '\n');
 
-		if (!path_allowed(line))
-		{
-			print_err(1, "confgen: refusing to restore %s", line);
-			ok = FALSE;
-			continue;
+			if (nl != NULL)
+				*nl = '\0';
+			if (!flat_name(line))
+				continue;
+			snprintf(path, sizeof(path), "%s/%s", dir, line);
+			content = slurp(path, &len);
+			if (content == NULL)
+			{
+				fclose(order);
+				EVP_MD_CTX_free(h.md);
+				return FALSE;
+			}
+			hash_pair(&h, line, content, len);
+			FREE(content);
 		}
-		content = slurp(leaf, &len);
-		if (content == NULL)
-		{
-			print_err(1, "confgen: rollback copy %s is missing", leaf);
-			ok = FALSE;
-			continue;
-		}
-		if (write_whole(line, content, len) == -1)
-		{
-			print_err(1, "confgen: cannot restore %s: %s", line, strerror(errno));
-			ok = FALSE;
-		}
-		FREE(content);
+		fclose(order);
+		return hash_end(&h, out);
 	}
-	fclose(mf);
-	return ok;
 }
 
 /* ------------------------------------------------------------------ */
@@ -672,8 +984,8 @@ static bool restore_previous(void)
 /* ------------------------------------------------------------------ */
 
 /*
- * Parse the config that is now on disk, in a child process, and collect
- * whatever the parser complained about.
+ * Parse a config, in a child process, and collect whatever the parser
+ * complained about.
  *
  * A child rather than an in-process parse for two reasons: the lexer and
  * its globals are not re-entrant against a live tree, and a config bad
@@ -683,7 +995,8 @@ static bool restore_previous(void)
  * Returns TRUE if the config parses. On failure, up to errlen-1 bytes of
  * the parser's complaints are copied into err.
  */
-static bool validate_on_disk(char *err, size_t errlen, unsigned long *objects)
+static bool validate_config(const char *path, char *err, size_t errlen,
+	unsigned long *objects)
 {
 	int fds[2];
 	pid_t pid;
@@ -715,7 +1028,7 @@ static bool validate_on_disk(char *err, size_t errlen, unsigned long *objects)
 	if (pid == 0)
 	{
 		struct all_elements_list *tree, *walk;
-		unsigned long objects = 0;
+		unsigned long n = 0;
 
 		/*
 		 * Child. Everything the parser complains about goes to stderr
@@ -727,7 +1040,7 @@ static bool validate_on_disk(char *err, size_t errlen, unsigned long *objects)
 		close(fds[1]);
 
 		badconfig = FALSE;
-		tree = loadconfig(configfile);
+		tree = loadconfig((char *)path);
 		if (badconfig)
 			_exit(1);
 		if (tree == NULL)
@@ -752,8 +1065,8 @@ static bool validate_on_disk(char *err, size_t errlen, unsigned long *objects)
 		}
 
 		for (walk = tree; walk != NULL; walk = walk->next)
-			objects++;
-		fprintf(stderr, "SYSMOND-OBJECTS %lu\n", objects);
+			n++;
+		fprintf(stderr, "SYSMOND-OBJECTS %lu\n", n);
 		_exit(0);
 	}
 
@@ -816,19 +1129,21 @@ static bool validate_on_disk(char *err, size_t errlen, unsigned long *objects)
 /* ------------------------------------------------------------------ */
 
 /*
- * Write the delivered files, validate, and either keep them or put the old
- * ones back.
+ * Write the delivered files into a fresh generation directory, parse them
+ * there, and only then make that directory the live one.
  *
- * The order is deliberate: back up, write, validate, decide. The running
- * daemon has not reloaded at any point in that sequence, so a config that
- * fails to parse costs nothing but the seconds the files were on disk -
- * and they are put back before this function returns.
+ * Nothing that is currently running is touched until the last two lines.
+ * A rejected delivery leaves the running config on disk exactly as it was,
+ * the in-memory tree exactly as it was, and a directory to remove.
  */
 bool confgen_apply(unsigned long generation,
 	struct confgen_file *files, int nfiles,
 	char *err, size_t errlen, unsigned long *objects)
 {
-	int i;
+	char dir[PATH_MAX], path[PATH_MAX + 160], entry[PATH_MAX + 160];
+	unsigned long prev = running_generation;
+	bool has_main = FALSE;
+	int i, j;
 
 	if (err != NULL && errlen > 0)
 		err[0] = '\0';
@@ -838,71 +1153,225 @@ bool confgen_apply(unsigned long generation,
 		snprintf(err, errlen, "no files were delivered");
 		return FALSE;
 	}
+	if (generation == 0)
+	{
+		snprintf(err, errlen, "generation 0 means \"running the seed config\" "
+			"and cannot be delivered");
+		return FALSE;
+	}
 
+	/*
+	 * Names, not paths. Nothing the other end sends is used to build a
+	 * directory - only the last component of a filename this side has
+	 * already decided is acceptable.
+	 */
 	for (i = 0; i < nfiles; i++)
 	{
-		if (!path_allowed(files[i].path))
+		if (!flat_name(files[i].name))
 		{
 			snprintf(err, errlen,
-				"refusing to write %s: outside this daemon's config directory",
-				files[i].path);
+				"\"%s\" is not a plain filename; a delivery names files, not paths",
+				files[i].name != NULL ? files[i].name : "");
 			return FALSE;
 		}
+		for (j = 0; j < i; j++)
+		{
+			if (strcmp(files[i].name, files[j].name) == 0)
+			{
+				snprintf(err, errlen, "\"%s\" appears twice in one delivery",
+					files[i].name);
+				return FALSE;
+			}
+		}
+		if (gen_mainname[0] != '\0' && strcmp(files[i].name, gen_mainname) == 0)
+			has_main = TRUE;
 	}
 
-	/* The main config file must be among them, or we would be validating
-	   a set that does not include the thing the daemon actually reads. */
+	/* First delivery on a box whose entry name is not recorded yet. */
+	if (gen_mainname[0] == '\0')
 	{
-		bool has_main = FALSE;
+		const char *base = strrchr(configfile, '/');
+
+		snprintf(gen_mainname, sizeof(gen_mainname), "%s",
+			(base != NULL) ? base + 1 : configfile);
 		for (i = 0; i < nfiles; i++)
 		{
-			if (strcmp(files[i].path, configfile) == 0)
+			if (strcmp(files[i].name, gen_mainname) == 0)
 				has_main = TRUE;
 		}
-		if (!has_main)
-		{
-			snprintf(err, errlen, "the delivery does not include %s", configfile);
-			return FALSE;
-		}
+	}
+	if (!has_main)
+	{
+		snprintf(err, errlen, "the delivery does not include \"%s\", "
+			"which is the file this daemon reads", gen_mainname);
+		return FALSE;
 	}
 
-	if (!save_previous())
+	gendir_path(dir, sizeof(dir), generation);
+	remove_gen_dir(dir); /* a previous attempt at this number, if any */
+	if (mkdir(dir, 0750) == -1)
 	{
-		snprintf(err, errlen,
-			"cannot save a rollback copy in %s - refusing to change anything",
-			statedir());
+		snprintf(err, errlen, "cannot create %s: %s", dir, strerror(errno));
 		return FALSE;
 	}
 
 	for (i = 0; i < nfiles; i++)
 	{
-		char tmp[PATH_MAX + 16];
-
-		snprintf(tmp, sizeof(tmp), "%s.sysmond-new", files[i].path);
-		if (write_whole(tmp, files[i].data, files[i].len) == -1 ||
-			rename(tmp, files[i].path) == -1)
+		snprintf(path, sizeof(path), "%s/%s", dir, files[i].name);
+		if (write_whole(path, files[i].data, files[i].len) == -1)
 		{
-			snprintf(err, errlen, "cannot write %s: %s",
-				files[i].path, strerror(errno));
-			unlink(tmp);
-			restore_previous();
+			snprintf(err, errlen, "cannot write %s: %s", path, strerror(errno));
+			remove_gen_dir(dir);
 			return FALSE;
 		}
 	}
 
-	if (!validate_on_disk(err, errlen, objects))
+	/* Record the load order alongside them, so this generation can still
+	   be hashed - and therefore rolled back to and reported - long after
+	   the delivery that carried it. */
 	{
-		print_err(1, "confgen: generation %lu rejected, restoring previous config",
+		FILE *order;
+
+		snprintf(path, sizeof(path), "%s/%s", dir, GEN_ORDER_FILE);
+		order = fopen(path, "w");
+		if (order == NULL)
+		{
+			snprintf(err, errlen, "cannot write %s: %s", path, strerror(errno));
+			remove_gen_dir(dir);
+			return FALSE;
+		}
+		for (i = 0; i < nfiles; i++)
+			fprintf(order, "%s\n", files[i].name);
+		if (fclose(order) != 0)
+		{
+			snprintf(err, errlen, "cannot write %s", path);
+			remove_gen_dir(dir);
+			return FALSE;
+		}
+	}
+
+	snprintf(entry, sizeof(entry), "%s/%s", dir, gen_mainname);
+	if (!validate_config(entry, err, errlen, objects))
+	{
+		print_err(1, "confgen: generation %lu rejected; nothing changed",
 			generation);
-		restore_previous();
+		remove_gen_dir(dir);
+		return FALSE;
+	}
+
+	/*
+	 * The swap. previous first: if the machine dies between these two,
+	 * current still points at the generation that was running, which is
+	 * the config that was working.
+	 */
+	if (prev > 0)
+		point_link("previous", prev);
+	save_mainname();
+	if (!point_link("current", generation))
+	{
+		snprintf(err, errlen, "cannot point %s/current at generation %lu",
+			confgen_statedir(), generation);
+		remove_gen_dir(dir);
 		return FALSE;
 	}
 
 	running_generation = generation;
-	save_state();
+	prune_generations();
 
 	print_err(1, "confgen: generation %lu accepted, reloading", generation);
 	gotsighup = TRUE; /* the main loop reloads at the top of the next pass */
+	return TRUE;
+}
+
+/*
+ * Roll back to the generation kept alongside the live one.
+ *
+ * The files are already on the box, so this needs nothing from the
+ * network - which matters, because a config that broke the link to the
+ * aggregator is exactly the one you most need to undo.
+ */
+bool confgen_rollback(char *err, size_t errlen)
+{
+	unsigned long prev, cur;
+	char entry[PATH_MAX + 160];
+
+	if (err != NULL && errlen > 0)
+		err[0] = '\0';
+
+	cur = running_generation;
+	prev = linked_generation("previous");
+	if (prev == 0 || prev == cur)
+	{
+		snprintf(err, errlen, "no previous generation is held on this box");
+		return FALSE;
+	}
+
+	snprintf(entry, sizeof(entry), "%s/gen-%010lu/%s",
+		confgen_statedir(), prev, gen_mainname);
+	/*
+	 * It parsed once, so it should parse again - but "should" is not a
+	 * thing to bet a monitoring box on, and if the copy has been damaged
+	 * the daemon keeps running what it has and says so.
+	 */
+	if (!validate_config(entry, err, errlen, NULL))
+	{
+		print_err(1, "confgen: the rollback copy does not parse; "
+			"keeping the running config");
+		return FALSE;
+	}
+
+	if (!point_link("current", prev))
+	{
+		snprintf(err, errlen, "cannot point current at generation %lu", prev);
+		return FALSE;
+	}
+	if (cur > 0)
+		point_link("previous", cur);
+
+	running_generation = prev;
+	print_err(1, "confgen: rolled back to generation %lu, reloading", prev);
+	gotsighup = TRUE;
+	return TRUE;
+}
+
+/*
+ * Stop being managed: drop the managed copy and go back to the seed.
+ *
+ * This is the way out, and it needs to exist. Without it, adopting a box
+ * once would mean its /etc config is inert forever with no way back short
+ * of an operator working out what this directory is for. The generations
+ * are left on disk; only the pointer to them goes.
+ */
+bool confgen_revert(char *err, size_t errlen)
+{
+	char path[PATH_MAX];
+	char scratch[1024];
+
+	if (err != NULL && errlen > 0)
+		err[0] = '\0';
+
+	if (running_generation == 0)
+	{
+		snprintf(err, errlen, "this box is already running %s", configfile);
+		return FALSE;
+	}
+	if (!validate_config(configfile, scratch, sizeof(scratch), NULL))
+	{
+		snprintf(err, errlen, "%s does not parse, so reverting to it would "
+			"leave this box with nothing to monitor", configfile);
+		return FALSE;
+	}
+
+	statepath(path, sizeof(path), "current");
+	if (unlink(path) == -1 && errno != ENOENT)
+	{
+		snprintf(err, errlen, "cannot remove %s: %s", path, strerror(errno));
+		return FALSE;
+	}
+
+	running_generation = 0;
+	print_err(1, "confgen: reverted to %s, reloading", configfile);
+	gotsighup = TRUE;
 	return TRUE;
 }
 
@@ -936,10 +1405,10 @@ void confgen_send(struct clientstatus *client)
 
 	for (i = 0; i < confset_n; i++)
 	{
-		content = slurp(confset[i], &len);
+		content = slurp(confset[i].path, &len);
 		if (content == NULL)
 		{
-			snprintf(line, sizeof(line), "444 cannot read %s", confset[i]);
+			snprintf(line, sizeof(line), "444 cannot read %s", confset[i].path);
 			sendline(client->filedes, line);
 			return;
 		}
@@ -952,16 +1421,17 @@ void confgen_send(struct clientstatus *client)
 		}
 
 		{
-			char *pathb64 = confgen_b64encode(
-				(const unsigned char *)confset[i], (long)strlen(confset[i]));
-			if (pathb64 == NULL)
+			char *nameb64 = confgen_b64encode(
+				(const unsigned char *)confset[i].name,
+				(long)strlen(confset[i].name));
+			if (nameb64 == NULL)
 			{
 				FREE(b64);
 				sendline(client->filedes, "444 out of memory");
 				return;
 			}
-			snprintf(line, sizeof(line), "FILE %s %ld", pathb64, len);
-			FREE(pathb64);
+			snprintf(line, sizeof(line), "FILE %s %ld", nameb64, len);
+			FREE(nameb64);
 		}
 		if (sendline(client->filedes, line) == -1)
 		{
@@ -996,20 +1466,38 @@ void confgen_send(struct clientstatus *client)
 
 /*
  * CONFIG-GEN: the one-line answer the poller asks for every cycle.
+ *
+ * The trailing word is why this box cannot be managed, when it cannot -
+ * an include naming a path rather than a filename, most likely. Saying it
+ * here means the operator finds out when they look at the fleet, not when
+ * a delivery fails.
  */
 void confgen_report(struct clientstatus *client)
 {
-	char line[160];
+	char line[512];
 	char hash[80];
+	char why[256];
 
 	if (!confgen_hash(hash, sizeof(hash)))
 	{
-		sendline(client->filedes,
-			"444 this sysmond was built without TLS, so it cannot hash its config");
+		if (confset_count() == 0)
+			sendline(client->filedes, "444 no config is loaded");
+		else
+			sendline(client->filedes,
+				"444 cannot hash this config - either sysmond was built "
+				"without TLS, or one of its files is no longer readable");
 		return;
 	}
-	snprintf(line, sizeof(line), "333 %lu %s %d",
-		running_generation, hash, confset_n);
+	if (!confgen_manageable(why, sizeof(why)))
+	{
+		snprintf(line, sizeof(line), "333 %lu %s %d unmanageable %s",
+			running_generation, hash, confset_n, why);
+	}
+	else
+	{
+		snprintf(line, sizeof(line), "333 %lu %s %d",
+			running_generation, hash, confset_n);
+	}
 	sendline(client->filedes, line);
 }
 
@@ -1062,8 +1550,8 @@ static void free_files(struct confgen_file *files, int n)
 
 	for (i = 0; i < n; i++)
 	{
-		if (files[i].path != NULL)
-			FREE(files[i].path);
+		if (files[i].name != NULL)
+			FREE(files[i].name);
 		if (files[i].data != NULL)
 			FREE(files[i].data);
 	}
@@ -1075,11 +1563,11 @@ static void free_files(struct confgen_file *files, int n)
  *
  * followed by exactly <payload-bytes> of:
  *
- *   FILE <base64 path> <content length>
+ *   FILE <base64 name> <content length>
  *   <base64 content, wrapped>
  *   ENDFILE
  *
- * Paths and contents are base64 so a config containing anything at all -
+ * Names and contents are base64 so a config containing anything at all -
  * a stray CR, a UTF-8 comment, a byte that is not text - survives the trip
  * unchanged. The hash both sides compare is over the original bytes, so
  * "survives unchanged" is not a nicety here, it is the entire mechanism.
@@ -1094,6 +1582,7 @@ void confgen_receive(struct clientstatus *client, char *args)
 	struct confgen_file *files = NULL;
 	int nfiles = 0, cap = 0;
 	unsigned long objects = 0;
+	char applied_hash[80] = "-";
 	char *p, *end;
 	bool ok;
 
@@ -1124,7 +1613,7 @@ void confgen_receive(struct clientstatus *client, char *args)
 	end = (char *)payload + payload_len;
 	while (p < end)
 	{
-		char *nl, *pathb64, *sp;
+		char *nl, *nameb64, *sp;
 		long declared = 0;
 		char *body;
 		long bodylen = 0;
@@ -1142,8 +1631,8 @@ void confgen_receive(struct clientstatus *client, char *args)
 			continue; /* blank line, or trailing junk */
 		}
 
-		pathb64 = p + 5;
-		sp = strchr(pathb64, ' ');
+		nameb64 = p + 5;
+		sp = strchr(nameb64, ' ');
 		if (sp == NULL)
 		{
 			free_files(files, nfiles);
@@ -1217,30 +1706,30 @@ void confgen_receive(struct clientstatus *client, char *args)
 		{
 			char saved = body[bodylen];
 			long plen = 0, clen = 0;
-			unsigned char *pathbytes;
+			unsigned char *namebytes;
 
 			body[bodylen] = '\0';
 			files[nfiles].data = confgen_b64decode(body, &clen);
 			body[bodylen] = saved;
 
-			pathbytes = confgen_b64decode(pathb64, &plen);
-			if (pathbytes == NULL || files[nfiles].data == NULL)
+			namebytes = confgen_b64decode(nameb64, &plen);
+			if (namebytes == NULL || files[nfiles].data == NULL)
 			{
-				if (pathbytes != NULL)
-					FREE(pathbytes);
+				if (namebytes != NULL)
+					FREE(namebytes);
 				free_files(files, nfiles + 1);
 				FREE(payload);
 				sendline(client->filedes, "444 the delivery is not valid base64");
 				return;
 			}
-			files[nfiles].path = (char *)pathbytes;
+			files[nfiles].name = (char *)namebytes;
 			files[nfiles].len = clen;
 
 			if (declared != clen)
 			{
 				snprintf(reply, sizeof(reply),
 					"444 %s declared %ld bytes but carried %ld",
-					files[nfiles].path, declared, clen);
+					files[nfiles].name, declared, clen);
 				free_files(files, nfiles + 1);
 				FREE(payload);
 				sendline(client->filedes, reply);
@@ -1252,6 +1741,8 @@ void confgen_receive(struct clientstatus *client, char *args)
 	FREE(payload);
 
 	ok = confgen_apply(generation, files, nfiles, err, sizeof(err), &objects);
+	if (ok && !confgen_hash_files(files, nfiles, applied_hash, sizeof(applied_hash)))
+		snprintf(applied_hash, sizeof(applied_hash), "-");
 	free_files(files, nfiles);
 
 	if (!ok)
@@ -1270,18 +1761,16 @@ void confgen_receive(struct clientstatus *client, char *args)
 				sendline(client->filedes, line);
 			line = (nl != NULL) ? nl + 1 : NULL;
 		}
-		sendline(client->filedes, "444 config rejected, previous config restored");
+		sendline(client->filedes, "444 config rejected, nothing changed");
 		return;
 	}
 
-	{
-		char hash[80];
-
-		if (!confgen_hash(hash, sizeof(hash)))
-			snprintf(hash, sizeof(hash), "-");
-		snprintf(reply, sizeof(reply), "333 %lu %s %lu",
-			running_generation, hash, objects);
-	}
+	/* The hash is of the bytes that were delivered, not of what is
+	   loaded: the reload happens at the top of the next main-loop pass,
+	   and hashing the loaded config here would report the generation this
+	   box is leaving as though it were the one it is joining. */
+	snprintf(reply, sizeof(reply), "333 %lu %s %lu",
+		running_generation, applied_hash, objects);
 	sendline(client->filedes, reply);
 }
 
@@ -1309,43 +1798,38 @@ void confgen_do_rollback(struct clientstatus *client)
 		return;
 	}
 
-	if (!confgen_hash(hash, sizeof(hash)))
+	/* Same reason as CONFIG-PUT: the reload has not happened yet, so this
+	   is the hash of the generation now pointed at, read from disk. */
+	if (!hash_generation(running_generation, hash, sizeof(hash)))
 		snprintf(hash, sizeof(hash), "-");
 	snprintf(reply, sizeof(reply), "333 %lu %s", running_generation, hash);
 	sendline(client->filedes, reply);
 }
 
 /*
- * Roll back to the copy kept on the box.
- *
- * The restored config is validated too. It parsed once, so it should parse
- * again - but "should" is not a thing to bet a monitoring box on, and if
- * the restore itself is broken the daemon keeps running what it has in
- * memory and says so.
+ * CONFIG-REVERT: stop being managed and go back to the seed config.
  */
-bool confgen_rollback(char *err, size_t errlen)
+void confgen_do_revert(struct clientstatus *client)
 {
-	if (err != NULL && errlen > 0)
-		err[0] = '\0';
+	char err[1024], reply[512];
 
-	if (!restore_previous())
+	if (!confgen_revert(err, sizeof(err)))
 	{
-		snprintf(err, errlen, "no rollback copy is held on this box");
-		return FALSE;
-	}
-	if (!validate_on_disk(err, errlen, NULL))
-	{
-		print_err(1, "confgen: the rollback copy does not parse; "
-			"keeping the running config in memory");
-		return FALSE;
+		char *line = err, *nl;
+
+		while (line != NULL && *line != '\0')
+		{
+			nl = strchr(line, '\n');
+			if (nl != NULL)
+				*nl = '\0';
+			if (*line != '\0')
+				sendline(client->filedes, line);
+			line = (nl != NULL) ? nl + 1 : NULL;
+		}
+		sendline(client->filedes, "444 revert failed");
+		return;
 	}
 
-	if (running_generation > 0)
-		running_generation--;
-	save_state();
-
-	print_err(1, "confgen: rolled back to generation %lu, reloading",
-		running_generation);
-	gotsighup = TRUE;
-	return TRUE;
+	snprintf(reply, sizeof(reply), "333 0 reverted to %s", configfile);
+	sendline(client->filedes, reply);
 }

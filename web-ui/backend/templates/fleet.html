@@ -68,6 +68,11 @@
                                   :class="stateClass(s.state)" x-text="s.state"></span>
                             <div class="text-[11px] text-gray-400 mt-0.5" x-text="s.last_error || ''"></div>
                             <div class="text-[11px] text-gray-500 mt-0.5" x-text="s.last_delivery || ''"></div>
+                            <!-- The daemon's own reason its config cannot be
+                                 managed. Shown here rather than at delivery
+                                 time, which is far too late to find out. -->
+                            <div x-show="s.unmanageable" class="text-[11px] text-amber-700 mt-0.5"
+                                 x-text="'cannot be managed: ' + s.unmanageable"></div>
                         </td>
                         <td class="px-3 py-2 text-right mono" x-text="s.running_generation"></td>
                         <td class="px-3 py-2 text-right mono" x-text="s.desired_generation || '-'"></td>
@@ -101,12 +106,23 @@
                                     class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40">
                                 Roll back
                             </button>
+                            <!-- The way out. A box that has been adopted is
+                                 running a copy in its own state directory;
+                                 this puts it back on the config an operator
+                                 wrote, which was never touched. -->
+                            <button x-show="s.running_generation > 0" @click="revert(s.site)" :disabled="busy"
+                                    class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40"
+                                    title="stop managing this box - it goes back to its own /etc config">
+                                Unmanage
+                            </button>
                         </td>
                     </tr>
                 </template>
                 <tr x-show="!sites.length">
                     <td colspan="7" class="px-3 py-8 text-center text-gray-400 text-sm">
-                        No monitoring boxes are configured.
+                        No daemons have connected yet. sysmond dials out; give each box
+                        <span class="mono">config aggregator</span>, a token from the admin
+                        page, and the certificate this process logged at startup.
                     </td>
                 </tr>
             </tbody>
@@ -247,6 +263,15 @@ function fleetPage() {
             try {
                 const d = await this.post('/api/config/rollback/' + encodeURIComponent(site));
                 this.say(site + ': rolled back to generation ' + d.running_generation, false);
+            } catch (e) { this.say(site + ': ' + e.message, true, e.complaints); }
+        },
+
+        async revert(site) {
+            if (!confirm('Stop managing ' + site + '?\n\nIt goes back to the config on the box itself. ' +
+                         'The generations delivered to it are kept, but nothing more is sent.')) return;
+            try {
+                await this.post('/api/config/revert/' + encodeURIComponent(site));
+                this.say(site + ': unmanaged - running its own config again', false);
             } catch (e) { this.say(site + ': ' + e.message, true, e.complaints); }
         },
 

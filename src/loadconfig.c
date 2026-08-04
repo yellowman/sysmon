@@ -909,9 +909,12 @@ struct all_elements_list *loadconfig(char *cfg_path)
 
 	/* Start the file set over. What the parser opens from here is what
 	   this daemon considers "the config" for hashing and for fleet
-	   management - open_new_file() adds each include as it follows it. */
+	   management - open_new_file() adds each include as it follows it.
+	   The main file is known by its basename, so a config means the same
+	   thing whether it is being read as a seed from /etc or as the
+	   running copy from the generation directory. */
 	confset_reset();
-	confset_record(cfg_path);
+	confset_record(NULL, cfg_path);
 
 	parser_head = NULL;
 

@@ -340,14 +340,20 @@ func (d *Document) Dirty() []string {
 // normalised - so an untouched config hashes identically forever, which is
 // what lets a fleet tell "in sync" from "somebody edited this box".
 func (d *Document) Hash() string {
+	names := make([]string, len(d.Order))
 	contents := make([][]byte, len(d.Order))
 	for i, p := range d.Order {
+		// Basenames, matching what the daemon hashes. A config's identity
+		// cannot depend on which directory it is being read out of, or a
+		// box would read as modified the moment its running copy moved
+		// from /etc into the generation directory.
+		names[i] = filepath.Base(p)
 		contents[i] = d.Files[p]
 	}
 	// One implementation, shared with the fleet: HashFileSet is what the
 	// daemon's confgen_hash() has to agree with byte for byte, and a
 	// second copy of the rule here is a second chance to drift from it.
-	return HashFileSet(d.Order, contents)
+	return HashFileSet(names, contents)
 }
 
 // Apply edits the document so its objects match cfg, touching only what

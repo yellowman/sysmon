@@ -101,11 +101,11 @@ type Service struct {
 
 	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.
-	history      *HistoryStore
+	history *HistoryStore
 	// generations is the desired-state store for config distribution.
 	// Nil means this process is not managing anyone's config, which is
 	// the correct state for a single-box install that never asked for it.
-	generations *settings.Store
+	generations  *settings.Store
 	cachedStatus *models.SysmonStatus
 	cacheTime    time.Time
 	fetching     bool
@@ -307,10 +307,12 @@ func NewService(sysmonAddr string) *Service {
 		}
 		s.daemons = append(s.daemons, &daemon{addr: addr, site: "local"})
 	}
-	if len(s.daemons) == 0 {
-		s.daemons = append(s.daemons, &daemon{addr: sysmonAddr, site: "local"})
+	// No address is a real configuration, not a mistake: sysmon-web waits
+	// to be dialled by default, and the fleet is empty until the first
+	// daemon connects and is adopted into it.
+	if len(s.daemons) > 0 {
+		s.sysmonAddr = s.daemons[0].addr
 	}
-	s.sysmonAddr = s.daemons[0].addr
 	return s
 }
 
@@ -970,18 +972,30 @@ func accumulateHost(status *models.SysmonStatus, host models.HostStatus, checkTy
 // refuses, a daemon too old to know the command - and the caller falls
 // back to asking object by object.
 func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Reader) (objs []XMLObjectStatus, ok bool) {
-	key := s.authKey()
-	if key == "" {
-		// Worth saying out loud: without it every poll walks the objects
-		// one at a time, which is the difference between 0.1s and 36s on
-		// a large config, and the silence made that hard to notice.
-		s.sessionLog.Log("CONF", "", true,
-			"no sysmond authkey available - falling back to per-object fetch")
-		return nil, false
-	}
-	if err := authenticate(conn, reader, key); err != nil {
-		s.sessionLog.Log("AUTH", "bulk fetch unavailable", true, err.Error())
-		return nil, false
+	// A daemon that dialled in is already authenticated, and by something
+	// stronger than a shared key: it verified our certificate before
+	// sending a byte, and we verified its per-box token before answering.
+	// Asking it to AUTH would prove less, and would put the shared authkey
+	// back in the middle of an arrangement built to retire it.
+	d.mu.Lock()
+	inbound := d.inbound
+	d.mu.Unlock()
+
+	if !inbound {
+		key := s.authKey()
+		if key == "" {
+			// Worth saying out loud: without it every poll walks the
+			// objects one at a time, which is the difference between 0.1s
+			// and 36s on a large config, and the silence made that hard to
+			// notice.
+			s.sessionLog.Log("CONF", "", true,
+				"no sysmond authkey available - falling back to per-object fetch")
+			return nil, false
+		}
+		if err := authenticate(conn, reader, key); err != nil {
+			s.sessionLog.Log("AUTH", "bulk fetch unavailable", true, err.Error())
+			return nil, false
+		}
 	}
 
 	// Ask only for what moved since last time. Periodically - and on the
@@ -1003,7 +1017,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 	}
 
 	var block strings.Builder
-	var daemonSeq uint64
+	var daemonSeq, daemonTotal uint64
 	for {
 		line, err := reader.ReadString('\n')
 		trimmed := strings.TrimSpace(line)
@@ -1015,6 +1029,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 		}
 		if strings.HasPrefix(trimmed, "333") {
 			daemonSeq = parseSeqField(trimmed, 1)
+			daemonTotal = parseSeqField(trimmed, 3)
 			break // end of dump
 		}
 
@@ -1056,6 +1071,18 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 	}
 	for _, o := range objs {
 		d.hostCache[o.Object] = o
+	}
+
+	// An incremental reply can say what changed but not what is gone: a
+	// deleted object simply stops being sent, so a merge keeps it forever.
+	// The daemon's own count is what catches that - if it does not match
+	// what we hold, the cache has ghosts in it and the next cycle asks for
+	// everything. (Older daemons send no count; 0 means "did not say".)
+	if daemonTotal > 0 && uint64(len(d.hostCache)) != daemonTotal {
+		s.sessionLog.Log("CONF",
+			fmt.Sprintf("holding %d objects, daemon has %d - resyncing",
+				len(d.hostCache), daemonTotal), false, "")
+		d.fullResyncAt = time.Time{}
 	}
 	d.confSeq = daemonSeq
 	merged := make([]XMLObjectStatus, 0, len(d.hostCache))

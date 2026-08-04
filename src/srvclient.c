@@ -134,6 +134,7 @@ int	send_conf(struct clientstatus *client, unsigned long since)
 	struct all_elements_list *here;
 	char buffer[TEMPBUF_SIZE];
 	unsigned long sent = 0;
+	unsigned long total = 0;
 
 	here = currenthead;
 
@@ -155,8 +156,25 @@ int	send_conf(struct clientstatus *client, unsigned long since)
 		here=here->next;
 	}
 
+	/*
+	 * The terminator carries the total object count as well.
+	 *
+	 * An incremental CONF can say what changed but has no way to say what
+	 * is gone: a deleted object simply stops being sent, and a client
+	 * merging into a cache would keep it forever. The count is what lets
+	 * the far end notice - if it holds a different number than the daemon
+	 * has, its cache is wrong and it asks for everything.
+	 */
+	{
+		struct all_elements_list *walk;
+
+		for (walk = currenthead; walk != NULL; walk = walk->next)
+			total++;
+	}
+
 	/* done printing config */
-	snprintf(buffer, sizeof(buffer), "333 %lu %lu", glob_change_seq, sent);
+	snprintf(buffer, sizeof(buffer), "333 %lu %lu %lu",
+		glob_change_seq, sent, total);
 	if (sendline(client->filedes, buffer) == -1)
 	{
 		print_err(0, "unable to send message to client");
@@ -1284,6 +1302,10 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	{
 		confgen_do_rollback(here);
 	}
+	else if (strncmp(buff, "CONFIG-REVERT", 13) == 0 && (here->authlvl > 1))
+	{
+		confgen_do_revert(here);
+	}
 	else if (strncmp(buff, "CONFIG-PUT ", 11) == 0 && (here->authlvl > 1))
 	{
 		confgen_receive(here, buff + 11);
@@ -1656,12 +1678,6 @@ void	client_poll()
 
 	in_client_poll = TRUE;
 
-        if (clienthead->filedes == -1)
-	{
-	        /* do nothing */
-                return;
-	}
-
         local_timeout.tv_sec = 0;
         local_timeout.tv_usec = 0;
 
@@ -1669,8 +1685,22 @@ void	client_poll()
         FD_ZERO(&except);
         FD_ZERO(&rd);
 
-	/* check for new clients */
-	check_for_new_clients();
+	/*
+	 * There may be no listening socket at all - that is the default now,
+	 * and a daemon that only dials out to a sysmon-web never has one. Its
+	 * connections still live in this list and still have to be serviced,
+	 * so it is the accept path that gets skipped, not the whole function.
+	 *
+	 * (This used to return early when there was no listener, and did it
+	 * *after* setting in_client_poll, so the flag stayed set and no client
+	 * was ever polled again. Nothing reached it while the daemon always
+	 * listened.)
+	 */
+	if (clienthead->filedes != -1)
+	{
+		/* check for new clients */
+		check_for_new_clients();
+	}
 
 	/* process old clients new data */
 	service_clients();
@@ -1680,6 +1710,12 @@ void	client_poll()
 
 	/* free dead client memory */
 	dead_client_cleanup();
+
+	if (clienthead->filedes == -1)
+	{
+		in_client_poll = FALSE;
+		return;
+	}
 
 	for (here = clienthead; here != NULL; here = here->next)
 		if (here->filedes != -1)

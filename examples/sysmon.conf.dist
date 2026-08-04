@@ -30,26 +30,44 @@ config maxqueued 50;
 #config sitename "sysmon-metro";
 #config sitedesc "Metro Station Monitoring (Linux)";
 
-# Dial out to a sysmon-web rather than waiting to be dialled. A monitoring
-# box usually sits behind NAT or on a management VLAN, so outbound-only
-# means no inbound firewall rule per site. The token proves this daemon to
-# the aggregator; the config authkey above still proves the aggregator to
-# this daemon when it asks for CONF.
+# Dial out to a sysmon-web rather than waiting to be dialled. This is the
+# normal way to be monitored: a box usually sits behind NAT or on a
+# management VLAN, so outbound-only means no inbound firewall rule per
+# site - and no listening socket on this daemon at all. The token proves
+# this daemon to the aggregator; the config authkey above still proves the
+# aggregator to this daemon when it asks for CONF.
 #
 # The link is never load-bearing: if it cannot be made, or drops, checks
 # and pages carry on exactly as on a standalone box and the daemon retries
 # with a backoff.
 #config aggregator "sysmon-web.example.net:1347";
 #config aggregator-token "paste the token the admin page minted";
-#config aggregator-ca "/etc/ssl/sysmon-web-ca.pem";   # omit to use the system trust store
+#config aggregator-ca "/etc/ssl/sysmon-web-agent.pem";  # sysmon-web logs where it wrote this
 
-# Where the config generation number and the rollback copy are kept, when
-# a sysmon-web manages this box's config. Defaults to this file's own
-# directory. Worth setting when that directory is not writable by the user
-# sysmond drops to - and note that letting a sysmon-web manage this box at
-# all means giving that user write access to the config files themselves.
-# A box nobody has adopted in the UI is never written to.
-#config generation-dir "/var/db/sysmon";
+# Listen for the sysmon client on TCP 1345.
+#
+# OFF unless you ask, and that is a deliberate change: this socket was
+# open on every sysmond for most of the daemon's life, unauthenticated
+# until AUTH and owned by a process that ran as root. Turn it on if you
+# use the sysmon(1) client against this box directly - which is the
+# stand-alone way to run, and does not need a sysmon-web at all.
+#
+# "-p <port>" on the command line does the same and overrides this.
+#config listen 1345;
+
+# Where a sysmon-web-managed config lives on this box.
+#
+# THIS FILE IS NEVER WRITTEN. When a sysmon-web manages this box, the
+# config it delivers is kept under the directory below - owned by the user
+# sysmond drops to, created for it at startup while still root - and the
+# daemon loads that instead of this file. This file stays as the operator
+# wrote it, is what the box falls back to if the directory is emptied, and
+# is what "Unmanage" in the UI returns the box to.
+#
+# Default: /var/lib/sysmon on Linux, /var/db/sysmon elsewhere. Read from
+# THIS file only: a delivered config cannot move the directory the daemon
+# is running out of.
+#config generation-dir "/var/lib/sysmon";
 
 # Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
 # the socket is bound at startup while sysmond is still root - enabling

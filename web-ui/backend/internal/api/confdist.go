@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/settings"
 )
 
@@ -41,15 +42,18 @@ func siteFromPath(path, prefix string) (site, action string) {
 // wireFile is how a config file crosses the HTTP boundary. Content is
 // base64 for the same reason it is base64 on the daemon link: a config
 // file is bytes, and JSON strings are not.
+//
+// Name, not path: this end never says where a file goes. The daemon owns
+// one directory and puts them there.
 type wireFile struct {
-	Path    string `json:"path"`
+	Name    string `json:"name"`
 	Content string `json:"content"`
 }
 
 func toWire(files []settings.GenFile) []wireFile {
 	out := make([]wireFile, len(files))
 	for i, f := range files {
-		out[i] = wireFile{Path: f.Path,
+		out[i] = wireFile{Name: f.Name,
 			Content: base64.StdEncoding.EncodeToString(f.Content)}
 	}
 	return out
@@ -62,7 +66,7 @@ func fromWire(files []wireFile) ([]settings.GenFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		out[i] = settings.GenFile{Path: f.Path, Content: body}
+		out[i] = settings.GenFile{Name: f.Name, Content: body}
 	}
 	return out, nil
 }
@@ -244,6 +248,33 @@ func (r *Router) handleConfigRollback(w http.ResponseWriter, req *http.Request) 
 	r.sendJSON(w, res)
 }
 
+// POST /api/config/revert/<site>
+//
+// Stop managing a box: it goes back to the config an operator wrote and
+// this process has never touched.
+func (r *Router) handleConfigRevert(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	site, _ := siteFromPath(req.URL.Path, "/api/config/revert/")
+	if site == "" {
+		r.sendError(w, http.StatusBadRequest, "which site?")
+		return
+	}
+
+	res, err := r.monitoring.RevertSite(site)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(), "result": res,
+		})
+		return
+	}
+	r.sendJSON(w, res)
+}
+
 // POST /api/config/rollout   {generation-per-site is implied; body picks
 // the sites and the watch window}
 //
@@ -281,4 +312,94 @@ func (r *Router) handleConfigRollout(w http.ResponseWriter, req *http.Request) {
 // GET /api/config/rollout - live state of the rollouts this process has run.
 func (r *Router) handleConfigRolloutStatus(w http.ResponseWriter, req *http.Request) {
 	r.sendJSON(w, map[string]interface{}{"rollouts": r.monitoring.Rollouts()})
+}
+
+// ---------------------------------------------------------------------
+// Agent tokens
+// ---------------------------------------------------------------------
+//
+// One credential per box, minted here and revocable here. This is the
+// whole reason daemons dial out rather than being dialled: the
+// alternative has this process holding a key to every box in the fleet,
+// so compromising the UI compromises the lot.
+//
+// The plaintext token is returned exactly once, at creation. It is stored
+// hashed, so "show it to me again" is impossible rather than merely
+// discouraged - and a leaked database does not leak the fleet.
+
+// GET  /api/settings/agents          list sites and when they last connected
+// POST /api/settings/agents          {site,label} -> mint, returns the token once
+func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "no settings store")
+		return
+	}
+
+	switch req.Method {
+	case http.MethodGet:
+		tokens, err := r.settings.ListAgentTokens()
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if tokens == nil {
+			tokens = []settings.AgentToken{}
+		}
+		r.sendJSON(w, map[string]interface{}{"agents": tokens})
+
+	case http.MethodPost:
+		var body struct {
+			Site  string `json:"site"`
+			Label string `json:"label"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// The same rule the daemon and the listener use. A site name that
+		// cannot be split back out of "site:object" is worse than no site.
+		if !monitoring.ValidSiteName(body.Site) {
+			r.sendError(w, http.StatusBadRequest,
+				"a site name is letters, digits, - and _ (no colon, which would make site:object ambiguous)")
+			return
+		}
+		token, err := r.settings.NewAgentToken(body.Site, body.Label)
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		r.sendJSON(w, map[string]interface{}{
+			"site":  body.Site,
+			"token": token,
+			"note":  "copy this now - it is stored hashed and cannot be shown again",
+		})
+
+	default:
+		r.sendError(w, http.StatusMethodNotAllowed, "GET or POST")
+	}
+}
+
+// POST /api/settings/agents/revoke/<site>
+//
+// The box keeps monitoring and paging; it just stops being able to report
+// here. Revoking is the fleet-side action, and it costs that one box.
+func (r *Router) handleAgentRevoke(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "no settings store")
+		return
+	}
+	site, _ := siteFromPath(req.URL.Path, "/api/settings/agents/revoke/")
+	if site == "" {
+		r.sendError(w, http.StatusBadRequest, "which site?")
+		return
+	}
+	if err := r.settings.RevokeAgentToken(site); err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	r.sendJSON(w, map[string]interface{}{"site": site, "revoked": true})
 }

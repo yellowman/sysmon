@@ -270,8 +270,8 @@ static void test_hash(void)
 	writefile(b, "object x { ip \"1.2.3.4\"; type ping; };\n");
 
 	confset_reset();
-	confset_record(a);
-	confset_record(b);
+	confset_record(NULL, a);
+	confset_record("b.conf", b);
 	check(confset_count() == 2, "two files tracked");
 
 	check(confgen_hash(h1, sizeof(h1)), "hash computed");
@@ -285,7 +285,7 @@ static void test_hash(void)
 	check(strcmp(h1, h3) != 0, "an edited file changes the hash");
 
 	/* Recording the same file twice must not double-count it. */
-	confset_record(a);
+	confset_record(NULL, a);
 	check(confset_count() == 2, "a repeated include is tracked once");
 
 	/* Two different splits of identical total bytes must differ. */
@@ -299,8 +299,8 @@ static void test_hash(void)
 		writefile(c, "AB");
 		writefile(d, "C");
 		confset_reset();
-		confset_record(c);
-		confset_record(d);
+		confset_record(NULL, c);
+		confset_record("d.conf", d);
 		check(confgen_hash(split1, sizeof(split1)), "split1 hashed");
 
 		writefile(c, "A");
@@ -320,6 +320,111 @@ static void test_hash(void)
 }
 
 /*
+ * The hash is over names, not paths, and this is the property the whole
+ * managed-config scheme rests on: the same config hashes the same whether
+ * it is sitting in /etc as a seed or in a generation directory as the
+ * running copy. If it did not, adopting a box and then delivering its own
+ * bytes straight back would read as a change - forever.
+ */
+static void test_hash_is_path_independent(void)
+{
+	char one[] = "/tmp/sysmon-confgen-seed-XXXXXX";
+	char two[] = "/tmp/sysmon-confgen-gen-XXXXXX";
+	char a1[512], b1[512], a2[512], b2[512];
+	char h1[80], h2[80];
+
+	if (mkdtemp(one) == NULL || mkdtemp(two) == NULL)
+	{
+		fprintf(stderr, "FAIL: cannot make temp dirs\n");
+		failures++;
+		return;
+	}
+	snprintf(a1, sizeof(a1), "%s/sysmon.conf", one);
+	snprintf(b1, sizeof(b1), "%s/hosts.conf", one);
+	snprintf(a2, sizeof(a2), "%s/sysmon.conf", two);
+	snprintf(b2, sizeof(b2), "%s/hosts.conf", two);
+
+	writefile(a1, "root = \"x\";\ninclude \"hosts.conf\";\n");
+	writefile(b1, "object x { ip \"1.2.3.4\"; type ping; };\n");
+	writefile(a2, "root = \"x\";\ninclude \"hosts.conf\";\n");
+	writefile(b2, "object x { ip \"1.2.3.4\"; type ping; };\n");
+
+	confset_reset();
+	confset_record(NULL, a1);
+	confset_record("hosts.conf", b1);
+	check(confgen_hash(h1, sizeof(h1)), "seed copy hashed");
+
+	confset_reset();
+	confset_record(NULL, a2);
+	confset_record("hosts.conf", b2);
+	check(confgen_hash(h2, sizeof(h2)), "managed copy hashed");
+
+	check(strcmp(h1, h2) == 0,
+		"the same config in two directories hashes the same");
+
+	confset_reset();
+	unlink(a1); unlink(b1); unlink(a2); unlink(b2);
+	rmdir(one); rmdir(two);
+}
+
+/*
+ * A config whose include names a path rather than a plain filename cannot
+ * be copied into a managed directory and still point at the same file, so
+ * this side says so rather than copying a file that would then never be
+ * read.
+ */
+static void test_manageable(void)
+{
+	char dir[] = "/tmp/sysmon-confgen-mng-XXXXXX";
+	char a[512], b[512];
+	char why[256];
+
+	if (mkdtemp(dir) == NULL)
+	{
+		fprintf(stderr, "FAIL: cannot make a temp dir\n");
+		failures++;
+		return;
+	}
+	snprintf(a, sizeof(a), "%s/sysmon.conf", dir);
+	snprintf(b, sizeof(b), "%s/hosts.conf", dir);
+	writefile(a, "root = \"x\";\n");
+	writefile(b, "object x { ip \"1.2.3.4\"; type ping; };\n");
+
+	confset_reset();
+	confset_record(NULL, a);
+	confset_record("hosts.conf", b);
+	check(confgen_manageable(why, sizeof(why)),
+		"a config of plain filenames is manageable");
+
+	confset_reset();
+	confset_record(NULL, a);
+	confset_record("/etc/sysmon.d/hosts.conf", b);
+	check(!confgen_manageable(why, sizeof(why)),
+		"an include naming an absolute path is not manageable");
+	check(why[0] != '\0', "and it says which include");
+
+	confset_reset();
+	confset_record(NULL, a);
+	confset_record("sub/hosts.conf", b);
+	check(!confgen_manageable(why, sizeof(why)),
+		"an include naming a subdirectory is not manageable");
+
+	confset_reset();
+	confset_record(NULL, a);
+	confset_record("../escape.conf", b);
+	check(!confgen_manageable(why, sizeof(why)),
+		"an include trying to climb out is not manageable");
+
+	confset_reset();
+	check(!confgen_manageable(why, sizeof(why)),
+		"an empty file set is not manageable");
+
+	unlink(a);
+	unlink(b);
+	rmdir(dir);
+}
+
+/*
  * A file the parser could not open is not part of the config, so hashing
  * must fail rather than quietly hash the files that do exist - a hash that
  * silently means something different is worse than no hash.
@@ -329,7 +434,7 @@ static void test_hash_missing_file(void)
 	char h[80];
 
 	confset_reset();
-	confset_record("/nonexistent/sysmon-confgen-test/nope.conf");
+	confset_record(NULL, "/nonexistent/sysmon-confgen-test/nope.conf");
 	check(!confgen_hash(h, sizeof(h)), "a missing file fails the hash");
 	confset_reset();
 }
@@ -350,6 +455,8 @@ int main(int argc, char **argv)
 	test_b64_rejects_junk();
 	test_b64_prefixes();
 	test_hash();
+	test_hash_is_path_independent();
+	test_manageable();
 	test_hash_missing_file();
 	fuzz_b64(rounds);
 
