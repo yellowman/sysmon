@@ -75,7 +75,7 @@ type xmlVarbind struct {
 func (s *Service) GetTraps(authKey string) (*models.TrapInfo, error) {
 	var held []xmlTrap
 	lost := 0
-	for _, d := range s.daemons {
+	for _, d := range s.fleet() {
 		d.mu.Lock()
 		held = append(held, d.trapHistory...)
 		lost += d.trapsLost

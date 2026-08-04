@@ -421,6 +421,23 @@ void update_globs_from_parser()
 		sitedesc = STRDUP(parser_sitedesc, "sitedesc");
 	}
 
+	if (parser_aggregator != NULL)
+	{
+		aggregator_set_target(parser_aggregator);
+	}
+	if (parser_agg_token != NULL)
+	{
+		if (aggregator_token != NULL)
+			FREE(aggregator_token);
+		aggregator_token = STRDUP(parser_agg_token, "aggregator token");
+	}
+	if (parser_agg_ca != NULL)
+	{
+		if (aggregator_ca != NULL)
+			FREE(aggregator_ca);
+		aggregator_ca = STRDUP(parser_agg_ca, "aggregator ca");
+	}
+
 	if (parser_pmesg != NULL)
 	{
 		if (pmesg != NULL)

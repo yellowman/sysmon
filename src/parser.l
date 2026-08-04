@@ -59,6 +59,9 @@ char *parser_errorsto = NULL;
 char *parser_header = NULL;
 char *parser_authkey = NULL;
 char *parser_sitename = NULL;
+char *parser_aggregator = NULL;
+char *parser_agg_token = NULL;
+char *parser_agg_ca = NULL;
 char *parser_sitedesc = NULL;
 char *parser_savestate = NULL;
 char *parser_statusfile = NULL;
@@ -1477,6 +1480,90 @@ config\ header\ [^;]+;          {
 
   if (debug)
     print_err(0, "header : %s", parser_header); 
+
+};
+
+config\ aggregator\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* host:port of the sysmon-web to dial out to */
+  if (parser_aggregator != NULL)
+  {
+	FREE(parser_aggregator);
+  }
+  parser_aggregator = STRDUP(parser_pos1, "parser.l:parser_aggregator");
+
+};
+
+config\ aggregator-token\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* bearer token proving this daemon to the aggregator */
+  if (parser_agg_token != NULL)
+  {
+	FREE(parser_agg_token);
+  }
+  parser_agg_token = STRDUP(parser_pos1, "parser.l:parser_agg_token");
+
+};
+
+config\ aggregator-ca\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* CA that signs the aggregator's certificate */
+  if (parser_agg_ca != NULL)
+  {
+	FREE(parser_agg_ca);
+  }
+  parser_agg_ca = STRDUP(parser_pos1, "parser.l:parser_agg_ca");
 
 };
 
@@ -3403,6 +3490,9 @@ void initalize_parser()
 	parser_header = NULL;
 	parser_authkey = NULL;
 	parser_sitename = NULL;
+	parser_aggregator = NULL;
+	parser_agg_token = NULL;
+	parser_agg_ca = NULL;
 	parser_sitedesc = NULL;
 	parser_savestate = NULL;
 	parser_statusfile = NULL;

@@ -97,6 +97,8 @@
 #define DOWNCOLOR	"ff5500" /* sumthin */
 
 #define SYSMON_PORTNUM		1345
+/* Where sysmon-web listens for daemons dialling in. */
+#define SYSMON_AGG_PORTNUM	1347
 #define	MAX_ARGS		100
 #define MAX_STRLEN		32768
 
@@ -731,6 +733,11 @@ extern char *authkey;
    sitedesc is the label a person reads and keys nothing. */
 extern char *sitename;
 extern char *sitedesc;
+/* Aggregator link (aggregator.c). NULL host = standalone. */
+extern char *aggregator_host;
+extern int aggregator_port;
+extern char *aggregator_token;
+extern char *aggregator_ca;
 extern char *path_savestate;
 extern char *replyto;
 extern char *downcolor, *upcolor, *recentcolor;
@@ -837,6 +844,9 @@ extern char *parser_page;
 extern char *parser_also;
 extern char *parser_secret;
 extern char *parser_sitename;
+extern char *parser_aggregator;
+extern char *parser_agg_token;
+extern char *parser_agg_ca;
 extern char *parser_sitedesc;
 extern bool parser_catch_snmptrap;
 extern char *parser_username;
@@ -1014,6 +1024,10 @@ void tls_forget(int);
 int tls_pending(int);
 int tls_read(int, void *, int);
 int tls_write(int, const void *, int);
+
+/* aggregator.c */
+void aggregator_poll(time_t);
+void aggregator_set_target(const char *);
 
 void hard_copy(struct hostinfo *old, struct hostinfo *new);
 void dump_to_file(char *, int, time_t );

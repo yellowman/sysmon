@@ -43,7 +43,7 @@ all:	@PROGS@
 DAEMON_OBJECTS = heartbeat.o syswatch.o page.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
-		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o pingv6.o logging.o dns.o ssh.o
+		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o pingv6.o logging.o dns.o ssh.o
 
 sysmon: client.o talktcp.o lib.o dnscache.o tlsio.o
 	-$(RM) sysmon
@@ -128,6 +128,7 @@ md5.o:		config.h Makefile md5.c md5.h
 snpp.o:		config.h Makefile snpp.c
 snmp.o:		config.h Makefile snmp.c
 tlsio.o:	config.h Makefile tlsio.c
+aggregator.o:	config.h Makefile aggregator.c
 trapdecode.o:	config.h Makefile trapdecode.c
 pingv6.o:	config.h Makefile pingv6.c
 logging.o:	config.h Makefile logging.c

@@ -1878,6 +1878,11 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		}
 #endif /* HAVE_IPv6 */
 
+		/* Keep the aggregator link up, if one is configured. Cheap
+		   when it already is, and never load-bearing: monitoring
+		   carries on regardless of whether sysmon-web is reachable. */
+		aggregator_poll(now_t);
+
 		service_checks(now_t); /* do checks that are ready for us */
 
 		needssleep(now_t);     /* if we need a sleep, do it here */
