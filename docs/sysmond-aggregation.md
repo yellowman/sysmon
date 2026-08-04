@@ -130,6 +130,29 @@ Consequences:
   worse than one that alerts for nothing and says the site it was watching
   is gone.
 
+### A site that goes dark keeps its hosts
+
+When a poll cannot reach a daemon, its hosts stay in the merged view,
+flagged `stale` with a `stale_since` of the last time it answered. They are
+not dropped.
+
+Dropping them looks tempting and is wrong twice over:
+
+- **It lies about the fleet.** The hosts do not disappear from a map, an
+  alert list and a history because they are fine; they disappear because
+  nobody is watching them. That is the one thing the operator needs to see,
+  and deleting the rows is the one presentation that hides it.
+- **It churns the delta.** Hosts absent from a snapshot are reported
+  *removed*. Every client deletes them, and on recovery every one is
+  re-added - a revision bump per host in each direction, fleet-wide, for a
+  link that blipped for three seconds.
+
+A stale host keeps its last status, so nothing transitions and nobody is
+paged by a site going quiet. What changes is the flag, which is part of the
+host's signature: exactly one delta on the way out and one on the way back.
+A site nobody has ever reached contributes nothing - there is no last
+report to show.
+
 ---
 
 ## 2. Connection direction: sysmond dials out

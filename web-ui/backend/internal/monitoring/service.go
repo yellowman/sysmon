@@ -66,6 +66,14 @@ type daemon struct {
 	hostCache    map[string]XMLObjectStatus
 	fullResyncAt time.Time
 
+	// lastHosts is the last thing this site actually said, kept so a site
+	// that stops answering can be shown as stale rather than deleted.
+	// It is the built model, not the XML, because the bulk path and the
+	// object-by-object fallback both end up here - and because freezing
+	// the derived "up for 3d" at the moment contact was lost is the
+	// honest thing to show.
+	lastHosts []models.HostStatus
+
 	// Traps collected from this daemon, newest first. trapSeq is the
 	// highest trap sequence it has reported; trapsLost counts the ones its
 	// ring overwrote before we asked for them.
@@ -304,7 +312,7 @@ func (s *Service) Sites() []models.SiteInfo {
 			Reachable:   d.lastErr == "",
 			LastError:   d.lastErr,
 			LastSeen:    d.lastOK,
-			Hosts:       len(d.hostCache),
+			Hosts:       len(d.lastHosts),
 		})
 		d.mu.Unlock()
 	}
@@ -331,9 +339,9 @@ func hostKey(h *models.HostStatus) string {
 // live "up/down for X" locally from LastChangeTime.
 func hostSignature(h *models.HostStatus) uint64 {
 	w := fnv.New64a()
-	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s",
+	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%t",
 		h.ObjectName, h.Hostname, h.OverallStatus, h.StatusColor, h.Contact,
-		h.Paused, h.Description, h.IPv4Address)
+		h.Paused, h.Description, h.IPv4Address, h.Stale)
 	if h.LastChangeTime != nil {
 		fmt.Fprintf(w, "\x00%d", h.LastChangeTime.Unix())
 	}
@@ -1117,6 +1125,7 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 				d.lastErr = ""
 				d.lastOK = time.Now()
 				d.info = st.Daemon
+				d.lastHosts = st.Hosts
 			}
 			d.mu.Unlock()
 		}(i, d)
@@ -1133,11 +1142,13 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 
 	reached := 0
 	var firstErr error
-	for _, r := range results {
+	var dark []*daemon
+	for i, r := range results {
 		if r.err != nil {
 			if firstErr == nil {
 				firstErr = r.err
 			}
+			dark = append(dark, fleet[i])
 			continue
 		}
 		reached++
@@ -1165,12 +1176,67 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 		return nil, firstErr
 	}
 
+	// A site that did not answer keeps its hosts, flagged stale.
+	//
+	// Dropping them instead would report them as *removed* in the delta:
+	// every client deletes them, the map loses a whole region, and when
+	// the site comes back they are all re-added - a rev bump per host in
+	// both directions, fleet-wide, for a link that blipped. Worse, the
+	// operator would see a site disappear rather than see that it has
+	// gone dark, which is the one thing they need to know.
+	for _, d := range dark {
+		hosts := d.staleHosts()
+		for _, h := range hosts {
+			merged.Statistics.TotalHosts++
+			merged.Statistics.TotalChecks += len(h.Checks)
+			for _, c := range h.Checks {
+				merged.Statistics.ChecksByType[c.Type]++
+			}
+			merged.Statistics.ChecksByStatus[h.OverallStatus]++
+			switch h.OverallStatus {
+			case "WARNING":
+				merged.Statistics.WarningHosts++
+			case "CRITICAL":
+				merged.Statistics.CriticalHosts++
+			default:
+				merged.Statistics.HealthyHosts++
+			}
+			merged.Hosts = append(merged.Hosts, h)
+		}
+	}
+
 	// The primary's daemon info is what a single-box client reads.
 	if len(merged.Daemons) > 0 {
 		merged.Daemon = merged.Daemons[0]
 	}
 	sortHostsByUrgency(merged.Hosts)
 	return merged, nil
+}
+
+// staleHosts rebuilds this daemon's last known hosts, marked stale.
+//
+// It is the last thing the site said before it stopped answering. Nothing
+// here is current - which is exactly what the flag says - but it is far
+// more useful than an empty space where a site used to be.
+func (d *daemon) staleHosts() []models.HostStatus {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if len(d.lastHosts) == 0 {
+		return nil // never heard from it; there is nothing to keep
+	}
+
+	since := d.lastOK
+	out := make([]models.HostStatus, len(d.lastHosts))
+	copy(out, d.lastHosts)
+	for i := range out {
+		out[i].Stale = true
+		if !since.IsZero() {
+			when := since
+			out[i].StaleSince = &when
+		}
+	}
+	return out
 }
 
 // fetchSite asks the daemon for its identity. Failure is not an error:

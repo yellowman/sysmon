@@ -267,6 +267,13 @@ type HostStatus struct {
 	TimeFailed     int64         `json:"time_failed,omitempty"`      // Seconds host has been down (0 if up)
 	LastOutage     *time.Time    `json:"last_outage,omitempty"`      // When last outage occurred
 	Checks         []CheckResult `json:"checks"`
+	// Stale means the site that owns this host is not answering, so what
+	// is shown is the last thing it said rather than current truth. The
+	// host is deliberately still here: a site going dark is a fact about
+	// the site, not a reason to make its hosts vanish from every map and
+	// alert list and then reappear minutes later.
+	Stale      bool       `json:"stale,omitempty"`
+	StaleSince *time.Time `json:"stale_since,omitempty"`
 }
 
 // CheckResult represents a check result

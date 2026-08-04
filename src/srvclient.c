@@ -1237,8 +1237,18 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	{
 		/* Send a quit message to far side */
 		sendline(here->filedes, "333 Good Bye, please come again");
-		/* Disallow any further communication */
-		close(here->filedes);
+		/*
+		 * Disallow any further communication.
+		 *
+		 * tls_disconnect() rather than close(): this client may be the
+		 * aggregator link, and the SSL* is tracked by descriptor number.
+		 * Closing the fd without dropping the SSL* leaves a stale entry
+		 * behind, and the next accept() or connect() will very likely be
+		 * handed that same number - at which point a plain socket would
+		 * quietly be written through a dead TLS session. On a plain
+		 * client this is exactly close().
+		 */
+		tls_disconnect(here->filedes);
 		here->filedes = -1;
 	}
         else if (strncmp(buff, "SNMPD", 5) == 0 && (here->authlvl >1))
@@ -1322,7 +1332,7 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 		if (sendline(here->filedes, "444 - Unk")  == -1)
 		{
 			print_err(0, "error sending message to client");
-			close(here->filedes);
+			tls_disconnect(here->filedes);
 			here->filedes = -1;
 		}
 		/* Log the unknown request */
@@ -1372,9 +1382,14 @@ void timeout_clients()
 		if ((now - here->lastactivity) > inactivetime )
 		{
 			sendline(here->filedes, "444 - Timed out");
+			/*
+			 * tls_disconnect(), not close(): see the QUIT handler.
+			 * A timed-out aggregator link that only had its fd closed
+			 * would leave its SSL* tracked against a number the next
+			 * connection is about to be given.
+			 */
 			if (here->filedes != -1)
-				if (close(here->filedes) == -1)
-					perror("waah! closing stuff\n");
+				tls_disconnect(here->filedes);
 			here->filedes = -1;
 		}
 }

@@ -410,6 +410,10 @@ function mapPage() {
         hosts: [],
         version: '',
         statuses: {},
+        // Hosts whose site is not answering. Their colour is the last
+        // thing that site said, so the node is drawn dashed rather than
+        // presented as current truth.
+        staleHosts: {},
         nodes: [],
         edges: [],
         collapsed: {},
@@ -631,9 +635,15 @@ function mapPage() {
         async loadStatus() {
             try {
                 const r = await apiCall('/api/monitoring/status');
-                const m = {};
-                (r.hosts || []).forEach(h => { m[h.object_name || h.hostname] = h.overall_status; });
+                const m = {}, st = {};
+                (r.hosts || []).forEach(h => {
+                    const k = h.object_name || h.hostname;
+                    m[k] = h.overall_status;
+                    // Its site is not answering, so this colour is a memory.
+                    if (h.stale) st[k] = true;
+                });
                 this.statuses = m;
+                this.staleHosts = st;
                 this.layout();
             } catch (e) { /* map works fine without live status */ }
         },
@@ -740,6 +750,7 @@ function mapPage() {
                     parents: (parents[h.id] || []).length,
                     moved: !!manual,
                     status: this.statuses[h.id] || '',
+                    stale: !!this.staleHosts[h.id],
                     match: q ? ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) : false
                 });
                 // depth-first over children keeps a branch together
@@ -1206,7 +1217,8 @@ function mapPage() {
                     '" stroke="' + this.strokeFor(n) + '" stroke-width="' +
                     ((this.linking === n.id || n.match) ? 2.5 : 1.25) +
                     '" data-base-stroke="' + this.strokeFor(n) +
-                    '" data-base-width="' + ((this.linking === n.id || n.match) ? 2.5 : 1.25) + '"/>' +
+                    '" data-base-width="' + ((this.linking === n.id || n.match) ? 2.5 : 1.25) + '"' +
+                    (n.stale ? ' stroke-dasharray="5 3" opacity="0.65"' : '') + '/>' +
                     '<text x="0" y="-3" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0f172a">' +
                     this.esc(this.trim(n.label)) + '</text>' +
                     '<text x="0" y="9" text-anchor="middle" font-size="8" fill="#64748b">' +
