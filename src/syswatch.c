@@ -472,6 +472,7 @@ void stop_it(time_t now)
 	if (path_savestate != NULL)
 		save_xml_state(path_savestate);
 
+
 	/* timeout old clients */
 	inactivetime = 0;
 
@@ -500,7 +501,7 @@ void stop_it(time_t now)
 	free_tree(currenthead);
 
 	/* Attempt to nuke the pidfile */
-	unlink(parser_pidfile);
+	unlink(sysmon_pidfile());
 
 	exit(0);
 }
@@ -1686,14 +1687,10 @@ void write_pid_file()
 	 * missing pid). Non-root runs simply get a perror if the path isn't
 	 * writable.
 	 */
-	if (parser_pidfile == NULL || parser_pidfile[0] == '\0')
-	{
-		return;
-	}
-	fh = fopen(parser_pidfile, "w");
+	fh = fopen(sysmon_pidfile(), "w");
 	if (fh == NULL)
 	{
-		perror("write_pid_file:fopen");
+		perror(sysmon_pidfile());
 		return;
 	}
 	fprintf(fh, "%d\n", mypid);
@@ -1719,6 +1716,50 @@ void write_pid_file()
  * basically disable icmp totally, and reject those parts
  * of config file
  */
+/*
+ * The user this daemon drops to, or NULL if it is not running as root and
+ * so will not drop at all. Looked up in one place because two callers need
+ * it: the state directory is created and handed over before the drop, and
+ * the drop itself happens after.
+ */
+struct passwd *sysmon_drop_user(void)
+{
+	struct passwd *pw;
+
+	pw = getpwnam("nobody");
+	if (pw == NULL)
+		pw = getpwnam("daemon");
+	return pw;
+}
+
+/*
+ * Create the state directory and give it to the user we are about to
+ * become. Separate from revoke_root_if_necessary() because the pidfile
+ * lives in that directory and is written before the drop.
+ */
+void confgen_prepare_as_root(void)
+{
+	struct passwd *pw;
+
+	if (geteuid() != 0)
+	{
+		/* Not root: nothing to hand over, and the directory is either
+		   already ours or about to fail loudly when we write it. */
+		confgen_prepare(getuid(), getgid());
+		return;
+	}
+
+	pw = sysmon_drop_user();
+	if (pw == NULL)
+	{
+		print_err(1, "WARNING: neither 'nobody' nor 'daemon' exists; "
+			"leaving %s owned by root", confgen_statedir());
+		confgen_prepare(0, 0);
+		return;
+	}
+	confgen_prepare(pw->pw_uid, pw->pw_gid);
+}
+
 void revoke_root_if_necessary()
 {
 	uid_t current_uid;
@@ -1758,38 +1799,20 @@ void revoke_root_if_necessary()
 		/* Continue to drop privileges below */
 	}
 
-	/* Look up the 'nobody' user */
-	pw = getpwnam(drop_user);
+	pw = sysmon_drop_user();
 	if (pw == NULL)
 	{
-		/* Try 'daemon' as fallback */
-		drop_user = "daemon";
-		pw = getpwnam(drop_user);
-
-		if (pw == NULL)
-		{
-			print_err(1, "WARNING: Cannot drop root privileges - user '%s' not found", drop_user);
-			return;
-		}
+		print_err(1, "WARNING: Cannot drop root privileges - neither "
+			"'nobody' nor 'daemon' exists");
+		return;
 	}
+	drop_user = pw->pw_name;
 
 	if (debug)
 	{
 		print_err(0, "revoke_root: Dropping privileges from root (uid=0) to user '%s' (uid=%d)",
 			drop_user, pw->pw_uid);
 	}
-
-	/*
-	 * Create the generation directory and hand it to the user we are
-	 * about to become. It has to happen here, on this side of the drop:
-	 * afterwards /var/lib is not writable, and the alternative is asking
-	 * an operator to mkdir it by hand on every box in the fleet.
-	 *
-	 * This is also the only directory the daemon is ever given. The seed
-	 * config stays owned by whoever owns /etc, and nothing here will make
-	 * it writable.
-	 */
-	confgen_prepare(pw->pw_uid, pw->pw_gid);
 
 	/* Drop privileges */
 	if (setgid(pw->pw_gid) != 0)
@@ -1870,8 +1893,13 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		setup_icmpv6_fd();
 #endif /* HAVE_IPv6 */
 	}
-	/* Write the pidfile while still root — after the privilege drop the
-	 * typical /var/run location is no longer writable. */
+	/*
+	 * The state directory holds the pidfile now, so it has to exist
+	 * before the pidfile is written - and both have to happen while we
+	 * are still root, because after the drop neither /var/db nor the
+	 * directory's ownership is ours to arrange.
+	 */
+	confgen_prepare_as_root();
 	write_pid_file();
 	revoke_root_if_necessary();
 
@@ -2105,7 +2133,7 @@ void signal_ourselves(int oursignal)
 	FILE *fh;
 	char buffer[256];
 
-	fh = fopen(parser_pidfile, "r");
+	fh = fopen(sysmon_pidfile(), "r");
 	if (fh == NULL)
 	{
 		perror("signal_ourselves:fopen");

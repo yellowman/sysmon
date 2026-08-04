@@ -431,13 +431,18 @@ void update_globs_from_parser()
 			FREE(aggregator_token);
 		aggregator_token = STRDUP(parser_agg_token, "aggregator token");
 	}
-	if (parser_agg_ca != NULL)
+	/* The CA that signs the aggregator's certificate, if the operator has
+	   put one in the state directory. NULL means the system trust store,
+	   which is the right answer for a publicly signed aggregator. */
 	{
+		const char *ca = sysmon_ca_file();
+
 		if (aggregator_ca != NULL)
 			FREE(aggregator_ca);
-		aggregator_ca = STRDUP(parser_agg_ca, "aggregator ca");
+		aggregator_ca = (ca != NULL) ?
+			STRDUP((unsigned char *)ca, "aggregator ca") : NULL;
 	}
-	confgen_set_statedir(parser_gendir);
+	confgen_set_statedir(parser_statedir);
 
 	if (parser_pmesg != NULL)
 	{
@@ -495,11 +500,14 @@ void update_globs_from_parser()
 			FREE(authkey);
 		authkey = STRDUP(parser_authkey,"authentication key");
 	}
-	if (parser_savestate != NULL)
 	{
+		/* Always written, always in the same place. It costs one small
+		   file at shutdown and it is how a restart finds what the last
+		   run knew. */
 		if (path_savestate != NULL)
 			FREE(path_savestate);
-		path_savestate = STRDUP(parser_savestate, "parser_savestate");
+		path_savestate = STRDUP((unsigned char *)sysmon_statefile(),
+			"savestate path");
 	}
 	if (parser_statusfile != NULL)
 	{
@@ -508,11 +516,15 @@ void update_globs_from_parser()
 		statusfilename = STRDUP(parser_statusfile,"status file name");
 		html = parser_statusfile_type;
 	}
-	if (parser_statustempdir != NULL)
 	{
+		/* The status page is built next to everything else the daemon
+		   writes and renamed into place at whatever path the operator
+		   named - which is the one path directive worth keeping, since
+		   where the page is published is the whole point of it. */
 		if (statustempdirname != NULL)
 			FREE(statustempdirname);
-		statustempdirname = STRDUP(parser_statustempdir,"status temp dir name");
+		statustempdirname = STRDUP((unsigned char *)confgen_statedir(),
+			"status temp dir name");
 	}
 	if (parser_cssfile != NULL)
 	{
@@ -524,14 +536,16 @@ void update_globs_from_parser()
 			cssfilename = NULL;
 		}
 	}
-	if (parser_logging != NULL)
+	/* "config logging file;" turns file logging on; which file is not a
+	   question any more. -3 is the sentinel for "a file, not syslog". */
+	if (parser_logging_fac != 0)
 	{
 		facility = parser_logging_fac;
 		if (facility == -3)
 		{
 			if (log_file != NULL)
 				FREE(log_file);
-			log_file = STRDUP(parser_logging,"log file name");
+			log_file = STRDUP((unsigned char *)sysmon_logfile(), "log file name");
 		}
 	}
 	if (parser_queuetime != NULL)

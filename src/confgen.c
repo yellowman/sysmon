@@ -694,6 +694,62 @@ void confgen_lock_statedir(void)
 	gen_statedir_locked = TRUE;
 }
 
+/*
+ * Everything this daemon writes, named rather than configured.
+ *
+ * There used to be a directive per file - pidfile, savestate,
+ * statustempdir, logging file, aggregator-ca - and each one was a path a
+ * delivered config could aim anywhere the daemon could write. One
+ * directory removes all five conflicts at once, and leaves an operator
+ * with one path to get right instead of five.
+ *
+ * Each has its own buffer, so two of them can be held at the same time
+ * without the second quietly overwriting the first.
+ */
+const char *sysmon_pidfile(void)
+{
+	static char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "%s/sysmond.pid", confgen_statedir());
+	return path;
+}
+
+const char *sysmon_logfile(void)
+{
+	static char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "%s/sysmond.log", confgen_statedir());
+	return path;
+}
+
+/*
+ * Where the monitoring state is dumped at shutdown. Named state.xml, in
+ * the state directory, so a restart can find it without being told.
+ */
+const char *sysmon_statefile(void)
+{
+	static char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "%s/state.xml", confgen_statedir());
+	return path;
+}
+
+/*
+ * The CA that signs the aggregator's certificate, if the operator has
+ * put one here. NULL means none, which means the system trust store -
+ * the right answer for an aggregator with a publicly signed certificate.
+ */
+const char *sysmon_ca_file(void)
+{
+	static char path[PATH_MAX];
+	struct stat st;
+
+	snprintf(path, sizeof(path), "%s/aggregator-ca.pem", confgen_statedir());
+	if (stat(path, &st) == 0 && S_ISREG(st.st_mode))
+		return path;
+	return NULL;
+}
+
 static void statepath(char *out, size_t outlen, const char *leaf)
 {
 	snprintf(out, outlen, "%s/%s", confgen_statedir(), leaf);

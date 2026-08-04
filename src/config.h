@@ -847,7 +847,7 @@ extern char *parser_sitename;
 extern char *parser_aggregator;
 extern char *parser_agg_token;
 extern char *parser_agg_ca;
-extern char *parser_gendir;
+extern char *parser_statedir;
 extern int parser_listenport;
 extern char *parser_sitedesc;
 extern bool parser_catch_snmptrap;
@@ -1077,7 +1077,16 @@ const char *confgen_active_config(void);
 bool confgen_is_managed_file(const char *);
 void confgen_set_statedir(const char *);
 void confgen_lock_statedir(void);
+
+/* Everything the daemon writes, derived from the state directory rather
+   than configured file by file. */
+const char *sysmon_pidfile(void);
+const char *sysmon_logfile(void);
+const char *sysmon_statefile(void);
+const char *sysmon_ca_file(void);
 void confgen_prepare(uid_t, gid_t);
+void confgen_prepare_as_root(void);
+struct passwd *sysmon_drop_user(void);
 bool confgen_apply(unsigned long, struct confgen_file *, int, char *, size_t,
 	unsigned long *);
 bool confgen_rollback(char *, size_t);

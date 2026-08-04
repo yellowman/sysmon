@@ -295,9 +295,23 @@ permanently. A managed box keeps its running copy somewhere it owns:
 
 `<gendir>` is `/var/db/sysmon` on every platform - one path to recite
 rather than one per OS, since "where does this box keep its config" is
-usually asked about somebody else's box - and moves with `config
-generation-dir`. It is created, parent included, and handed to the daemon's
-user at startup while the process is still root.
+usually asked about somebody else's box - and moves with `config statedir`.
+It is created, parent included, and handed to the daemon's user at startup
+while the process is still root.
+
+It holds everything the daemon writes, not only generations: the pidfile,
+the log when logging to a file, the shutdown state dump, and the scratch
+file the status page is built in. There used to be a directive per file -
+`pidfile`, `savestate`, `statustempdir`, `logging file`, `aggregator-ca` -
+and every one of them was a path a delivered config could aim anywhere the
+daemon could write. One directory removes all five conflicts at once, and
+leaves an operator with one path to get right instead of five. The
+directives are still parsed, and warn that they are no longer used.
+
+`config statusfile` keeps its path, deliberately: it names a *published
+output*, and where the page is published is the whole point of it. It is
+still built in the state directory and renamed into place, so a web server
+never sees a half-written page.
 
 The daemon loads `<gendir>/current/<main>` when it exists and the seed
 otherwise. Three things follow from that "otherwise", and they are the
@@ -313,7 +327,7 @@ point of the whole arrangement:
   the `current` pointer and the box is running its own config again. The
   generations stay on disk as the record of what was delivered.
 
-`config generation-dir` is read from the **seed only**, and locked once the
+`config statedir` is read from the **seed only**, and locked once the
 seed is parsed. A delivered config carrying a different value is inert - it
 cannot move the directory the daemon is currently running out of. It is not
 a security control on its own (a box with real filesystem permissions gives
