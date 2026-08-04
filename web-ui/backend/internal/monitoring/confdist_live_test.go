@@ -52,7 +52,7 @@ const liveMainTmpl = `root = "core";
 config authkey "livetestkey";
 config sitename "livebox";
 config sitedesc "Live test box";
-config generation-dir "%s";
+config statedir "%s";
 
 include "hosts.conf";
 

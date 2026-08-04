@@ -62,7 +62,7 @@ char *parser_sitename = NULL;
 char *parser_aggregator = NULL;
 char *parser_agg_token = NULL;
 char *parser_agg_ca = NULL;
-char *parser_gendir = NULL;
+char *parser_statedir = NULL;
 int parser_listenport = -1;   /* -1 = not configured; 0 = explicitly off */
 char *parser_sitedesc = NULL;
 char *parser_savestate = NULL;
@@ -370,17 +370,10 @@ config{WS}statustempdir{WS}[^;]+{WS}*;       {
     print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
     break;
   }
-  if (parser_statustempdir != NULL)
-  {
-    FREE(parser_statustempdir);
-  }
-  parser_statustempdir = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_statustempdir");
-  strncpy( parser_statustempdir, parser_pos1, parser_pos2 - parser_pos1 );
-
-  parser_statustempdir[ parser_pos2 - parser_pos1 ] = '\0';
-
-  if (debug)
-    print_err(0, "statustempdir : %s", parser_statustempdir);
+  *parser_pos2 = '\0';
+  print_err(1, "config statustempdir is no longer used (%s line %d); "
+    "the status page is built in the state directory, not %s",
+    current_parsing_filename, line_no, parser_pos1);
 }
 
 config{WS}cssfile{WS}[^;]+{WS}*;       {
@@ -413,6 +406,18 @@ config{WS}cssfile{WS}[^;]+{WS}*;       {
     print_err(0, "cssfile : %s", parser_cssfile); 
 }
 
+config\ logging\ file{WS}*;       {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  /* Log to a file rather than syslog. Which file is not a question any
+     more - it is sysmond.log in the state directory. */
+  parser_logging_fac = -3;
+  if (not_started_yet == TRUE)
+	facility = -3;
+
+};
+
 config\ logging\ file\ [^;]+{WS}*;       {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -431,16 +436,11 @@ config\ logging\ file\ [^;]+{WS}*;       {
 	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
 	break;
   }
-  if (parser_logging != NULL)
-  {
-        FREE(parser_logging);
-  }
-  parser_logging = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_name");
-  strncpy( parser_logging, parser_pos1, parser_pos2 - parser_pos1 );
-
-  parser_logging[ parser_pos2 - parser_pos1 ] = '\0';
-  if (debug)
-    print_err(0, "logging : %s", parser_logging); 
+  *parser_pos2 = '\0';
+  print_err(1, "config logging file no longer takes a path (%s line %d); "
+	"the log is sysmond.log in the state directory, not %s. "
+	"Write \"config logging file;\".",
+	current_parsing_filename, line_no, parser_pos1);
 
   parser_logging_fac = -3;
   if (not_started_yet == TRUE)
@@ -482,6 +482,7 @@ config\ logging\ syslog\ [^;]+{WS}*;       {
 	print_err(0, "invalid facility %s specified", parser_logging);
 	FREE(parser_logging);
 	parser_logging = NULL;
+	parser_logging_fac = 0;   /* 0 = the config said nothing about logging */
   }
   if (not_started_yet == TRUE)
 	use_logging_now();
@@ -505,16 +506,14 @@ config\ pidfile\ [^;]+{WS}*;       {
 	print_err(1, "misbalanced quotes on line %d (pidfile) in %s", line_no, current_parsing_filename);
 	break;
   }
-  if (parser_pidfile != NULL)
-  {
-        FREE(parser_pidfile);
-  }
-  parser_pidfile = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_logging");
-  strncpy( parser_pidfile, parser_pos1, parser_pos2 - parser_pos1 );
-
-  parser_pidfile[ parser_pos2 - parser_pos1 ] = '\0';
-  if (debug)
-    print_err(0, "pidfile : %s", parser_pidfile); 
+  *parser_pos2 = '\0';
+  /* Worth a real warning rather than a debug line: a service manager holds
+     this path from outside sysmon.conf, so somebody has a unit file or an
+     rc script to update as well. */
+  print_err(1, "config pidfile is no longer used (%s line %d); the pidfile "
+    "is sysmond.pid in the state directory, not %s - update any systemd "
+    "PIDFile= or rc script that refers to it",
+    current_parsing_filename, line_no, parser_pos1); 
 }
 
 config\ date\ [^;]+{WS}*;       {
@@ -1575,6 +1574,41 @@ config\ listen\ [^;]+;        {
 
 };
 
+config\ statedir\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /*
+   * One directory for everything this daemon writes: the pidfile, the log
+   * if it logs to a file, the shutdown state dump, the scratch file the
+   * status page is built in, and the config generations a sysmon-web
+   * delivers. There used to be a directive per file, which meant a
+   * delivered config could aim any of them anywhere the daemon could
+   * write - and meant five paths to get right instead of one.
+   */
+  if (parser_statedir != NULL)
+  {
+	FREE(parser_statedir);
+  }
+  parser_statedir = STRDUP(parser_pos1, "parser.l:parser_statedir");
+
+};
+
 config\ generation-dir\ [^;]+;        {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1594,14 +1628,16 @@ config\ generation-dir\ [^;]+;        {
   }
   *parser_pos2 = '\0';
 
-  /* Where the generation number and the rollback copy are kept. Defaults
-     to the config file's own directory; worth moving when that directory
-     is not writable by the user sysmond drops to. */
-  if (parser_gendir != NULL)
+  /* The old name for "config statedir", from when generations were the
+     only thing kept there. Still honoured - it means the same directory. */
+  if (parser_statedir != NULL)
   {
-	FREE(parser_gendir);
+	FREE(parser_statedir);
   }
-  parser_gendir = STRDUP(parser_pos1, "parser.l:parser_gendir");
+  parser_statedir = STRDUP(parser_pos1, "parser.l:parser_statedir");
+  print_err(1, "config generation-dir is now called \"config statedir\" "
+	"(%s line %d); it holds the pidfile, the log and the state dump too",
+	current_parsing_filename, line_no);
 
 };
 
@@ -1624,12 +1660,13 @@ config\ aggregator-ca\ [^;]+;        {
   }
   *parser_pos2 = '\0';
 
-  /* CA that signs the aggregator's certificate */
-  if (parser_agg_ca != NULL)
-  {
-	FREE(parser_agg_ca);
-  }
-  parser_agg_ca = STRDUP(parser_pos1, "parser.l:parser_agg_ca");
+  /* The CA that signs the aggregator's certificate is now a file in the
+     state directory - aggregator-ca.pem - because it is something the
+     operator copies onto the box, and a known name is one less thing to
+     agree on between the two ends. */
+  print_err(1, "config aggregator-ca is no longer used (%s line %d); put "
+	"the certificate at aggregator-ca.pem in the state directory, not %s",
+	current_parsing_filename, line_no, parser_pos1);
 
 };
 
@@ -1759,13 +1796,10 @@ config\ savestate\ [^;]+;          {
   {
         FREE(parser_savestate);
   }
-  parser_savestate = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_savestate");
-
-  strncpy( parser_savestate, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_savestate[ parser_pos2 - parser_pos1 ] = '\0';
-
-  if (debug)
-    print_err(0, "savestate : %s", parser_savestate);
+  *parser_pos2 = '\0';
+  print_err(1, "config savestate no longer takes a path (%s line %d); "
+    "the state dump is state.xml in the state directory, not %s",
+    current_parsing_filename, line_no, parser_pos1);
 
 };
 
@@ -3563,8 +3597,8 @@ void initalize_parser()
 		FREE(parser_pidfile);
 	if (parser_statusfile != NULL)
 		FREE(parser_statusfile);
-	if (parser_gendir != NULL)
-		FREE(parser_gendir);
+	if (parser_statedir != NULL)
+		FREE(parser_statedir);
 	if (parser_statustempdir != NULL)
 		FREE(parser_statustempdir);
 	if (parser_logging != NULL)
@@ -3652,7 +3686,7 @@ void initalize_parser()
 	parser_sitedesc = NULL;
 	parser_savestate = NULL;
 	parser_statusfile = NULL;
-	parser_gendir = NULL;
+	parser_statedir = NULL;
 	parser_listenport = -1;
 	parser_statustempdir = NULL;
 	parser_pidfile = STRDUP (PIDFILE, "default PID file name");
