@@ -71,7 +71,9 @@ config nologconnects;           # Don't log client connections
 config snmp-trap;               # Enable SNMP trap monitoring (port 162)
 
 # --- State ---
-config savestate "/var/log/sysmon/state.xml";
+# Check state survives a restart automatically now - no directive. It is
+# kept as sysmond.state in the state directory.
+#config statedir "/var/db/sysmon";
 # config pidfile "/var/run/sysmond.pid";
 
 # --- Include Files ---

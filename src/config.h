@@ -1083,6 +1083,12 @@ void confgen_lock_statedir(void);
 const char *sysmon_pidfile(void);
 const char *sysmon_logfile(void);
 const char *sysmon_statefile(void);
+
+/* savestate.c - check state across a restart. Only the runtime fields
+   hard_copy() already carries across a SIGHUP; nothing structural and
+   nothing secret. */
+void save_state(const char *);
+void load_state(const char *);
 const char *sysmon_ca_file(void);
 void confgen_prepare(uid_t, gid_t);
 void confgen_prepare_as_root(void);

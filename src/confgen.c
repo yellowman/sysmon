@@ -723,14 +723,15 @@ const char *sysmon_logfile(void)
 }
 
 /*
- * Where the monitoring state is dumped at shutdown. Named state.xml, in
- * the state directory, so a restart can find it without being told.
+ * The check-state checkpoint, written at shutdown and read at startup.
+ * Not .xml: it stopped being XML when something finally had to read it
+ * back, and a name that lies about a format is worse than no name.
  */
 const char *sysmon_statefile(void)
 {
 	static char path[PATH_MAX];
 
-	snprintf(path, sizeof(path), "%s/state.xml", confgen_statedir());
+	snprintf(path, sizeof(path), "%s/sysmond.state", confgen_statedir());
 	return path;
 }
 
