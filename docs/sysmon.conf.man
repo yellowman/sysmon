@@ -345,12 +345,14 @@ Per-object custom page message format string.  Supports the same
 substitution variables as the global pmesg (set pmesg).
 
 .SS trap_alert
-Enable SNMP trap monitoring for this object.  The object's
+Enable SNMP trap monitoring for this object.  A trap is matched by
+comparing the source address of the packet against the address this
+object's
 .B ip
-must be a literal address: traps are matched on the source address of
-the packet, and no name is resolved while a trap is being handled.  An
-object that sets trap_alert but names its device by hostname is
-reported at startup and will never match a trap.
+resolved to when the config was loaded, so a hostname and a literal
+address work equally well and no name is resolved while a trap is being
+handled.  A device that changes address is picked up at the next config
+load.
 
 .SS rtt_threshold
 Round-trip time threshold in milliseconds.  If average RTT exceeds

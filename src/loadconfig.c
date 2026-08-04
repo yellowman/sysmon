@@ -218,6 +218,8 @@ void free_struct_hostinfo(struct hostinfo *item_to_free)
 		FREE(item_to_free->url_text);
 	if (item_to_free->command != NULL)
 		FREE(item_to_free->command);
+	if (item_to_free->ipv4_str != NULL)
+		FREE(item_to_free->ipv4_str);
 	
 	/* This must be the last thing */
 	FREE(item_to_free);

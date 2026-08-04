@@ -91,15 +91,17 @@ config maxqueued 50;
 # this on a running daemon needs a restart, not a SIGHUP.
 # Traps are decoded (v1 and v2c) and logged with what the device said.
 #
-# A trap is only accepted from an object that says "trap_alert;" and
-# names the device by ADDRESS. Everything else arriving on the port is
-# discarded unread - trap PDUs are unauthenticated UDP with a source
-# anybody can write, so an allowlist is the only thing that decides
-# whether a packet is worth the work of parsing it.
+# A trap is only accepted from an object that says "trap_alert;".
+# Everything else arriving on the port is discarded unread - trap PDUs
+# are unauthenticated UDP with a source anybody can write, so an
+# allowlist is the only thing that decides whether a packet is worth
+# the work of parsing it.
 #
-# Write the address, not a hostname: the match is made on the source
-# address of the packet and nothing is resolved while a trap is being
-# handled. sysmond names any object that gets this wrong at startup.
+# Name the device however you name it everywhere else. The match is made
+# on the packet's source address against the address the object resolved
+# to when the config was loaded, so a hostname works as well as a
+# literal address, and nothing is resolved while a trap is in hand. A
+# device that changes address is picked up at the next load.
 #config snmp-trap;		# catch snmp-traps
 
 object my.default.gateway-obj {

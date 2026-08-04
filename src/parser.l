@@ -3239,6 +3239,27 @@ void add_object()
 
 		/* LOAD DATA into structure */
 		new_ele->value->data->hostname = STRDUP(parser_ip, "hostname");
+
+		/*
+		 * Keep what the name resolved to, not just the name.
+		 *
+		 * hp is the lookup done above to decide this object is worth
+		 * monitoring at all, so the address is already in hand and
+		 * costs nothing to record. Anything that later arrives with an
+		 * address and needs the object it belongs to - an snmp trap -
+		 * can then match on it directly, instead of resolving every
+		 * object in the config to find out. get_ip() hands back a
+		 * static buffer, so copy it now.
+		 */
+		new_ele->value->data->ipv4_str = NULL;
+		if (hp != NULL && hp->my_h_addr_v4 != NULL)
+		{
+			char *dotted = get_ip(hp);
+
+			if (dotted != NULL)
+				new_ele->value->data->ipv4_str =
+					STRDUP(dotted, "parser.l:ipv4_str");
+		}
 		new_ele->value->data->type = parser_i_type;
 		new_ele->value->data->port = parser_i_port;
 		new_ele->value->data->reverse = parser_reverse;

@@ -914,10 +914,16 @@ void process_snmp_trap(int skt)
  * which made "an address matching nothing" the cheapest thing in the
  * world to send and the most expensive thing here to receive.
  *
- * Now an unknown source costs one walk of string compares and no
- * network at all. The comparison is literal, so an object that wants
- * traps must name an address rather than a hostname; check_trap_sources()
- * says so at load time, where it can still be fixed.
+ * Now an unknown source costs one walk of integer-ish string compares
+ * and no network at all.
+ *
+ * The comparison is against data->ipv4_str - the address the object's
+ * name resolved to when the config was loaded - so naming a device by
+ * hostname works exactly as well as naming it by address. That lookup
+ * already happens at load time to decide whether an object is usable,
+ * so recording its answer is what lets this path be both correct and
+ * free. A name that moves is picked up at the next load, which is the
+ * same cadence everything else about an object honours.
  *
  * Returns: the object, or NULL - and NULL means discard.
  */
@@ -933,46 +939,22 @@ struct graph_elements *find_trap_source(char *ip_string)
 			continue;
 		if (!walker->value->data->trap_alert)
 			continue;
-		if (walker->value->data->hostname == NULL)
-			continue;
 
-		if (strcmp((char *)walker->value->data->hostname, ip_string) == 0)
+		if (walker->value->data->ipv4_str != NULL &&
+		    strcmp((char *)walker->value->data->ipv4_str, ip_string) == 0)
+			return walker->value;
+
+		/*
+		 * An object with no resolved v4 address - v6-only, or a name
+		 * that would not resolve at load - can still be named by a
+		 * literal address in the config.
+		 */
+		if (walker->value->data->hostname != NULL &&
+		    strcmp((char *)walker->value->data->hostname, ip_string) == 0)
 			return walker->value;
 	}
 
 	return NULL;
-}
-
-/*
- * check_trap_sources - warn about objects whose traps can never arrive
- *
- * trap_alert on an object named by hostname is a silent no-op: matching
- * is by address, and this daemon does not resolve names on the trap path
- * on purpose. Rather than let those traps vanish, say so once per load,
- * naming the object, while somebody is still looking at the config.
- */
-void check_trap_sources(void)
-{
-	struct all_elements_list *walker;
-	struct in_addr scratch;
-
-	for (walker = currenthead; walker != NULL; walker = walker->next) {
-		if (walker->value == NULL || walker->value->data == NULL)
-			continue;
-		if (!walker->value->data->trap_alert)
-			continue;
-		if (walker->value->data->hostname == NULL)
-			continue;
-
-		if (inet_pton(AF_INET, (char *)walker->value->data->hostname,
-				&scratch) == 1)
-			continue;
-
-		print_err(1, "object %s has trap_alert but its ip \"%s\" is a name, "
-			"not an address - traps are matched by source address, so "
-			"traps from this device will be discarded. Write the address.",
-			walker->value->unique_name, walker->value->data->hostname);
-	}
 }
 
 /*
