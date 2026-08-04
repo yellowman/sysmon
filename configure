@@ -653,6 +653,7 @@ SNMP
 IPV6
 PROGS
 SSL
+TLS
 LEX
 SENDMAIL
 INSTALL_DATA
@@ -4666,7 +4667,59 @@ LIBS_SAVE="$LIBS"
 
 LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
-LIBS="$LIBS_SAVE"
+       for ac_header in openssl/ssl.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "openssl/ssl.h" "ac_cv_header_openssl_ssl_h" "$ac_includes_default"
+if test "x$ac_cv_header_openssl_ssl_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_OPENSSL_SSL_H 1" >>confdefs.h
+ HAVE_SSL_H="yes"
+fi
+
+done
+if test "$HAVE_SSL_H" = "yes"; then
+					SAVE_LIBS="$LIBS"
+	LIBS="$LIBS -lssl -lcrypto"
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for a usable OpenSSL 1.1.1 / LibreSSL API" >&5
+printf %s "checking for a usable OpenSSL 1.1.1 / LibreSSL API... " >&6; }
+	cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
+int
+main (void)
+{
+SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+SSL *s; X509_VERIFY_PARAM *p;
+SSL_CTX_set_min_proto_version(c, TLS1_2_VERSION);
+s = SSL_new(c); p = SSL_get0_param(s);
+X509_VERIFY_PARAM_set1_host(p, "x", 0);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  HAVE_SSL_LIB="yes"
+else $as_nop
+  HAVE_SSL_LIB="no"
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $HAVE_SSL_LIB" >&5
+printf "%s\n" "$HAVE_SSL_LIB" >&6; }
+	LIBS="$SAVE_LIBS"
+fi
+if test "$HAVE_SSL_LIB" = "yes"; then
+	TLS="-DHAVE_TLS"
+			TLS_LIBS="-lssl -lcrypto"
+else
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: no usable OpenSSL/LibreSSL - sysmond will refuse to dial an aggregator" >&5
+printf "%s\n" "$as_me: WARNING: no usable OpenSSL/LibreSSL - sysmond will refuse to dial an aggregator" >&2;}
+fi
+
+
+LIBS="$LIBS_SAVE $TLS_LIBS"
 
 
 if test "$SENDMAIL" = no; then
