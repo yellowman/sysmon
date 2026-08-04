@@ -85,6 +85,12 @@
                                         <span class="font-medium text-gray-900 truncate" x-text="hostLabel(alert)" :title="hostKey(alert)"></span>
                                         <span x-show="hostSite(alert)" class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-xs mono"
                                               x-text="hostSite(alert)"></span>
+                                        <!-- The site stopped answering: this alert is the last
+                                             thing it said, not a live one. -->
+                                        <span x-show="alert.stale" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium"
+                                              :title="'site ' + (alert.site || '?') + ' is not answering'">
+                                            <i class="fas fa-plug-circle-xmark mr-0.5"></i>stale
+                                        </span>
                                         <span class="text-xs text-gray-500 truncate" x-text="'(' + alert.hostname + ')'"></span>
                                     </div>
                                     <div class="text-[10px] text-red-500 font-medium" x-show="alert.checks && alert.checks[0] && alert.checks[0].status_message" x-text="alert.checks[0].status_message"></div>

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 
 	"sysmon-web/internal/models"
@@ -367,7 +368,12 @@ func (d *Document) Apply(cfg *models.Config) (added, changed, removed int) {
 		return 0, 0, 0
 	}
 
+	// Keep the caller's order. Walking a map instead would append new
+	// objects in whatever order Go felt like that run, so two saves of
+	// the same config could produce different bytes - and therefore
+	// different hashes, which is what fleet management compares.
 	wanted := make(map[string]models.Host, len(cfg.Hosts))
+	order := make([]string, 0, len(cfg.Hosts))
 	for _, h := range cfg.Hosts {
 		name := h.Hostname
 		if name == "" {
@@ -376,10 +382,14 @@ func (d *Document) Apply(cfg *models.Config) (added, changed, removed int) {
 		if name == "" {
 			continue
 		}
+		if _, dup := wanted[name]; !dup {
+			order = append(order, name)
+		}
 		wanted[name] = h
 	}
 
-	for name, h := range wanted {
+	for _, name := range order {
+		h := wanted[name]
 		span, exists := d.Objects[name]
 		if !exists {
 			d.AddObject(name, GenerateHost(h))
@@ -399,11 +409,20 @@ func (d *Document) Apply(cfg *models.Config) (added, changed, removed int) {
 		changed++
 	}
 
+	// Collect first, then delete. DeleteObject reindexes the file it
+	// touched, which deletes and re-adds every entry that file owns -
+	// mutating the map mid-range, so deleting two objects from one file
+	// could silently skip one of them.
+	var doomed []string
 	for name := range d.Objects {
 		if _, keep := wanted[name]; !keep {
-			if d.DeleteObject(name) {
-				removed++
-			}
+			doomed = append(doomed, name)
+		}
+	}
+	sort.Strings(doomed)
+	for _, name := range doomed {
+		if d.DeleteObject(name) {
+			removed++
 		}
 	}
 
