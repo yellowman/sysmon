@@ -2905,64 +2905,58 @@ void open_new_file(char *filename, FILE *current_file)
 	bool managed;
 
 	/*
-	 * Where a relative include resolves.
+	 * A relative include means "next to the file that included it", and
+	 * nothing else. An absolute one is opened as written.
 	 *
-	 * Inside the managed config directory the answer is "next to the file
-	 * that included it", full stop. Trying the working directory there
-	 * would be a real hole: the daemon's working directory is / by the
-	 * time it is running, so `include "hosts.conf"` would prefer
-	 * /hosts.conf to the managed copy, and anyone who can create a file in
-	 * / would decide what this box monitors.
+	 * It used to mean "relative to the working directory", which sounds
+	 * harmless and is not, because sysmond never sets its own working
+	 * directory - it inherits whatever started it. systemd defaults units
+	 * to /, and rc.d scripts run daemons from /, so on a normally
+	 * installed box `include "hosts.conf"` was being resolved as
+	 * /hosts.conf. That is a file anybody with write access to / could
+	 * create, and it decides what the box monitors. Where it did not
+	 * exist, the include silently vanished instead - the same directive
+	 * loading a different file, or no file, depending on how the daemon
+	 * happened to be started.
 	 *
-	 * Outside it, the working directory is tried first, because that is
-	 * what a relative include has always meant and changing it could point
-	 * an existing config at a different file. The sibling is a fallback
-	 * only: it turns "the include silently vanished after a SIGHUP,
-	 * because the daemon had moved to /" into "the include was found where
-	 * it was written", and cannot change a config that already resolved.
+	 * Resolving against the including file removes the working directory
+	 * from the answer entirely. It is also what the string plainly means
+	 * to whoever wrote it.
 	 */
 	managed = confgen_is_managed_file(save_current_parsing_filename);
 
-	sibling[0] = '\0';
-	if (filename[0] != '/' && save_current_parsing_filename != NULL)
+	if (managed && strchr(filename, '/') != NULL)
 	{
-		snprintf(sibling, sizeof(sibling), "%s", save_current_parsing_filename);
-		slash = strrchr(sibling, '/');
-		if (slash != NULL)
-		{
-			snprintf(slash + 1, sizeof(sibling) - (size_t)(slash + 1 - sibling),
-				"%s", filename);
-		}
-		else
-		{
-			sibling[0] = '\0';
-		}
+		print_err(1, "parser.l: include \"%s\" in a managed config names a "
+			"path; only plain filenames are read from %s",
+			filename, confgen_statedir());
+		return;
 	}
 
-	if (managed)
-	{
-		if (strchr(filename, '/') != NULL)
-		{
-			print_err(1, "parser.l: include \"%s\" in a managed config names a "
-				"path; only plain filenames are read from %s",
-				filename, confgen_statedir());
-			return;
-		}
-		if (sibling[0] == '\0')
-			return;
-		new_file = fopen(sibling, "r");
-		if (new_file != NULL)
-			filename = sibling;
-	}
-	else
+	if (filename[0] == '/')
 	{
 		new_file = fopen(filename, "r");
-		if (new_file == NULL && sibling[0] != '\0')
+	}
+	else if (save_current_parsing_filename != NULL &&
+		(slash = strrchr(save_current_parsing_filename, '/')) != NULL)
+	{
+		size_t dirlen = (size_t)(slash - save_current_parsing_filename) + 1;
+
+		if (dirlen + strlen(filename) < sizeof(sibling))
 		{
+			memcpy(sibling, save_current_parsing_filename, dirlen);
+			snprintf(sibling + dirlen, sizeof(sibling) - dirlen, "%s", filename);
 			new_file = fopen(sibling, "r");
 			if (new_file != NULL)
 				filename = sibling;
 		}
+	}
+	else
+	{
+		/* The including file has no directory in its name, so it was
+		   itself opened relative to the working directory; a sibling of
+		   it is the same thing. */
+		new_file = fopen(filename, "r");
 	}
 
 	if (new_file == NULL)
