@@ -176,149 +176,8 @@ func Generate(config *models.Config) (string, error) {
 
 	// Object definitions - use "object name { ... };" syntax
 	for _, host := range config.Hosts {
-		sb.WriteString(fmt.Sprintf("object %s {\n", host.Hostname))
-
-		if host.IP != "" {
-			sb.WriteString(fmt.Sprintf("\tip \"%s\";\n", host.IP))
-		}
-		if host.Type != "" {
-			sb.WriteString(fmt.Sprintf("\ttype %s;\n", host.Type))
-		} else if len(host.Checks) > 0 {
-			sb.WriteString(fmt.Sprintf("\ttype %s;\n", host.Checks[0].Type))
-		}
-		if host.Port > 0 {
-			sb.WriteString(fmt.Sprintf("\tport %d;\n", host.Port))
-		} else if len(host.Checks) > 0 && host.Checks[0].Port > 0 {
-			sb.WriteString(fmt.Sprintf("\tport %d;\n", host.Checks[0].Port))
-		}
-		if host.Notes != "" {
-			sb.WriteString(fmt.Sprintf("\tdesc \"%s\";\n", q(host.Notes)))
-		}
-		if host.Contact != "" {
-			sb.WriteString(fmt.Sprintf("\tcontact \"%s\";\n", q(host.Contact)))
-		}
-		// Dependencies are carried comma-separated; sysmond wants one
-		// "dep" line each. Writing the joined string would emit a single
-		// dependency with a bogus, comma-laden name.
-		for _, dep := range strings.Split(host.Dependencies, ",") {
-			dep = strings.TrimSpace(dep)
-			if dep != "" {
-				sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(dep)))
-			}
-		}
-		if host.Group != "" {
-			sb.WriteString(fmt.Sprintf("\tgroup \"%s\";\n", q(host.Group)))
-		}
-		// NOTE: "paused" is web-UI-only runtime state. sysmond has no
-		// "pause" config directive (pausing is done via the TCP PAUSE
-		// command at runtime), so we must NOT emit it - the lexer would
-		// reject it as an unknown token on reload.
-		if host.Reverse {
-			sb.WriteString("\treverse;\n")
-		}
-		if host.TrapAlert {
-			sb.WriteString("\ttrap_alert;\n")
-		}
-
-		// Per-object overrides
-		if host.QueueTime > 0 {
-			sb.WriteString(fmt.Sprintf("\tqueuetime %d;\n", host.QueueTime))
-		}
-		if host.NumFailures > 0 {
-			sb.WriteString(fmt.Sprintf("\tnumfailures %d;\n", host.NumFailures))
-		}
-		if host.PageInterval > 0 {
-			sb.WriteString(fmt.Sprintf("\tpageinterval %d;\n", host.PageInterval))
-		}
-		if host.ContactOn != "" {
-			sb.WriteString(fmt.Sprintf("\tcontact_on %s;\n", q(host.ContactOn)))
-		}
-		if host.Spawn != "" {
-			sb.WriteString(fmt.Sprintf("\tspawn \"%s\";\n", q(host.Spawn)))
-		}
-		if host.PMsg != "" {
-			sb.WriteString(fmt.Sprintf("\tpmesg \"%s\";\n", q(host.PMsg)))
-		}
-
-		// Ping/latency thresholds (send_pings/min_pings are NOT lexer
-		// directives - sysmond hardcodes those - so they're omitted).
-		if host.RTTThreshold > 0 {
-			sb.WriteString(fmt.Sprintf("\trtt_threshold %d;\n", host.RTTThreshold))
-		}
-		if host.JitterThreshold > 0 {
-			sb.WriteString(fmt.Sprintf("\tjitter_threshold %d;\n", host.JitterThreshold))
-		}
-		if host.RTTSamples > 0 {
-			sb.WriteString(fmt.Sprintf("\trtt_samples %d;\n", host.RTTSamples))
-		}
-
-		// SNMP settings
-		if host.SNMPCommunity != "" {
-			sb.WriteString(fmt.Sprintf("\tcommunity \"%s\";\n", q(host.SNMPCommunity)))
-		}
-		if host.SNMPOID != "" {
-			sb.WriteString(fmt.Sprintf("\toid \"%s\";\n", q(host.SNMPOID)))
-		}
-		if host.SNMPOIDSec != "" {
-			sb.WriteString(fmt.Sprintf("\tsnmp-oid-sec \"%s\";\n", q(host.SNMPOIDSec)))
-		}
-		// Only written when it is not the default, so an untouched config
-		// does not sprout a directive the operator never asked for.
-		if host.SNMPVersion == "1" {
-			sb.WriteString("\tsnmp-version \"1\";\n")
-		}
-		if host.SNMPType != "" {
-			sb.WriteString(fmt.Sprintf("\tsnmp-type \"%s\";\n", q(host.SNMPType)))
-		}
-		// snmp-high/low/rate/exact: the lexer requires a quoted value and
-		// reads up to ';' (atol tolerates the trailing quote).
-		if host.SNMPHigh != 0 {
-			sb.WriteString(fmt.Sprintf("\tsnmp-high \"%d\";\n", host.SNMPHigh))
-		}
-		if host.SNMPLow != 0 {
-			sb.WriteString(fmt.Sprintf("\tsnmp-low \"%d\";\n", host.SNMPLow))
-		}
-		if host.SNMPRate != 0 {
-			sb.WriteString(fmt.Sprintf("\tsnmp-rate \"%d\";\n", host.SNMPRate))
-		}
-		if host.SNMPExact != 0 {
-			sb.WriteString(fmt.Sprintf("\tsnmp-exact \"%d\";\n", host.SNMPExact))
-		}
-		if host.SNMPOctets {
-			sb.WriteString("\tsnmp-octets;\n")
-		}
-
-		// DNS settings
-		if host.DNSQuery != "" {
-			sb.WriteString(fmt.Sprintf("\tdns-query \"%s\";\n", q(host.DNSQuery)))
-		}
-		if host.DNSAA {
-			sb.WriteString("\tdns-aa;\n")
-		}
-		if host.DNSRecursion {
-			sb.WriteString("\tdns-recursion;\n")
-		}
-
-		// HTTP settings
-		if host.URL != "" {
-			sb.WriteString(fmt.Sprintf("\turl \"%s\";\n", q(host.URL)))
-		}
-		if host.URLText != "" {
-			sb.WriteString(fmt.Sprintf("\turltext \"%s\";\n", q(host.URLText)))
-		}
-
-		// Auth settings
-		if host.Username != "" {
-			sb.WriteString(fmt.Sprintf("\tusername \"%s\";\n", q(host.Username)))
-		}
-		if host.Password != "" {
-			sb.WriteString(fmt.Sprintf("\tpassword \"%s\";\n", q(host.Password)))
-		}
-		if host.Secret != "" {
-			sb.WriteString(fmt.Sprintf("\tsecret \"%s\";\n", q(host.Secret)))
-		}
-
-		sb.WriteString("};\n\n")
+		sb.WriteString(GenerateHost(host))
+		sb.WriteString("\n")
 	}
 
 	return sb.String(), nil
@@ -346,4 +205,160 @@ func Validate(config *models.Config) error {
 	}
 
 	return nil
+}
+
+// GenerateHost renders one object block, exactly as Generate would emit it.
+//
+// Split out so the splice editor and the whole-file generator can never
+// disagree about what an object looks like: an edit replaces the bytes of
+// one object with this, and everything around it - comments, includes,
+// hand-formatting - is left untouched.
+func GenerateHost(host models.Host) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("object %s {\n", host.Hostname))
+
+	if host.IP != "" {
+		sb.WriteString(fmt.Sprintf("\tip \"%s\";\n", host.IP))
+	}
+	if host.Type != "" {
+		sb.WriteString(fmt.Sprintf("\ttype %s;\n", host.Type))
+	} else if len(host.Checks) > 0 {
+		sb.WriteString(fmt.Sprintf("\ttype %s;\n", host.Checks[0].Type))
+	}
+	if host.Port > 0 {
+		sb.WriteString(fmt.Sprintf("\tport %d;\n", host.Port))
+	} else if len(host.Checks) > 0 && host.Checks[0].Port > 0 {
+		sb.WriteString(fmt.Sprintf("\tport %d;\n", host.Checks[0].Port))
+	}
+	if host.Notes != "" {
+		sb.WriteString(fmt.Sprintf("\tdesc \"%s\";\n", q(host.Notes)))
+	}
+	if host.Contact != "" {
+		sb.WriteString(fmt.Sprintf("\tcontact \"%s\";\n", q(host.Contact)))
+	}
+	// Dependencies are carried comma-separated; sysmond wants one
+	// "dep" line each. Writing the joined string would emit a single
+	// dependency with a bogus, comma-laden name.
+	for _, dep := range strings.Split(host.Dependencies, ",") {
+		dep = strings.TrimSpace(dep)
+		if dep != "" {
+			sb.WriteString(fmt.Sprintf("\tdep \"%s\";\n", q(dep)))
+		}
+	}
+	if host.Group != "" {
+		sb.WriteString(fmt.Sprintf("\tgroup \"%s\";\n", q(host.Group)))
+	}
+	// NOTE: "paused" is web-UI-only runtime state. sysmond has no
+	// "pause" config directive (pausing is done via the TCP PAUSE
+	// command at runtime), so we must NOT emit it - the lexer would
+	// reject it as an unknown token on reload.
+	if host.Reverse {
+		sb.WriteString("\treverse;\n")
+	}
+	if host.TrapAlert {
+		sb.WriteString("\ttrap_alert;\n")
+	}
+
+	// Per-object overrides
+	if host.QueueTime > 0 {
+		sb.WriteString(fmt.Sprintf("\tqueuetime %d;\n", host.QueueTime))
+	}
+	if host.NumFailures > 0 {
+		sb.WriteString(fmt.Sprintf("\tnumfailures %d;\n", host.NumFailures))
+	}
+	if host.PageInterval > 0 {
+		sb.WriteString(fmt.Sprintf("\tpageinterval %d;\n", host.PageInterval))
+	}
+	if host.ContactOn != "" {
+		sb.WriteString(fmt.Sprintf("\tcontact_on %s;\n", q(host.ContactOn)))
+	}
+	if host.Spawn != "" {
+		sb.WriteString(fmt.Sprintf("\tspawn \"%s\";\n", q(host.Spawn)))
+	}
+	if host.PMsg != "" {
+		sb.WriteString(fmt.Sprintf("\tpmesg \"%s\";\n", q(host.PMsg)))
+	}
+
+	// Ping/latency thresholds (send_pings/min_pings are NOT lexer
+	// directives - sysmond hardcodes those - so they're omitted).
+	if host.RTTThreshold > 0 {
+		sb.WriteString(fmt.Sprintf("\trtt_threshold %d;\n", host.RTTThreshold))
+	}
+	if host.JitterThreshold > 0 {
+		sb.WriteString(fmt.Sprintf("\tjitter_threshold %d;\n", host.JitterThreshold))
+	}
+	if host.RTTSamples > 0 {
+		sb.WriteString(fmt.Sprintf("\trtt_samples %d;\n", host.RTTSamples))
+	}
+
+	// SNMP settings
+	if host.SNMPCommunity != "" {
+		sb.WriteString(fmt.Sprintf("\tcommunity \"%s\";\n", q(host.SNMPCommunity)))
+	}
+	if host.SNMPOID != "" {
+		sb.WriteString(fmt.Sprintf("\toid \"%s\";\n", q(host.SNMPOID)))
+	}
+	if host.SNMPOIDSec != "" {
+		sb.WriteString(fmt.Sprintf("\tsnmp-oid-sec \"%s\";\n", q(host.SNMPOIDSec)))
+	}
+	// Only written when it is not the default, so an untouched config
+	// does not sprout a directive the operator never asked for.
+	if host.SNMPVersion == "1" {
+		sb.WriteString("\tsnmp-version \"1\";\n")
+	}
+	if host.SNMPType != "" {
+		sb.WriteString(fmt.Sprintf("\tsnmp-type \"%s\";\n", q(host.SNMPType)))
+	}
+	// snmp-high/low/rate/exact: the lexer requires a quoted value and
+	// reads up to ';' (atol tolerates the trailing quote).
+	if host.SNMPHigh != 0 {
+		sb.WriteString(fmt.Sprintf("\tsnmp-high \"%d\";\n", host.SNMPHigh))
+	}
+	if host.SNMPLow != 0 {
+		sb.WriteString(fmt.Sprintf("\tsnmp-low \"%d\";\n", host.SNMPLow))
+	}
+	if host.SNMPRate != 0 {
+		sb.WriteString(fmt.Sprintf("\tsnmp-rate \"%d\";\n", host.SNMPRate))
+	}
+	if host.SNMPExact != 0 {
+		sb.WriteString(fmt.Sprintf("\tsnmp-exact \"%d\";\n", host.SNMPExact))
+	}
+	if host.SNMPOctets {
+		sb.WriteString("\tsnmp-octets;\n")
+	}
+
+	// DNS settings
+	if host.DNSQuery != "" {
+		sb.WriteString(fmt.Sprintf("\tdns-query \"%s\";\n", q(host.DNSQuery)))
+	}
+	if host.DNSAA {
+		sb.WriteString("\tdns-aa;\n")
+	}
+	if host.DNSRecursion {
+		sb.WriteString("\tdns-recursion;\n")
+	}
+
+	// HTTP settings
+	if host.URL != "" {
+		sb.WriteString(fmt.Sprintf("\turl \"%s\";\n", q(host.URL)))
+	}
+	if host.URLText != "" {
+		sb.WriteString(fmt.Sprintf("\turltext \"%s\";\n", q(host.URLText)))
+	}
+
+	// Auth settings
+	if host.Username != "" {
+		sb.WriteString(fmt.Sprintf("\tusername \"%s\";\n", q(host.Username)))
+	}
+	if host.Password != "" {
+		sb.WriteString(fmt.Sprintf("\tpassword \"%s\";\n", q(host.Password)))
+	}
+	if host.Secret != "" {
+		sb.WriteString(fmt.Sprintf("\tsecret \"%s\";\n", q(host.Secret)))
+	}
+
+	sb.WriteString("};\n")
+
+	return sb.String()
 }
