@@ -76,6 +76,35 @@ Status pages (dashboard, alerts, history, traps) aggregate by default and
 filter by site optionally, because those are read-only and cross-site
 context is the point of them.
 
+### Mobile apps: all sites, or one
+
+The apps default to **all sites**, showing `site:object` so a name is never
+ambiguous, and offer a per-install option to follow **one** site instead -
+a phone that belongs to whoever looks after one region should be able to
+say so.
+
+The part that is easy to get wrong: **that option has to live on the push
+subscription, not just the list view.** Filtering only what the app draws
+leaves the phone buzzing at 3am for a site its owner deliberately excluded
+and then hiding the row that explains why. So a subscription carries the
+site filter, the server skips subscribers a host's site does not match, and
+the app's list filter is presentation on top of a decision the server has
+already made.
+
+Consequences:
+
+- `/api/sites` lists the fleet (name, description, reachable) so the app
+  can offer a picker rather than making someone type a name.
+- A filtered app shows bare object names, because with one site in view the
+  prefix is noise. An all-sites app shows the qualified name.
+- Changing the filter re-registers the subscription; until it does, the
+  server keeps using the old one. The app says so rather than silently
+  disagreeing with what the phone will actually receive.
+- A site that later disappears from the fleet leaves a filter pointing at
+  nothing. That is *not* silently reset to "all" - a phone that quietly
+  starts alerting for everything is worse than one that alerts for nothing
+  and says the site it was watching is gone.
+
 ---
 
 ## 2. Connection direction: sysmond dials out
