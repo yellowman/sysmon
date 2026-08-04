@@ -58,8 +58,12 @@ config maxqueued 50;
 # and pages carry on exactly as on a standalone box and the daemon retries
 # with a backoff.
 #config aggregator "sysmon-web.example.net:1347";
-#config aggregator-token "paste the token the admin page minted";
-#config aggregator-ca "/etc/ssl/sysmon-web-agent.pem";  # sysmon-web logs where it wrote this
+#config aggregator-token "the token sysmon-web minted for this site";
+#
+# The certificate that signs the aggregator goes in the state directory as
+# aggregator-ca.pem. sysmon-web logs where it wrote its own on first start.
+# With no such file the system trust store is used, which is what a
+# publicly signed aggregator needs.
 
 # Listen for the sysmon client on TCP 1345.
 #

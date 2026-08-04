@@ -113,28 +113,15 @@ notifications, and CI that builds everything on every push.
 ## Aggregating several sysmonds
 
 One sysmon-web fronts a fleet. **Daemons dial in; sysmon-web listens.**
-Neither side does the opposite by default:
-
-```sh
-# sysmon-web: listens on :1347, generates and logs a certificate on first run
-sysmon-web ...
-
-# each box, in its sysmon.conf:
-config sitename  "metro";
-config aggregator "sysmon-web.example.net:1347";
-config aggregator-token "...";                 # minted on the admin page
-config aggregator-ca "/etc/ssl/sysmon-web-agent.pem";
-```
+See [Connect a sysmond to a sysmon-web](#connect-a-sysmond-to-a-sysmon-web)
+below for the six steps.
 
 sysmond **no longer listens on 1345 unless asked**. That socket was open on
 every sysmond for most of the daemon's life, unauthenticated until `AUTH`,
 on a process that ran as root; it is now opt-in with `config listen 1345`
 (or `-p`), which is what you want if you use the `sysmon(1)` client against
-a box directly. sysmon-web likewise only dials out if given `-sysmon`:
-
-```sh
-sysmon-web -sysmon "metro.noc:1345,north.noc:1345" ...   # the old arrangement
-```
+a box directly. sysmon-web only dials a daemon if given `-sysmon`, which is
+how a single box on localhost is still monitored.
 
 The design is in [docs/sysmond-aggregation.md](docs/sysmond-aggregation.md);
 the shape of it:
@@ -190,6 +177,71 @@ the shape of it:
   Several sites can share a canvas as separate clusters, but no cross-site
   edge is invented - the honest way to express one is a `type sysm` check
   against the upstream daemon.
+
+### Connect a sysmond to a sysmon-web
+
+sysmond dials out and sysmon-web listens. You do not open a port on the
+monitored box.
+
+**1. Start sysmon-web.** It makes a certificate on the first start and
+writes the path to the log.
+
+```
+agents: using /var/lib/sysmon/agent/agent-cert.pem, valid for [localhost 127.0.0.1]
+agents: listening for sysmond connections on :1347
+```
+
+The daemons must dial a name in that list. Give the other names at the
+first start:
+
+```sh
+sysmon-web -agent-names sysmon-web.example.net
+```
+
+**2. Make a token for the site.** The server shows the token one time. It
+keeps only a hash of it.
+
+```sh
+curl -b cookies -X POST https://sysmon-web.example.net/api/settings/agents \
+     -H 'Content-Type: application/json' \
+     -d '{"site":"metro","label":"Metro Station"}'
+```
+
+**3. Copy the certificate to the box.**
+
+```sh
+ssh box mkdir -p /var/db/sysmon
+scp /var/lib/sysmon/agent/agent-cert.pem box:/var/db/sysmon/aggregator-ca.pem
+```
+
+**4. Add four lines to the box's `/etc/sysmon.conf`.**
+
+```
+config sitename  "metro";
+config sitedesc  "Metro Station Monitoring";
+config aggregator "sysmon-web.example.net:1347";
+config aggregator-token "the token from step 2";
+```
+
+**5. Start sysmond.** The log shows the result.
+
+```
+aggregator: connected to sysmon-web.example.net:1347 as site metro
+```
+
+The box now sends its status. Its config stays read-only.
+
+**6. Adopt the box, to manage its config.** Open the Fleet page and click
+Adopt. sysmon-web then keeps a copy of the config the box is running. You
+can edit and deliver it after that step, and not before.
+
+Three things to know:
+
+- No `config authkey` is necessary. TLS proves the server to the box, and
+  the token proves the box to the server.
+- Do not change `config aggregator` from the web. The editor refuses it.
+  Change it on the box, where you can also put the new certificate.
+- A box with no `config listen` opens no port at all.
 
 ## Quick start
 
