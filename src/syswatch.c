@@ -249,7 +249,14 @@ void update_count()
 	unsigned long total = 0;
 	struct all_elements_list *here;
 	for (here = currenthead; here != NULL;here=here->next)
+	{
 		total++;
+		/* A (re)loaded object is new to every client, whatever it was
+		   called before, so stamp it as changed now. A client asking
+		   "what moved since N" after a SIGHUP gets the whole tree. */
+		if (here->value != NULL)
+			object_changed(here->value->data);
+	}
 	print_err(0, "total entries to be monitored = %d", total);
 	elements_to_monitor = total;
 	return;
@@ -1300,6 +1307,7 @@ void handle_retval(struct monitorent *handle_this, time_t now)
 	{
 		/* XXX */
 		client_send_statechange(handle_this->unique_name, handle_this->checkent->lastcheck, handle_this->retval);
+		object_changed(handle_this->checkent);
 	}
 
 	/* Do necessary post-check status stuff */

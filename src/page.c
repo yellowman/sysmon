@@ -390,6 +390,7 @@ void page_someone(struct hostinfo *svc, int newstate, time_t now_t)
 		run_command_and_mail_output(svc, myhostname);
 		time(&svc->lastcontacted);
 		svc->contacted = TRUE;
+		object_changed(svc);
 		free(out);
 		return;
 	}
@@ -398,6 +399,7 @@ void page_someone(struct hostinfo *svc, int newstate, time_t now_t)
 	{
 		if (debug) print_err(1,"page.c:page_someone:nobody to contact");
 		svc->contacted = TRUE;
+		object_changed(svc);
 		free(out);
 		return;
 	}
@@ -416,6 +418,7 @@ void page_someone(struct hostinfo *svc, int newstate, time_t now_t)
 		time(&svc->lastcontacted);
                 /* Set contacted */
                 svc->contacted = TRUE;
+		object_changed(svc);
 
 
 		/* setup the command to call (sendmail) */

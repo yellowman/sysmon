@@ -2,6 +2,25 @@
 
 #include "config.h"
 
+/*
+ * Every object carries the value this had when it last changed in a way a
+ * client would notice. A client remembers the highest it has seen and asks
+ * for "everything above that", so a quiet network costs one round trip and
+ * an empty answer instead of a full dump of every object every poll.
+ *
+ * Monotonic within one run only: it restarts at zero when the daemon does,
+ * and a client that sees the daemon's current value go backwards knows to
+ * resync from scratch.
+ */
+unsigned long glob_change_seq = 0;
+
+void object_changed(struct hostinfo *svc)
+{
+	if (svc == NULL)
+		return;
+	svc->change_seq = ++glob_change_seq;
+}
+
 extern int facility;
 extern bool mallocdebug;
 #ifndef HAVE_SNPRINTF

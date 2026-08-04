@@ -362,6 +362,12 @@ struct hostinfo {
 	/* SNMP trap alert configuration */
 	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
 
+	/* Bumped from a single global counter every time something a client
+	   would care about changes on this object - state, contacted, ack,
+	   notes. Lets CONF hand back only what moved since the caller last
+	   asked, instead of every object every second. */
+	unsigned long change_seq;
+
 	/* Wakeup/stale check configuration */
 	unsigned int max_wakeup_retries;    /* Max times to retry waking stale check (0 = unlimited) */
 
@@ -490,6 +496,7 @@ struct trap_content {
 };
 
 struct trap_record {
+	unsigned long seq;		/* monotonic, 1-based, since daemon start */
 	char source[IP_ADDR_STR_SIZE];	/* who sent the packet */
 	time_t when;
 	int bytes;
@@ -644,6 +651,7 @@ struct bootp_pkt {
 #define XML_NEXT_QUEUE_TIME    "ObjectNextQueueTime"
 #define XML_TRACE_ENABLED      "ObjectTraceEnabled"
 #define XML_ACKED              "ObjectAcked"
+#define XML_CHANGE_SEQ         "ObjectChangeSeq"
 #define XML_CHECK_QUEUED_AT    "CheckQueuedAt"
 #define XML_CHECK_LAST_SERV    "CheckLastServiced"
 #define XML_CHECK_FD           "CheckFileDescriptor"
@@ -686,6 +694,7 @@ struct bootp_pkt {
 #define XML_TRAP_VB_TYPE	"VarbindType"
 #define XML_TRAP_VB_VALUE	"VarbindValue"
 #define XML_TRAP_VB_NOTE	"VarbindNote"
+#define XML_TRAP_SEQ		"TrapSeq"
 
 
 /* misc defines for any/all external functions */
@@ -720,6 +729,7 @@ extern int glob_icmp_fd; /* icmp.c + syswatch.c */
 extern int glob_icmpv6_fd; /* pingv6.c */
 extern int snmp_trap_fd; /* loadconfig.c + snmp.c + syswatch.c */
 extern bool paused; /* syswatch.c + srvclient.c + textfile.c */
+extern unsigned long glob_change_seq; /* lib.c - see object_changed() */
 extern int inactivetime;
 extern int numfailures;
 extern int minnumfailures; /* minimum failures before yellow status */
@@ -1032,6 +1042,7 @@ void trap_history_add(const char *, time_t, int, struct trap_content *,
 	const char *, bool, bool);
 int trap_history_count(void);
 unsigned long trap_history_total(void);
+unsigned long trap_history_oldest_seq(void);
 struct trap_record *trap_history_get(int);
 
 /* radius check */
@@ -1042,13 +1053,15 @@ void md5_calc (unsigned char *, unsigned char *, unsigned int);
 
 /* srvclient.c */
 void send_object_xml(int, FILE*, struct graph_elements *);
-void send_traps(struct clientstatus *);
+void send_traps(struct clientstatus *, unsigned long);
 void client_send_statechange(char *, int , int);
+int send_conf(struct clientstatus *, unsigned long);
 
 /* in lib.c */
 void *MALLOC(size_t, char *);
 void *STRDUP(char *, char *);
 void FREE(void *);
+void object_changed(struct hostinfo *);
 short int name_to_type(char *);
 short int name_to_snmp_type(char *);
 void quicksort(char *, size_t, size_t, int (*)(const void *, const void *));
