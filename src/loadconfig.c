@@ -385,6 +385,15 @@ void copy_alerts(struct all_elements_list *old, struct all_elements_list *new)
 void update_globs_from_parser()
 {
 	set_defaults();
+
+	/*
+	 * First, before anything that derives a path from it - the pidfile,
+	 * the log, the state checkpoint, the aggregator's CA. Getting this
+	 * order wrong does not fail loudly; it silently looks in the default
+	 * directory on a box that configured a different one. (Which is
+	 * exactly what happened to the CA lookup.)
+	 */
+	confgen_set_statedir(parser_statedir);
 	if (parser_catch_snmptrap && (!ckconfigonly))
 	{
 		if (snmp_trap_fd == -1)
@@ -442,7 +451,6 @@ void update_globs_from_parser()
 		aggregator_ca = (ca != NULL) ?
 			STRDUP((unsigned char *)ca, "aggregator ca") : NULL;
 	}
-	confgen_set_statedir(parser_statedir);
 
 	if (parser_pmesg != NULL)
 	{
