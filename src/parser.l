@@ -2900,63 +2900,80 @@ void open_new_file(char *filename, FILE *current_file)
 	include_stack = YY_CURRENT_BUFFER;
 
 	char sibling[PATH_MAX];
-	char *slash;
 	const char *include_name = filename;
-	bool managed;
 
 	/*
-	 * A relative include means "next to the file that included it", and
-	 * nothing else. An absolute one is opened as written.
+	 * An include is opened exactly as written, first, always. A config
+	 * that resolves today resolves the same way after this - nothing here
+	 * can change which file a working config opens, and that is the whole
+	 * design of it. Absolute paths are what a config is expected to use
+	 * and they never touch anything below.
 	 *
-	 * It used to mean "relative to the working directory", which sounds
-	 * harmless and is not, because sysmond never sets its own working
-	 * directory - it inherits whatever started it. systemd defaults units
-	 * to /, and rc.d scripts run daemons from /, so on a normally
-	 * installed box `include "hosts.conf"` was being resolved as
-	 * /hosts.conf. That is a file anybody with write access to / could
-	 * create, and it decides what the box monitors. Where it did not
-	 * exist, the include silently vanished instead - the same directive
-	 * loading a different file, or no file, depending on how the daemon
-	 * happened to be started.
+	 * A relative include is ambiguous, because it resolves against the
+	 * working directory and sysmond does not set one - it inherits
+	 * whatever started it, which differs between a shell, systemd
+	 * (defaults to /) and an rc.d script. When that ambiguity has gone
+	 * wrong the include does not resolve at all, and *that* case gets one
+	 * repair: try the config file's own directory before giving up.
 	 *
-	 * Resolving against the including file removes the working directory
-	 * from the answer entirely. It is also what the string plainly means
-	 * to whoever wrote it.
+	 * It is a fallback and not a redirect, which is the distinction that
+	 * makes it safe: it can only turn an include that was silently
+	 * missing into one that loads. It says so when it fires, because a
+	 * repair nobody can see is the kind that is confusing years later.
 	 */
-	managed = confgen_is_managed_file(save_current_parsing_filename);
-
-	if (managed && strchr(filename, '/') != NULL)
+	if (confgen_is_managed_file(save_current_parsing_filename))
 	{
-		print_err(1, "parser.l: include \"%s\" in a managed config names a "
-			"path; only plain filenames are read from %s",
-			filename, confgen_statedir());
-		return;
-	}
+		/*
+		 * The managed directory, which is not a repair at all: these
+		 * files are copies this daemon wrote into one flat directory it
+		 * owns, so a bare filename names a member of the set that was
+		 * validated and anything else names something outside it.
+		 */
+		char *slash;
 
-	if (filename[0] == '/')
-	{
-		new_file = fopen(filename, "r");
-	}
-	else if (save_current_parsing_filename != NULL &&
-		(slash = strrchr(save_current_parsing_filename, '/')) != NULL)
-	{
-		size_t dirlen = (size_t)(slash - save_current_parsing_filename) + 1;
-
-		if (dirlen + strlen(filename) < sizeof(sibling))
+		if (strchr(filename, '/') != NULL)
 		{
-			memcpy(sibling, save_current_parsing_filename, dirlen);
-			snprintf(sibling + dirlen, sizeof(sibling) - dirlen, "%s", filename);
-			new_file = fopen(sibling, "r");
-			if (new_file != NULL)
-				filename = sibling;
+			print_err(1, "parser.l: include \"%s\" in a managed config names a "
+				"path; only plain filenames are read from %s",
+				filename, confgen_statedir());
+			return;
 		}
+		snprintf(sibling, sizeof(sibling), "%s", save_current_parsing_filename);
+		slash = strrchr(sibling, '/');
+		if (slash == NULL)
+			return;
+		snprintf(slash + 1, sizeof(sibling) - (size_t)(slash + 1 - sibling),
+			"%s", filename);
+		new_file = fopen(sibling, "r");
+		if (new_file != NULL)
+			filename = sibling;
 	}
 	else
 	{
-		/* The including file has no directory in its name, so it was
-		   itself opened relative to the working directory; a sibling of
-		   it is the same thing. */
 		new_file = fopen(filename, "r");
+
+		if (new_file == NULL && filename[0] != '/')
+		{
+			char *slash;
+
+			snprintf(sibling, sizeof(sibling), "%s", configfile);
+			slash = strrchr(sibling, '/');
+			if (slash != NULL)
+			{
+				snprintf(slash + 1,
+					sizeof(sibling) - (size_t)(slash + 1 - sibling),
+					"%s", filename);
+				new_file = fopen(sibling, "r");
+				if (new_file != NULL)
+				{
+					print_err(1, "include \"%s\" did not resolve from the "
+						"working directory; using %s. Write it as an "
+						"absolute path to say which you meant.",
+						filename, sibling);
+					filename = sibling;
+				}
+			}
+		}
 	}
 
 	if (new_file == NULL)

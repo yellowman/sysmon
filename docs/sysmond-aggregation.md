@@ -335,109 +335,52 @@ because copying it into one directory would change what it points at. The
 daemon says so in its `CONFIG-GEN` reply, and the fleet page shows it -
 finding out at delivery time would be far too late.
 
-### A relative include means "next to me"
+### Write includes as absolute paths
 
-`include "hosts.conf"` resolves against the directory of the file that
-included it. Nothing else - not the working directory.
+`include "/etc/sysmon.d/hosts.conf"` is what a config is expected to use,
+and it is opened exactly as written.
 
-It used to resolve against the working directory, and that was a live
-vulnerability rather than a wart. sysmond never sets its own working
-directory; it inherits whatever started it, and systemd defaults units to
-`/` while rc.d scripts run daemons from `/`. So on a normally installed
-box, `include "hosts.conf"` in `/etc/sysmon.conf` was read as
-`/hosts.conf`: a file anybody with write access to `/` could create, and
-one that decides what the box monitors. Where no such file existed the
-include silently vanished instead - the same directive loading a different
-file, or no file, depending on how the daemon happened to be started.
+A relative include is ambiguous. It resolves against the working directory,
+and sysmond does not set one - it inherits whatever started it, which
+differs between a shell, systemd (which defaults to `/`) and an rc.d
+script. The same directive can name different files on two boxes with
+identical configs.
 
-Demonstrated against the previous build: with a decoy `hosts.conf` in the
-working directory and the real one beside the config, the old daemon loaded
-the decoy's objects and the new one loads the real ones.
+**That is not repaired, on purpose.** Re-pointing a relative include at the
+config's directory would silently change which file an existing config
+opens, on boxes that have been running for years, to fix something nobody
+asked to have fixed - and a config that resolves differently after an
+upgrade is a worse problem than one that was ambiguous all along.
 
-Inside the managed directory the rule is tighter still - a plain filename
-and nothing else - because those files are copies the daemon wrote into one
-flat directory, and a path among them would name something outside the set
-that was validated.
+There is exactly one repair, and it is a fallback rather than a redirect:
+when a relative include does **not** resolve at all, the config file's own
+directory is tried before giving up, and the daemon logs that it did. It
+can only turn a silently-missing include into one that loads; it cannot
+change a config that already works. (Verified three ways: a config whose
+include resolves from the working directory still gets that file and logs
+nothing; one whose include resolves nowhere gets the config directory's
+copy with a log line; one with neither fails exactly as before.)
 
-### Hashing
+### The consequence for managed configs
 
-Both sides must agree bit-for-bit on what "the config" is, or every box
-shows as modified forever:
+Inside the managed directory an include must be a plain filename. Those
+files are copies the daemon wrote into one flat directory it owns, so a
+bare name is a member of the set that was validated and anything else names
+something outside it.
 
-> SHA-256 over, for the main file and then each included file in load
-> order: the file's path length, the path, the content length, the content.
+Which means: **a config whose includes are absolute paths cannot be
+config-managed.** Copying `/etc/sysmon.d/hosts.conf` into a generation
+directory would not change what the main file points at, so the copy would
+be delivered and never read. The daemon says so in its `CONFIG-GEN` reply
+rather than letting it be discovered at delivery time, and the fleet page
+shows the reason.
 
-Length-prefixed so no concatenation ambiguity exists. Bytes are hashed
-**as-is** - never normalised, never re-indented, no line-ending
-translation. That is only achievable if edits splice rather than
-regenerate, which is why §4 is a prerequisite rather than a nicety.
-
-### Conflict model
-
-Per box, sysmon-web tracks `desired_generation` / `desired_hash`, and the
-daemon reports `running_generation` / `running_hash` each cycle.
-
-| condition | state | meaning |
-|---|---|---|
-| box not answering, or too old to know `CONFIG-GEN` | **unknown** | nothing here is knowable |
-| no `desired` recorded, or not adopted | **unmanaged** | never adopted; config is read-only in the UI |
-| `running_hash == desired_hash` | **in sync** | nothing to do |
-| `running_gen < desired_gen` | **pending** | staged here, not delivered yet |
-| `running_gen == desired_gen`, hash differs | **locally modified** | somebody edited the box directly |
-| `running_gen > desired_gen` | **rejected** | the box claims a generation this side never issued |
-
-The order matters. **Unknown wins over everything**: reporting a box as in
-sync when it has not answered is the one failure that costs someone their
-weekend.
-
-**The hash wins over the generation number.** They can disagree
-legitimately - adopting a box records what it already runs as generation 1
-while the box still calls it 0 - and a box running exactly the right bytes
-is in sync whatever number either side has written down. The generation
-number is bookkeeping; the hash is the truth.
-
-Generation numbers only ever move forward, including past a rollback and
-past a poisoned one. Re-using a number would make "the box is running
-generation 9" stop naming one set of bytes.
-
-**Locally modified is never resolved automatically.** The operator is shown
-a diff and chooses:
-
-- **adopt local** - pull the box's file up and make it the new desired
-  state. This is also how an existing box is onboarded, and how you recover
-  when somebody fixed something on the console at 3am. It is the *default*
-  offer, because the person at the console usually had a reason.
-- **overwrite** - re-deliver the desired generation.
-
-**Unmanaged is a real state, not a missing value.** A box that has never
-been adopted shows its config read-only. Nothing is ever delivered to a box
-that has not been explicitly adopted, so no amount of UI misclicking can
-blank a daemon that sysmon-web has never seen the config of.
-
-### Rollout
-
-A generation is delivered in waves, first to one box.
-
-Success is not "it applied". A config can parse perfectly and still be
-catastrophically wrong - remove a `dep` line and a single upstream failure
-becomes eight hundred pages. So the canary criteria are:
-
-1. validation passed and the daemon reloaded
-2. object count is within a tolerance of expected
-3. no alert-rate spike in the watch window
-
-Failing 2 or 3 within the watch window **rolls the box back to the previous
-generation automatically** and marks the generation poisoned, which blocks
-the remaining waves. The previous generation's files are kept on the box
-precisely so rollback needs no network - a config that broke the link to
-the aggregator is exactly the one you most need to undo.
-
-Waves are one box at a time rather than N at a time: the whole value of a
-canary is that the first failure costs one box.
-
-A rollback is also recorded as the new desired state. Without that, the
-next poll would see the box "behind" and offer to redeliver the config it
-was just rolled away from.
+Such a box is still monitored, aggregated, alerted on and shown like any
+other - only its config stays read-only in the UI. That is a real limit on
+what phase 5 covers, and the honest options for widening it are: keep the
+whole config in one file, use bare filenames beside the main config, or
+manage only the main file and treat absolutely-included fragments as
+read-only members of the hash. Not yet decided.
 
 ---
 
