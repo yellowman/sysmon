@@ -166,7 +166,7 @@ the shape of it:
   operator is offered the diff, and adopting the local version is the
   default, because the person at the console usually had a reason.
 - **`/etc/sysmon.conf` is never written.** A managed box keeps its running
-  copy under a directory it owns (`/var/lib/sysmon`, or `config
+  copy under a directory it owns (`/var/db/sysmon`, or `config
   generation-dir`), created for it at startup while still root, and loads
   that instead. The seed file stays exactly as the operator wrote it, is
   what the box falls back to if that directory is emptied, and is what
