@@ -116,10 +116,24 @@ int	send_stat(struct clientstatus *client, char *buff)
 	return 0;
 }
 
-int	send_conf(struct clientstatus *client)
+/*
+ * CONF [since]
+ *
+ * Every object's status XML. With a sequence number, only the objects
+ * whose change_seq is above it - which on a quiet network is none of
+ * them, and the whole exchange is two lines.
+ *
+ * The terminator carries the daemon's current sequence and how many
+ * objects were sent: "333 <seq> <sent>". A client remembers <seq> and
+ * passes it back next time; if it ever comes back lower than what the
+ * client holds, the daemon restarted and the client resyncs from zero.
+ */
+int	send_conf(struct clientstatus *client, unsigned long since)
 {
 
 	struct all_elements_list *here;
+	char buffer[TEMPBUF_SIZE];
+	unsigned long sent = 0;
 
 	here = currenthead;
 
@@ -132,12 +146,18 @@ int	send_conf(struct clientstatus *client)
 	/* send xml */
 	while (here != NULL)
 	{
-		send_object_xml(client->filedes, NULL, here->value);
+		if (here->value != NULL && here->value->data != NULL &&
+		    here->value->data->change_seq > since)
+		{
+			send_object_xml(client->filedes, NULL, here->value);
+			sent++;
+		}
 		here=here->next;
 	}
 
 	/* done printing config */
-	if (sendline(client->filedes, "333") == -1)
+	snprintf(buffer, sizeof(buffer), "333 %lu %lu", glob_change_seq, sent);
+	if (sendline(client->filedes, buffer) == -1)
 	{
 		print_err(0, "unable to send message to client");
 		return -1;
@@ -190,6 +210,10 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		}
 
 	snprintf(buffer, sizeof(buffer), "<%s>", XML_OBJECT_STATUS);
+	SEND_OR_ABORT(fd, fh, buffer);
+
+	snprintf(buffer, sizeof(buffer), "<%s>%lu</%s>", XML_CHANGE_SEQ,
+		obj->data->change_seq, XML_CHANGE_SEQ);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
@@ -708,6 +732,7 @@ void do_ack(struct clientstatus *client, char *buff)
                 return;
         } else {
                 found_obj->data->acked = TRUE;
+                object_changed(found_obj->data);
 		sendline(client->filedes, "333 object updated");
         }
         return;
@@ -761,6 +786,7 @@ int     do_upd(struct clientstatus *client, char *buff)
 			FREE(found_obj->data->notes);
 		}
 		found_obj->data->notes = strdup(buff+x+1);
+		object_changed(found_obj->data);
 		sendline(client->filedes, "333 object updated");
 		} else {
 			sendline(client->filedes, "403 update error");
@@ -888,19 +914,27 @@ static char *xml_escape(const char *in, char *out, size_t outlen)
 }
 
 /*
- * TRAPS
+ * TRAPS [since]
  *
- * Hand back the recent SNMP traps sysmond has caught, decoded. In XML mode
+ * Hand back the recent SNMP traps sysmond has caught, decoded. With a
+ * sequence number, only the traps newer than it - so a client polling
+ * every second normally transfers nothing at all, and neither side
+ * spends anything re-sending or re-parsing what the caller already has.
+ *
+ * The terminator is "333 <current> <oldest-held> <sent>": the client
+ * remembers <current>, and compares <oldest-held> against what it asked
+ * for to know whether the ring overwrote traps it never saw. In XML mode
  * this is the full record - identity, severity, the interface it named and
  * every varbind - which is what the web UI renders. In plain mode it is one
  * summary line per trap for a human on a telnet session.
  */
-void send_traps(struct clientstatus *client)
+void send_traps(struct clientstatus *client, unsigned long since)
 {
 	char buffer[LARGE_TEMPBUF_SIZE];
 	char esc[TRAP_OID_LEN * 6 + 8];
 	struct trap_record *r;
 	int i, v;
+	unsigned long sent = 0;
 
 	#define TRAP_SEND(buf) \
 		if (sendline(client->filedes, buf) == -1) { \
@@ -912,6 +946,8 @@ void send_traps(struct clientstatus *client)
 	{
 		for (i = 0; (r = trap_history_get(i)) != NULL; i++)
 		{
+			if (r->seq <= since)
+				break;	/* newest first: the rest are older still */
 			snprintf(buffer, sizeof(buffer), "%ld:%s:%s:%s:%s:%s",
 				(long)r->when, r->source, r->content.name,
 				r->content.severity,
@@ -919,8 +955,9 @@ void send_traps(struct clientstatus *client)
 				r->content.description);
 			TRAP_SEND(buffer);
 		}
-		snprintf(buffer, sizeof(buffer), "333 %d traps held, %lu seen since start",
-			trap_history_count(), trap_history_total());
+		snprintf(buffer, sizeof(buffer), "333 %lu %lu %d",
+			trap_history_total(), trap_history_oldest_seq(),
+			trap_history_count());
 		TRAP_SEND(buffer);
 		return;
 	}
@@ -932,7 +969,16 @@ void send_traps(struct clientstatus *client)
 	{
 		struct trap_content *c = &r->content;
 
+		if (r->seq <= since)
+			break;	/* newest first: the rest are older still */
+
+		sent++;
+
 		snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAP);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%lu</%s>", XML_TRAP_SEQ,
+			r->seq, XML_TRAP_SEQ);
 		TRAP_SEND(buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_SOURCE,
@@ -1081,8 +1127,8 @@ void send_traps(struct clientstatus *client)
 	snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAPS);
 	TRAP_SEND(buffer);
 
-	snprintf(buffer, sizeof(buffer), "333 %d traps held, %lu seen since start",
-		trap_history_count(), trap_history_total());
+	snprintf(buffer, sizeof(buffer), "333 %lu %lu %lu",
+		trap_history_total(), trap_history_oldest_seq(), sent);
 	TRAP_SEND(buffer);
 
 	#undef TRAP_SEND
@@ -1094,6 +1140,28 @@ void send_uptime(struct clientstatus *client, time_t now_t)
 
 	snprintf(buffer, sizeof(buffer), "Uptime = %s", str_difftime_sec(boottime, now_t));
 	sendline(client->filedes, buffer);
+}
+
+/*
+ * Read the optional "since this sequence" argument of CONF/TRAPS.
+ * Anything unparseable means 0, which is a full dump - the safe answer.
+ */
+static unsigned long parse_since(char *arg)
+{
+	char *end = NULL;
+	unsigned long v;
+
+	if (arg == NULL)
+		return 0;
+	while (*arg == ' ' || *arg == '\t')
+		arg++;
+	if (*arg == '\0')
+		return 0;
+
+	v = strtoul(arg, &end, 10);
+	if (end == arg)
+		return 0;
+	return v;
 }
 
 /* CLIENT managment code */
@@ -1160,7 +1228,7 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	}
 	else if (strncmp(buff, "CONF", 4) == 0)
 	{
-		send_conf(here);
+		send_conf(here, parse_since(buff + 4));
 	}
 	else if (strncmp(buff, "EXPIREDNS", 9) == 0 && (here->authlvl >1))
 	{
@@ -1192,7 +1260,7 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	}
 	else if (strncmp(buff, "TRAPS", 5) == 0)
 	{
-		send_traps(here);
+		send_traps(here, parse_since(buff + 5));
 	}
 	else if (strncmp(buff, "AUTH", 4) == 0)
 	{

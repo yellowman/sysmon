@@ -749,6 +749,7 @@ void trap_history_add(const char *source, time_t when, int bytes,
 	struct trap_record *r = &trap_ring[trap_ring_next];
 
 	memset(r, 0, sizeof(*r));
+	r->seq = trap_ring_total + 1;	/* 1-based, monotonic for this run */
 	snprintf(r->source, sizeof(r->source), "%s", source != NULL ? source : "");
 	r->when = when;
 	r->bytes = bytes;
@@ -773,6 +774,18 @@ int trap_history_count(void)
 unsigned long trap_history_total(void)
 {
 	return trap_ring_total;
+}
+
+/*
+ * The sequence of the oldest trap still held. A client that asked for
+ * "everything after N" and gets back an oldest of N+5 knows four traps
+ * fell out of the ring before it managed to ask.
+ */
+unsigned long trap_history_oldest_seq(void)
+{
+	struct trap_record *oldest = trap_history_get(trap_ring_count - 1);
+
+	return oldest != NULL ? oldest->seq : 0;
 }
 
 /*
