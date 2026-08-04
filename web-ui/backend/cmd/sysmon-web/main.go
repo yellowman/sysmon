@@ -197,7 +197,7 @@ func main() {
 	socketGroup := flag.String("socket-group", "", "group for the FastCGI socket (default: first of www, www-data, nobody)")
 	procUser := flag.String("user", "", "drop to this user when started as root (default: first of _sysmon, nobody)")
 	procGroup := flag.String("group", "", "drop to this group when started as root (default: first of _sysmon, nobody)")
-	agentListen := flag.String("agent-listen", ":1347", "TLS address to accept sysmond connections on; empty disables")
+	agentListen := flag.String("agent-listen", ":"+monitoring.DefaultAgentPort, "TLS address to accept sysmond connections on; empty disables")
 	agentCert := flag.String("agent-cert", "", "certificate for -agent-listen (default: self-signed, generated once)")
 	agentKey := flag.String("agent-key", "", "private key for -agent-listen")
 	agentNames := flag.String("agent-names", "", "comma-separated names/IPs daemons dial this process by, for the generated certificate")
