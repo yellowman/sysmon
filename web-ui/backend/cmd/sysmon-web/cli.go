@@ -146,10 +146,16 @@ func mintAgent(store *settings.Store, site, label string, replace bool, agentNam
 
 	fmt.Print(monitoring.AgentConfigBlock(
 		site, label, monitoring.DialTarget(agentNames, agentListen), token))
+	// Standard output is the config; this is the advice. They are two
+	// streams so a provisioning script can append the first straight to
+	// the box's config, and a person still gets told what to do.
+	//
 	// The certificate is a file. Naming it is more use than wrapping it in
 	// a command that would only ever print it.
 	fmt.Fprintf(os.Stderr,
-		"\nThe box also needs %s,\ncopied to its state directory as aggregator-ca.pem\n",
+		"\nAdd those lines to /etc/sysmon.conf on the box.\n"+
+			"The token is shown one time; the server keeps only a hash.\n"+
+			"The box also needs %s,\ncopied to its state directory as aggregator-ca.pem\n",
 		defaultAgentCert())
 	return 0
 }
