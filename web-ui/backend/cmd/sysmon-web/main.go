@@ -208,7 +208,6 @@ func main() {
 	replaceAgent := flag.Bool("replace-agent", false, "allow -mint-agent to replace a live token, stopping the box that holds it")
 	listAgentsFlag := flag.Bool("list-agents", false, "list monitoring boxes and exit")
 	revokeAgentSite := flag.String("revoke-agent", "", "revoke a site's token and exit")
-	showCAFlag := flag.Bool("show-ca", false, "print the certificate a box must trust, and exit")
 	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
@@ -224,7 +223,6 @@ func main() {
 		replace:      *replaceAgent,
 		list:         *listAgentsFlag,
 		revoke:       *revokeAgentSite,
-		showCA:       *showCAFlag,
 	}
 	if cli.wanted() {
 		os.Exit(runCLI(cli, *agentNames, *agentListen))
@@ -478,6 +476,11 @@ func main() {
 	// around, usually by disabling verification somewhere.
 	if *agentListen != "" {
 		certFile, keyFile := *agentCert, *agentKey
+
+		// What a box must dial to reach this listener. The admin page
+		// prints it in the config block it hands out, and only this
+		// process knows the name and the port.
+		monitoring.SetAgentDialTarget(monitoring.DialTarget(*agentNames, *agentListen))
 
 		if certFile == "" || keyFile == "" {
 			var names []string

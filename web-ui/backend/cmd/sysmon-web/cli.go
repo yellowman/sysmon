@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,21 +36,14 @@ type cliOptions struct {
 	replace bool
 	list    bool
 	revoke  string
-	showCA  bool
 }
 
 func (o cliOptions) wanted() bool {
-	return o.mint != "" || o.list || o.revoke != "" || o.showCA
+	return o.mint != "" || o.list || o.revoke != ""
 }
 
 // runCLI performs the requested command and returns the process exit code.
 func runCLI(o cliOptions, agentNames, agentListen string) int {
-	// The certificate needs no database, so it works while the service is
-	// running - which is when somebody is most likely to want it.
-	if o.showCA {
-		return showCA(agentNames, agentListen)
-	}
-
 	dbPath := filepath.Join(stateDir, "settings.db")
 
 	store, err := settings.NewStore(dbPath)
@@ -152,51 +144,13 @@ func mintAgent(store *settings.Store, site, label string, replace bool, agentNam
 		return 1
 	}
 
-	desc := label
-	if desc == "" {
-		desc = site
-	}
-	fmt.Printf("# Add to /etc/sysmon.conf on the box, then start sysmond.\n")
-	fmt.Printf("# The token is shown once; it is stored as a hash.\n")
-	fmt.Printf("config sitename  %q;\n", site)
-	fmt.Printf("config sitedesc  %q;\n", desc)
-	fmt.Printf("config aggregator %q;\n", dialTarget(agentNames, agentListen))
-	fmt.Printf("config aggregator-token %q;\n", token)
+	fmt.Print(monitoring.AgentConfigBlock(
+		site, label, monitoring.DialTarget(agentNames, agentListen), token))
+	// The certificate is a file. Naming it is more use than wrapping it in
+	// a command that would only ever print it.
 	fmt.Fprintf(os.Stderr,
-		"\nThe box also needs this server's certificate as aggregator-ca.pem\n"+
-			"in its state directory. Get it with: sysmon-web -show-ca\n")
-	return 0
-}
-
-// showCA writes the certificate a box must trust, so a provisioning script
-// can pipe it straight to the right place.
-func showCA(agentNames, agentListen string) int {
-	path := monitoring.AgentCertPath()
-	if path == "" {
-		// Nothing has started the listener in this process, so work out
-		// where it would have put the certificate.
-		p := filepath.Join(stateDir, "agent", "agent-cert.pem")
-		if _, err := os.Stat(p); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"sysmon-web: no certificate at %s yet - start sysmon-web once "+
-					"and it will make one\n", p)
-			return 1
-		}
-		path = p
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sysmon-web: cannot read %s: %v\n", path, err)
-		return 1
-	}
-	os.Stdout.Write(raw)
-
-	if names, nerr := monitoring.CertNames(path); nerr == nil {
-		fmt.Fprintf(os.Stderr, "\n# %s, valid for %s\n", path, names)
-		fmt.Fprintf(os.Stderr,
-			"# The box must dial one of those names in \"config aggregator\".\n")
-	}
+		"\nThe box also needs %s,\ncopied to its state directory as aggregator-ca.pem\n",
+		defaultAgentCert())
 	return 0
 }
 
@@ -226,32 +180,11 @@ func handOverToServiceUser(path, wantUser, wantGroup string) {
 	}
 }
 
-// dialTarget is what the box should put in "config aggregator".
-//
-// The name comes from -agent-names, because that is what the certificate
-// was made for and the daemon verifies it. The port comes from
-// -agent-listen, because printing a hardcoded 1347 at somebody running on
-// a different port hands them a config that cannot connect - and the
-// failure looks like a network fault rather than a typo.
-func dialTarget(agentNames, agentListen string) string {
-	port := "1347"
-	if _, p, err := net.SplitHostPort(agentListen); err == nil && p != "" {
-		port = p
+// defaultAgentCert is where a generated certificate lives, for messages
+// that need to name it.
+func defaultAgentCert() string {
+	if p := monitoring.AgentCertPath(); p != "" {
+		return p
 	}
-	return net.JoinHostPort(firstName(agentNames), port)
-}
-
-// firstName is the name a box should dial, for the snippet. -agent-names
-// is what the certificate was made for, so its first entry is the one most
-// likely to work.
-func firstName(agentNames string) string {
-	for _, n := range strings.Split(agentNames, ",") {
-		if n = strings.TrimSpace(n); n != "" {
-			return n
-		}
-	}
-	if h, err := os.Hostname(); err == nil && h != "" {
-		return h
-	}
-	return "sysmon-web.example.net"
+	return filepath.Join(stateDir, "agent", "agent-cert.pem")
 }
