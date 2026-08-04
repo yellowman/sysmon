@@ -474,13 +474,14 @@ func main() {
 	// kept, rather than the listener silently not starting - a default
 	// that needs a CA before anything works is a default that gets worked
 	// around, usually by disabling verification somewhere.
+	// What a box must dial to reach this process. The admin page prints
+	// it in the config block it hands out. Set even with the listener
+	// off: a token minted now is for a box that connects later, and the
+	// best guess beats an empty line - the CLI guesses the same way.
+	monitoring.SetAgentDialTarget(monitoring.DialTarget(*agentNames, *agentListen))
+
 	if *agentListen != "" {
 		certFile, keyFile := *agentCert, *agentKey
-
-		// What a box must dial to reach this listener. The admin page
-		// prints it in the config block it hands out, and only this
-		// process knows the name and the port.
-		monitoring.SetAgentDialTarget(monitoring.DialTarget(*agentNames, *agentListen))
 
 		if certFile == "" || keyFile == "" {
 			var names []string

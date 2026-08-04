@@ -371,15 +371,6 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 				"a site name is letters, digits, - and _ (no colon, which would make site:object ambiguous)")
 			return
 		}
-		// No listener, no mint. With -agent-listen "" a box cannot
-		// connect at all, and the block would carry an empty aggregator
-		// line - a config that fails on the box, hours later, instead of
-		// an answer that fails here with the reason attached.
-		if monitoring.AgentDialTarget() == "" {
-			r.sendError(w, http.StatusServiceUnavailable,
-				"the agent listener is disabled (-agent-listen \"\"), so a box could not connect; enable it before minting tokens")
-			return
-		}
 		if existing, held := r.settings.GetAgentToken(body.Site); held &&
 			!existing.Revoked && !body.Replace {
 			w.Header().Set("Content-Type", "application/json")
