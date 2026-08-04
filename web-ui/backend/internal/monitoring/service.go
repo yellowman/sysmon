@@ -657,6 +657,13 @@ func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) []HistoryEven
 			if old, ok := s.hostSig[name]; !ok || old != sig {
 				s.hostRev[name] = s.rev
 			}
+			// It is here now, so it is not removed - whatever it was
+			// before. Leaving the old tombstone in place means a client
+			// whose "since" predates both the removal and the return is
+			// told the same name is changed AND removed in one answer,
+			// and one of the two has to lose. Deleting on return is what
+			// makes the two lists disjoint.
+			delete(s.removedAt, name)
 		}
 		for _, name := range removed {
 			delete(s.hostRev, name)

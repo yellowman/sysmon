@@ -109,6 +109,15 @@ int	send_stat(struct clientstatus *client, char *buff)
 	if (retval == -1)
 	{
 		print_err(0, "unable to send message to client");
+		/*
+		 * tls_disconnect(), not a bare -1: dead_client_cleanup() frees
+		 * this struct, so a descriptor dropped here is a descriptor
+		 * nothing can ever close. On the aggregator link that also
+		 * strands the SSL*, which is tracked by descriptor number - and
+		 * the next connect() is very likely handed that same number.
+		 * One leak per flap, against a 1024 limit.
+		 */
+		tls_disconnect(client->filedes);
 		client->filedes = -1;
 		return -1;
 	}
@@ -211,6 +220,8 @@ int do_send_xml(int fd, FILE *fh, char *buff)
 	}
 }
 
+static char *xml_escape(const char *in, char *out, size_t outlen);
+
 /*
  * send_object_xml - send an object described as obj
  * to either FILE or file(can be socket).  do FILE = null
@@ -219,6 +230,22 @@ int do_send_xml(int fd, FILE *fh, char *buff)
 void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 {
 	char buffer[TEMPBUF_SIZE];
+
+	/*
+	 * Every text field goes through xml_escape() on the way out. An
+	 * object's URL, notes, message and contact are operator-written or
+	 * come back off the wire, and one bare "&" - the kind an ordinary
+	 * query string has - makes a document the reader rejects. sysmon-web
+	 * then skips that object, so the host simply vanishes from the
+	 * dashboard with nothing said. The trap path has escaped for this
+	 * reason from the start; objects were missed.
+	 *
+	 * esc is sized so an escaped value plus the longest tag name, twice,
+	 * still fits in buffer. That matters: truncating inside an entity
+	 * would produce exactly the broken document being avoided here.
+	 * xml_escape() itself stops on an entity boundary.
+	 */
+	char esc[TEMPBUF_SIZE - 128];
 
 	/* Macro to check send errors and abort XML generation if write fails */
 	#define SEND_OR_ABORT(fd, fh, buf) \
@@ -234,38 +261,45 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		obj->data->change_seq, XML_CHANGE_SEQ);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT,
+			xml_escape(obj->unique_name, esc, sizeof(esc)), XML_OBJECT);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HOSTNAME, obj->data->hostname ,XML_HOSTNAME);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HOSTNAME,
+			xml_escape(obj->data->hostname, esc, sizeof(esc)), XML_HOSTNAME);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_PORT, obj->data->port, XML_OBJECT_PORT);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_TYPE, type_to_name(obj->data->type), XML_OBJECT_TYPE);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_TYPE,
+			xml_escape(type_to_name(obj->data->type), esc, sizeof(esc)), XML_OBJECT_TYPE);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_MESSAGE, obj->data->message, XML_OBJECT_MESSAGE);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_MESSAGE,
+			xml_escape(obj->data->message, esc, sizeof(esc)), XML_OBJECT_MESSAGE);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	if (obj->data->contact != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_CONTACT, obj->data->contact, XML_OBJECT_CONTACT);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_CONTACT,
+			xml_escape(obj->data->contact, esc, sizeof(esc)), XML_OBJECT_CONTACT);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* XML_OBJ_GROUP */
         if (obj->data->group != NULL)
         {
-                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_GROUP, obj->data->group, XML_OBJECT_GROUP);
+                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_GROUP,
+			xml_escape(obj->data->group, esc, sizeof(esc)), XML_OBJECT_GROUP);
                 SEND_OR_ABORT(fd, fh, buffer);
         }
 
         /* XML_OBJ_NOTES */
         if (obj->data->notes != NULL)
         {
-                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_NOTES, obj->data->notes, XML_OBJECT_NOTES);
+                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_NOTES,
+			xml_escape(obj->data->notes, esc, sizeof(esc)), XML_OBJECT_NOTES);
                 SEND_OR_ABORT(fd, fh, buffer);
         }
 
@@ -273,18 +307,21 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	{
 		if (obj->data->snmp_community != NULL)
 		{
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY,
+			xml_escape(obj->data->snmp_community, esc, sizeof(esc)), XML_SNMP_COMMUNITY);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_VERSION,
-			obj->data->snmp_version == SNMP_VERSION_1 ? "1" : "2c", XML_SNMP_VERSION);
+			xml_escape(obj->data->snmp_version == SNMP_VERSION_1 ? "1" : "2c", esc, sizeof(esc)), XML_SNMP_VERSION);
 		SEND_OR_ABORT(fd, fh, buffer);
 		if (obj->data->snmp_oid != NULL)
 		{
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID,
+			xml_escape(obj->data->snmp_oid, esc, sizeof(esc)), XML_SNMP_OID);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_TYPE, snmp_type_to_name(obj->data->snmp_test_type), XML_SNMP_TYPE);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_TYPE,
+			xml_escape(snmp_type_to_name(obj->data->snmp_test_type), esc, sizeof(esc)), XML_SNMP_TYPE);
 		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LOW, obj->data->snmp_low, XML_SNMP_LOW);
@@ -314,62 +351,72 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	if (obj->data->username != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER, obj->data->username , XML_AUTH_USER);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER,
+			xml_escape(obj->data->username, esc, sizeof(esc)), XML_AUTH_USER);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->password != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD, obj->data->password, XML_AUTH_PASSWD);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD,
+			xml_escape(obj->data->password, esc, sizeof(esc)), XML_AUTH_PASSWD);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->hdr != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER, obj->data->hdr, XML_HEADER);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER,
+			xml_escape(obj->data->hdr, esc, sizeof(esc)), XML_HEADER);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->hdrval != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL, obj->data->hdrval, XML_HEADER_VAL);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL,
+			xml_escape(obj->data->hdrval, esc, sizeof(esc)), XML_HEADER_VAL);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
 	if (obj->data->secret != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET, obj->data->secret, XML_RADIUS_SECRET);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET,
+			xml_escape(obj->data->secret, esc, sizeof(esc)), XML_RADIUS_SECRET);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->lastmsgid != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_MESSAGE_ID, obj->data->lastmsgid, XML_MESSAGE_ID);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_MESSAGE_ID,
+			xml_escape(obj->data->lastmsgid, esc, sizeof(esc)), XML_MESSAGE_ID);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->unique_id != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_UNIQUE_ID, obj->data->unique_id, XML_UNIQUE_ID);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_UNIQUE_ID,
+			xml_escape(obj->data->unique_id, esc, sizeof(esc)), XML_UNIQUE_ID);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->url != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL, obj->data->url, XML_OBJ_URL);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL,
+			xml_escape(obj->data->url, esc, sizeof(esc)), XML_OBJ_URL);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->url_text != NULL)
 	{
 		/* BUG FIX: Use url_text instead of url */
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url_text, XML_OBJ_URL_TEXT);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT,
+			xml_escape(obj->data->url_text, esc, sizeof(esc)), XML_OBJ_URL_TEXT);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
 	if (obj->data->command != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC, obj->data->command, XML_OBJ_EXEC);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC,
+			xml_escape(obj->data->command, esc, sizeof(esc)), XML_OBJ_EXEC);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -464,18 +511,18 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	/* SNMP Extended Configuration */
 	if (obj->data->type == SYSM_TYPE_SNMP) {
 		if (obj->data->snmp_oid_sec != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_SNMP_OID_SEC, obj->data->snmp_oid_sec, XML_SNMP_OID_SEC);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID_SEC,
+			xml_escape(obj->data->snmp_oid_sec, esc, sizeof(esc)), XML_SNMP_OID_SEC);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_up_msg != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_SNMP_UP_MSG, obj->data->snmp_up_msg, XML_SNMP_UP_MSG);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_UP_MSG,
+			xml_escape(obj->data->snmp_up_msg, esc, sizeof(esc)), XML_SNMP_UP_MSG);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_down_msg != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_SNMP_DOWN_MSG, obj->data->snmp_down_msg, XML_SNMP_DOWN_MSG);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_DOWN_MSG,
+			xml_escape(obj->data->snmp_down_msg, esc, sizeof(esc)), XML_SNMP_DOWN_MSG);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 	}
@@ -483,8 +530,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	/* DNS Configuration */
 	if (obj->data->type == SYSM_TYPE_DNS) {
 		if (obj->data->dns_query != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_DNS_QUERY, obj->data->dns_query, XML_DNS_QUERY);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_DNS_QUERY,
+			xml_escape(obj->data->dns_query, esc, sizeof(esc)), XML_DNS_QUERY);
 			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
@@ -499,8 +546,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	/* Per-Object Custom Page Message */
 	if (obj->data->pmesg != NULL) {
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-			XML_PAGE_MESSAGE, obj->data->pmesg, XML_PAGE_MESSAGE);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_PAGE_MESSAGE,
+			xml_escape(obj->data->pmesg, esc, sizeof(esc)), XML_PAGE_MESSAGE);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -957,8 +1004,10 @@ void send_traps(struct clientstatus *client, unsigned long since)
 	int i, v;
 	unsigned long sent = 0;
 
+	/* tls_disconnect() before dropping the descriptor: see send_stat(). */
 	#define TRAP_SEND(buf) \
 		if (sendline(client->filedes, buf) == -1) { \
+			tls_disconnect(client->filedes); \
 			client->filedes = -1; \
 			return; \
 		}
