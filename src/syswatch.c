@@ -430,30 +430,6 @@ void handle_stop()
 	stop_daemon = TRUE;
 }
 
-/*
- * save current state info to XML file specified by arg.  may be useful for debugging.
- */
-void save_xml_state(char *fn)
-{
-	FILE *fh;
-	struct all_elements_list *here;
-
-	fh = fopen(fn, "w");
-	if (fh == NULL)
-	{
-		print_err(1, "unable to save_xml_state error with fopen of %s", fn);
-		return;
-	}
-	here=currenthead;
-	while (here != NULL)
-	{
-		send_object_xml(-1, fh, here->value);
-		here=here->next;
-	}
-
-	fclose(fh);
-}
-
 /* 
  * Stop the daemon, free memory that is currently allocated
  * and other fun stuff like that, such that we are not
@@ -470,7 +446,7 @@ void stop_it(time_t now)
 	if (html != -1)
 		dump_to_file(statusfilename, html, now);
 	if (path_savestate != NULL)
-		save_xml_state(path_savestate);
+		save_state(path_savestate);
 
 
 	/* timeout old clients */
@@ -2370,6 +2346,19 @@ int main(int argc, char **argv)
 		print_err(1, "main: currenthead == NULL - nothing to monitor, exiting");
 		exit(1);
 	}
+
+	/*
+	 * Put back what the last run knew: how long each host had been down,
+	 * how many consecutive failures it was at, and whether anyone had
+	 * already been paged about it. Without this a daemon restarted during
+	 * an outage pages again for something it has already reported.
+	 *
+	 * After the config is loaded and before the first check, so the
+	 * restored counts are what the first check compares against - and
+	 * only at startup, because a SIGHUP reload already carries all of it
+	 * across in hard_copy().
+	 */
+	load_state(path_savestate);
 
 	/* if we're syslogging stuff, log a bootup message in syslog
 	 */

@@ -43,7 +43,7 @@ all:	@PROGS@
 DAEMON_OBJECTS = heartbeat.o syswatch.o page.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
-		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o pingv6.o logging.o dns.o ssh.o
+		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o savestate.o pingv6.o logging.o dns.o ssh.o
 
 sysmon: client.o talktcp.o lib.o dnscache.o tlsio.o
 	-$(RM) sysmon
@@ -103,10 +103,17 @@ snmpget-test: snmpget_test.c snmp.c trapdecode.c config.h
 confgen-test: confgen_test.c confgen.c config.h
 	$(CC) $(CFLAGS) $(TLS_LIBS_TEST) -o confgen-test confgen_test.c confgen.c $(LIBS)
 
-check: trapdecode-test snmpget-test confgen-test
+# The checkpoint carries "have we already paged about this" across a
+# restart, so a file that is truncated, stale or from another version has
+# to end in "start clean" rather than in half-applied state.
+savestate-test: savestate_test.c savestate.c config.h
+	$(CC) $(CFLAGS) -o savestate-test savestate_test.c savestate.c
+
+check: trapdecode-test snmpget-test confgen-test savestate-test
 	./trapdecode-test
 	./snmpget-test
 	./confgen-test
+	./savestate-test
 
 clean:
 	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test core sysmond.core sysmon.core
@@ -139,6 +146,7 @@ snmp.o:		config.h Makefile snmp.c
 tlsio.o:	config.h Makefile tlsio.c
 aggregator.o:	config.h Makefile aggregator.c
 confgen.o:	config.h Makefile confgen.c
+savestate.o:	config.h Makefile savestate.c
 trapdecode.o:	config.h Makefile trapdecode.c
 pingv6.o:	config.h Makefile pingv6.c
 logging.o:	config.h Makefile logging.c

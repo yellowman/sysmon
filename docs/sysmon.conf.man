@@ -249,8 +249,19 @@ privileged client commands.  Clients must send "AUTH <key>" to authenticate
 before performing certain operations.
 
 .SS savestate
-The ``config savestate'' directive specifies a file path where sysmond
-will save the complete monitoring state in XML format on shutdown.
+Removed. Check state is now saved and restored automatically, as
+sysmond.state in the state directory (see ``config statedir'').
+
+On shutdown sysmond records what it had learned about each object - how
+long it had been down, how many consecutive failures it was at, and
+whether anyone had already been paged about it - and puts it back at the
+next start. Without this a daemon restarted during an outage pages again
+for something it has already reported.
+
+A checkpoint older than twelve hours is ignored: it describes a network
+that has probably changed, and consecutive-failure counts from then mean
+nothing. Objects the checkpoint has never heard of - newly added, or
+renamed - start clean.
 
 .SH OBJECT DEFINITIONS
 Objects are defined using the following syntax:

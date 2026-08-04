@@ -23,6 +23,13 @@ config statusfile html "/usr/local/htdocs/index.html";
 
 # Log to sysmond.log in the state directory instead of syslog.
 #config logging file;
+
+# Check state survives a restart automatically - no directive. sysmond
+# records what it knew about each object on the way down (down since when,
+# how many consecutive failures, whether anyone was already paged) and
+# puts it back on the way up, so a restart during an outage does not page
+# again for something already reported. A checkpoint older than twelve
+# hours is ignored rather than believed.
 # Configure an authentication key -- Default is none
 #config authkey "Debug";
 # Set the sender to be sysmon@localhost
