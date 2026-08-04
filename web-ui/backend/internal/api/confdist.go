@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -424,4 +426,52 @@ func (r *Router) handleAgentRevoke(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	r.sendJSON(w, map[string]interface{}{"site": site, "revoked": true})
+}
+
+// GET /api/settings/agents/ca
+//
+// The certificate a box needs as aggregator-ca.pem. Without it the daemon
+// cannot verify this server and refuses to connect, so handing it out is
+// half of onboarding - and telling somebody to go and find a file on the
+// server is how they end up copying the wrong one, or the key.
+//
+// Only ever the certificate. The key that goes with it is what lets
+// something impersonate this server to the whole fleet, so this reads the
+// cert file, parses it, and re-encodes only the CERTIFICATE blocks - a
+// file that happened to hold both would still yield only the public half.
+func (r *Router) handleAgentCA(w http.ResponseWriter, req *http.Request) {
+	path := monitoring.AgentCertPath()
+	if path == "" {
+		r.sendError(w, http.StatusServiceUnavailable,
+			"no agent listener is running, so there is no certificate to hand out")
+		return
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, "cannot read the certificate")
+		return
+	}
+
+	var out []byte
+	for rest := raw; len(rest) > 0; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue // a key in this file is not ours to give away
+		}
+		out = append(out, pem.EncodeToMemory(block)...)
+	}
+	if len(out) == 0 {
+		r.sendError(w, http.StatusInternalServerError,
+			"the configured certificate file holds no certificate")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Header().Set("Content-Disposition", `attachment; filename="aggregator-ca.pem"`)
+	w.Write(out)
 }

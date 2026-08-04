@@ -109,6 +109,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/config/revert/", auth.RequireAdmin(r.handleConfigRevert))
 	r.mux.HandleFunc("/api/settings/agents", auth.RequireAdmin(r.handleAgentTokens))
 	r.mux.HandleFunc("/api/settings/agents/revoke/", auth.RequireAdmin(r.handleAgentRevoke))
+	r.mux.HandleFunc("/api/settings/agents/ca", auth.RequireAdmin(r.handleAgentCA))
 	r.mux.HandleFunc("/api/config/rollout", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodGet {
 			r.handleConfigRolloutStatus(w, req)

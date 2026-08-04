@@ -201,9 +201,34 @@ func main() {
 	agentCert := flag.String("agent-cert", "", "certificate for -agent-listen (default: self-signed, generated once)")
 	agentKey := flag.String("agent-key", "", "private key for -agent-listen")
 	agentNames := flag.String("agent-names", "", "comma-separated names/IPs daemons dial this process by, for the generated certificate")
+	// Managing monitoring boxes from a terminal - the same three things the
+	// admin page does, for scripts that build machines.
+	mintAgentSite := flag.String("mint-agent", "", "mint a token for a site and print the config lines, then exit")
+	mintAgentLabel := flag.String("agent-label", "", "label for -mint-agent (what machine this is)")
+	replaceAgent := flag.Bool("replace-agent", false, "allow -mint-agent to replace a live token, stopping the box that holds it")
+	listAgentsFlag := flag.Bool("list-agents", false, "list monitoring boxes and exit")
+	revokeAgentSite := flag.String("revoke-agent", "", "revoke a site's token and exit")
+	showCAFlag := flag.Bool("show-ca", false, "print the certificate a box must trust, and exit")
 	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
+
+	// Commands run and exit. They come before anything that binds a
+	// socket or drops privileges, so they work on a host where the
+	// service has never been started.
+	cli := cliOptions{
+		serviceUser:  *procUser,
+		serviceGroup: *procGroup,
+		mint:         *mintAgentSite,
+		label:        *mintAgentLabel,
+		replace:      *replaceAgent,
+		list:         *listAgentsFlag,
+		revoke:       *revokeAgentSite,
+		showCA:       *showCAFlag,
+	}
+	if cli.wanted() {
+		os.Exit(runCLI(cli, *agentNames, *agentListen))
+	}
 
 	isDaemonChild := os.Getenv(daemonEnvMarker) == "1"
 
@@ -482,6 +507,10 @@ func main() {
 		}
 
 		if certFile != "" {
+			// Remembered so the admin page can offer it for download: a
+			// box cannot verify this server without it.
+			monitoring.SetAgentCertPath(certFile)
+
 			al, aerr := monitoring.ListenForAgents(*agentListen, certFile, keyFile,
 				monitoringService,
 				func(site, token, addr string) bool {

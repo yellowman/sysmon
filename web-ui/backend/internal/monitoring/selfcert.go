@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -115,6 +116,27 @@ func EnsureAgentCert(dir string, hosts []string) (certPath, keyPath string, err 
 	}
 
 	return certPath, keyPath, nil
+}
+
+// The certificate this process is actually serving on the agent
+// listener, remembered so the admin page can hand it out. A box needs it
+// as aggregator-ca.pem, and telling somebody to go and find a file on the
+// server is how they end up copying the wrong one.
+var agentCertPath struct {
+	mu   sync.Mutex
+	path string
+}
+
+func SetAgentCertPath(p string) {
+	agentCertPath.mu.Lock()
+	agentCertPath.path = p
+	agentCertPath.mu.Unlock()
+}
+
+func AgentCertPath() string {
+	agentCertPath.mu.Lock()
+	defer agentCertPath.mu.Unlock()
+	return agentCertPath.path
 }
 
 // CertNames lists what a generated certificate is valid for, so the log
