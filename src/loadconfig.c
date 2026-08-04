@@ -408,6 +408,19 @@ void update_globs_from_parser()
 			}
 		}
 	}
+	if (parser_sitename != NULL)
+	{
+		if (sitename != NULL)
+			FREE(sitename);
+		sitename = STRDUP(parser_sitename, "sitename");
+	}
+	if (parser_sitedesc != NULL)
+	{
+		if (sitedesc != NULL)
+			FREE(sitedesc);
+		sitedesc = STRDUP(parser_sitedesc, "sitedesc");
+	}
+
 	if (parser_pmesg != NULL)
 	{
 		if (pmesg != NULL)

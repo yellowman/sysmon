@@ -22,6 +22,14 @@ config dnsexpire 7200;
 # Do not queue more than this many objects to be checked at once
 config maxqueued 50;
 
+# Who this daemon is, when several of them share one sysmon-web.
+# sitename is the key: it becomes the first half of every "site:object"
+# a client stores, so it is limited to letters, digits, - and _ , and
+# changing it later renames everything. sitedesc is just the label a
+# person reads and can be reworded any time. Unset means "local".
+#config sitename "sysmon-metro";
+#config sitedesc "Metro Station Monitoring (Linux)";
+
 # Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
 # the socket is bound at startup while sysmond is still root - enabling
 # this on a running daemon needs a restart, not a SIGHUP.

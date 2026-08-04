@@ -606,6 +606,8 @@ struct bootp_pkt {
 #define XML_OBJECT_CONTACT	"ObjectContact"
 #define XML_SNMP_COMMUNITY	"ObjectSNMPCommunity"
 #define XML_SNMP_VERSION	"ObjectSNMPVersion"
+#define XML_SITE_NAME		"SiteName"
+#define XML_SITE_DESC		"SiteDescription"
 #define XML_SNMP_OID		"ObjectSNMPoid"
 #define XML_SNMP_TYPE		"ObjectSNMPType"
 #define XML_SNMP_LOW		"ObjectSNMPLowThresh"
@@ -724,6 +726,11 @@ extern bool mallocdebug;
 extern bool stop_daemon;
 extern char *errorsto;
 extern char *authkey;
+/* Identity of this daemon within a fleet. sitename is the key half of
+   every "site:object" a client stores and is restricted accordingly;
+   sitedesc is the label a person reads and keys nothing. */
+extern char *sitename;
+extern char *sitedesc;
 extern char *path_savestate;
 extern char *replyto;
 extern char *downcolor, *upcolor, *recentcolor;
@@ -829,6 +836,8 @@ extern struct nei_list *parser_dep_tmp;
 extern char *parser_page;
 extern char *parser_also;
 extern char *parser_secret;
+extern char *parser_sitename;
+extern char *parser_sitedesc;
 extern bool parser_catch_snmptrap;
 extern char *parser_username;
 extern char *parser_password;
@@ -1088,6 +1097,7 @@ void md5_calc (unsigned char *, unsigned char *, unsigned int);
 /* srvclient.c */
 void send_object_xml(int, FILE*, struct graph_elements *);
 void send_traps(struct clientstatus *, unsigned long);
+void send_site(struct clientstatus *);
 void client_send_statechange(char *, int , int);
 int send_conf(struct clientstatus *, unsigned long);
 
@@ -1096,6 +1106,7 @@ void *MALLOC(size_t, char *);
 void *STRDUP(char *, char *);
 void FREE(void *);
 void object_changed(struct hostinfo *);
+bool valid_sitename(const char *);
 short int name_to_type(char *);
 short int name_to_snmp_type(char *);
 void quicksort(char *, size_t, size_t, int (*)(const void *, const void *));
