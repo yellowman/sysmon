@@ -43,7 +43,7 @@ all:	@PROGS@
 DAEMON_OBJECTS = heartbeat.o syswatch.o page.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
-		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o pingv6.o logging.o dns.o ssh.o
+		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o pingv6.o logging.o dns.o ssh.o
 
 sysmon: client.o talktcp.o lib.o dnscache.o tlsio.o
 	-$(RM) sysmon
@@ -95,9 +95,18 @@ trapdecode-test: trapdecode_test.c trapdecode.c config.h
 snmpget-test: snmpget_test.c snmp.c trapdecode.c config.h
 	$(CC) $(CFLAGS) -o snmpget-test snmpget_test.c snmp.c trapdecode.c
 
-check: trapdecode-test snmpget-test
+# A config delivery arrives base64-encoded from the aggregator and is
+# decoded straight into this box's config files, so the decoder gets the
+# same prefix + fuzz treatment as the trap decoder. The hash is checked
+# here too: both ends compare it to decide whether a box is in sync, so a
+# hash that is not stable breaks fleet management silently.
+confgen-test: confgen_test.c confgen.c config.h
+	$(CC) $(CFLAGS) $(TLS_LIBS_TEST) -o confgen-test confgen_test.c confgen.c $(LIBS)
+
+check: trapdecode-test snmpget-test confgen-test
 	./trapdecode-test
 	./snmpget-test
+	./confgen-test
 
 clean:
 	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test core sysmond.core sysmon.core
@@ -129,6 +138,7 @@ snpp.o:		config.h Makefile snpp.c
 snmp.o:		config.h Makefile snmp.c
 tlsio.o:	config.h Makefile tlsio.c
 aggregator.o:	config.h Makefile aggregator.c
+confgen.o:	config.h Makefile confgen.c
 trapdecode.o:	config.h Makefile trapdecode.c
 pingv6.o:	config.h Makefile pingv6.c
 logging.o:	config.h Makefile logging.c

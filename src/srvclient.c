@@ -1271,6 +1271,38 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 		sendline(here->filedes, "Toggled debugging");
 		print_err(0, "Toggled debugging at client request");
 	}
+	/*
+	 * Config generations. CONFIG-GEN is the cheap one a poller asks every
+	 * cycle; the rest change what this box runs, so all four want the
+	 * authkey - a config carries community strings and contact addresses
+	 * on the way out, and decides what gets monitored on the way in.
+	 *
+	 * The longer command names are tested first: "CONFIG-GEN" would
+	 * otherwise never be reached through a prefix match on "CONFIG-G".
+	 */
+	else if (strncmp(buff, "CONFIG-ROLLBACK", 15) == 0 && (here->authlvl > 1))
+	{
+		confgen_do_rollback(here);
+	}
+	else if (strncmp(buff, "CONFIG-PUT ", 11) == 0 && (here->authlvl > 1))
+	{
+		confgen_receive(here, buff + 11);
+	}
+	else if (strncmp(buff, "CONFIG-GEN", 10) == 0 && (here->authlvl > 1))
+	{
+		confgen_report(here);
+	}
+	else if (strncmp(buff, "CONFIG-GET", 10) == 0 && (here->authlvl > 1))
+	{
+		confgen_send(here);
+	}
+	else if (strncmp(buff, "CONFIG-", 7) == 0)
+	{
+		/* Recognised but not permitted: say which, rather than letting it
+		   fall through to "unknown request" and look like an old daemon
+		   that has never heard of config management. */
+		sendline(here->filedes, "403 - config management needs the authkey");
+	}
 	else if (strncmp(buff, "CONF", 4) == 0)
 	{
 		send_conf(here, parse_since(buff + 4));

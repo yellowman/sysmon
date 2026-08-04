@@ -437,6 +437,7 @@ void update_globs_from_parser()
 			FREE(aggregator_ca);
 		aggregator_ca = STRDUP(parser_agg_ca, "aggregator ca");
 	}
+	confgen_set_statedir(parser_gendir);
 
 	if (parser_pmesg != NULL)
 	{
@@ -905,6 +906,12 @@ struct all_elements_list *loadconfig(char *cfg_path)
 
 	/* set what to parse */
 	yyin = file_to_parse;
+
+	/* Start the file set over. What the parser opens from here is what
+	   this daemon considers "the config" for hashing and for fleet
+	   management - open_new_file() adds each include as it follows it. */
+	confset_reset();
+	confset_record(cfg_path);
 
 	parser_head = NULL;
 

@@ -62,6 +62,7 @@ char *parser_sitename = NULL;
 char *parser_aggregator = NULL;
 char *parser_agg_token = NULL;
 char *parser_agg_ca = NULL;
+char *parser_gendir = NULL;
 char *parser_sitedesc = NULL;
 char *parser_savestate = NULL;
 char *parser_statusfile = NULL;
@@ -1539,6 +1540,36 @@ config\ aggregator-token\ [^;]+;        {
 
 };
 
+config\ generation-dir\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* Where the generation number and the rollback copy are kept. Defaults
+     to the config file's own directory; worth moving when that directory
+     is not writable by the user sysmond drops to. */
+  if (parser_gendir != NULL)
+  {
+	FREE(parser_gendir);
+  }
+  parser_gendir = STRDUP(parser_pos1, "parser.l:parser_gendir");
+
+};
+
 config\ aggregator-ca\ [^;]+;        {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2834,11 +2865,40 @@ void open_new_file(char *filename, FILE *current_file)
 	include_stack = YY_CURRENT_BUFFER;
 
 	new_file = fopen(filename, "r");
+	if (new_file == NULL && filename[0] != '/' &&
+		save_current_parsing_filename != NULL)
+	{
+		/*
+		 * A relative include has always been resolved against the
+		 * working directory, which is fine at startup and wrong
+		 * afterwards: the daemon moves to / once it is running, so the
+		 * same include silently disappears on a SIGHUP reload. Falling
+		 * back to the including file's own directory is what the string
+		 * meant in the first place, and cannot break a config that
+		 * already resolved.
+		 */
+		char sibling[PATH_MAX];
+		char *slash;
+
+		snprintf(sibling, sizeof(sibling), "%s", save_current_parsing_filename);
+		slash = strrchr(sibling, '/');
+		if (slash != NULL)
+		{
+			snprintf(slash + 1, sizeof(sibling) - (size_t)(slash + 1 - sibling),
+				"%s", filename);
+			new_file = fopen(sibling, "r");
+			if (new_file != NULL)
+				filename = sibling;
+		}
+	}
 	if (new_file == NULL)
 	{
                 perror(filename);
                 return;
 	}
+	/* Record it only once it opened: a missing include is not part of
+	   the config, and hashing a file that is not there is not possible. */
+	confset_record(filename);
 	yyin = new_file;
 	yy_switch_to_buffer(yy_create_buffer( yyin, YY_BUF_SIZE ) );
 /* 	yyrestart(new_file); */
@@ -2847,6 +2907,12 @@ void open_new_file(char *filename, FILE *current_file)
 	current_parsing_filename = filename;
 
 	sysmon_conf_yylex();
+
+	/* Put the name back. It was saved and never restored, so every parse
+	   error after an include used to be reported against the include
+	   rather than the file it was really in - and now that the name can
+	   point at a buffer in this frame, leaving it set would outlive it. */
+	current_parsing_filename = save_current_parsing_filename;
 
 	line_no = templn;
 	fclose(new_file);
@@ -3409,6 +3475,8 @@ void initalize_parser()
 		FREE(parser_pidfile);
 	if (parser_statusfile != NULL)
 		FREE(parser_statusfile);
+	if (parser_gendir != NULL)
+		FREE(parser_gendir);
 	if (parser_statustempdir != NULL)
 		FREE(parser_statustempdir);
 	if (parser_logging != NULL)
@@ -3496,6 +3564,7 @@ void initalize_parser()
 	parser_sitedesc = NULL;
 	parser_savestate = NULL;
 	parser_statusfile = NULL;
+	parser_gendir = NULL;
 	parser_statustempdir = NULL;
 	parser_pidfile = STRDUP (PIDFILE, "default PID file name");
 	parser_logging = NULL;
