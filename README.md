@@ -140,10 +140,12 @@ One sysmon-web can front a fleet. The design is in
   "applied" is not success on its own: object count and alert rate are
   watched, and a spike rolls that box back automatically and blocks the
   rest of the fleet.
-- **The apps default to all sites** with `site:object` names, and can opt
-  into a single site per install. That choice lives on the push
-  subscription, not just the list view - otherwise the phone still buzzes
-  for the sites its owner excluded.
+- **The apps carry two independent site filters**, both defaulting to all:
+  what to *show* and what to *notify about*. Someone on call for one region
+  wants waking only for it, but wants to see every site when they open the
+  app - whether the neighbour is also down is the first question at 3am.
+  Show is a local preference; Notify lives on the push subscription,
+  because that is the only one the server can enforce.
 - **The dependency map is per site**, because `dep` cannot cross daemons.
   Several sites can share a canvas as separate clusters, but no cross-site
   edge is invented - the honest way to express one is a `type sysm` check

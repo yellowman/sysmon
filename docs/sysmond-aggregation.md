@@ -76,34 +76,48 @@ Status pages (dashboard, alerts, history, traps) aggregate by default and
 filter by site optionally, because those are read-only and cross-site
 context is the point of them.
 
-### Mobile apps: all sites, or one
+### Mobile apps: two filters, not one
 
-The apps default to **all sites**, showing `site:object` so a name is never
-ambiguous, and offer a per-install option to follow **one** site instead -
-a phone that belongs to whoever looks after one region should be able to
-say so.
+The apps carry **two independent settings**, both defaulting to all sites:
 
-The part that is easy to get wrong: **that option has to live on the push
-subscription, not just the list view.** Filtering only what the app draws
-leaves the phone buzzing at 3am for a site its owner deliberately excluded
-and then hiding the row that explains why. So a subscription carries the
-site filter, the server skips subscribers a host's site does not match, and
-the app's list filter is presentation on top of a decision the server has
-already made.
+    Show          all sites  |  one site
+    Notify me about   all sites  |  one site
+
+They are separate because the cases genuinely differ. Someone on call for
+one region wants to be woken only for that region - but when they open the
+app at 3am they usually want to see everything, because whether the
+neighbouring site is also down is the first diagnostic question. Forcing
+one control to serve both makes that person choose between being woken too
+often and being unable to see context.
+
+The split is also exactly where the technical boundary falls:
+
+- **Show** is a local preference. The app already holds every site's hosts,
+  so filtering is presentation: instant, no round trip, nothing to get out
+  of sync, and nothing the server needs to know.
+- **Notify me about** lives on the push subscription, because it is the
+  only one that can be enforced anywhere else. Filtering notifications in
+  the app would mean the phone still buzzes at 3am for a site its owner
+  excluded and then hides the row explaining why. The server skips
+  subscribers whose filter does not match the host's site.
 
 Consequences:
 
-- `/api/sites` lists the fleet (name, description, reachable) so the app
-  can offer a picker rather than making someone type a name.
-- A filtered app shows bare object names, because with one site in view the
-  prefix is noise. An all-sites app shows the qualified name.
-- Changing the filter re-registers the subscription; until it does, the
-  server keeps using the old one. The app says so rather than silently
-  disagreeing with what the phone will actually receive.
-- A site that later disappears from the fleet leaves a filter pointing at
-  nothing. That is *not* silently reset to "all" - a phone that quietly
-  starts alerting for everything is worse than one that alerts for nothing
-  and says the site it was watching is gone.
+- `/api/sites` lists the fleet (name, description, reachable) so both
+  pickers offer a list rather than asking someone to type a name.
+- With **Show** narrowed to one site, object names render bare - the
+  prefix is noise when only one site is in view. Showing all sites renders
+  the qualified `site:object`.
+- Changing **Notify** re-registers the subscription. Until that succeeds
+  the server is still using the old filter, and the app says so rather than
+  quietly disagreeing with what the phone will actually receive.
+- Setting **Notify** to one site offers - but does not force - matching
+  **Show** to it, since that is the common intent and the wrong default to
+  impose.
+- A filter pointing at a site that has left the fleet is **not** silently
+  reset to "all". A phone that quietly starts alerting for everything is
+  worse than one that alerts for nothing and says the site it was watching
+  is gone.
 
 ---
 
