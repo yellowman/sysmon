@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -137,6 +138,57 @@ func AgentCertPath() string {
 	agentCertPath.mu.Lock()
 	defer agentCertPath.mu.Unlock()
 	return agentCertPath.path
+}
+
+// What a box should put in "config aggregator".
+//
+// The page, the API and the command line all print this line, and a box
+// that gets it wrong fails in a way that looks like a network fault. So
+// one function makes it and one variable holds the answer.
+var agentDial struct {
+	mu     sync.Mutex
+	target string
+}
+
+func SetAgentDialTarget(t string) {
+	agentDial.mu.Lock()
+	agentDial.target = t
+	agentDial.mu.Unlock()
+}
+
+func AgentDialTarget() string {
+	agentDial.mu.Lock()
+	defer agentDial.mu.Unlock()
+	return agentDial.target
+}
+
+// DialTarget builds that line from the two flags that decide it.
+//
+// The name comes from -agent-names, because that is what the certificate
+// was made for and the daemon verifies it. The port comes from
+// -agent-listen, because a hardcoded 1347 hands somebody on another port
+// a config that cannot connect.
+func DialTarget(agentNames, agentListen string) string {
+	port := "1347"
+	if _, p, err := net.SplitHostPort(agentListen); err == nil && p != "" {
+		port = p
+	}
+	return net.JoinHostPort(firstName(agentNames), port)
+}
+
+// firstName is the name a box should dial. -agent-names is what the
+// certificate was made for, so its first entry is the one most likely to
+// work.
+func firstName(agentNames string) string {
+	for _, n := range strings.Split(agentNames, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			return n
+		}
+	}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "sysmon-web.example.net"
 }
 
 // CertNames lists what a generated certificate is valid for, so the log

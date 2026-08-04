@@ -199,9 +199,9 @@ sysmon-web -agent-names sysmon-web.example.net
 ```
 
 **2. Make a token for the site.** Open **Admin -> Monitoring boxes ->
-Add a box**. Give it a site name and a label. The page shows the token one
-time, with the config lines ready to copy. The server keeps only a hash, so
-it cannot show the token again.
+Add a box**. Give it a site name and a label. The page then shows the
+complete set of config lines, with the token in them, and a button that
+copies them. The server keeps only a hash, so it shows the token one time.
 
 The same thing by API:
 
@@ -213,21 +213,22 @@ curl -b cookies -X POST https://sysmon-web.example.net/api/settings/agents \
 
 Only an administrator can reach that page or that endpoint.
 
-**3. Copy the certificate to the box.** The page has a **CA certificate**
-button, or use `-show-ca`.
-
-```sh
-ssh box mkdir -p /var/db/sysmon
-sysmon-web -show-ca | ssh box 'cat > /var/db/sysmon/aggregator-ca.pem'
-```
-
-**4. Add four lines to the box's `/etc/sysmon.conf`.**
+**3. Paste those lines into the box's `/etc/sysmon.conf`.**
 
 ```
 config sitename  "metro";
 config sitedesc  "Metro Station Monitoring";
 config aggregator "sysmon-web.example.net:1347";
 config aggregator-token "the token from step 2";
+```
+
+**4. Copy the certificate to the box.** The page has a **CA certificate**
+button. The file is also on the server, at the path the first start
+logged.
+
+```sh
+ssh box mkdir -p /var/db/sysmon
+scp /var/lib/sysmon/agent/agent-cert.pem box:/var/db/sysmon/aggregator-ca.pem
 ```
 
 **5. Start sysmond.** The log shows the result.
@@ -251,18 +252,16 @@ well. These run and exit.
 sysmon-web -mint-agent metro -agent-label "Metro Station - rack 4"
 sysmon-web -list-agents
 sysmon-web -revoke-agent metro
-sysmon-web -show-ca
 ```
 
-`-mint-agent` writes the config lines to standard output and its advice to
-standard error, so a provisioning script can append the first straight to
-the box's config. Add `-replace-agent` to replace a live token, which
-stops the box holding the old one.
+`-mint-agent` writes the same config lines the page shows to standard
+output, and its advice to standard error, so a provisioning script can
+append the first straight to the box's config. Add `-replace-agent` to
+replace a live token, which stops the box holding the old one.
 
 These open `settings.db` directly, and a running sysmon-web holds that
 file. So they work with the service stopped, or on a machine where it has
-never been started; while it is running, use the page. `-show-ca` needs no
-database and works either way.
+never been started; while it is running, use the page.
 
 Three things to know:
 

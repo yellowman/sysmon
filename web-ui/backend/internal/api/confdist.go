@@ -392,10 +392,16 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// The whole config block, not just the token. The person doing
+		// this is setting up a box, and the next thing they need is the
+		// text that goes in its config - with the right server name and
+		// port in it, which only this process knows.
 		r.sendJSON(w, map[string]interface{}{
 			"site":  body.Site,
 			"token": token,
-			"note":  "copy this now - it is stored hashed and cannot be shown again",
+			"config": monitoring.AgentConfigBlock(body.Site, body.Label,
+				monitoring.AgentDialTarget(), token),
+			"note": "copy this now - it is stored hashed and cannot be shown again",
 		})
 
 	default:

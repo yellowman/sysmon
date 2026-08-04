@@ -29,40 +29,75 @@
         </div>
     </div>
 
-    <!-- The token, shown once. This panel is the only place it ever
-         appears; the server keeps a hash and cannot produce it again. -->
-    <div x-show="fresh.token" x-cloak
-         class="mb-4 rounded-lg border-2 border-amber-400 bg-amber-50 p-4">
-        <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-bold text-amber-900">
-                    Token for <span class="mono" x-text="fresh.site"></span>
-                </h2>
-                <p class="text-xs text-amber-800 mt-1">
-                    Copy this now. It is stored as a hash, so it cannot be shown again.
-                    If you lose it, mint a new one - which stops the box using the old one.
-                </p>
+    <!-- The token, shown once, in the only place it ever appears: the
+         server keeps a hash and cannot produce it again.
 
-                <label class="block text-[10px] font-semibold uppercase tracking-wider text-amber-900 mt-3 mb-1">
-                    Add these lines to /etc/sysmon.conf on the box
-                </label>
-                <p class="text-[11px] text-amber-800 mb-1">
-                    The box also needs the CA certificate, as
-                    <span class="mono">aggregator-ca.pem</span> in its state
-                    directory (<span class="mono">/var/db/sysmon</span>).
-                    <a href="/api/settings/agents/ca" download="aggregator-ca.pem"
-                       class="underline">Download it</a>.
-                </p>
-                <pre class="text-xs bg-white rounded p-3 overflow-x-auto border border-amber-200"
-                     x-text="configSnippet()"></pre>
-            </div>
-            <div class="flex flex-col gap-2">
-                <button @click="copySnippet()"
-                        class="px-3 py-1.5 bg-amber-600 text-white text-xs rounded hover:bg-amber-700 whitespace-nowrap">
-                    <i class="fas fa-copy mr-1"></i><span x-text="copied ? 'Copied' : 'Copy'"></span>
+         A modal, and the whole config block rather than the token alone.
+         The person here is building a box, so give them the finished text
+         and one button. Nothing to write out, and nothing to look up. -->
+    <div x-show="fresh.token" x-cloak
+         @keydown.escape.window="fresh = {}"
+         class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
+        <div class="w-full max-w-3xl rounded-lg bg-white shadow-xl border border-gray-200"
+             @click.outside="fresh = {}">
+            <div class="flex items-start justify-between gap-3 border-b border-gray-100 p-4">
+                <div>
+                    <h2 class="text-base font-bold text-gray-900">
+                        Site <span class="mono" x-text="fresh.site"></span> is ready
+                    </h2>
+                    <p class="text-xs text-gray-500 mt-1">
+                        Do these two things on the box, then start sysmond.
+                    </p>
+                </div>
+                <button @click="fresh = {}" class="text-gray-400 hover:text-gray-700 text-sm px-2 py-1">
+                    <i class="fas fa-times"></i>
                 </button>
+            </div>
+
+            <div class="p-4 space-y-4">
+                <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <i class="fas fa-triangle-exclamation mr-1"></i>
+                    The token is in the text below, and it is shown one time. The
+                    server keeps a hash of it. If you lose it, mint a new one -
+                    which stops the box using the old one.
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                            1. Put these lines in /etc/sysmon.conf
+                        </h3>
+                        <button @click="copySnippet()"
+                                class="px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 whitespace-nowrap">
+                            <i class="fas fa-copy mr-1"></i><span x-text="copied ? 'Copied' : 'Copy all'"></span>
+                        </button>
+                    </div>
+                    <pre class="text-xs bg-gray-50 rounded p-3 overflow-x-auto border border-gray-200 max-h-80"
+                         x-text="configSnippet()"></pre>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                            2. Put the CA certificate on the box
+                        </h3>
+                        <a href="/api/settings/agents/ca" download="aggregator-ca.pem"
+                           class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline whitespace-nowrap">
+                            <i class="fas fa-download mr-1"></i>CA certificate
+                        </a>
+                    </div>
+                    <p class="text-xs text-gray-500">
+                        Save it in the state directory as
+                        <span class="mono">/var/db/sysmon/aggregator-ca.pem</span>.
+                        The box proves itself with the token; it proves this server
+                        with that file. Both are necessary.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex justify-end border-t border-gray-100 p-4">
                 <button @click="fresh = {}"
-                        class="px-3 py-1.5 bg-white text-amber-800 text-xs rounded border border-amber-300 hover:bg-amber-100">
+                        class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">
                     Done
                 </button>
             </div>
@@ -154,8 +189,7 @@
         The same jobs from a terminal:
         <span class="mono">sysmon-web -mint-agent &lt;site&gt;</span>,
         <span class="mono">-list-agents</span>,
-        <span class="mono">-revoke-agent &lt;site&gt;</span>,
-        <span class="mono">-show-ca</span>.
+        <span class="mono">-revoke-agent &lt;site&gt;</span>.
     </p>
 </div>
 
@@ -191,7 +225,12 @@ function agentsPage() {
             return formatRelativeTime(a.last_seen) || a.last_seen;
         },
 
+        // The server writes this block: it knows the name and the port the
+        // daemons must dial, and this page does not. The four lines below
+        // are a floor, not a copy - if the block ever fails to arrive, the
+        // token still gets shown instead of being lost.
         configSnippet() {
+            if (this.fresh.config) return this.fresh.config;
             return 'config sitename  "' + this.fresh.site + '";\n' +
                    'config sitedesc  "' + (this.fresh.label || this.fresh.site) + '";\n' +
                    'config aggregator "' + window.location.hostname + ':1347";\n' +
@@ -229,7 +268,8 @@ function agentsPage() {
             try {
                 const d = await this.post('/api/settings/agents',
                                           {site: site, label: label, replace: !!replace});
-                this.fresh = {site: d.site, token: d.token, label: label};
+                this.fresh = {site: d.site, token: d.token, label: label,
+                              config: d.config};
                 this.showAdd = false;
                 this.newAgent = {site: '', label: ''};
                 this.say('');
