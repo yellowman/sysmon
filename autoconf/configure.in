@@ -354,40 +354,13 @@ LIBS_SAVE="$LIBS"
 
 LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
-dnl net-snmp/version.h uses the NETSNMP_IMPORT macro, which is only
-dnl defined once net-snmp-config.h has been included. Checking it on its
-dnl own fails to compile on every modern net-snmp, so SNMP support was
-dnl silently dropped from the build - a daemon that then rejects every
-dnl "type snmp" object at config load. Include the config header first.
-AC_CHECK_HEADERS(net-snmp/version.h,IS_NET_SNMP="yes",,
-[#include <net-snmp/net-snmp-config.h>])
-if test "$IS_NET_SNMP" = "yes"; then
-        AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
-        AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")
-        AC_CHECK_LIB(netsnmp,snmp_open,USABLE_NET_SNMP="yes")
-else
-	AC_CHECK_HEADERS(ucd-snmp/version.h,IS_UCD_SNMP="yes")
-	if test "$IS_UCD_SNMP" = "yes"; then
-       		AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
-        	AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")
-        	AC_CHECK_LIB(netsnmp,snmp_open,USABLE_NET_SNMP="yes")
-	fi
-fi
-
+dnl SNMP needs no library. sysmond speaks v1/v2c GET itself (src/snmp.c)
+dnl and decodes traps itself (src/trapdecode.c), which is the whole of the
+dnl protocol it ever used - so there is no net-snmp to find, no header
+dnl test to get subtly wrong, and no way to end up with a daemon that
+dnl silently rejects every "type snmp" object because a probe failed.
 LIBS="$LIBS_SAVE"
 
-if test "$USABLE_SNMP" = "yes"; then
-       SNMP="-DENABLE_SNMP"
-	LIBS="$LIBS -lsnmp"
-fi
-if test "$USABLE_NET_SNMP" = "yes"; then
-       SNMP="-DENABLE_SNMP"
-       LIBS="$LIBS -lnetsnmp"
-fi
-
-
-dnl ssl libs need to come after netsnmp in linkpath
-LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
 dnl some checks
 if test "$SENDMAIL" = no; then

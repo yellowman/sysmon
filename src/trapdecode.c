@@ -140,16 +140,7 @@ static const char *if_status_name(long v)
 	}
 }
 
-/*
- * A cursor over a BER buffer. pos is always <= len.
- */
-struct ber_cursor {
-	const unsigned char *buf;
-	size_t len;
-	size_t pos;
-};
-
-static void ber_open(struct ber_cursor *c, const unsigned char *buf, size_t len)
+void snmp_ber_open(struct ber_cursor *c, const unsigned char *buf, size_t len)
 {
 	c->buf = buf;
 	c->len = len;
@@ -161,7 +152,7 @@ static void ber_open(struct ber_cursor *c, const unsigned char *buf, size_t len)
  * tolerate: truncation, multi-byte tags, indefinite lengths, or a length
  * that runs past the end of the buffer.
  */
-static bool ber_next(struct ber_cursor *c, unsigned char *tag,
+bool snmp_ber_next(struct ber_cursor *c, unsigned char *tag,
 	const unsigned char **val, size_t *vlen)
 {
 	unsigned char t;
@@ -203,10 +194,10 @@ static bool ber_next(struct ber_cursor *c, unsigned char *tag,
 /* Descend into a constructed value. */
 static void ber_enter(struct ber_cursor *c, const unsigned char *val, size_t vlen)
 {
-	ber_open(c, val, vlen);
+	snmp_ber_open(c, val, vlen);
 }
 
-static long ber_int(const unsigned char *v, size_t len)
+long snmp_ber_int(const unsigned char *v, size_t len)
 {
 	unsigned long acc;
 	size_t i;
@@ -228,7 +219,7 @@ static long ber_int(const unsigned char *v, size_t len)
 	return -(long)(~acc) - 1;		/* defined for every value */
 }
 
-static unsigned long ber_uint(const unsigned char *v, size_t len)
+unsigned long snmp_ber_uint(const unsigned char *v, size_t len)
 {
 	unsigned long out = 0;
 	size_t i;
@@ -245,7 +236,7 @@ static unsigned long ber_uint(const unsigned char *v, size_t len)
  * Render an OID as ".1.3.6.1...". Truncates rather than overflows, and
  * gives up on sub-identifiers that would overflow an unsigned long.
  */
-static void ber_oid_str(const unsigned char *v, size_t len, char *out, size_t outlen)
+void snmp_ber_oid_str(const unsigned char *v, size_t len, char *out, size_t outlen)
 {
 	unsigned long sub = 0;
 	size_t i, used;
@@ -347,7 +338,7 @@ static void ber_value_str(unsigned char tag, const unsigned char *v, size_t len,
 	switch (tag) {
 		case BER_INTEGER:
 			snprintf(type, typelen, "INTEGER");
-			snprintf(out, outlen, "%ld", ber_int(v, len));
+			snprintf(out, outlen, "%ld", snmp_ber_int(v, len));
 			break;
 		case BER_OCTETSTR:
 			snprintf(type, typelen, "STRING");
@@ -358,7 +349,7 @@ static void ber_value_str(unsigned char tag, const unsigned char *v, size_t len,
 			break;
 		case BER_OID:
 			snprintf(type, typelen, "OID");
-			ber_oid_str(v, len, out, outlen);
+			snmp_ber_oid_str(v, len, out, outlen);
 			break;
 		case BER_IPADDRESS:
 			snprintf(type, typelen, "IpAddress");
@@ -369,15 +360,15 @@ static void ber_value_str(unsigned char tag, const unsigned char *v, size_t len,
 			break;
 		case BER_COUNTER32:
 			snprintf(type, typelen, "Counter32");
-			snprintf(out, outlen, "%lu", ber_uint(v, len));
+			snprintf(out, outlen, "%lu", snmp_ber_uint(v, len));
 			break;
 		case BER_GAUGE32:
 			snprintf(type, typelen, "Gauge32");
-			snprintf(out, outlen, "%lu", ber_uint(v, len));
+			snprintf(out, outlen, "%lu", snmp_ber_uint(v, len));
 			break;
 		case BER_TIMETICKS:
 			{
-				unsigned long ticks = ber_uint(v, len);
+				unsigned long ticks = snmp_ber_uint(v, len);
 				snprintf(type, typelen, "TimeTicks");
 				snprintf(out, outlen, "%lu", ticks);
 				snprintf(note, notelen, "%lud %luh %lum %lus",
@@ -389,7 +380,7 @@ static void ber_value_str(unsigned char tag, const unsigned char *v, size_t len,
 			break;
 		case BER_COUNTER64:
 			snprintf(type, typelen, "Counter64");
-			snprintf(out, outlen, "%lu", ber_uint(v, len));
+			snprintf(out, outlen, "%lu", snmp_ber_uint(v, len));
 			break;
 		case BER_OPAQUE:
 			snprintf(type, typelen, "Opaque");
@@ -466,7 +457,7 @@ static void decode_varbinds(struct ber_cursor *pdu, struct trap_content *out)
 	const unsigned char *val;
 	size_t vlen;
 
-	if (!ber_next(pdu, &tag, &val, &vlen) || tag != BER_SEQUENCE)
+	if (!snmp_ber_next(pdu, &tag, &val, &vlen) || tag != BER_SEQUENCE)
 		return;
 
 	ber_enter(&list, val, vlen);
@@ -477,17 +468,17 @@ static void decode_varbinds(struct ber_cursor *pdu, struct trap_content *out)
 		const unsigned char *vval;
 		size_t vvlen;
 
-		if (!ber_next(&list, &tag, &val, &vlen) || tag != BER_SEQUENCE)
+		if (!snmp_ber_next(&list, &tag, &val, &vlen) || tag != BER_SEQUENCE)
 			break;
 
 		ber_enter(&vb, val, vlen);
 
-		if (!ber_next(&vb, &tag, &vval, &vvlen) || tag != BER_OID)
+		if (!snmp_ber_next(&vb, &tag, &vval, &vvlen) || tag != BER_OID)
 			break;
-		ber_oid_str(vval, vvlen, b->oid, sizeof(b->oid));
+		snmp_ber_oid_str(vval, vvlen, b->oid, sizeof(b->oid));
 		name_oid(b->oid, b->name, sizeof(b->name));
 
-		if (!ber_next(&vb, &vtag, &vval, &vvlen))
+		if (!snmp_ber_next(&vb, &vtag, &vval, &vvlen))
 			break;
 		ber_value_str(vtag, vval, vvlen, b->type, sizeof(b->type),
 			b->value, sizeof(b->value), b->note, sizeof(b->note));
@@ -621,14 +612,14 @@ bool decode_snmp_trap(const unsigned char *buf, size_t len, struct trap_content 
 	if (buf == NULL || len == 0)
 		return FALSE;
 
-	ber_open(&msg, buf, len);
-	if (!ber_next(&msg, &tag, &val, &vlen) || tag != BER_SEQUENCE)
+	snmp_ber_open(&msg, buf, len);
+	if (!snmp_ber_next(&msg, &tag, &val, &vlen) || tag != BER_SEQUENCE)
 		return FALSE;
 	ber_enter(&seq, val, vlen);
 
-	if (!ber_next(&seq, &tag, &val, &vlen) || tag != BER_INTEGER)
+	if (!snmp_ber_next(&seq, &tag, &val, &vlen) || tag != BER_INTEGER)
 		return FALSE;
-	out->version = (int)ber_int(val, vlen);
+	out->version = (int)snmp_ber_int(val, vlen);
 
 	if (out->version == 3) {
 		/* v3 hides the PDU behind USM keys we were never given. Be
@@ -645,11 +636,11 @@ bool decode_snmp_trap(const unsigned char *buf, size_t len, struct trap_content 
 	if (out->version != 0 && out->version != 1)
 		return FALSE;	/* not v1 or v2c */
 
-	if (!ber_next(&seq, &tag, &val, &vlen) || tag != BER_OCTETSTR)
+	if (!snmp_ber_next(&seq, &tag, &val, &vlen) || tag != BER_OCTETSTR)
 		return FALSE;
 	ber_string_str(val, vlen, out->community, sizeof(out->community));
 
-	if (!ber_next(&seq, &tag, &val, &vlen))
+	if (!snmp_ber_next(&seq, &tag, &val, &vlen))
 		return FALSE;
 	ber_enter(&pdu, val, vlen);
 
@@ -659,30 +650,30 @@ bool decode_snmp_trap(const unsigned char *buf, size_t len, struct trap_content 
 		unsigned char t;
 
 		/* enterprise */
-		if (!ber_next(&pdu, &t, &v, &l) || t != BER_OID)
+		if (!snmp_ber_next(&pdu, &t, &v, &l) || t != BER_OID)
 			return FALSE;
-		ber_oid_str(v, l, out->enterprise, sizeof(out->enterprise));
+		snmp_ber_oid_str(v, l, out->enterprise, sizeof(out->enterprise));
 
 		/* agent-addr: the device's own idea of its address, which
 		   differs from the packet source when a proxy forwards. */
-		if (!ber_next(&pdu, &t, &v, &l))
+		if (!snmp_ber_next(&pdu, &t, &v, &l))
 			return FALSE;
 		if (t == BER_IPADDRESS && l == 4)
 			snprintf(out->agent, sizeof(out->agent), "%u.%u.%u.%u",
 				v[0], v[1], v[2], v[3]);
 
-		if (!ber_next(&pdu, &t, &v, &l) || t != BER_INTEGER)
+		if (!snmp_ber_next(&pdu, &t, &v, &l) || t != BER_INTEGER)
 			return FALSE;
-		out->generic = (int)ber_int(v, l);
+		out->generic = (int)snmp_ber_int(v, l);
 
-		if (!ber_next(&pdu, &t, &v, &l) || t != BER_INTEGER)
+		if (!snmp_ber_next(&pdu, &t, &v, &l) || t != BER_INTEGER)
 			return FALSE;
-		out->specific = (int)ber_int(v, l);
+		out->specific = (int)snmp_ber_int(v, l);
 
-		if (!ber_next(&pdu, &t, &v, &l))
+		if (!snmp_ber_next(&pdu, &t, &v, &l))
 			return FALSE;
 		if (t == BER_TIMETICKS)
-			out->uptime = ber_uint(v, l);
+			out->uptime = snmp_ber_uint(v, l);
 
 		/* v1 has no snmpTrapOID; build the equivalent so the web UI
 		   and the v2c path can be compared like for like. */
@@ -712,7 +703,7 @@ bool decode_snmp_trap(const unsigned char *buf, size_t len, struct trap_content 
 
 		/* request-id, error-status, error-index */
 		for (i = 0; i < 3; i++) {
-			if (!ber_next(&pdu, &t, &v, &l) || t != BER_INTEGER)
+			if (!snmp_ber_next(&pdu, &t, &v, &l) || t != BER_INTEGER)
 				return FALSE;
 		}
 	} else {

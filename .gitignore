@@ -8,6 +8,8 @@ src/sysmond
 src/sysmon
 src/sysmon-ping-helper
 src/trapdecode-test
+src/snmpget-test
+src/trapdecode-test
 web-ui/backend/sysmon-web
 web-ui/backend/sysmon-web-ui
 autom4te.cache/

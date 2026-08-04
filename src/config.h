@@ -79,13 +79,9 @@
 #endif /* sgi */
 #endif /* NICEINTERFACE */
 
-#ifdef HAVE_NET_SNMP_VERSION_H
+/* SNMP is built in - sysmond speaks it itself, so there is nothing to
+   detect and no way to end up without it. */
 #define ENABLE_SNMP
-#endif /* HAVE_NET_SNMP_VERSION_H */
-
-#ifdef HAVE_UCD_SNMP_VERSION_H
-#define ENABLE_SNMP
-#endif /* HAVE_UCD_SNMP_VERSION_H */
 
 
 #define SYSM_VERS	"v0.94"
@@ -450,6 +446,28 @@ struct monitorent {
 	unsigned int wakeup_count;      /* How many times woken up */
 	time_t last_wakeup_time;        /* When last woken up */
 	};
+
+/*
+ * A cursor over a BER buffer, shared by the trap decoder and the SNMP
+ * client. pos is always <= len; every read is bounds-checked.
+ */
+struct ber_cursor {
+	const unsigned char *buf;
+	size_t len;
+	size_t pos;
+};
+
+/*
+ * One value out of a GetResponse.
+ */
+struct snmp_value {
+	bool have_value;		/* FALSE => exception or no varbind */
+	unsigned long value;		/* integers, counters, gauges, ticks */
+	char type[16];			/* INTEGER, Counter64, ... */
+	char oid[192];			/* the varbind's OID, as returned */
+	int error_status;		/* PDU error-status, 0 = noError */
+	char exception[24];		/* noSuchObject etc, when the agent said so */
+};
 
 /*
  * Decoded SNMP trap content (trapdecode.c).
@@ -1036,8 +1054,22 @@ void start_test_snmp(struct monitorent *);
 struct graph_elements *find_object_by_ip(char *);
 void send_trap_alert(struct graph_elements *, char *, struct trap_content *);
 
-/* trapdecode.c */
+/* trapdecode.c - BER reading, shared with the SNMP client */
+void snmp_ber_open(struct ber_cursor *, const unsigned char *, size_t);
+bool snmp_ber_next(struct ber_cursor *, unsigned char *, const unsigned char **, size_t *);
+long snmp_ber_int(const unsigned char *, size_t);
+unsigned long snmp_ber_uint(const unsigned char *, size_t);
+void snmp_ber_oid_str(const unsigned char *, size_t, char *, size_t);
+
 bool decode_snmp_trap(const unsigned char *, size_t, struct trap_content *);
+
+/* snmpget.c - the SNMP client sysmond polls agents with */
+#define SNMP_VERSION_1		0
+#define SNMP_VERSION_2C		1
+int snmp_build_get(unsigned char *, size_t, int, const char *, unsigned long, const char *);
+bool snmp_parse_response(const unsigned char *, size_t, unsigned long, struct snmp_value *);
+int snmp_open_query(const char *, int, int, const char *, unsigned long, const char *);
+bool snmp_read_response(int, unsigned long, struct snmp_value *);
 void trap_history_add(const char *, time_t, int, struct trap_content *,
 	const char *, bool, bool);
 int trap_history_count(void);
