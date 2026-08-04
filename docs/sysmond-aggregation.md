@@ -335,10 +335,29 @@ because copying it into one directory would change what it points at. The
 daemon says so in its `CONFIG-GEN` reply, and the fleet page shows it -
 finding out at delivery time would be far too late.
 
-**Include resolution inside the managed directory is siblings only.** Not
-the working directory, which is `/` by the time the daemon is running and
-is somewhere a file might be creatable by someone else; `include
-"hosts.conf"` there means the copy next to it and nothing else.
+### A relative include means "next to me"
+
+`include "hosts.conf"` resolves against the directory of the file that
+included it. Nothing else - not the working directory.
+
+It used to resolve against the working directory, and that was a live
+vulnerability rather than a wart. sysmond never sets its own working
+directory; it inherits whatever started it, and systemd defaults units to
+`/` while rc.d scripts run daemons from `/`. So on a normally installed
+box, `include "hosts.conf"` in `/etc/sysmon.conf` was read as
+`/hosts.conf`: a file anybody with write access to `/` could create, and
+one that decides what the box monitors. Where no such file existed the
+include silently vanished instead - the same directive loading a different
+file, or no file, depending on how the daemon happened to be started.
+
+Demonstrated against the previous build: with a decoy `hosts.conf` in the
+working directory and the real one beside the config, the old daemon loaded
+the decoy's objects and the new one loads the real ones.
+
+Inside the managed directory the rule is tighter still - a plain filename
+and nothing else - because those files are copies the daemon wrote into one
+flat directory, and a path among them would name something outside the set
+that was validated.
 
 ### Hashing
 
