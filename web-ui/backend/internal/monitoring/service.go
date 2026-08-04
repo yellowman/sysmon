@@ -1389,14 +1389,28 @@ func (d *daemon) connection() (net.Conn, *bufio.Reader, bool, error) {
 }
 
 // dropConnection closes a dialled-in link so the daemon reconnects.
-func (d *daemon) dropConnection() {
+//
+// It takes the connection the caller was actually using. By the time a
+// broken conversation gets here the daemon may already have noticed,
+// redialled, and been adopted onto a new socket - and closing "whatever
+// is current" would tear down that healthy new link on the strength of
+// the dead one's error. On a flaky uplink that repeats every cycle and
+// looks like the site flapping when it is this doing it.
+//
+// The replaced connection is already closed by adoptAgent, so there is
+// nothing to clean up in that case beyond leaving the new one alone.
+func (d *daemon) dropConnection(stale net.Conn) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.conn != nil {
-		d.conn.Close()
-		d.conn = nil
-		d.reader = nil
+	if d.conn == nil {
+		return
 	}
+	if stale != nil && d.conn != stale {
+		return // already replaced; not ours to close
+	}
+	d.conn.Close()
+	d.conn = nil
+	d.reader = nil
 }
 
 func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error) {
@@ -1409,12 +1423,6 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		return nil, err
 	}
 
-	// Per-chunk, not per-fetch: a hung daemon is still caught in seconds,
-	// but a big config walking object by object is not cut off halfway.
-	// (30s was less than an 800-object walk takes, so the fetch used to
-	// time out on exactly the configs that most needed it.)
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
-
 	if inbound {
 		// One socket, two users. A config delivery on a dialled-in
 		// daemon has to have the connection to itself - interleaving a
@@ -1423,14 +1431,38 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		d.confMu.Lock()
 		defer d.confMu.Unlock()
 
+		// The deadline is part of owning the socket, so it is armed
+		// here, under the lock, and not before waiting for it.
+		//
+		// Setting it first cut both ways. Going out, a poll that fired
+		// while a delivery held the lock reset that delivery's 120s to
+		// 30s, and a CONFIG-PUT the daemon took longer than half a
+		// minute to validate died of a deadline somebody else set.
+		// Coming back, the delivery's own "defer SetDeadline(zero)"
+		// cleared the deadline this poll had already armed while it
+		// blocked - so the poll then ran with no deadline at all, and a
+		// wedged daemon held this goroutine, and every GetStatus caller
+		// behind it, for good.
+		conn.SetDeadline(time.Now().Add(30 * time.Second))
+
 		// A conversation that breaks means the link is broken: drop it
 		// and let the daemon dial back in with clean sequence numbers.
+		// Naming the connection matters - see dropConnection.
 		defer func() {
 			if err != nil {
-				d.dropConnection()
+				d.dropConnection(conn)
 			}
 		}()
 	} else {
+		// A socket we dialled for this fetch alone: nobody else can be
+		// on it, so the deadline goes on straight away.
+		//
+		// Per-chunk, not per-fetch: a hung daemon is still caught in
+		// seconds, but a big config walking object by object is not cut
+		// off halfway. (30s was less than an 800-object walk takes, so
+		// the fetch used to time out on exactly the configs that most
+		// needed it.)
+		conn.SetDeadline(time.Now().Add(30 * time.Second))
 		defer conn.Close()
 		reader = bufio.NewReader(conn)
 
@@ -1910,179 +1942,126 @@ func authenticate(conn net.Conn, reader *bufio.Reader, authKey string) error {
 	return fmt.Errorf("authentication failed - invalid auth key")
 }
 
-// AckHost acknowledges an alert for a specific host
-func (s *Service) AckHost(hostname string, authKey string) error {
-	// The caller holds a fleet-wide "site:object" key; the daemon that
-	// owns it has never heard of the site half.
-	_, hostname = SplitQualified(hostname)
-	hostname = sanitizeCmd(hostname)
-	// Connect to sysmon daemon
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
+// hostAction runs one command against the daemon that actually owns a
+// host, and hands the callback the bare object name to put in it.
+//
+// The site half of "site:object" used to be split off and thrown away,
+// and every one of these actions then dialled s.sysmonAddr - the first
+// configured daemon. Two ways that is wrong. In the default fleet
+// nothing is dialled at all, so sysmonAddr is empty and acking anything
+// failed with "missing address". In a mixed fleet the command went to
+// the wrong box, and if that box happened to have an object by the same
+// name - which is what happens when sites are built from one template -
+// it acked that one instead, silently and on the wrong machine.
+//
+// withDaemonConn is what knows how to reach a given site: the shared
+// socket for a daemon that dialled in, a fresh authenticated one for a
+// daemon we dial.
+func (s *Service) hostAction(qualified, authKey string,
+	fn func(conn net.Conn, r *bufio.Reader, object string) error) error {
 
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner first
-	if err := readWelcomeBanner(reader); err != nil {
-		return err
-	}
-
-	// Authenticate if auth key provided
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return err
+	site, object := SplitQualified(qualified)
+	object = sanitizeCmd(object)
+	if object == "" {
+		return fmt.Errorf("no object name in %q", qualified)
 	}
 
-	// Enable XML mode
-	_, err = conn.Write([]byte("MODE xml\n"))
-	if err != nil {
+	return s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+		if err := enterXMLMode(conn, r); err != nil {
+			return err
+		}
+		return fn(conn, r, object)
+	})
+}
+
+// enterXMLMode puts a connection in the mode every one of these commands
+// needs. Harmless to repeat on a shared socket the poller already put
+// there.
+func enterXMLMode(conn net.Conn, r *bufio.Reader) error {
+	if _, err := conn.Write([]byte("MODE xml\n")); err != nil {
 		return fmt.Errorf("failed to send MODE xml: %w", err)
 	}
-
-	response, err := reader.ReadString('\n')
+	response, err := r.ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("failed to read MODE xml response: %w", err)
 	}
 	if !strings.Contains(response, "333") {
 		return fmt.Errorf("MODE xml failed: %s", response)
 	}
+	return nil
+}
 
-	// Send ACK command
-	_, err = conn.Write([]byte(fmt.Sprintf("ACK %s\n", hostname)))
-	if err != nil {
-		return fmt.Errorf("failed to send ACK command: %w", err)
-	}
-
-	response, err = reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read ACK response: %w", err)
-	}
-
-	if strings.Contains(response, "333") {
+// daemonReply turns sysmond's numeric answer into an error or nil.
+func daemonReply(what, response string) error {
+	switch {
+	case strings.Contains(response, "333"):
 		return nil
-	} else if strings.Contains(response, "403") {
+	case strings.Contains(response, "403"):
 		return fmt.Errorf("host not found or permission denied")
-	} else if strings.Contains(response, "444") {
+	case strings.Contains(response, "444"):
 		return fmt.Errorf("permission denied - authentication required")
 	}
+	return fmt.Errorf("%s failed: %s", what, response)
+}
 
-	return fmt.Errorf("ACK failed: %s", response)
+// AckHost acknowledges an alert for a specific host
+func (s *Service) AckHost(hostname string, authKey string) error {
+	return s.hostAction(hostname, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
+				return fmt.Errorf("failed to send ACK command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read ACK response: %w", err)
+			}
+			return daemonReply("ACK", response)
+		})
 }
 
 // UpdateHostStatus updates a host with a status note
 func (s *Service) UpdateHostStatus(hostname string, note string, authKey string) error {
-	// The caller holds a fleet-wide "site:object" key; the daemon that
-	// owns it has never heard of the site half.
-	_, hostname = SplitQualified(hostname)
-	hostname = sanitizeCmd(hostname)
 	note = sanitizeCmd(note)
-	// Connect to sysmon daemon
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner first
-	if err := readWelcomeBanner(reader); err != nil {
-		return err
-	}
-
-	// Authenticate if auth key provided
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return err
-	}
-
-	// Enable XML mode
-	_, err = conn.Write([]byte("MODE xml\n"))
-	if err != nil {
-		return fmt.Errorf("failed to send MODE xml: %w", err)
-	}
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read MODE xml response: %w", err)
-	}
-	if !strings.Contains(response, "333") {
-		return fmt.Errorf("MODE xml failed: %s", response)
-	}
-
-	// Send UPD command with note
-	_, err = conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", hostname, note)))
-	if err != nil {
-		return fmt.Errorf("failed to send UPD command: %w", err)
-	}
-
-	response, err = reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read UPD response: %w", err)
-	}
-
-	if strings.Contains(response, "333") {
-		return nil
-	} else if strings.Contains(response, "403") {
-		return fmt.Errorf("host not found, update error, or permission denied")
-	} else if strings.Contains(response, "444") {
-		return fmt.Errorf("permission denied - authentication required")
-	}
-
-	return fmt.Errorf("UPD failed: %s", response)
+	return s.hostAction(hostname, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, note))); err != nil {
+				return fmt.Errorf("failed to send UPD command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read UPD response: %w", err)
+			}
+			return daemonReply("UPD", response)
+		})
 }
 
 // ToggleTrace toggles debug tracing for a specific host
 func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
-	// The caller holds a fleet-wide "site:object" key; the daemon that
-	// owns it has never heard of the site half.
-	_, hostname = SplitQualified(hostname)
-	hostname = sanitizeCmd(hostname)
-	// Connect to sysmon daemon
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
+	var enabled bool
+	err := s.hostAction(hostname, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("TRACE %s\n", object))); err != nil {
+				return fmt.Errorf("failed to send TRACE command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read TRACE response: %w", err)
+			}
+			response = strings.TrimSpace(response)
 
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner first
-	if err := readWelcomeBanner(reader); err != nil {
-		return false, err
-	}
-
-	// Authenticate if auth key provided (TRACE doesn't require auth, but accept it)
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return false, err
-	}
-
-	// Send TRACE command
-	_, err = conn.Write([]byte(fmt.Sprintf("TRACE %s\n", hostname)))
-	if err != nil {
-		return false, fmt.Errorf("failed to send TRACE command: %w", err)
-	}
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false, fmt.Errorf("failed to read TRACE response: %w", err)
-	}
-
-	response = strings.TrimSpace(response)
-
-	if strings.Contains(response, "333 tracing enabled") {
-		return true, nil
-	} else if strings.Contains(response, "333 tracing disabled") {
-		return false, nil
-	} else if strings.Contains(response, "403") {
-		return false, fmt.Errorf("host not found")
-	}
-
-	return false, fmt.Errorf("TRACE failed: %s", response)
+			switch {
+			case strings.Contains(response, "333 tracing enabled"):
+				enabled = true
+				return nil
+			case strings.Contains(response, "333 tracing disabled"):
+				enabled = false
+				return nil
+			case strings.Contains(response, "403"):
+				return fmt.Errorf("host not found")
+			}
+			return fmt.Errorf("TRACE failed: %s", response)
+		})
+	return enabled, err
 }
 
 // TestAuth tests if an auth key is valid
@@ -2416,72 +2395,41 @@ func (s *Service) GetObjectsXML() (string, error) {
 
 // GetObjectXML returns raw XML for a single monitored object
 func (s *Service) GetObjectXML(hostname string) (string, error) {
-	// The caller holds a fleet-wide "site:object" key; the daemon that
-	// owns it has never heard of the site half.
-	_, hostname = SplitQualified(hostname)
-	hostname = sanitizeCmd(hostname)
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	var xmlOutput strings.Builder
+	err := s.hostAction(hostname, "",
+		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("SHOWOBJ %s\n", object))); err != nil {
+				return fmt.Errorf("failed to send SHOWOBJ command: %w", err)
+			}
+
+			// Read multi-line XML response
+			for {
+				line, err := r.ReadString('\n')
+
+				// Process line first (ReadString can return data + error)
+				xmlOutput.WriteString(line)
+
+				// Check for terminator
+				if strings.Contains(line, "</ObjectStatus>") {
+					return nil
+				}
+
+				// Check for error responses (match at line start to avoid
+				// false positives on XML content)
+				trimmedLine := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmedLine, "403") || strings.HasPrefix(trimmedLine, "444") {
+					return fmt.Errorf("object not found or MODE xml not enabled")
+				}
+
+				// Then check error
+				if err != nil {
+					return fmt.Errorf("error reading SHOWOBJ response: %w", err)
+				}
+			}
+		})
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner
-	if err := readWelcomeBanner(reader); err != nil {
 		return "", err
 	}
-
-	// Enable XML mode
-	_, err = conn.Write([]byte("MODE xml\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send MODE xml command: %w", err)
-	}
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("failed to read MODE xml response: %w", err)
-	}
-	if !strings.Contains(response, "333") {
-		return "", fmt.Errorf("MODE xml failed: %s", response)
-	}
-
-	// Send SHOWOBJ command
-	_, err = conn.Write([]byte(fmt.Sprintf("SHOWOBJ %s\n", hostname)))
-	if err != nil {
-		return "", fmt.Errorf("failed to send SHOWOBJ command: %w", err)
-	}
-
-	// Read multi-line XML response
-	var xmlOutput strings.Builder
-	for {
-		line, err := reader.ReadString('\n')
-
-		// Process line first (ReadString can return data + error)
-		xmlOutput.WriteString(line)
-
-		// Check for terminator
-		if strings.Contains(line, "</ObjectStatus>") {
-			break
-		}
-
-		// Check for error responses (match at line start to avoid false positives on XML content)
-		trimmedLine := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmedLine, "403") || strings.HasPrefix(trimmedLine, "444") {
-			return "", fmt.Errorf("object not found or MODE xml not enabled")
-		}
-
-		// Then check error
-		if err != nil {
-			return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
-		}
-	}
-
-	// Send QUIT to close connection cleanly (ignore error - connection closing)
-	conn.Write([]byte("QUIT\n"))
-
 	return xmlOutput.String(), nil
 }
 
@@ -2492,328 +2440,152 @@ type BulkOperationResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// BulkAckHosts acknowledges multiple hosts in a single connection
-func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperationResult {
+// bulkBySite runs one command per host, grouped into one conversation
+// per site.
+//
+// A bulk selection on the Hosts page is whatever the operator ticked, so
+// it crosses sites freely. These used to open a single connection to the
+// first configured daemon and send every object name down it, which sent
+// half the work to a box that had never heard of those objects - or, in
+// the default inbound-only fleet, to no address at all.
+//
+// The one-connection-per-conversation property is worth keeping, so this
+// groups rather than dialling per host. Results stay in the caller's
+// order: the API pairs them with the request by position.
+func (s *Service) bulkBySite(hostnames []string, authKey string,
+	fn func(conn net.Conn, r *bufio.Reader, object string) (bool, string)) []BulkOperationResult {
+
 	results := make([]BulkOperationResult, len(hostnames))
+	bySite := make(map[string][]int)
+	order := []string{}
 
-	// Validate input
-	if len(hostnames) == 0 {
-		return results
-	}
-
-	// Connect to sysmon daemon once
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 10*time.Second)
-	if err != nil {
-		// If connection fails, mark all as failed
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to connect to sysmon: %v", err),
-			}
-		}
-		return results
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(30 * time.Second)) // Longer timeout for bulk
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner
-	if err := readWelcomeBanner(reader); err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to read welcome banner: %v", err),
-			}
-		}
-		return results
-	}
-
-	// Authenticate once
-	if err := authenticate(conn, reader, authKey); err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("authentication failed: %v", err),
-			}
-		}
-		return results
-	}
-
-	// Process each hostname
-	for i, hostname := range hostnames {
-		// The caller holds a fleet-wide "site:object" key; the daemon that
-		// owns it has never heard of the site half.
-		_, hostname = SplitQualified(hostname)
-		hostname = sanitizeCmd(hostname)
-		cmd := fmt.Sprintf("ACK %s\n", hostname)
-		_, err := conn.Write([]byte(cmd))
-		if err != nil {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to send command: %v", err),
-			}
+	for i, qualified := range hostnames {
+		site, object := SplitQualified(qualified)
+		results[i] = BulkOperationResult{Hostname: qualified}
+		if sanitizeCmd(object) == "" {
+			results[i].Error = fmt.Sprintf("no object name in %q", qualified)
 			continue
 		}
-
-		s.sessionLog.Log(fmt.Sprintf("ACK %s", hostname), "", false, "")
-
-		// Read response
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to read response: %v", err),
-			}
-			continue
+		if _, seen := bySite[site]; !seen {
+			order = append(order, site)
 		}
+		bySite[site] = append(bySite[site], i)
+	}
 
-		response = strings.TrimSpace(response)
-		s.sessionLog.Log(fmt.Sprintf("ACK %s", hostname), response, false, "")
-
-		// sysmond responds with "333 ..." on success
-		if strings.HasPrefix(response, "333") {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  true,
+	for _, site := range order {
+		idxs := bySite[site]
+		err := s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+			if err := enterXMLMode(conn, r); err != nil {
+				return err
 			}
-		} else {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    response,
+			for _, i := range idxs {
+				_, object := SplitQualified(hostnames[i])
+				ok, msg := fn(conn, r, sanitizeCmd(object))
+				results[i].Success = ok
+				if !ok {
+					results[i].Error = msg
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			// The site could not be reached at all, so nothing in its
+			// group was attempted.
+			for _, i := range idxs {
+				results[i].Success = false
+				results[i].Error = err.Error()
 			}
 		}
 	}
-
-	// Send QUIT
-	conn.Write([]byte("QUIT\n"))
 
 	return results
+}
+
+// BulkAckHosts acknowledges multiple hosts in a single connection
+func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperationResult {
+	return s.bulkBySite(hostnames, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
+				return false, fmt.Sprintf("failed to send command: %v", err)
+			}
+			s.sessionLog.Log(fmt.Sprintf("ACK %s", object), "", false, "")
+
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return false, fmt.Sprintf("failed to read response: %v", err)
+			}
+			response = strings.TrimSpace(response)
+			s.sessionLog.Log(fmt.Sprintf("ACK %s", object), response, false, "")
+
+			// sysmond responds with "333 ..." on success
+			if strings.HasPrefix(response, "333") {
+				return true, ""
+			}
+			return false, response
+		})
 }
 
 // BulkUpdateHosts updates multiple hosts with the same note in a single connection
 func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey string) []BulkOperationResult {
-	results := make([]BulkOperationResult, len(hostnames))
-
-	// Validate input
-	if len(hostnames) == 0 {
-		return results
-	}
 	if note == "" {
+		results := make([]BulkOperationResult, len(hostnames))
 		for i, hostname := range hostnames {
 			results[i] = BulkOperationResult{
 				Hostname: hostname,
 				Success:  false,
-				Error:    "note is required",
+				Error:    "note cannot be empty",
 			}
 		}
 		return results
 	}
-
-	// Connect to sysmon daemon once
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 10*time.Second)
-	if err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to connect to sysmon: %v", err),
-			}
-		}
-		return results
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner
-	if err := readWelcomeBanner(reader); err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to read welcome banner: %v", err),
-			}
-		}
-		return results
-	}
-
-	// Authenticate once
-	if err := authenticate(conn, reader, authKey); err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("authentication failed: %v", err),
-			}
-		}
-		return results
-	}
-
-	// Process each hostname
 	note = sanitizeCmd(note)
-	for i, hostname := range hostnames {
-		// The caller holds a fleet-wide "site:object" key; the daemon that
-		// owns it has never heard of the site half.
-		_, hostname = SplitQualified(hostname)
-		hostname = sanitizeCmd(hostname)
-		cmd := fmt.Sprintf("UPD %s %s\n", hostname, note)
-		_, err := conn.Write([]byte(cmd))
-		if err != nil {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to send command: %v", err),
+
+	return s.bulkBySite(hostnames, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, note))); err != nil {
+				return false, fmt.Sprintf("failed to send command: %v", err)
 			}
-			continue
-		}
-
-		s.sessionLog.Log(fmt.Sprintf("UPD %s %s", hostname, note), "", false, "")
-
-		// Read response
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to read response: %v", err),
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return false, fmt.Sprintf("failed to read response: %v", err)
 			}
-			continue
-		}
-
-		response = strings.TrimSpace(response)
-		s.sessionLog.Log(fmt.Sprintf("UPD %s", hostname), response, false, "")
-
-		// sysmond responds with "333 ..." on success
-		if strings.HasPrefix(response, "333") {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  true,
+			response = strings.TrimSpace(response)
+			if strings.HasPrefix(response, "333") {
+				return true, ""
 			}
-		} else {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    response,
-			}
-		}
-	}
-
-	// Send QUIT
-	conn.Write([]byte("QUIT\n"))
-
-	return results
+			return false, response
+		})
 }
 
 // BulkToggleTrace toggles trace for multiple hosts in a single connection
 func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey string) []BulkOperationResult {
-	results := make([]BulkOperationResult, len(hostnames))
-
-	// Validate input
-	if len(hostnames) == 0 {
-		return results
-	}
-
-	// Connect to sysmon daemon once
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 10*time.Second)
-	if err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to connect to sysmon: %v", err),
+	return s.bulkBySite(hostnames, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+			if _, err := conn.Write([]byte(fmt.Sprintf("TRACE %s\n", object))); err != nil {
+				return false, fmt.Sprintf("failed to send command: %v", err)
 			}
-		}
-		return results
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner
-	if err := readWelcomeBanner(reader); err != nil {
-		for i, hostname := range hostnames {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to read welcome banner: %v", err),
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return false, fmt.Sprintf("failed to read response: %v", err)
 			}
-		}
-		return results
-	}
+			response = strings.TrimSpace(response)
 
-	// Authenticate once (trace doesn't require auth but accept it)
-	if authKey != "" {
-		if err := authenticate(conn, reader, authKey); err != nil {
-			for i, hostname := range hostnames {
-				results[i] = BulkOperationResult{
-					Hostname: hostname,
-					Success:  false,
-					Error:    fmt.Sprintf("authentication failed: %v", err),
+			// TRACE toggles, so the daemon reports which way it went.
+			// Asking for a state it is already in is not a failure.
+			switch {
+			case strings.Contains(response, "333 tracing enabled"):
+				if enable {
+					return true, ""
 				}
+				return false, "tracing was enabled, not disabled - TRACE toggles"
+			case strings.Contains(response, "333 tracing disabled"):
+				if !enable {
+					return true, ""
+				}
+				return false, "tracing was disabled, not enabled - TRACE toggles"
+			case strings.HasPrefix(response, "333"):
+				return true, ""
 			}
-			return results
-		}
-	}
-
-	// Process each hostname
-	for i, hostname := range hostnames {
-		// The caller holds a fleet-wide "site:object" key; the daemon that
-		// owns it has never heard of the site half.
-		_, hostname = SplitQualified(hostname)
-		hostname = sanitizeCmd(hostname)
-		cmd := fmt.Sprintf("TRACE %s\n", hostname)
-		_, err := conn.Write([]byte(cmd))
-		if err != nil {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to send command: %v", err),
-			}
-			continue
-		}
-
-		s.sessionLog.Log(fmt.Sprintf("TRACE %s", hostname), "", false, "")
-
-		// Read response
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    fmt.Sprintf("failed to read response: %v", err),
-			}
-			continue
-		}
-
-		response = strings.TrimSpace(response)
-		s.sessionLog.Log(fmt.Sprintf("TRACE %s", hostname), response, false, "")
-
-		// sysmond responds with "333 ..." on success
-		if strings.HasPrefix(response, "333") {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  true,
-			}
-		} else {
-			results[i] = BulkOperationResult{
-				Hostname: hostname,
-				Success:  false,
-				Error:    response,
-			}
-		}
-	}
-
-	// Send QUIT
-	conn.Write([]byte("QUIT\n"))
-
-	return results
+			return false, response
+		})
 }
