@@ -396,6 +396,32 @@ whole config in one file, use bare filenames beside the main config, or
 manage only the main file and treat absolutely-included fragments as
 read-only members of the hash. Not yet decided.
 
+### Where a box reports is not editable from here
+
+`config aggregator` and `config aggregator-token` decide which sysmon-web
+a box reports to. The editor refuses any change to either, in any file of
+the config.
+
+sysmond keeps the ability to be moved - a box behind NAT may one day need
+to point somewhere else - so this is a limit in the management plane, not
+in the daemon. It is a limit because moving a box also needs the
+certificate for its new destination, and this side has no way to put that
+on the box. Half a move costs the box.
+
+The failure is quiet, which is why this is refused rather than warned
+about. The delivery succeeds and the reply comes back on the old
+connection; the daemon then reloads and dials somewhere that cannot
+answer. From here that is indistinguishable from a network fault, and the
+repair is a drive to the console.
+
+Removing the directive is in fact survivable today - the seed still
+carries it, the seed is parsed first at every start, and the value is not
+cleared when a config omits it - but it is refused too, because "safe by
+accident" is not a property to build on.
+
+Change it in the seed config, on the box, where the certificate can be put
+in place at the same time.
+
 ---
 
 ## 4. Editing: splice, never regenerate

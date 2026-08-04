@@ -765,6 +765,19 @@ func (s *Service) StageGeneration(site string, files []settings.GenFile, by, not
 		return 0, "", fmt.Errorf("a generation with no files would blank the box")
 	}
 
+	// Where the box reports is not editable from here. See uplink.go: the
+	// daemon can be moved, but moving it also needs a certificate this
+	// side cannot deliver, so a half-done move costs the box. Compared
+	// against what this process already holds, which is what the operator
+	// was looking at when they made the edit.
+	if desired, ok := store.GetDesired(site); ok && desired.Generation > 0 {
+		if was, held := store.GetGenerationFiles(site, desired.Generation); held {
+			if err := checkUplinkUnchanged(was, files); err != nil {
+				return 0, "", err
+			}
+		}
+	}
+
 	names := make([]string, len(files))
 	contents := make([][]byte, len(files))
 	for i, f := range files {
