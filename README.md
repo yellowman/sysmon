@@ -140,6 +140,10 @@ One sysmon-web can front a fleet. The design is in
   "applied" is not success on its own: object count and alert rate are
   watched, and a spike rolls that box back automatically and blocks the
   rest of the fleet.
+- **The apps default to all sites** with `site:object` names, and can opt
+  into a single site per install. That choice lives on the push
+  subscription, not just the list view - otherwise the phone still buzzes
+  for the sites its owner excluded.
 - **The dependency map is per site**, because `dep` cannot cross daemons.
   Several sites can share a canvas as separate clusters, but no cross-site
   edge is invented - the honest way to express one is a `type sysm` check
