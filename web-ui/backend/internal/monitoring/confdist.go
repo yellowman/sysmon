@@ -761,8 +761,28 @@ func (s *Service) StageGeneration(site string, files []settings.GenFile, by, not
 	if store == nil {
 		return 0, "", fmt.Errorf("no settings store is attached")
 	}
+	if !ValidSiteName(site) {
+		return 0, "", fmt.Errorf(
+			"%q is not a usable site name - letters, digits, - and _ only", site)
+	}
 	if len(files) == 0 {
 		return 0, "", fmt.Errorf("a generation with no files would blank the box")
+	}
+
+	// Adoption first, and this is the gate that enforces it rather than
+	// DeliverSite's.
+	//
+	// PutGeneration marks a site adopted as a side effect of storing a
+	// generation, so staging into a site that was never adopted - or was
+	// reverted, which zeroes the same fields - used to adopt it by
+	// implication and hand DeliverSite everything it checks for. An edit
+	// is a change to what a box runs, so it has to start from what the
+	// box is running: without that, "changed" has no meaning and the
+	// comparison below has nothing to compare against.
+	desired, ok := store.GetDesired(site)
+	if !ok || !desired.Adopted || desired.Generation == 0 {
+		return 0, "", fmt.Errorf("%s has not been adopted; adopt it first so there is a "+
+			"known starting point to edit from", site)
 	}
 
 	// Where the box reports is not editable from here. See uplink.go: the
@@ -770,12 +790,20 @@ func (s *Service) StageGeneration(site string, files []settings.GenFile, by, not
 	// side cannot deliver, so a half-done move costs the box. Compared
 	// against what this process already holds, which is what the operator
 	// was looking at when they made the edit.
-	if desired, ok := store.GetDesired(site); ok && desired.Generation > 0 {
-		if was, held := store.GetGenerationFiles(site, desired.Generation); held {
-			if err := checkUplinkUnchanged(was, files); err != nil {
-				return 0, "", err
-			}
-		}
+	//
+	// Unconditional now. It used to be skipped whenever there was no
+	// desired generation to compare against, which is exactly the state
+	// an unadopted or reverted site is in - so the one path that could
+	// move a box to another aggregator was the one the guard did not
+	// watch.
+	was, held := store.GetGenerationFiles(site, desired.Generation)
+	if !held {
+		return 0, "", fmt.Errorf(
+			"generation %d of %s is not held here, so an edit cannot be checked against it",
+			desired.Generation, site)
+	}
+	if err := checkUplinkUnchanged(was, files); err != nil {
+		return 0, "", err
 	}
 
 	names := make([]string, len(files))

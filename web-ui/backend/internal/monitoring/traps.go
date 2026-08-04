@@ -165,7 +165,8 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if current < d.trapSeq {
+	restarted := current < d.trapSeq
+	if restarted {
 		// Daemon restarted; its ring and its counter start over.
 		d.trapSeq = 0
 		since = 0
@@ -188,7 +189,17 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since),
 			fmt.Sprintf("%d new (seq %d, %d held)", len(fresh), current, len(d.trapHistory)), false, "")
 	}
-	if current > 0 {
+	// Hold the cursor at 0 for one cycle after a restart, so the next
+	// poll asks from the beginning and actually collects the ring.
+	//
+	// This request went out with the pre-restart "since", which is larger
+	// than every sequence the restarted daemon has, so the daemon filtered
+	// all of them out and there is nothing in "fresh" to keep. Advancing
+	// to "current" here would step over exactly the traps that were just
+	// reset to 0 - they would never be asked for again. The CONF path has
+	// a full-resync fallback for the same situation; TRAPS had none, and
+	// that asymmetry was the bug.
+	if current > 0 && !restarted {
 		d.trapSeq = current
 	}
 
