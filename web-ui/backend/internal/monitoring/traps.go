@@ -71,12 +71,17 @@ type xmlVarbind struct {
 // connection it uses for object status, and kept what came back. Traps
 // are held far longer than the daemon's ring holds them, so this is also
 // the only place a month of history exists.
+// Traps from every daemon in the fleet, newest first.
 func (s *Service) GetTraps(authKey string) (*models.TrapInfo, error) {
-	s.cacheMu.Lock()
-	held := make([]xmlTrap, len(s.trapHistory))
-	copy(held, s.trapHistory)
-	lost := s.trapsLost
-	s.cacheMu.Unlock()
+	var held []xmlTrap
+	lost := 0
+	for _, d := range s.daemons {
+		d.mu.Lock()
+		held = append(held, d.trapHistory...)
+		lost += d.trapsLost
+		d.mu.Unlock()
+	}
+	sort.Slice(held, func(i, j int) bool { return held[i].Time > held[j].Time })
 
 	info := buildTrapInfo(held)
 	info.Summary.Lost = lost
@@ -101,10 +106,10 @@ func emptyTrapInfo() *models.TrapInfo {
 // <oldest-held> against what we asked for is how we know the ring
 // overwrote traps before we managed to collect them - which is worth
 // saying out loud rather than quietly under-reporting.
-func (s *Service) fetchTraps(conn net.Conn, reader *bufio.Reader) {
-	s.cacheMu.Lock()
-	since := s.trapSeq
-	s.cacheMu.Unlock()
+func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
+	d.mu.Lock()
+	since := d.trapSeq
+	d.mu.Unlock()
 
 	cmd := "TRAPS\n"
 	if since > 0 {
@@ -157,18 +162,18 @@ func (s *Service) fetchTraps(conn net.Conn, reader *bufio.Reader) {
 		}
 	}
 
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
-	if current < s.trapSeq {
+	if current < d.trapSeq {
 		// Daemon restarted; its ring and its counter start over.
-		s.trapSeq = 0
+		d.trapSeq = 0
 		since = 0
 	}
 	// A gap means traps aged out of the daemon's ring before we asked.
 	if since > 0 && oldest > since+1 {
 		missed := int(oldest - since - 1)
-		s.trapsLost += missed
+		d.trapsLost += missed
 		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since), "", true,
 			fmt.Sprintf("%d trap(s) aged out of sysmond's ring before we collected them", missed))
 	}
@@ -176,26 +181,26 @@ func (s *Service) fetchTraps(conn net.Conn, reader *bufio.Reader) {
 	// The daemon sends newest first; keep the store oldest-last so the
 	// page renders the same order it always did.
 	if len(fresh) > 0 {
-		s.trapHistory = append(fresh, s.trapHistory...)
-		if len(s.trapHistory) > trapsKept {
-			s.trapHistory = s.trapHistory[:trapsKept]
+		d.trapHistory = append(fresh, d.trapHistory...)
+		if len(d.trapHistory) > trapsKept {
+			d.trapHistory = d.trapHistory[:trapsKept]
 		}
 		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since),
-			fmt.Sprintf("%d new (seq %d, %d held)", len(fresh), current, len(s.trapHistory)), false, "")
+			fmt.Sprintf("%d new (seq %d, %d held)", len(fresh), current, len(d.trapHistory)), false, "")
 	}
 	if current > 0 {
-		s.trapSeq = current
+		d.trapSeq = current
 	}
 
 	// Age out anything past the retention window.
 	cutoff := time.Now().Add(-trapMaxAge).Unix()
-	kept := s.trapHistory[:0]
-	for _, t := range s.trapHistory {
+	kept := d.trapHistory[:0]
+	for _, t := range d.trapHistory {
 		if t.Time >= cutoff {
 			kept = append(kept, t)
 		}
 	}
-	s.trapHistory = kept
+	d.trapHistory = kept
 }
 
 // buildTrapInfo turns the daemon's records into the page model, including
