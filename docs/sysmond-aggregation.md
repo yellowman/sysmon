@@ -90,16 +90,27 @@ neighbouring site is also down is the first diagnostic question. Forcing
 one control to serve both makes that person choose between being woken too
 often and being unable to see context.
 
-The split is also exactly where the technical boundary falls:
+They are enforced in different places, for different reasons:
 
-- **Show** is a local preference. The app already holds every site's hosts,
-  so filtering is presentation: instant, no round trip, nothing to get out
-  of sync, and nothing the server needs to know.
-- **Notify me about** lives on the push subscription, because it is the
-  only one that can be enforced anywhere else. Filtering notifications in
-  the app would mean the phone still buzzes at 3am for a site its owner
-  excluded and then hides the row explaining why. The server skips
-  subscribers whose filter does not match the host's site.
+- **Show** is a request parameter: `?site=sysmon-metro` on the status and
+  history endpoints. Not stored server-side and not filtered on the phone -
+  a phone watching one site out of twenty should not be downloading twenty
+  sites' worth of hosts over a mobile connection, and a parameter costs no
+  server state and changes instantly.
+
+  This works unchanged with the delta protocol: `rev` stays global and
+  monotonic, and the server drops non-matching hosts from `changed` and
+  `removed`. A client whose delta is empty because the change was in a site
+  it does not watch simply stores the new rev and moves on. The one thing
+  to get right is that *widening* the filter needs a full resync - the
+  client's warm cache has never seen the sites it was excluding - so a
+  changed `site` parameter forces `full`.
+
+- **Notify me about** lives on the push subscription, because that is the
+  only place it can be enforced. Filtering notifications in the app would
+  mean the phone still buzzes at 3am for a site its owner excluded and then
+  hides the row explaining why. The server skips subscribers whose filter
+  does not match the host's site.
 
 Consequences:
 

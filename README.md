@@ -144,8 +144,9 @@ One sysmon-web can front a fleet. The design is in
   what to *show* and what to *notify about*. Someone on call for one region
   wants waking only for it, but wants to see every site when they open the
   app - whether the neighbour is also down is the first question at 3am.
-  Show is a local preference; Notify lives on the push subscription,
-  because that is the only one the server can enforce.
+  Show is a request parameter so a phone watching one site never downloads
+  the rest; Notify lives on the push subscription, because that is the only
+  place it can be enforced.
 - **The dependency map is per site**, because `dep` cannot cross daemons.
   Several sites can share a canvas as separate clusters, but no cross-site
   edge is invented - the honest way to express one is a `type sysm` check
