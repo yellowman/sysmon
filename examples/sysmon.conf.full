@@ -45,7 +45,7 @@ config dnslog 900;              # DNS cache log interval (default: 900)
 
 # --- Logging ---
 # Two forms: syslog facility or file path
-config logging file "/var/log/sysmond.log";
+config logging file;   # sysmond.log in the state directory
 # config logging syslog "daemon";
 
 # --- Status File ---
