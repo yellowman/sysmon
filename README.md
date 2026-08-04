@@ -136,13 +136,21 @@ the shape of it:
   rules and no per-site VPN. A daemon that cannot reach sysmon-web keeps
   running its last known-good config and keeps paging - the monitoring
   outlives its management plane.
-- **Config is distributed whole-file, pull, and validated on the target**
-  with `sysmond -c` before the swap. sysmon-web holds desired state, the
-  daemon reports what it is actually running, and the difference is a hash
-  comparison rather than a merge: in sync, pending, locally modified,
-  unmanaged, or rejected. A box that was edited at the console is never
-  silently overwritten - the operator is offered the diff, and adopting the
-  local version is the default.
+- **Config is distributed whole-file and validated by the target daemon's
+  own parser** before it is allowed to take effect - in a forked child, so
+  a config bad enough to crash the parser cannot take down the daemon that
+  is still paging people. sysmon-web holds desired state, the daemon
+  reports what it is actually running (`CONFIG-GEN`, one line per poll),
+  and the difference is a hash comparison rather than a merge: in sync,
+  pending, locally modified, unmanaged, rejected or unknown. A rejected
+  delivery costs nothing - the running config is untouched until validation
+  passes, and the previous files are back on disk before the reply is sent.
+  A box that was edited at the console is never silently overwritten: the
+  operator is offered the diff, and adopting the local version is the
+  default, because the person at the console usually had a reason.
+  Managing a box's config means letting the daemon write its own config
+  directory after it drops privileges, which is why nothing is ever
+  delivered to a box that has not been explicitly adopted.
 - **Rollouts are canaried.** A generation goes to one box first, and
   "applied" is not success on its own: object count and alert rate are
   watched, and a spike rolls that box back automatically and blocks the

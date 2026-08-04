@@ -95,6 +95,24 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/sites", r.handleSites)
+
+	// Config distribution. Reading state is open to anyone who can see the
+	// UI; everything that changes what a box runs is admin-only and POST,
+	// so no stale tab or link prefetch can deliver a config.
+	r.mux.HandleFunc("/api/config/fleet", r.handleConfigFleet)
+	r.mux.HandleFunc("/api/config/site/", r.handleConfigSite)
+	r.mux.HandleFunc("/api/config/generations/", r.handleConfigGenerations)
+	r.mux.HandleFunc("/api/config/adopt/", auth.RequireAdmin(r.handleConfigAdopt))
+	r.mux.HandleFunc("/api/config/stage/", auth.RequireAdmin(r.handleConfigStage))
+	r.mux.HandleFunc("/api/config/deliver/", auth.RequireAdmin(r.handleConfigDeliver))
+	r.mux.HandleFunc("/api/config/rollback/", auth.RequireAdmin(r.handleConfigRollback))
+	r.mux.HandleFunc("/api/config/rollout", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet {
+			r.handleConfigRolloutStatus(w, req)
+			return
+		}
+		auth.RequireAdmin(r.handleConfigRollout)(w, req)
+	})
 	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
 	r.mux.HandleFunc("/api/map/layout", r.handleMapLayout)
 	r.mux.HandleFunc("/api/templates", r.handleTemplates)
@@ -160,6 +178,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/history.html", r.handleHistoryPage)
 	r.mux.HandleFunc("/map.html", r.handleMapPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
+	r.mux.HandleFunc("/fleet.html", r.handleFleetPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
 

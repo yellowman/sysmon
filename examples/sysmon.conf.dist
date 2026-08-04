@@ -43,6 +43,14 @@ config maxqueued 50;
 #config aggregator-token "paste the token the admin page minted";
 #config aggregator-ca "/etc/ssl/sysmon-web-ca.pem";   # omit to use the system trust store
 
+# Where the config generation number and the rollback copy are kept, when
+# a sysmon-web manages this box's config. Defaults to this file's own
+# directory. Worth setting when that directory is not writable by the user
+# sysmond drops to - and note that letting a sysmon-web manage this box at
+# all means giving that user write access to the config files themselves.
+# A box nobody has adopted in the UI is never written to.
+#config generation-dir "/var/db/sysmon";
+
 # Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
 # the socket is bound at startup while sysmond is still root - enabling
 # this on a running daemon needs a restart, not a SIGHUP.

@@ -225,14 +225,62 @@ config and every file it includes), delivered together.
 
     fetch -> validate locally -> swap atomically -> reload -> report
 
-Validation is `sysmond -c` **on the target box, before the swap**. This is
-the step that makes remote config survivable: sysmon-web's parser and
-sysmond's lexer are two implementations of one grammar and can disagree,
-and the only opinion that matters is the one held by the daemon that has to
-run it.
+Validation is **sysmond's own parser, on the target box**. This is the step
+that makes remote config survivable: sysmon-web's Go parser and sysmond's
+lexer are two implementations of one grammar and can disagree, and the only
+opinion that matters is the one held by the daemon that has to run it.
 
-A failed validation leaves the running config untouched and reports the
-parser's error back to the UI, against that generation, for that box.
+It runs in a forked child, on the real files, so that a config bad enough
+to take the parser down takes the child down instead of the daemon that is
+still paging people. What it refuses:
+
+- anything the lexer marks as a config error
+- a config that declares nothing to monitor
+- a `root` naming an object nobody defined - which parses perfectly and
+  quietly makes every object unreachable from the root
+
+It also reports the object count, which is what the canary compares
+against. That division is deliberate, and it is the honest one: sysmond's
+lexer is permissive by design and ignores what it does not recognise, so
+"it parsed" is a weak claim. The strong claims are made by watching what
+the box does next.
+
+The order on the box is: back up, write, validate, decide. The daemon has
+not reloaded at any point in that sequence, so a config that fails to parse
+costs nothing but the seconds the files were on disk - and they are put
+back before the reply is sent. A failed validation reports the parser's own
+words back to the UI, verbatim, against that generation, for that box.
+
+### The commands
+
+    CONFIG-GEN       what am I running?    -> generation, hash, file count
+    CONFIG-GET       give me what you run  -> every file, byte for byte
+    CONFIG-PUT       run this instead      -> validate, swap, reload
+    CONFIG-ROLLBACK  undo the last PUT     -> restore, reload
+
+All four need the authkey: a config carries community strings and contact
+addresses on the way out, and decides what gets monitored on the way in.
+`CONFIG-GEN` is the one asked every cycle - one line each way, on the
+connection the poller already has open - which is what makes "somebody
+edited this box" visible in seconds rather than whenever someone looks.
+
+Paths and contents are base64 on the wire, so a config containing anything
+at all survives the trip unchanged. That is not a nicety: the hash is over
+the original bytes, so "survives unchanged" is the entire mechanism.
+
+**What the daemon will write.** Only files it already had open as part of
+its config, or files directly in its main config file's own directory, and
+every delivery must include the main config file. Anything else is refused
+whatever the aggregator claims. An aggregator is trusted with the
+monitoring config; it is not trusted with the filesystem.
+
+**What this costs.** sysmond drops privileges, so a managed box needs its
+config directory writable by the user it drops to (`config generation-dir`
+moves the generation state and the rollback copy elsewhere, but the config
+files themselves are still written in place). That is a real trade-off and
+it is the reason nothing is ever delivered to a box that has not been
+explicitly adopted: a box you have not adopted is not writable by this
+mechanism at all.
 
 ### Hashing
 
@@ -254,11 +302,26 @@ daemon reports `running_generation` / `running_hash` each cycle.
 
 | condition | state | meaning |
 |---|---|---|
-| `running == desired` | **in sync** | nothing to do |
-| `running_gen < desired_gen` | **pending** | delivery in flight or not yet fetched |
+| box not answering, or too old to know `CONFIG-GEN` | **unknown** | nothing here is knowable |
+| no `desired` recorded, or not adopted | **unmanaged** | never adopted; config is read-only in the UI |
+| `running_hash == desired_hash` | **in sync** | nothing to do |
+| `running_gen < desired_gen` | **pending** | staged here, not delivered yet |
 | `running_gen == desired_gen`, hash differs | **locally modified** | somebody edited the box directly |
-| no `desired` recorded | **unmanaged** | never adopted; config is read-only in the UI |
-| validation failed | **rejected** | daemon refused generation N, still running N-1 |
+| `running_gen > desired_gen` | **rejected** | the box claims a generation this side never issued |
+
+The order matters. **Unknown wins over everything**: reporting a box as in
+sync when it has not answered is the one failure that costs someone their
+weekend.
+
+**The hash wins over the generation number.** They can disagree
+legitimately - adopting a box records what it already runs as generation 1
+while the box still calls it 0 - and a box running exactly the right bytes
+is in sync whatever number either side has written down. The generation
+number is bookkeeping; the hash is the truth.
+
+Generation numbers only ever move forward, including past a rollback and
+past a poisoned one. Re-using a number would make "the box is running
+generation 9" stop naming one set of bytes.
 
 **Locally modified is never resolved automatically.** The operator is shown
 a diff and chooses:
@@ -289,7 +352,15 @@ becomes eight hundred pages. So the canary criteria are:
 Failing 2 or 3 within the watch window **rolls the box back to the previous
 generation automatically** and marks the generation poisoned, which blocks
 the remaining waves. The previous generation's files are kept on the box
-precisely so rollback needs no network.
+precisely so rollback needs no network - a config that broke the link to
+the aggregator is exactly the one you most need to undo.
+
+Waves are one box at a time rather than N at a time: the whole value of a
+canary is that the first failure costs one box.
+
+A rollback is also recorded as the new desired state. Without that, the
+next poll would see the box "behind" and offer to redeliver the config it
+was just rolled away from.
 
 ---
 

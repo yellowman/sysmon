@@ -1,9 +1,6 @@
 package config
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -343,18 +340,14 @@ func (d *Document) Dirty() []string {
 // normalised - so an untouched config hashes identically forever, which is
 // what lets a fleet tell "in sync" from "somebody edited this box".
 func (d *Document) Hash() string {
-	h := sha256.New()
-	var n [8]byte
-	for _, p := range d.Order {
-		binary.BigEndian.PutUint64(n[:], uint64(len(p)))
-		h.Write(n[:])
-		h.Write([]byte(p))
-		content := d.Files[p]
-		binary.BigEndian.PutUint64(n[:], uint64(len(content)))
-		h.Write(n[:])
-		h.Write(content)
+	contents := make([][]byte, len(d.Order))
+	for i, p := range d.Order {
+		contents[i] = d.Files[p]
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	// One implementation, shared with the fleet: HashFileSet is what the
+	// daemon's confgen_hash() has to agree with byte for byte, and a
+	// second copy of the rule here is a second chance to drift from it.
+	return HashFileSet(d.Order, contents)
 }
 
 // Apply edits the document so its objects match cfg, touching only what
