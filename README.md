@@ -112,8 +112,15 @@ notifications, and CI that builds everything on every push.
 
 ## Aggregating several sysmonds
 
-One sysmon-web can front a fleet. The design is in
-[docs/sysmond-aggregation.md](docs/sysmond-aggregation.md); the shape of it:
+One sysmon-web can front a fleet: pass several daemons to `-sysmon`,
+comma-separated, and it polls them all concurrently.
+
+```sh
+sysmon-web -sysmon "metro.noc:1345,north.noc:1345" ...
+```
+
+The design is in [docs/sysmond-aggregation.md](docs/sysmond-aggregation.md);
+the shape of it:
 
 - **Objects are namespaced** `site:object`. Each daemon carries a short
   `sitename` (the key, appearing in every alert and stored row) and a
