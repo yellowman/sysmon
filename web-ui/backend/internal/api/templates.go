@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"syscall"
+	"sysmon-web/internal/auth"
 )
 
 var templateCache map[string]*template.Template
@@ -28,6 +29,7 @@ func InitTemplates(dir string) error {
 		"map.html",
 		"config.html",
 		"fleet.html",
+		"agents.html",
 		"admin.html",
 		"metrics.html",
 	}
@@ -155,6 +157,17 @@ func (r *Router) handleConfigPage(w http.ResponseWriter, req *http.Request) {
 // running, what it should be, and the two actions that change that.
 func (r *Router) handleFleetPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "fleet.html", PageData{Active: "fleet"})
+}
+
+// The monitoring-boxes page. Gated here as well as on the API it calls:
+// a page whose every control returns 403 is a worse answer than not
+// serving the page.
+func (r *Router) handleAgentsPage(w http.ResponseWriter, req *http.Request) {
+	if req.Header.Get("X-Session-Role") != auth.RoleAdmin {
+		http.Redirect(w, req, "/admin.html", http.StatusSeeOther)
+		return
+	}
+	r.renderTemplate(w, "agents.html", PageData{Active: "admin"})
 }
 
 func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {

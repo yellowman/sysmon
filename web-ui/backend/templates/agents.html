@@ -1,0 +1,245 @@
+{{template "base" .}}
+
+{{define "title"}}Monitoring boxes{{end}}
+
+{{define "content"}}
+<div x-data="agentsPage()" x-init="init()">
+    <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
+        <div>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Monitoring boxes</h1>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide">
+                Every sysmond that reports here, and the credential it uses
+            </p>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="/admin.html" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
+                <i class="fas fa-arrow-left mr-1"></i>Admin
+            </a>
+            <button @click="showAdd = !showAdd"
+                    class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
+                <i class="fas fa-plus mr-1"></i>Add a box
+            </button>
+        </div>
+    </div>
+
+    <!-- The token, shown once. This panel is the only place it ever
+         appears; the server keeps a hash and cannot produce it again. -->
+    <div x-show="fresh.token" x-cloak
+         class="mb-4 rounded-lg border-2 border-amber-400 bg-amber-50 p-4">
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+                <h2 class="text-sm font-bold text-amber-900">
+                    Token for <span class="mono" x-text="fresh.site"></span>
+                </h2>
+                <p class="text-xs text-amber-800 mt-1">
+                    Copy this now. It is stored as a hash, so it cannot be shown again.
+                    If you lose it, mint a new one - which stops the box using the old one.
+                </p>
+
+                <label class="block text-[10px] font-semibold uppercase tracking-wider text-amber-900 mt-3 mb-1">
+                    Add these lines to /etc/sysmon.conf on the box
+                </label>
+                <pre class="text-xs bg-white rounded p-3 overflow-x-auto border border-amber-200"
+                     x-text="configSnippet()"></pre>
+            </div>
+            <div class="flex flex-col gap-2">
+                <button @click="copySnippet()"
+                        class="px-3 py-1.5 bg-amber-600 text-white text-xs rounded hover:bg-amber-700 whitespace-nowrap">
+                    <i class="fas fa-copy mr-1"></i><span x-text="copied ? 'Copied' : 'Copy'"></span>
+                </button>
+                <button @click="fresh = {}"
+                        class="px-3 py-1.5 bg-white text-amber-800 text-xs rounded border border-amber-300 hover:bg-amber-100">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="notice" x-cloak class="mb-3 text-sm rounded p-3"
+         :class="noticeBad ? 'bg-red-50 border border-red-200 text-red-900' : 'bg-emerald-50 border border-emerald-200 text-emerald-900'"
+         x-text="notice"></div>
+
+    <!-- Add a box -->
+    <div x-show="showAdd" x-cloak class="card mb-4 p-4">
+        <div class="flex flex-wrap gap-3 items-end">
+            <div>
+                <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Site name</label>
+                <input type="text" x-model="newAgent.site" placeholder="metro"
+                       class="px-3 py-1.5 border border-gray-200 rounded text-sm w-44 mono">
+                <p class="text-[10px] text-gray-400 mt-1">
+                    Letters, digits, - and _ . This becomes the first half of every
+                    <span class="mono">site:object</span> name.
+                </p>
+            </div>
+            <div class="flex-1 min-w-[16rem]">
+                <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Label</label>
+                <input type="text" x-model="newAgent.label" placeholder="Metro Station - rack 4"
+                       class="px-3 py-1.5 border border-gray-200 rounded text-sm w-full">
+                <p class="text-[10px] text-gray-400 mt-1">
+                    For people. Write down which machine this is - nothing else records it.
+                </p>
+            </div>
+            <button @click="mint(false)" :disabled="!newAgent.site || busy"
+                    class="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700 disabled:opacity-40">
+                Mint token
+            </button>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                <tr>
+                    <th class="px-3 py-2 text-left">Site</th>
+                    <th class="px-3 py-2 text-left">Label</th>
+                    <th class="px-3 py-2 text-left">Last address</th>
+                    <th class="px-3 py-2 text-left">Last seen</th>
+                    <th class="px-3 py-2 text-left">Token</th>
+                    <th class="px-3 py-2 text-left">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="a in agents" :key="a.site">
+                    <tr class="border-t border-gray-100" :class="a.revoked ? 'opacity-50' : ''">
+                        <td class="px-3 py-2 mono font-medium" x-text="a.site"></td>
+                        <td class="px-3 py-2 text-gray-600" x-text="a.label || ''"></td>
+                        <td class="px-3 py-2 mono text-xs" x-text="a.last_addr || '-'"></td>
+                        <td class="px-3 py-2 text-xs" x-text="seen(a)"></td>
+                        <td class="px-3 py-2">
+                            <span x-show="a.revoked"
+                                  class="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[11px] font-medium">revoked</span>
+                            <span x-show="!a.revoked" class="text-xs text-gray-400 mono"
+                                  title="Stored as a SHA-256 hash. The value is shown once, when it is minted.">
+                                &bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;
+                            </span>
+                        </td>
+                        <td class="px-3 py-2 whitespace-nowrap">
+                            <button @click="remint(a)" :disabled="busy"
+                                    class="px-2 py-1 bg-amber-600 text-white text-xs rounded hover:bg-amber-700 disabled:opacity-40">
+                                Re-mint
+                            </button>
+                            <button x-show="!a.revoked" @click="revoke(a)" :disabled="busy"
+                                    class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40">
+                                Revoke
+                            </button>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!agents.length">
+                    <td colspan="6" class="px-3 py-8 text-center text-gray-400 text-sm">
+                        No boxes yet. Add one, then put the token and the certificate on it.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="text-[11px] text-gray-400 mt-3">
+        A token proves a box to this server; the certificate proves this server
+        to the box. Both are needed. Only an administrator sees this page.
+    </p>
+</div>
+
+<script>
+function agentsPage() {
+    return {
+        agents: [],
+        showAdd: false,
+        newAgent: { site: '', label: '' },
+        fresh: {},
+        copied: false,
+        busy: false,
+        notice: '',
+        noticeBad: false,
+
+        init() {
+            this.load();
+            setInterval(() => this.load(), 10000);
+        },
+
+        async load() {
+            try {
+                const r = await apiCall('/api/settings/agents');
+                this.agents = r.agents || [];
+            } catch (e) { /* the table simply does not refresh */ }
+        },
+
+        // A zero time means the box has never connected. Saying "never" is
+        // the useful thing: it separates "not installed yet" from "was
+        // working and stopped".
+        seen(a) {
+            if (!a.last_seen || a.last_seen.startsWith('0001-01-01')) return 'never';
+            return formatRelativeTime(a.last_seen) || a.last_seen;
+        },
+
+        configSnippet() {
+            return 'config sitename  "' + this.fresh.site + '";\n' +
+                   'config sitedesc  "' + (this.fresh.label || this.fresh.site) + '";\n' +
+                   'config aggregator "' + window.location.hostname + ':1347";\n' +
+                   'config aggregator-token "' + this.fresh.token + '";';
+        },
+
+        copySnippet() {
+            navigator.clipboard.writeText(this.configSnippet());
+            this.copied = true;
+            setTimeout(() => this.copied = false, 2000);
+        },
+
+        say(msg, bad) { this.notice = msg; this.noticeBad = !!bad; },
+
+        async post(url, body) {
+            this.busy = true;
+            try {
+                const r = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: body ? JSON.stringify(body) : undefined,
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.message || data.error || r.statusText);
+                return data;
+            } finally {
+                this.busy = false;
+                this.load();
+            }
+        },
+
+        async mint(replace) {
+            const site = (this.newAgent.site || '').trim();
+            const label = (this.newAgent.label || '').trim();
+            try {
+                const d = await this.post('/api/settings/agents',
+                                          {site: site, label: label, replace: !!replace});
+                this.fresh = {site: d.site, token: d.token, label: label};
+                this.showAdd = false;
+                this.newAgent = {site: '', label: ''};
+                this.say('');
+            } catch (e) { this.say(e.message, true); }
+        },
+
+        // Re-minting is how an admin replaces a token, and it is also how a
+        // box gets cut off by accident - so the confirmation says which box
+        // and when it last reported.
+        async remint(a) {
+            const when = this.seen(a);
+            if (!confirm('Mint a new token for ' + a.site + '?\n\n' +
+                         'The box using the current one stops reporting until you put ' +
+                         'the new token on it. It keeps monitoring and paging.\n\n' +
+                         'Last seen: ' + when)) return;
+            this.newAgent = {site: a.site, label: a.label || ''};
+            await this.mint(true);
+        },
+
+        async revoke(a) {
+            if (!confirm('Revoke the token for ' + a.site + '?\n\n' +
+                         'That box stops reporting here at once. It keeps monitoring ' +
+                         'and paging.')) return;
+            try {
+                await this.post('/api/settings/agents/revoke/' + encodeURIComponent(a.site));
+                this.say(a.site + ': token revoked');
+            } catch (e) { this.say(e.message, true); }
+        },
+    };
+}
+</script>
+{{end}}

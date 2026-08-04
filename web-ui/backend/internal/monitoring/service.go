@@ -1220,11 +1220,21 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 		}
 	}
 
-	// Nothing answered: that is a real failure, and the caller's error
-	// handling (and the UI's error widget) should see it.
+	// An empty fleet is not a failure. Daemons dial in, so a freshly
+	// installed sysmon-web has none until the first box is given a token
+	// and started - and reporting that as a service error puts a red
+	// banner on every page of a system that is working exactly as
+	// intended. There are no hosts because there are no boxes yet.
+	if len(fleet) == 0 {
+		merged.Rev = 0
+		return merged, nil
+	}
+
+	// Daemons are configured and not one answered: that is a real failure,
+	// and the caller's error handling should see it.
 	if reached == 0 {
 		if firstErr == nil {
-			firstErr = fmt.Errorf("no sysmond configured")
+			firstErr = fmt.Errorf("no sysmond answered")
 		}
 		return nil, firstErr
 	}
@@ -2100,36 +2110,23 @@ func (s *Service) TestAuth(authKey string) (bool, error) {
 
 // GetVersion gets the sysmon daemon version
 func (s *Service) GetVersion(authKey string) (string, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
+	// From what the poller already recorded, not from a connection of its
+	// own. This used to dial s.sysmonAddr, which predates the fleet: it
+	// could only ever see a daemon this process dials, and daemons dial
+	// *in* by default now. On a normal install it was reaching for an
+	// address that is not set and reporting the result as a fault.
+	//
+	// An empty answer is not an error. A sysmon-web with no boxes yet is
+	// a sysmon-web that has just been installed.
+	for _, d := range s.fleet() {
+		d.mu.Lock()
+		v := d.info.Version
+		d.mu.Unlock()
+		if v != "" {
+			return v, nil
+		}
 	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	if err := readWelcomeBanner(reader); err != nil {
-		return "", err
-	}
-
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return "", err
-	}
-
-	// Send VERS command
-	_, err = conn.Write([]byte("VERS\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send VERS command: %w", err)
-	}
-
-	// Read version response
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("failed to read VERS response: %w", err)
-	}
-
-	return strings.TrimSpace(response), nil
+	return "", nil
 }
 
 // ToggleDebug toggles general debug logging

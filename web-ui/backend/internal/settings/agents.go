@@ -37,6 +37,33 @@ type AgentToken struct {
 	Revoked  bool      `json:"revoked,omitempty"`
 }
 
+// GetAgentToken returns the record for a site, without the secret.
+// Used to tell "this site has no token yet" from "this site has a live
+// token that something in the field is using".
+func (s *Store) GetAgentToken(site string) (AgentToken, bool) {
+	var stored struct {
+		AgentToken
+		Hash string `json:"hash"`
+	}
+	found := false
+
+	s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		if b == nil {
+			return nil
+		}
+		blob := b.Get([]byte(site))
+		if blob == nil {
+			return nil
+		}
+		if json.Unmarshal(blob, &stored) == nil {
+			found = true
+		}
+		return nil
+	})
+	return stored.AgentToken, found
+}
+
 // NewAgentToken mints a credential for a site. The token is returned once
 // and only once - it is stored hashed, so a leaked database does not leak
 // the fleet's credentials, and "show me the token again" is deliberately
