@@ -62,7 +62,32 @@ type Service struct {
 	// object dump - is privileged; without a key we fall back to asking
 	// for each object separately.
 	authKeyFn func() string
+
+	// Incremental fetch state (guarded by cacheMu).
+	//
+	// confSeq is the highest object sequence sysmond has reported. It goes
+	// back as CONF's argument, so a cycle where nothing changed transfers
+	// two lines. hostCache keeps the objects we already know, since the
+	// daemon will not resend them.
+	//
+	// fullResyncAt forces a whole dump periodically: counters like
+	// total_checked tick without being a "change", so an object that never
+	// changes state would otherwise show numbers frozen at whenever we
+	// last saw it.
+	confSeq      uint64
+	hostCache    map[string]XMLObjectStatus
+	fullResyncAt time.Time
+
+	// Traps collected from sysmond, newest first. trapSeq is the highest
+	// trap sequence the daemon has reported; trapsLost counts the ones its
+	// ring overwrote before we asked for them.
+	trapSeq     uint64
+	trapHistory []xmlTrap
+	trapsLost   int
 }
+
+// fullResyncEvery bounds how stale a quiet object's counters can get.
+const fullResyncEvery = 60 * time.Second
 
 // SetAuthKeyProvider tells the service how to find sysmond's authkey.
 func (s *Service) SetAuthKeyProvider(fn func() string) { s.authKeyFn = fn }
@@ -297,38 +322,41 @@ func readSysmonResponse(reader *bufio.Reader) (*SysmonResponse, error) {
 // XMLObjectStatus represents the XML structure from SHOWOBJ command
 // Maps to send_object_xml() output in srvclient.c
 type XMLObjectStatus struct {
-	XMLName           xml.Name `xml:"ObjectStatus"`
-	Object            string   `xml:"Object"`
-	HostName          string   `xml:"HostName"`
-	ObjectPort        int      `xml:"ObjectPort"`
-	ObjectType        string   `xml:"ObjectType"`
-	ObjectMessage     string   `xml:"ObjectMessage"`
-	ObjectNotes       string   `xml:"ObjectNotes"`
-	ObjectContact     string   `xml:"ObjectContact"`
-	ObjectGroup       string   `xml:"ObjectGroup"`
-	ObjectState       int      `xml:"ObjectLastcheckState"`
-	ObjectContacted   int      `xml:"ObjectContacted"`
-	ObjectContactedAt int64    `xml:"ObjectContactedAt"`
-	ObjectContactOnUp int      `xml:"ObjectContactOnUp"`
-	TotalChecked      int64    `xml:"ObjectTotalChecked"`
-	TotalDown         int64    `xml:"ObjectTotalDown"`
-	DownCt            int64    `xml:"ObjectDownCt"`
-	UpCt              int64    `xml:"ObjectUpCt"`
-	MaxDown           int64    `xml:"ObjectMaxDown"`
-	QueueInterval     int64    `xml:"ObjectQueueInterval"`
-	SendPings         int      `xml:"ObjectSendPings"`
-	MinPings          int      `xml:"ObjectMinPings"`
-	Reversed          int      `xml:"ObjectReversed"`
-	Queued            int      `xml:"ObjectQueued"`
-	LastChecked       int64    `xml:"ObjectLastChecked"`
-	CheckStarted      int64    `xml:"ObjectCheckStarted"`
-	DeathTime         int64    `xml:"ObjectOutageTime"`
-	LastTimeUp        int64    `xml:"ObjectLastTimeUp"`
-	UniqueID          string   `xml:"ObjectUniqueID"`
-	URL               string   `xml:"ObjectURL"`
-	URLText           string   `xml:"ObjectURLText"`
-	ExecCmd           string   `xml:"ObjectExecCmd"`
-	PageMessage       string   `xml:"ObjectPageMessage"`
+	XMLName xml.Name `xml:"ObjectStatus"`
+	// ChangeSeq is sysmond's monotonic "this object moved" counter. The
+	// highest one seen goes back as CONF's argument next cycle.
+	ChangeSeq         uint64 `xml:"ObjectChangeSeq"`
+	Object            string `xml:"Object"`
+	HostName          string `xml:"HostName"`
+	ObjectPort        int    `xml:"ObjectPort"`
+	ObjectType        string `xml:"ObjectType"`
+	ObjectMessage     string `xml:"ObjectMessage"`
+	ObjectNotes       string `xml:"ObjectNotes"`
+	ObjectContact     string `xml:"ObjectContact"`
+	ObjectGroup       string `xml:"ObjectGroup"`
+	ObjectState       int    `xml:"ObjectLastcheckState"`
+	ObjectContacted   int    `xml:"ObjectContacted"`
+	ObjectContactedAt int64  `xml:"ObjectContactedAt"`
+	ObjectContactOnUp int    `xml:"ObjectContactOnUp"`
+	TotalChecked      int64  `xml:"ObjectTotalChecked"`
+	TotalDown         int64  `xml:"ObjectTotalDown"`
+	DownCt            int64  `xml:"ObjectDownCt"`
+	UpCt              int64  `xml:"ObjectUpCt"`
+	MaxDown           int64  `xml:"ObjectMaxDown"`
+	QueueInterval     int64  `xml:"ObjectQueueInterval"`
+	SendPings         int    `xml:"ObjectSendPings"`
+	MinPings          int    `xml:"ObjectMinPings"`
+	Reversed          int    `xml:"ObjectReversed"`
+	Queued            int    `xml:"ObjectQueued"`
+	LastChecked       int64  `xml:"ObjectLastChecked"`
+	CheckStarted      int64  `xml:"ObjectCheckStarted"`
+	DeathTime         int64  `xml:"ObjectOutageTime"`
+	LastTimeUp        int64  `xml:"ObjectLastTimeUp"`
+	UniqueID          string `xml:"ObjectUniqueID"`
+	URL               string `xml:"ObjectURL"`
+	URLText           string `xml:"ObjectURLText"`
+	ExecCmd           string `xml:"ObjectExecCmd"`
+	PageMessage       string `xml:"ObjectPageMessage"`
 
 	// Thresholds
 	PacketLossThreshold int `xml:"ObjectPacketLossThreshold"`
@@ -762,6 +790,11 @@ func accumulateHost(status *models.SysmonStatus, host models.HostStatus, checkTy
 func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs []XMLObjectStatus, ok bool) {
 	key := s.authKey()
 	if key == "" {
+		// Worth saying out loud: without it every poll walks the objects
+		// one at a time, which is the difference between 0.1s and 36s on
+		// a large config, and the silence made that hard to notice.
+		s.sessionLog.Log("CONF", "", true,
+			"no sysmond authkey available - falling back to per-object fetch")
 		return nil, false
 	}
 	if err := authenticate(conn, reader, key); err != nil {
@@ -769,11 +802,26 @@ func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs 
 		return nil, false
 	}
 
-	if _, err := conn.Write([]byte("CONF\n")); err != nil {
+	// Ask only for what moved since last time. Periodically - and on the
+	// first cycle - ask for everything anyway, so counters that tick
+	// without counting as a change do not drift.
+	s.cacheMu.Lock()
+	since := s.confSeq
+	if s.hostCache == nil || time.Since(s.fullResyncAt) > fullResyncEvery {
+		since = 0
+	}
+	s.cacheMu.Unlock()
+
+	cmd := "CONF\n"
+	if since > 0 {
+		cmd = fmt.Sprintf("CONF %d\n", since)
+	}
+	if _, err := conn.Write([]byte(cmd)); err != nil {
 		return nil, false
 	}
 
 	var block strings.Builder
+	var daemonSeq uint64
 	for {
 		line, err := reader.ReadString('\n')
 		trimmed := strings.TrimSpace(line)
@@ -784,6 +832,7 @@ func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs 
 			return nil, false
 		}
 		if strings.HasPrefix(trimmed, "333") {
+			daemonSeq = parseSeqField(trimmed, 1)
 			break // end of dump
 		}
 
@@ -809,11 +858,53 @@ func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs 
 		}
 	}
 
-	if len(objs) == 0 {
+	// Merge into what we already hold. An incremental reply carrying
+	// nothing is the normal case on a quiet network, and is a success.
+	s.cacheMu.Lock()
+	if since == 0 || s.hostCache == nil {
+		s.hostCache = make(map[string]XMLObjectStatus, len(objs))
+		s.fullResyncAt = time.Now()
+	}
+	if daemonSeq < s.confSeq {
+		// The daemon restarted: its counter went backwards, so everything
+		// we hold is from a previous life.
+		s.sessionLog.Log("CONF", "sysmond sequence went backwards - resyncing", false, "")
+		s.hostCache = make(map[string]XMLObjectStatus, len(objs))
+		s.fullResyncAt = time.Time{}
+	}
+	for _, o := range objs {
+		s.hostCache[o.Object] = o
+	}
+	s.confSeq = daemonSeq
+	merged := make([]XMLObjectStatus, 0, len(s.hostCache))
+	for _, o := range s.hostCache {
+		merged = append(merged, o)
+	}
+	s.cacheMu.Unlock()
+
+	if len(merged) == 0 {
 		return nil, false
 	}
-	s.sessionLog.Log("CONF", fmt.Sprintf("Retrieved %d objects in one command", len(objs)), false, "")
-	return objs, true
+	if since > 0 {
+		s.sessionLog.Log(fmt.Sprintf("CONF %d", since),
+			fmt.Sprintf("%d changed of %d held (seq %d)", len(objs), len(merged), daemonSeq), false, "")
+	} else {
+		s.sessionLog.Log("CONF", fmt.Sprintf("Retrieved %d objects in one command", len(objs)), false, "")
+	}
+	return merged, true
+}
+
+// parseSeqField pulls field n out of a "333 a b c" terminator.
+func parseSeqField(line string, n int) uint64 {
+	fields := strings.Fields(line)
+	if n >= len(fields) {
+		return 0
+	}
+	v, err := strconv.ParseUint(fields[n], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
@@ -953,6 +1044,11 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 
 	// One command for everything, when the daemon will give it to us.
 	bulkObjs, bulkOK := s.fetchAllObjectsXML(conn, reader)
+	if bulkOK {
+		// Same connection, already authenticated: ask for the traps that
+		// arrived since last cycle while we are here.
+		s.fetchTraps(conn, reader)
+	}
 	if bulkOK {
 		objectNames = objectNames[:0]
 		for _, xmlObj := range bulkObjs {

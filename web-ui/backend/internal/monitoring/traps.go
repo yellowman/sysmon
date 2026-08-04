@@ -7,7 +7,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"sysmon-web/internal/models"
@@ -18,15 +17,13 @@ import (
 // This file asks it for what it has - the TRAPS command - and turns the
 // daemon's XML into the model the trap page renders.
 
-// trapCacheTTL keeps a burst of page loads from opening a connection each.
-// Traps are already history by the time they get here; a few seconds of
-// staleness costs nothing.
-const trapCacheTTL = 5 * time.Second
-
-var (
-	trapMu      sync.Mutex
-	trapCache   *models.TrapInfo
-	trapCacheAt time.Time
+// Retention. sysmond's ring holds the last few dozen traps in memory so
+// it can hand them over; keeping a month of them is this side's job,
+// because this is the side with somewhere to put them and a page that
+// shows them.
+const (
+	trapMaxAge = 31 * 24 * time.Hour
+	trapsKept  = 20000 // backstop against a device stuck in a trap loop
 )
 
 // Wire format produced by send_traps() in src/srvclient.c.
@@ -36,6 +33,7 @@ type xmlTrapList struct {
 }
 
 type xmlTrap struct {
+	Seq          uint64       `xml:"TrapSeq"`
 	Source       string       `xml:"TrapSource"`
 	Time         int64        `xml:"TrapTime"`
 	Bytes        int          `xml:"TrapBytes"`
@@ -67,31 +65,21 @@ type xmlVarbind struct {
 	Note  string `xml:"VarbindNote"`
 }
 
-// GetTraps returns the traps sysmond has caught, newest first.
+// GetTraps returns the traps the poller has collected, newest first.
 //
-// An older daemon that does not know the TRAPS command answers "444 - Unk";
-// that is reported as an empty list rather than an error, because "no traps"
-// and "this daemon predates trap decoding" look identical to a user staring
-// at an empty page, and only one of them is worth a red banner.
+// It does not talk to sysmond: the poller already asked, on the same
+// connection it uses for object status, and kept what came back. Traps
+// are held far longer than the daemon's ring holds them, so this is also
+// the only place a month of history exists.
 func (s *Service) GetTraps(authKey string) (*models.TrapInfo, error) {
-	trapMu.Lock()
-	if trapCache != nil && time.Since(trapCacheAt) < trapCacheTTL {
-		cached := trapCache
-		trapMu.Unlock()
-		return cached, nil
-	}
-	trapMu.Unlock()
+	s.cacheMu.Lock()
+	held := make([]xmlTrap, len(s.trapHistory))
+	copy(held, s.trapHistory)
+	lost := s.trapsLost
+	s.cacheMu.Unlock()
 
-	info, err := s.fetchTraps(authKey)
-	if err != nil {
-		return nil, err
-	}
-
-	trapMu.Lock()
-	trapCache = info
-	trapCacheAt = time.Now()
-	trapMu.Unlock()
-
+	info := buildTrapInfo(held)
+	info.Summary.Lost = lost
 	return info, nil
 }
 
@@ -106,77 +94,108 @@ func emptyTrapInfo() *models.TrapInfo {
 	}
 }
 
-func (s *Service) fetchTraps(authKey string) (*models.TrapInfo, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", s.sysmonAddr, err)
-	}
-	defer conn.Close()
+// fetchTraps asks for the traps that arrived since the last cycle, on the
+// connection the caller already has open and authenticated.
+//
+// The daemon answers "333 <current-seq> <oldest-held> <sent>". Comparing
+// <oldest-held> against what we asked for is how we know the ring
+// overwrote traps before we managed to collect them - which is worth
+// saying out loud rather than quietly under-reporting.
+func (s *Service) fetchTraps(conn net.Conn, reader *bufio.Reader) {
+	s.cacheMu.Lock()
+	since := s.trapSeq
+	s.cacheMu.Unlock()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	if err := readWelcomeBanner(reader); err != nil {
-		return nil, err
+	cmd := "TRAPS\n"
+	if since > 0 {
+		cmd = fmt.Sprintf("TRAPS %d\n", since)
 	}
-
-	// Authenticating is what earns the community string in the reply;
-	// sysmond withholds it from anonymous clients because it is a
-	// credential.
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return nil, err
-	}
-
-	if _, err := conn.Write([]byte("MODE xml\n")); err != nil {
-		return nil, fmt.Errorf("failed to send MODE xml command: %w", err)
-	}
-	resp, err := readSysmonResponse(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MODE xml response: %w", err)
-	}
-	if resp.IsError || resp.Code != "333" {
-		return nil, fmt.Errorf("MODE xml failed: %s", resp.Message)
+	if _, err := conn.Write([]byte(cmd)); err != nil {
+		s.sessionLog.Log("TRAPS", "", true, "write failed: "+err.Error())
+		return
 	}
 
-	if _, err := conn.Write([]byte("TRAPS\n")); err != nil {
-		return nil, fmt.Errorf("failed to send TRAPS command: %w", err)
-	}
-
-	var sb strings.Builder
+	var (
+		block   strings.Builder
+		fresh   []xmlTrap
+		current uint64
+		oldest  uint64
+	)
 	for {
 		line, err := reader.ReadString('\n')
 		trimmed := strings.TrimSpace(line)
 
-		if strings.HasPrefix(trimmed, "444") {
-			// Daemon does not implement TRAPS.
-			s.sessionLog.Log("TRAPS", "daemon does not support TRAPS", false, "")
-			return emptyTrapInfo(), nil
+		if strings.HasPrefix(trimmed, "444") || strings.HasPrefix(trimmed, "403") {
+			s.sessionLog.Log("TRAPS", trimmed, true, "daemon refused the trap query")
+			return // daemon too old to know TRAPS, or not in xml mode
 		}
 		if strings.HasPrefix(trimmed, "333") {
-			s.sessionLog.Log("TRAPS", trimmed, false, "")
+			current = parseSeqField(trimmed, 1)
+			oldest = parseSeqField(trimmed, 2)
 			break
 		}
-		if trimmed != "" {
-			sb.WriteString(trimmed)
-		}
 
+		// Start clean at each <Trap>: the first block would otherwise
+		// carry the <SysmonTraps> wrapper line with it and fail to
+		// unmarshal, quietly losing one trap per fetch.
+		if strings.Contains(line, "<Trap>") {
+			block.Reset()
+		}
+		block.WriteString(line)
+		if strings.Contains(line, "</Trap>") {
+			var t xmlTrap
+			if perr := xml.Unmarshal([]byte(block.String()), &t); perr == nil {
+				fresh = append(fresh, t)
+			} else {
+				s.sessionLog.Log("TRAPS", block.String(), true, perr.Error())
+			}
+			block.Reset()
+		}
 		if err != nil {
-			return nil, fmt.Errorf("error reading TRAPS response: %w", err)
+			s.sessionLog.Log("TRAPS", "", true, "read failed: "+err.Error())
+			return
 		}
 	}
 
-	raw := sb.String()
-	if raw == "" {
-		return emptyTrapInfo(), nil
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	if current < s.trapSeq {
+		// Daemon restarted; its ring and its counter start over.
+		s.trapSeq = 0
+		since = 0
+	}
+	// A gap means traps aged out of the daemon's ring before we asked.
+	if since > 0 && oldest > since+1 {
+		missed := int(oldest - since - 1)
+		s.trapsLost += missed
+		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since), "", true,
+			fmt.Sprintf("%d trap(s) aged out of sysmond's ring before we collected them", missed))
 	}
 
-	var parsed xmlTrapList
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		s.sessionLog.Log("TRAPS", raw, true, err.Error())
-		return nil, fmt.Errorf("could not parse trap list from sysmond: %w", err)
+	// The daemon sends newest first; keep the store oldest-last so the
+	// page renders the same order it always did.
+	if len(fresh) > 0 {
+		s.trapHistory = append(fresh, s.trapHistory...)
+		if len(s.trapHistory) > trapsKept {
+			s.trapHistory = s.trapHistory[:trapsKept]
+		}
+		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since),
+			fmt.Sprintf("%d new (seq %d, %d held)", len(fresh), current, len(s.trapHistory)), false, "")
+	}
+	if current > 0 {
+		s.trapSeq = current
 	}
 
-	return buildTrapInfo(parsed.Traps), nil
+	// Age out anything past the retention window.
+	cutoff := time.Now().Add(-trapMaxAge).Unix()
+	kept := s.trapHistory[:0]
+	for _, t := range s.trapHistory {
+		if t.Time >= cutoff {
+			kept = append(kept, t)
+		}
+	}
+	s.trapHistory = kept
 }
 
 // buildTrapInfo turns the daemon's records into the page model, including

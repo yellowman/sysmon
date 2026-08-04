@@ -375,7 +375,10 @@ func main() {
 	// Refresh the status cache in the background so the per-host sysmond
 	// fetch happens off the request path - UI/app requests serve from a
 	// warm cache instead of each one driving a fresh N-round-trip query.
-	monitoringService.StartPoller(2 * time.Second)
+	// One second, and one connection: each cycle asks sysmond only for the
+	// objects and traps that changed since the last one, so a quiet
+	// network costs two round trips and transfers nothing.
+	monitoringService.StartPoller(1 * time.Second)
 	defer monitoringService.StopPoller()
 
 	// Web-only settings (push credentials etc.) live in their own bbolt

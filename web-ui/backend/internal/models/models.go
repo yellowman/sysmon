@@ -312,7 +312,10 @@ type TrapSource struct {
 
 // TrapSummary represents trap statistics
 type TrapSummary struct {
-	TotalTraps      int            `json:"total_traps_hour"`
+	TotalTraps int `json:"total_traps_hour"`
+	// Lost counts traps sysmond's ring overwrote before sysmon-web
+	// collected them - visible rather than silently missing.
+	Lost            int            `json:"traps_lost,omitempty"`
 	TrapsByType     map[string]int `json:"traps_by_type"`
 	TrapsBySeverity map[string]int `json:"traps_by_severity"`
 }
