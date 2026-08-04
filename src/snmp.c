@@ -568,13 +568,14 @@ void start_test_snmp(struct monitorent *here)
 	localstruct->reqid = next_snmp_reqid();
 
 	if (debug||snmp_debug)
-		print_err(1, "snmp.c:start_test_snmp: %s oid %s reqid %lu",
+		print_err(1, "snmp.c:start_test_snmp: %s oid %s reqid %lu (%s)",
 			here->checkent->hostname, here->checkent->snmp_oid,
-			localstruct->reqid);
+			localstruct->reqid,
+			here->checkent->snmp_version == SNMP_VERSION_1 ? "v1" : "v2c");
 
 	here->filedes = snmp_open_query((char *)here->checkent->hostname,
 		here->checkent->port > 0 ? here->checkent->port : SNMP_PORTNUM,
-		SNMP_VERSION_2C, (char *)here->checkent->snmp_community,
+		here->checkent->snmp_version, (char *)here->checkent->snmp_community,
 		localstruct->reqid, (char *)here->checkent->snmp_oid);
 
 	if (here->filedes == -1)

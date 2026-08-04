@@ -279,6 +279,104 @@ static void test_response_parsing(void)
 	check(!v.have_value, "an error PDU carries no value");
 }
 
+
+/*
+ * Fuzz the encoder as well as the parser.
+ *
+ * The parser reads bytes an agent sent; the encoder writes bytes into a
+ * caller's buffer from a config-file string, and a config file is not a
+ * trusted input either - an OID typo is the normal case, not the
+ * exceptional one. Random OIDs into random-sized buffers, and every
+ * packet that does come out has to parse back to the OID that went in.
+ */
+static void test_encoder_fuzz(int rounds)
+{
+	static const char *seeds[] = {
+		".1.3.6.1.2.1.1.3.0", "1.3.6.1.4.1.9.9.9.9.9.9",
+		".1.3.6.1.2.1.31.1.1.1.6.4294967295",
+		".0.0", ".2.39", ".1.3", "", ".", "..", "1..2", "1.2.3.",
+		".1.3.6.1.4.1.99999999999999999999",
+	};
+	int i, j;
+
+	for (i = 0; i < rounds; i++) {
+		unsigned char pkt[600];
+		char oid[512];
+		char community[128];
+		size_t cap;
+		int len;
+
+		/* half known-shaped, half noise */
+		if (i % 2) {
+			snprintf(oid, sizeof(oid), "%s", seeds[rand() % (int)(sizeof(seeds)/sizeof(seeds[0]))]);
+			/* then chew on it */
+			for (j = 0; j < 3 && oid[0] != '\0'; j++) {
+				size_t n = strlen(oid);
+				oid[rand() % (int)n] = (char)(rand() % 127 + 1);
+			}
+		} else {
+			int n = rand() % (int)(sizeof(oid) - 1);
+			for (j = 0; j < n; j++) {
+				/* mostly digits and dots, so we reach the encoder
+				   rather than bouncing off the first character */
+				int r = rand() % 10;
+				oid[j] = (r < 6) ? (char)('0' + rand() % 10)
+					: (r < 9) ? '.' : (char)(rand() % 127 + 1);
+			}
+			oid[n] = '\0';
+		}
+
+		{
+			int n = rand() % (int)(sizeof(community) - 1);
+			for (j = 0; j < n; j++)
+				community[j] = (char)(rand() % 127 + 1);
+			community[n] = '\0';
+		}
+
+		/* a buffer that is sometimes far too small */
+		cap = (size_t)(rand() % (int)sizeof(pkt));
+
+		len = snmp_build_get(pkt, cap, (rand() % 2) ? SNMP_VERSION_1 : SNMP_VERSION_2C,
+			community, (unsigned long)rand(), oid);
+
+		if (len < 0)
+			continue;	/* refused, which is always allowed */
+
+		check((size_t)len <= cap, "a built packet fits the buffer it was given");
+
+		/* Whatever came out must be readable BER, and must carry the
+		   OID we asked for - a packet that encodes a different object
+		   is worse than no packet. */
+		{
+			struct ber_cursor msg, seq, pdu, vbl, vb;
+			unsigned char tag;
+			const unsigned char *val;
+			size_t vlen;
+			char back[256];
+
+			snmp_ber_open(&msg, pkt, (size_t)len);
+			check(snmp_ber_next(&msg, &tag, &val, &vlen) && tag == 0x30, "fuzz: outer SEQUENCE");
+			snmp_ber_open(&seq, val, vlen);
+			check(snmp_ber_next(&seq, &tag, &val, &vlen) && tag == 0x02, "fuzz: version");
+			check(snmp_ber_next(&seq, &tag, &val, &vlen) && tag == 0x04, "fuzz: community");
+			check(vlen == strlen(community), "fuzz: community length round-trips");
+			check(snmp_ber_next(&seq, &tag, &val, &vlen) && tag == 0xa0, "fuzz: GetRequest");
+			snmp_ber_open(&pdu, val, vlen);
+			check(snmp_ber_next(&pdu, &tag, &val, &vlen), "fuzz: request-id");
+			check(snmp_ber_next(&pdu, &tag, &val, &vlen), "fuzz: error-status");
+			check(snmp_ber_next(&pdu, &tag, &val, &vlen), "fuzz: error-index");
+			check(snmp_ber_next(&pdu, &tag, &val, &vlen) && tag == 0x30, "fuzz: varbind list");
+			snmp_ber_open(&vbl, val, vlen);
+			check(snmp_ber_next(&vbl, &tag, &val, &vlen) && tag == 0x30, "fuzz: varbind");
+			snmp_ber_open(&vb, val, vlen);
+			check(snmp_ber_next(&vb, &tag, &val, &vlen) && tag == 0x06, "fuzz: OID");
+			snmp_ber_oid_str(val, vlen, back, sizeof(back));
+			check(back[0] == '.', "fuzz: decoded OID is well formed");
+			check(snmp_ber_next(&vb, &tag, &val, &vlen) && tag == 0x05, "fuzz: NULL value");
+		}
+	}
+}
+
 static void test_truncation_and_fuzz(int rounds)
 {
 	struct rbuf r;
@@ -427,10 +525,30 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
+	/* -fuzz <rounds> [seed]: the long runs, for the sanitizers */
+	if (argc >= 3 && strcmp(argv[1], "-fuzz") == 0) {
+		int rounds = atoi(argv[2]);
+		if (argc >= 4)
+			srand((unsigned)atoi(argv[3]));
+		test_request_shape();
+		test_minimal_lengths();
+		test_bad_oids_are_refused();
+		test_response_parsing();
+		test_encoder_fuzz(rounds);
+		test_truncation_and_fuzz(rounds);
+		if (failures == 0) {
+			printf("snmpget: all checks passed (%d fuzz rounds)\n", rounds);
+			return 0;
+		}
+		printf("snmpget: %d failures\n", failures);
+		return 1;
+	}
+
 	test_request_shape();
 	test_minimal_lengths();
 	test_bad_oids_are_refused();
 	test_response_parsing();
+	test_encoder_fuzz(20000);
 	test_truncation_and_fuzz(50000);
 
 	if (argc >= 5) {

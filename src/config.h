@@ -291,6 +291,7 @@ struct hostinfo {
         unsigned char *message; /* message to print for outages */
         unsigned char *contact; /* e-mail contact for this */
 	unsigned char *snmp_community; /* snmp community */
+	int snmp_version; /* SNMP_VERSION_2C by default; _1 for old agents */
 	unsigned char *snmp_oid; /* OID to query - can be numerical 
 					or textual*/
 	unsigned char *snmp_oid_sec; /* used in snmp compare two values chk */
@@ -604,6 +605,7 @@ struct bootp_pkt {
 #define XML_OBJECT_MESSAGE	"ObjectMessage"
 #define XML_OBJECT_CONTACT	"ObjectContact"
 #define XML_SNMP_COMMUNITY	"ObjectSNMPCommunity"
+#define XML_SNMP_VERSION	"ObjectSNMPVersion"
 #define XML_SNMP_OID		"ObjectSNMPoid"
 #define XML_SNMP_TYPE		"ObjectSNMPType"
 #define XML_SNMP_LOW		"ObjectSNMPLowThresh"

@@ -530,6 +530,8 @@ func Parse(content []byte) (*models.Config, error) {
 				currentHost.SNMPUpMsg = extractQuoted(strings.TrimPrefix(line, "snmp-upmsg "))
 			} else if strings.HasPrefix(line, "snmp-downmsg ") {
 				currentHost.SNMPDownMsg = extractQuoted(strings.TrimPrefix(line, "snmp-downmsg "))
+			} else if strings.HasPrefix(line, "snmp-version ") {
+				currentHost.SNMPVersion = extractQuoted(strings.TrimPrefix(line, "snmp-version "))
 			} else if strings.HasPrefix(line, "snmp-type ") {
 				currentHost.SNMPType = extractQuoted(strings.TrimPrefix(line, "snmp-type "))
 			} else if strings.HasPrefix(line, "snmp-high ") {
