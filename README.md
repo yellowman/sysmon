@@ -198,14 +198,20 @@ first start:
 sysmon-web -agent-names sysmon-web.example.net
 ```
 
-**2. Make a token for the site.** The server shows the token one time. It
-keeps only a hash of it.
+**2. Make a token for the site.** Open **Admin -> Monitoring boxes ->
+Add a box**. Give it a site name and a label. The page shows the token one
+time, with the config lines ready to copy. The server keeps only a hash, so
+it cannot show the token again.
+
+The same thing by API:
 
 ```sh
 curl -b cookies -X POST https://sysmon-web.example.net/api/settings/agents \
      -H 'Content-Type: application/json' \
      -d '{"site":"metro","label":"Metro Station"}'
 ```
+
+Only an administrator can reach that page or that endpoint.
 
 **3. Copy the certificate to the box.**
 

@@ -351,6 +351,12 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 		var body struct {
 			Site  string `json:"site"`
 			Label string `json:"label"`
+			// Replace has to be asked for. One token per site, so minting
+			// again for a site that already has one silently stops the box
+			// holding the old token - it keeps monitoring and paging, and
+			// simply cannot report any more. That is not something to do
+			// by accident while trying to make a spare.
+			Replace bool `json:"replace"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
@@ -363,6 +369,22 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 				"a site name is letters, digits, - and _ (no colon, which would make site:object ambiguous)")
 			return
 		}
+		if existing, held := r.settings.GetAgentToken(body.Site); held &&
+			!existing.Revoked && !body.Replace {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "site already has a token",
+				"message": "Site " + body.Site + " already has a live token. " +
+					"Minting another one stops the box that holds the old one " +
+					"from reporting. Send replace:true if that is what you want.",
+				"site":      body.Site,
+				"last_seen": existing.LastSeen,
+				"last_addr": existing.LastAddr,
+			})
+			return
+		}
+
 		token, err := r.settings.NewAgentToken(body.Site, body.Label)
 		if err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
