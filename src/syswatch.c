@@ -1980,7 +1980,6 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			/* Must do this to avoid qsort having out of bounds issues
 			 * fix from corne.cornelius/at/gmail.com */
 			update_count();
-			check_trap_sources();
 
 			if (debug)
 			{
@@ -2305,9 +2304,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	/* After whichever parse won: traps are matched by source address, so
-	   an object asking for them by name would never see one. Say so now. */
-	check_trap_sources();
 	if (max_numnei > maxqueued && (!quiet))
 	{
 		print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",

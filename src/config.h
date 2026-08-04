@@ -284,6 +284,14 @@ struct pktloss_data {
 
 struct hostinfo {
         unsigned char *hostname; /* name of system to check */
+	unsigned char *ipv4_str; /* what hostname resolved to when this
+		object was loaded, as dotted quad, or NULL if it has no v4
+		address. The config says who to watch; this says where they
+		were. Recorded because the name is already resolved once at
+		load to decide whether the object is usable at all, and
+		throwing that answer away means anything later that has an
+		address in hand - an arriving snmp trap - has no way back to
+		the object except by resolving the whole config again. */
         unsigned int type; /* 1 = tcp, 2 = udp, 3 = ping, 4 = snmp, 5 = nntp
 		6 = smtp, 7 = imap, 8 = pop3 9 = umichX500 10 = pop2
 		11 = bootp 12 = dns 13 = www-content, 14 = radius,
@@ -1157,7 +1165,6 @@ void stop_check_dns(struct monitorent *);
 void service_test_snmp(struct monitorent *);
 void start_test_snmp(struct monitorent *);
 struct graph_elements *find_trap_source(char *);
-void check_trap_sources(void);
 void send_trap_alert(struct graph_elements *, char *, struct trap_content *);
 
 /* trapdecode.c - BER reading, shared with the SNMP client */
