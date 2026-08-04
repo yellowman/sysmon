@@ -293,9 +293,11 @@ permanently. A managed box keeps its running copy somewhere it owns:
     <gendir>/previous ->     gen-0000000006
     <gendir>/gen-0000000007/ that generation's files, plus .order
 
-`<gendir>` defaults to `/var/lib/sysmon` (`/var/db/sysmon` off Linux) and
-moves with `config generation-dir`. It is created and handed to the
-daemon's user at startup, while the process is still root.
+`<gendir>` is `/var/db/sysmon` on every platform - one path to recite
+rather than one per OS, since "where does this box keep its config" is
+usually asked about somebody else's box - and moves with `config
+generation-dir`. It is created, parent included, and handed to the daemon's
+user at startup while the process is still root.
 
 The daemon loads `<gendir>/current/<main>` when it exists and the seed
 otherwise. Three things follow from that "otherwise", and they are the

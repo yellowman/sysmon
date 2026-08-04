@@ -655,12 +655,15 @@ unsigned char *confgen_b64decode(const char *in, long *outlen)
  * belongs to the operator and to the package manager; the running copy
  * belongs to the daemon, and mixing the two is what forced /etc to be
  * writable by the dropped-privilege user in the first place.
+ *
+ * The same path on every platform, deliberately. "Where does this box keep
+ * its config" is a question asked about someone else's box, often at 3am
+ * and often about an OS the person asking does not run - and a per-platform
+ * answer makes it a question at all. /var/db is not conventional on Linux;
+ * one path everyone can recite is worth more than matching each platform's
+ * habit. "config generation-dir" moves it for anyone who disagrees.
  */
-#ifdef __linux__
-#define GENDIR_DEFAULT "/var/lib/sysmon"
-#else
 #define GENDIR_DEFAULT "/var/db/sysmon"
-#endif
 
 const char *confgen_statedir(void)
 {
@@ -850,6 +853,27 @@ void confgen_prepare(uid_t uid, gid_t gid)
 
 	if (stat(dir, &st) == -1)
 	{
+		/*
+		 * Make the parent too if it is missing. /var/db is standard on
+		 * BSD and absent on most Linux installs, and failing there would
+		 * mean every Linux box in a fleet needed a mkdir by hand before
+		 * it could be managed.
+		 */
+		char parent[PATH_MAX];
+		char *slash;
+
+		snprintf(parent, sizeof(parent), "%s", dir);
+		slash = strrchr(parent, '/');
+		if (slash != NULL && slash != parent)
+		{
+			*slash = '\0';
+			if (stat(parent, &st) == -1 && mkdir(parent, 0755) == -1)
+			{
+				print_err(1, "confgen: cannot create %s: %s", parent,
+					strerror(errno));
+			}
+		}
+
 		if (mkdir(dir, 0750) == -1)
 		{
 			print_err(1, "confgen: cannot create %s: %s - this box cannot be "

@@ -64,10 +64,10 @@ config maxqueued 50;
 # wrote it, is what the box falls back to if the directory is emptied, and
 # is what "Unmanage" in the UI returns the box to.
 #
-# Default: /var/lib/sysmon on Linux, /var/db/sysmon elsewhere. Read from
-# THIS file only: a delivered config cannot move the directory the daemon
-# is running out of.
-#config generation-dir "/var/lib/sysmon";
+# Default: /var/db/sysmon, on every platform - one path to recite rather
+# than one per OS. Read from THIS file only: a delivered config cannot move
+# the directory the daemon is running out of.
+#config generation-dir "/var/db/sysmon";
 
 # Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
 # the socket is bound at startup while sysmond is still root - enabling
