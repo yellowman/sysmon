@@ -11,14 +11,10 @@ import (
 // person who is setting up a box. One function writes them, so the three
 // cannot drift apart and give different advice about the same server.
 //
-// The block is complete on purpose. A person who pastes it into
-// /etc/sysmon.conf and puts the certificate in place has a working box.
-// There is nothing more to look up, and nothing to fill in.
-
-// agentStateDir is the daemon's default state directory. It is
-// GENDIR_DEFAULT in src/confgen.c. The block names it in a comment,
-// because the certificate goes there.
-const agentStateDir = "/var/db/sysmon"
+// The block is only the lines a box needs. Instructions belong where the
+// person is - on the page, or on standard error - not in the file they
+// paste. Commented-out directives are worse still: they are text to read
+// and decide about in a config that was supposed to need no decisions.
 
 // AgentConfigBlock returns those lines, ready to copy.
 //
@@ -31,24 +27,10 @@ func AgentConfigBlock(site, label, dial, token string) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# sysmond -> sysmon-web, for site %q.\n", site)
-	b.WriteString("# Add these lines to /etc/sysmon.conf, then start sysmond.\n")
-	b.WriteString("# The token is shown one time. The server keeps only a hash of it.\n\n")
-
 	fmt.Fprintf(&b, "config sitename  %q;\n", site)
 	fmt.Fprintf(&b, "config sitedesc  %q;\n", label)
 	fmt.Fprintf(&b, "config aggregator %q;\n", dial)
 	fmt.Fprintf(&b, "config aggregator-token %q;\n", token)
-
-	fmt.Fprintf(&b, `
-# sysmond writes its files in this directory. The line shows the default,
-# so remove the comment mark only if you want a different directory.
-# Put the CA certificate there, with the name aggregator-ca.pem.
-#config statedir %q;
-
-# sysmond opens no port. Remove the comment mark if the sysmon client
-# must connect to this box directly.
-#config listen 1345;
-`, agentStateDir)
 
 	return b.String()
 }
