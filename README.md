@@ -23,6 +23,15 @@ notifications, and CI that builds everything on every push.
 ### Monitoring engine (sysmond)
 - Checks: ICMP ping (v4/v6, with packet-loss / RTT / jitter thresholds),
   TCP, DNS, HTTP, SMTP, IMAP, POP3, NNTP, SSH, Radius, SNMP, and more
+- **No net-snmp**: sysmond speaks SNMP itself - v1/v2c GET for polling,
+  v1/v2c trap decoding for what arrives on 162. That is the whole of the
+  protocol it ever used, so there is no library to find, no OpenSSL on
+  the link line, and no configure probe that can quietly leave you with a
+  daemon that rejects every `type snmp` object. Counter64 values are read
+  as 64-bit rather than guessed at, which the old net-snmp path got
+  wrong. Both halves are fuzzed under ASan/UBSan, and `make check` runs a
+  differential test against net-snmp's own client when you point it at an
+  agent
 - Dependency trees: when a router dies, its children don't page you
 - Flap damping, ack/notification thresholds, per-contact schedules
 - **SNMP trap reception, decoded**: v1 and v2c traps are parsed - trap

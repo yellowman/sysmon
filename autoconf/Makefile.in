@@ -13,7 +13,7 @@ LEX		= @LEX@
 CFILE           = @sysconfdir@/sysmon.conf
 INCLUDES	= -I/usr/local/include
 HELPER_PATH     = $(libexecdir)/sysmon-ping-helper
-CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ @SNMP@ $(INCLUDES)
+CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ $(INCLUDES)
 #@IPV6@
 
 LIBS		= @LIBS@
@@ -89,8 +89,15 @@ strip:
 trapdecode-test: trapdecode_test.c trapdecode.c config.h
 	$(CC) $(CFLAGS) -o trapdecode-test trapdecode_test.c trapdecode.c
 
-check: trapdecode-test
+# The SNMP client links the daemon objects it calls into. Run it with a
+# live agent to get the differential test against net-snmp as well:
+#   ./snmpget-test 127.0.0.1 161 public .1.3.6.1.2.1.1.3.0
+snmpget-test: snmpget_test.c snmp.c trapdecode.c config.h
+	$(CC) $(CFLAGS) -o snmpget-test snmpget_test.c snmp.c trapdecode.c
+
+check: trapdecode-test snmpget-test
 	./trapdecode-test
+	./snmpget-test
 
 clean:
 	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test core sysmond.core sysmon.core

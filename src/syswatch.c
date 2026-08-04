@@ -2195,10 +2195,6 @@ int main(int argc, char **argv)
 	}
 	badconfig = FALSE;
 
-#ifdef ENABLE_SNMP
-	/* Initalize SNMP */
-	init_snmp("sysmond");
-#endif /* ENABLE_SNMP */
 
 
 	/* Parse the configuration */
