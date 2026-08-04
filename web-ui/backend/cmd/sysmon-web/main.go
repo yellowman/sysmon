@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -182,7 +183,12 @@ func main() {
 	// Command line flags
 	socketPath := flag.String("socket", defaultSocket, "FastCGI socket path")
 	configPath := flag.String("config", "/etc/sysmon.conf", "Sysmon config file path")
-	sysmonAddr := flag.String("sysmon", "localhost:1345", "Sysmon daemon address (default port 1345)")
+	// Empty by default: sysmon-web waits to be dialled rather than dialling
+	// out. Give an address (comma-separated for several) to poll daemons
+	// that are configured with "config listen" instead - the old
+	// arrangement, still supported, and the right one for a single box on
+	// localhost.
+	sysmonAddr := flag.String("sysmon", "", "sysmond address(es) to dial, comma-separated; empty means wait for daemons to connect")
 	auditLog := flag.String("audit", "/var/log/sysmon-web-audit.log", "Audit log path")
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
 	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")
@@ -191,9 +197,10 @@ func main() {
 	socketGroup := flag.String("socket-group", "", "group for the FastCGI socket (default: first of www, www-data, nobody)")
 	procUser := flag.String("user", "", "drop to this user when started as root (default: first of _sysmon, nobody)")
 	procGroup := flag.String("group", "", "drop to this group when started as root (default: first of _sysmon, nobody)")
-	agentListen := flag.String("agent-listen", "", "TLS address to accept sysmond connections on (e.g. :1347); empty disables")
-	agentCert := flag.String("agent-cert", "", "certificate for -agent-listen")
+	agentListen := flag.String("agent-listen", ":1347", "TLS address to accept sysmond connections on; empty disables")
+	agentCert := flag.String("agent-cert", "", "certificate for -agent-listen (default: self-signed, generated once)")
 	agentKey := flag.String("agent-key", "", "private key for -agent-listen")
+	agentNames := flag.String("agent-names", "", "comma-separated names/IPs daemons dial this process by, for the generated certificate")
 	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
@@ -434,14 +441,48 @@ func main() {
 		}
 	}
 
-	// Daemons that dial in. Off unless an address and certificate are
-	// given: TLS is not optional on this listener, because it carries a
-	// bearer token and, later, whole configs.
+	// Daemons that dial in - the normal way a site connects, and on by
+	// default. sysmond no longer listens unless asked to: its client
+	// socket spent most of its life open, unauthenticated and owned by a
+	// root process, and inverting the direction retires it.
+	//
+	// TLS is not optional here, because this carries a bearer token and
+	// whole configs. Without a supplied certificate one is generated and
+	// kept, rather than the listener silently not starting - a default
+	// that needs a CA before anything works is a default that gets worked
+	// around, usually by disabling verification somewhere.
 	if *agentListen != "" {
-		if *agentCert == "" || *agentKey == "" {
-			log.Printf("WARNING: -agent-listen needs -agent-cert and -agent-key; not accepting daemon connections")
-		} else {
-			al, aerr := monitoring.ListenForAgents(*agentListen, *agentCert, *agentKey,
+		certFile, keyFile := *agentCert, *agentKey
+
+		if certFile == "" || keyFile == "" {
+			var names []string
+			for _, n := range strings.Split(*agentNames, ",") {
+				if n = strings.TrimSpace(n); n != "" {
+					names = append(names, n)
+				}
+			}
+			if len(names) == 0 {
+				if h, herr := os.Hostname(); herr == nil && h != "" {
+					names = append(names, h)
+				}
+				names = append(names, "localhost", "127.0.0.1")
+			}
+
+			var cerr error
+			certFile, keyFile, cerr = monitoring.EnsureAgentCert(
+				filepath.Join(stateDir, "agent"), names)
+			if cerr != nil {
+				log.Printf("WARNING: cannot prepare a certificate for %s: %v", *agentListen, cerr)
+				certFile = ""
+			} else if valid, verr := monitoring.CertNames(certFile); verr == nil {
+				log.Printf("agents: using %s, valid for %s", certFile, valid)
+				log.Printf("agents: each sysmond needs this file as " +
+					"'config aggregator-ca' and must dial one of those names")
+			}
+		}
+
+		if certFile != "" {
+			al, aerr := monitoring.ListenForAgents(*agentListen, certFile, keyFile,
 				monitoringService,
 				func(site, token, addr string) bool {
 					return settingsStore.CheckAgentToken(site, token, addr)

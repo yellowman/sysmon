@@ -64,6 +64,10 @@ type SiteConfigStatus struct {
 	LastDelivery string `json:"last_delivery,omitempty"`
 	Objects      int    `json:"objects,omitempty"`
 	Poisoned     bool   `json:"poisoned,omitempty"`
+	// Unmanageable is the daemon's reason its config cannot be managed at
+	// all - empty when it can. Shown rather than hidden: it is a thing an
+	// operator can fix, and finding out at delivery time is too late.
+	Unmanageable string `json:"unmanageable,omitempty"`
 }
 
 // confState is the per-daemon half of distribution state, kept on the
@@ -78,6 +82,9 @@ type confState struct {
 	asked      time.Time
 	lastErr    string
 	lastReply  string
+	// unmanageable is the daemon's own reason its config cannot be
+	// managed, empty when it can.
+	unmanageable string
 }
 
 // ---------------------------------------------------------------------
@@ -119,13 +126,36 @@ func (s *Service) fetchConfigGen(d *daemon, conn net.Conn, reader *bufio.Reader)
 		files, _ = strconv.Atoi(fields[3])
 	}
 
+	// The daemon appends "unmanageable <why>" when its config cannot be
+	// copied into a managed directory - an include naming a path rather
+	// than a filename, most likely. Carrying it here means the operator
+	// finds out when they look at the fleet, not when a delivery fails.
+	why := ""
+	if len(fields) >= 6 && fields[4] == "unmanageable" {
+		why = strings.Join(fields[5:], " ")
+	}
+
 	d.conf.mu.Lock()
 	d.conf.generation = gen
 	d.conf.hash = fields[2]
 	d.conf.files = files
 	d.conf.asked = time.Now()
 	d.conf.lastErr = ""
+	d.conf.unmanageable = why
 	d.conf.mu.Unlock()
+}
+
+// forgetHosts drops the object cache for a daemon whose config we just
+// changed. The count check in the CONF merge would catch it a cycle later
+// anyway, but we know right now that what we hold is out of date, and
+// there is no reason to show an operator a host that no longer exists
+// while they are looking at the delivery that removed it.
+func (d *daemon) forgetHosts() {
+	d.mu.Lock()
+	d.hostCache = nil
+	d.confSeq = 0
+	d.fullResyncAt = time.Time{}
+	d.mu.Unlock()
 }
 
 func (c *confState) setErr(msg string) {
@@ -135,10 +165,10 @@ func (c *confState) setErr(msg string) {
 	c.mu.Unlock()
 }
 
-func (c *confState) snapshot() (gen uint64, hash string, files int, lastErr, lastReply string) {
+func (c *confState) snapshot() (gen uint64, hash string, files int, lastErr, lastReply, unmanageable string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.generation, c.hash, c.files, c.lastErr, c.lastReply
+	return c.generation, c.hash, c.files, c.lastErr, c.lastReply, c.unmanageable
 }
 
 // readUntilCode reads protocol lines until a three-digit response code,
@@ -158,6 +188,19 @@ func readUntilCode(reader *bufio.Reader) (string, []string, error) {
 			return "", body, err
 		}
 	}
+}
+
+// flatName mirrors the daemon's rule: a config file is named, not
+// located. Anything with a separator in it would have to become a path on
+// the far side, and the far side does not accept paths.
+func flatName(n string) bool {
+	if n == "" || len(n) >= 128 {
+		return false
+	}
+	if strings.ContainsRune(n, '/') || n == "." || n == ".." {
+		return false
+	}
+	return true
 }
 
 func isDigits(s string) bool {
@@ -207,12 +250,12 @@ func fetchConfigFiles(conn net.Conn, reader *bufio.Reader) ([]settings.GenFile, 
 			if len(f) < 3 {
 				return nil, 0, "", fmt.Errorf("malformed FILE header: %s", trimmed)
 			}
-			path, derr := base64.StdEncoding.DecodeString(f[1])
+			name, derr := base64.StdEncoding.DecodeString(f[1])
 			if derr != nil {
-				return nil, 0, "", fmt.Errorf("undecodable path in %s: %w", trimmed, derr)
+				return nil, 0, "", fmt.Errorf("undecodable name in %s: %w", trimmed, derr)
 			}
 			declare, _ = strconv.Atoi(f[2])
-			cur = &settings.GenFile{Path: string(path)}
+			cur = &settings.GenFile{Name: string(name)}
 			b64.Reset()
 		case trimmed == "ENDFILE":
 			if cur == nil {
@@ -220,11 +263,11 @@ func fetchConfigFiles(conn net.Conn, reader *bufio.Reader) ([]settings.GenFile, 
 			}
 			content, derr := base64.StdEncoding.DecodeString(b64.String())
 			if derr != nil {
-				return nil, 0, "", fmt.Errorf("undecodable content for %s: %w", cur.Path, derr)
+				return nil, 0, "", fmt.Errorf("undecodable content for %s: %w", cur.Name, derr)
 			}
 			if len(content) != declare {
 				return nil, 0, "", fmt.Errorf("%s declared %d bytes but carried %d",
-					cur.Path, declare, len(content))
+					cur.Name, declare, len(content))
 			}
 			cur.Content = content
 			files = append(files, *cur)
@@ -250,7 +293,7 @@ func putConfigFiles(conn net.Conn, reader *bufio.Reader, gen uint64, files []set
 	var payload strings.Builder
 	for _, f := range files {
 		fmt.Fprintf(&payload, "FILE %s %d\n",
-			base64.StdEncoding.EncodeToString([]byte(f.Path)), len(f.Content))
+			base64.StdEncoding.EncodeToString([]byte(f.Name)), len(f.Content))
 		enc := base64.StdEncoding.EncodeToString(f.Content)
 		for off := 0; off < len(enc); off += 960 {
 			end := off + 960
@@ -313,6 +356,31 @@ func rollbackConfig(conn net.Conn, reader *bufio.Reader) (uint64, string, []stri
 	return gen, fields[2], complaints, nil
 }
 
+// revertConfig tells a box to stop being managed and go back to its seed
+// config - the file an operator wrote, which the daemon has never touched.
+//
+// This is the way out, and it has to exist. Without it, adopting a box
+// once would make its /etc config inert forever with no route back that
+// does not involve somebody working out what the state directory is for.
+func revertConfig(conn net.Conn, reader *bufio.Reader) (uint64, []string, error) {
+	if _, err := conn.Write([]byte("CONFIG-REVERT\n")); err != nil {
+		return 0, nil, err
+	}
+	code, complaints, err := readUntilCode(reader)
+	if err != nil {
+		return 0, complaints, err
+	}
+	if !strings.HasPrefix(code, "333") {
+		return 0, complaints, fmt.Errorf("%s", code)
+	}
+	fields := strings.Fields(code)
+	if len(fields) < 2 {
+		return 0, complaints, fmt.Errorf("malformed revert reply: %s", code)
+	}
+	gen, _ := strconv.ParseUint(fields[1], 10, 64)
+	return gen, complaints, nil
+}
+
 // ---------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------
@@ -330,7 +398,7 @@ func (s *Service) ConfigStatus() []SiteConfigStatus {
 			site = "local"
 		}
 
-		gen, hash, files, confErr, lastReply := d.conf.snapshot()
+		gen, hash, files, confErr, lastReply, unmanageable := d.conf.snapshot()
 		row := SiteConfigStatus{
 			Site:              site,
 			Description:       desc,
@@ -340,6 +408,7 @@ func (s *Service) ConfigStatus() []SiteConfigStatus {
 			Reachable:         lastErr == "",
 			LastError:         firstNonEmpty(lastErr, confErr),
 			LastDelivery:      lastReply,
+			Unmanageable:      unmanageable,
 		}
 
 		var desired settings.Desired
@@ -432,11 +501,6 @@ func (s *Service) withDaemonConn(site string, fn func(net.Conn, *bufio.Reader) e
 		return fmt.Errorf("no site called %q is in the fleet", site)
 	}
 
-	key := s.authKey()
-	if key == "" {
-		return fmt.Errorf("config management needs sysmond's authkey, which is not configured here")
-	}
-
 	d.mu.Lock()
 	inbound, conn, reader, addr := d.inbound, d.conn, d.reader, d.addr
 	d.mu.Unlock()
@@ -445,15 +509,22 @@ func (s *Service) withDaemonConn(site string, fn func(net.Conn, *bufio.Reader) e
 		if conn == nil {
 			return fmt.Errorf("site %q is not connected", site)
 		}
-		// Hold the poller off this socket for the length of the exchange.
+		// Already authenticated, both ways, by TLS and by its token - see
+		// fetchAllObjectsXML. Hold the poller off this socket for the
+		// length of the exchange and get on with it.
 		d.confMu.Lock()
 		defer d.confMu.Unlock()
 		conn.SetDeadline(time.Now().Add(120 * time.Second))
 		defer conn.SetDeadline(time.Time{})
-		if err := authenticate(conn, reader, key); err != nil {
-			return fmt.Errorf("authenticating to %s: %w", site, err)
-		}
 		return fn(conn, reader)
+	}
+
+	// A daemon we dial is a listening daemon, and that path still uses the
+	// shared authkey - it is the only credential a listening socket has.
+	key := s.authKey()
+	if key == "" {
+		return fmt.Errorf("managing a dialled daemon needs its authkey, " +
+			"which is not configured here")
 	}
 
 	fresh, err := net.DialTimeout("tcp", addr, 10*time.Second)
@@ -505,12 +576,12 @@ func (s *Service) AdoptSite(site, by string) (uint64, error) {
 	// disagree about what the hash of a byte sequence is, the whole state
 	// model is built on sand, and adoption is exactly where that has to
 	// surface.
-	paths := make([]string, len(files))
+	names := make([]string, len(files))
 	contents := make([][]byte, len(files))
 	for i, f := range files {
-		paths[i], contents[i] = f.Path, f.Content
+		names[i], contents[i] = f.Name, f.Content
 	}
-	if mine := config.HashFileSet(paths, contents); mine != hash {
+	if mine := config.HashFileSet(names, contents); mine != hash {
 		return 0, fmt.Errorf("hash disagreement adopting %s: daemon says %s, we compute %s",
 			site, hash, mine)
 	}
@@ -562,6 +633,9 @@ func (s *Service) DeliverSite(site string) (*DeliveryResult, error) {
 	})
 
 	if d != nil {
+		if err == nil {
+			d.forgetHosts()
+		}
 		d.conf.mu.Lock()
 		if err != nil {
 			d.conf.lastReply = strings.Join(append(res.Complaints, err.Error()), "; ")
@@ -618,10 +692,47 @@ func (s *Service) RollbackSite(site string) (*DeliveryResult, error) {
 		store.SetDesiredGeneration(site, res.RunningGeneration, res.RunningHash)
 	}
 	if d := s.daemonFor(site); d != nil {
+		d.forgetHosts()
 		d.conf.mu.Lock()
 		d.conf.generation = res.RunningGeneration
 		d.conf.hash = res.RunningHash
 		d.conf.lastReply = fmt.Sprintf("rolled back to generation %d", res.RunningGeneration)
+		d.conf.mu.Unlock()
+	}
+	return res, nil
+}
+
+// RevertSite tells a box to stop being managed.
+//
+// The desired state goes with it: a box that has been reverted is running
+// its own config again, and leaving a desired generation recorded would
+// only offer to overwrite it on the next poll.
+func (s *Service) RevertSite(site string) (*DeliveryResult, error) {
+	res := &DeliveryResult{Site: site}
+
+	err := s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+		gen, complaints, e := revertConfig(conn, r)
+		res.Complaints = complaints
+		if e != nil {
+			return e
+		}
+		res.Accepted = true
+		res.RunningGeneration = gen
+		return nil
+	})
+	if err != nil {
+		return res, err
+	}
+
+	if store := s.Generations(); store != nil {
+		store.Unadopt(site)
+	}
+	if d := s.daemonFor(site); d != nil {
+		d.forgetHosts()
+		d.conf.mu.Lock()
+		d.conf.generation = 0
+		d.conf.hash = ""
+		d.conf.lastReply = "reverted to its own config"
 		d.conf.mu.Unlock()
 	}
 	return res, nil
@@ -654,15 +765,25 @@ func (s *Service) StageGeneration(site string, files []settings.GenFile, by, not
 		return 0, "", fmt.Errorf("a generation with no files would blank the box")
 	}
 
-	paths := make([]string, len(files))
+	names := make([]string, len(files))
 	contents := make([][]byte, len(files))
 	for i, f := range files {
-		if f.Path == "" || !strings.HasPrefix(f.Path, "/") {
-			return 0, "", fmt.Errorf("config file paths must be absolute; got %q", f.Path)
+		// A name, never a path. The daemon decides which directory these
+		// land in; this end only says what they are called, and anything
+		// that looks like a path is a mistake worth catching here rather
+		// than being refused three hops away.
+		if !flatName(f.Name) {
+			return 0, "", fmt.Errorf(
+				"%q is not a plain filename - a generation names files, not paths", f.Name)
 		}
-		paths[i], contents[i] = f.Path, f.Content
+		for j := 0; j < i; j++ {
+			if files[j].Name == f.Name {
+				return 0, "", fmt.Errorf("%q appears twice in one generation", f.Name)
+			}
+		}
+		names[i], contents[i] = f.Name, f.Content
 	}
-	hash := config.HashFileSet(paths, contents)
+	hash := config.HashFileSet(names, contents)
 
 	gen, err := store.PutGeneration(site, files, hash, by, note)
 	return gen, hash, err

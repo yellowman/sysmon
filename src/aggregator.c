@@ -95,7 +95,23 @@ static void aggregator_adopt(int fd)
 	thisclient->filedes = fd;
 	thisclient->un = NULL;
 	thisclient->ip = STRDUP(aggregator_host, "aggregator_ip");
-	thisclient->authlvl = 0;	/* it still has to AUTH for CONF */
+	/*
+	 * This connection arrives already authenticated, in both directions,
+	 * and by something stronger than the shared authkey:
+	 *
+	 *   - we verified the aggregator's certificate against a CA we were
+	 *     given, and the name we dialled, before sending anything;
+	 *   - it verified us by the per-box token we presented, and answered
+	 *     "333 welcome" only after accepting it.
+	 *
+	 * Making it AUTH again would prove less than has already been proved,
+	 * and would mean every box in a fleet still had to share one key -
+	 * which is exactly the arrangement dialling out exists to retire. A
+	 * daemon with no "config authkey" at all is managed perfectly well
+	 * this way; the authkey remains for clients that connect the other
+	 * way, to a listening socket.
+	 */
+	thisclient->authlvl = 2;
 	thisclient->xml = FALSE;
 	thisclient->outage_log = FALSE;
 	thisclient->clientver = 0;

@@ -157,7 +157,20 @@ report to show.
 
 ## 2. Connection direction: sysmond dials out
 
-sysmond opens the connection to sysmon-web, not the other way around.
+sysmond opens the connection to sysmon-web, not the other way around, and
+**neither daemon does the opposite by default**:
+
+- sysmond does not listen at all unless `config listen` (or `-p`) asks it
+  to. That socket was open on every sysmond for most of the daemon's life,
+  unauthenticated until `AUTH`, on a process that ran as root - and it was
+  the largest piece of attack surface the daemon had. Inverting the
+  direction retires it for anyone using sysmon-web.
+- sysmon-web does not dial anyone unless `-sysmon` asks it to. It listens
+  on 1347 and waits.
+
+The `sysmon(1)` client still connects to a daemon directly, and that is
+still a perfectly good way to run - it is what `config listen` is for. It
+just means that box is standing alone rather than being part of a fleet.
 
 **Why:**
 
@@ -245,18 +258,20 @@ lexer is permissive by design and ignores what it does not recognise, so
 "it parsed" is a weak claim. The strong claims are made by watching what
 the box does next.
 
-The order on the box is: back up, write, validate, decide. The daemon has
-not reloaded at any point in that sequence, so a config that fails to parse
-costs nothing but the seconds the files were on disk - and they are put
-back before the reply is sent. A failed validation reports the parser's own
+The order on the box is: write into a *new* generation directory, validate
+there, then swap a symlink. Nothing that is running is touched until that
+last step, so a rejected delivery costs nothing at all - not a moment of
+bad config on disk, not a byte of the running one - and the staging
+directory is simply removed. A failed validation reports the parser's own
 words back to the UI, verbatim, against that generation, for that box.
 
 ### The commands
 
     CONFIG-GEN       what am I running?    -> generation, hash, file count
     CONFIG-GET       give me what you run  -> every file, byte for byte
-    CONFIG-PUT       run this instead      -> validate, swap, reload
-    CONFIG-ROLLBACK  undo the last PUT     -> restore, reload
+    CONFIG-PUT       run this instead      -> stage, validate, swap, reload
+    CONFIG-ROLLBACK  undo the last PUT     -> swap back, reload
+    CONFIG-REVERT    stop being managed    -> back to the seed config
 
 All four need the authkey: a config carries community strings and contact
 addresses on the way out, and decides what gets monitored on the way in.
@@ -268,19 +283,60 @@ Paths and contents are base64 on the wire, so a config containing anything
 at all survives the trip unchanged. That is not a nicety: the hash is over
 the original bytes, so "survives unchanged" is the entire mechanism.
 
-**What the daemon will write.** Only files it already had open as part of
-its config, or files directly in its main config file's own directory, and
-every delivery must include the main config file. Anything else is refused
-whatever the aggregator claims. An aggregator is trusted with the
-monitoring config; it is not trusted with the filesystem.
+### The seed config is never written
 
-**What this costs.** sysmond drops privileges, so a managed box needs its
-config directory writable by the user it drops to (`config generation-dir`
-moves the generation state and the rollback copy elsewhere, but the config
-files themselves are still written in place). That is a real trade-off and
-it is the reason nothing is ever delivered to a box that has not been
-explicitly adopted: a box you have not adopted is not writable by this
-mechanism at all.
+`/etc/sysmon.conf` - or whatever `-f` names - is read-only to the daemon,
+permanently. A managed box keeps its running copy somewhere it owns:
+
+    <gendir>/main            the entry file's name, e.g. "sysmon.conf"
+    <gendir>/current  ->     gen-0000000007
+    <gendir>/previous ->     gen-0000000006
+    <gendir>/gen-0000000007/ that generation's files, plus .order
+
+`<gendir>` defaults to `/var/lib/sysmon` (`/var/db/sysmon` off Linux) and
+moves with `config generation-dir`. It is created and handed to the
+daemon's user at startup, while the process is still root.
+
+The daemon loads `<gendir>/current/<main>` when it exists and the seed
+otherwise. Three things follow from that "otherwise", and they are the
+point of the whole arrangement:
+
+- **The alternative was worse.** Writing the delivered config back over
+  `/etc/sysmon.conf` means `/etc` has to be writable by the user sysmond
+  drops to. That is a bad trade to ask an operator to make in exchange for
+  remote config, and it is not one they have to make now.
+- **A wiped state directory is survivable.** The box comes back on the
+  config an operator wrote, not on nothing and not on half of something.
+- **There is a way out.** `CONFIG-REVERT` - "Unmanage" in the UI - drops
+  the `current` pointer and the box is running its own config again. The
+  generations stay on disk as the record of what was delivered.
+
+`config generation-dir` is read from the **seed only**, and locked once the
+seed is parsed. A delivered config carrying a different value is inert - it
+cannot move the directory the daemon is currently running out of. It is not
+a security control on its own (a box with real filesystem permissions gives
+the daemon exactly one directory and no others, so a pushed value could not
+take effect anyway); it just means the answer to "where does this box keep
+its config" does not depend on which generation happens to be live.
+
+**Files are named, not located.** A delivery carries plain filenames - no
+slashes, no leading dots - and this side decides which directory they land
+in. Nothing the aggregator sends is ever used to build a path. The content
+hash is over those names too, which is what lets the same config hash
+identically as a seed in `/etc` and as the running copy in a generation
+directory; without that, adopting a box and delivering its own bytes
+straight back would read as a change forever.
+
+The consequence is a constraint worth stating: a config whose `include`
+names a path (`include "/etc/sysmon.d/hosts.conf"`) cannot be managed,
+because copying it into one directory would change what it points at. The
+daemon says so in its `CONFIG-GEN` reply, and the fleet page shows it -
+finding out at delivery time would be far too late.
+
+**Include resolution inside the managed directory is siblings only.** Not
+the working directory, which is `/` by the time the daemon is running and
+is somewhere a file might be creatable by someone else; `include
+"hosts.conf"` there means the copy next to it and nothing else.
 
 ### Hashing
 

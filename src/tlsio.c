@@ -12,8 +12,9 @@
  * Dialect is OpenSSL 1.1.1 / LibreSSL, deliberately: that is what OpenBSD
  * ships and what long-lived Linux installs have. Nothing here uses the
  * 3.0-only surface (no providers, no EVP_MAC, no SSL_CTX_set_ciphersuites),
- * and hostname verification goes through X509_VERIFY_PARAM_set1_host(),
- * which exists across 1.0.2, 1.1.x, 3.x and LibreSSL alike.
+ * and peer-name verification goes through X509_VERIFY_PARAM_set1_host()
+ * and set1_ip_asc(), which exist across 1.0.2, 1.1.x, 3.x and LibreSSL
+ * alike.
  */
 
 #include "config.h"
@@ -221,18 +222,48 @@ int tls_connect(const char *host, int port, const char *cafile)
 		return -1;
 	}
 
-	/* Verify the name we asked for, not merely that some CA signed
-	   something. Without this the whole chain check proves nothing. */
+	/*
+	 * Verify the name we asked for, not merely that some CA signed
+	 * something. Without this the whole chain check proves nothing.
+	 *
+	 * An address needs the IP variant: set1_host() matches DNS names and
+	 * a certificate's IP addresses live in a different kind of SAN, so
+	 * dialling an aggregator by address would be rejected against a
+	 * certificate that names that very address.
+	 */
 	param = SSL_get0_param(ssl);
 	X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-	if (X509_VERIFY_PARAM_set1_host(param, host, 0) != 1)
+
 	{
-		tls_log_error("set1_host");
-		SSL_free(ssl);
-		close(fd);
-		return -1;
+		struct in_addr v4;
+		struct in6_addr v6;
+		bool is_ip = (inet_pton(AF_INET, host, &v4) == 1) ||
+			(inet_pton(AF_INET6, host, &v6) == 1);
+
+		if (is_ip)
+		{
+			if (X509_VERIFY_PARAM_set1_ip_asc(param, host) != 1)
+			{
+				tls_log_error("set1_ip");
+				SSL_free(ssl);
+				close(fd);
+				return -1;
+			}
+			/* No SNI for a literal address - RFC 6066 forbids it, and
+			   some servers reject the handshake outright. */
+		}
+		else
+		{
+			if (X509_VERIFY_PARAM_set1_host(param, host, 0) != 1)
+			{
+				tls_log_error("set1_host");
+				SSL_free(ssl);
+				close(fd);
+				return -1;
+			}
+			SSL_set_tlsext_host_name(ssl, host);	/* SNI */
+		}
 	}
-	SSL_set_tlsext_host_name(ssl, host);	/* SNI */
 
 	if (SSL_set_fd(ssl, fd) != 1)
 	{

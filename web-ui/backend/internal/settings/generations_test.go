@@ -29,12 +29,12 @@ func TestGenerationsAreKept(t *testing.T) {
 	s := testStore(t)
 
 	g1, err := s.PutGeneration("metro",
-		[]GenFile{{Path: "/etc/sysmon.conf", Content: []byte("one\n")}}, "h1", "alice", "first")
+		[]GenFile{{Name: "/etc/sysmon.conf", Content: []byte("one\n")}}, "h1", "alice", "first")
 	if err != nil {
 		t.Fatal(err)
 	}
 	g2, err := s.PutGeneration("metro",
-		[]GenFile{{Path: "/etc/sysmon.conf", Content: []byte("two\n")}}, "h2", "bob", "second")
+		[]GenFile{{Name: "/etc/sysmon.conf", Content: []byte("two\n")}}, "h2", "bob", "second")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,8 +64,8 @@ func TestGenerationsAreKept(t *testing.T) {
 func TestRollbackDoesNotRecycleGenerationNumbers(t *testing.T) {
 	s := testStore(t)
 
-	s.PutGeneration("metro", []GenFile{{Path: "/c", Content: []byte("one")}}, "h1", "", "")
-	s.PutGeneration("metro", []GenFile{{Path: "/c", Content: []byte("two")}}, "h2", "", "")
+	s.PutGeneration("metro", []GenFile{{Name: "/c", Content: []byte("one")}}, "h1", "", "")
+	s.PutGeneration("metro", []GenFile{{Name: "/c", Content: []byte("two")}}, "h2", "", "")
 
 	// Roll back to 1.
 	if err := s.SetDesiredGeneration("metro", 1, "h1"); err != nil {
@@ -76,7 +76,7 @@ func TestRollbackDoesNotRecycleGenerationNumbers(t *testing.T) {
 	}
 
 	// The next edit must be 3, not another 2.
-	g, err := s.PutGeneration("metro", []GenFile{{Path: "/c", Content: []byte("three")}}, "h3", "", "")
+	g, err := s.PutGeneration("metro", []GenFile{{Name: "/c", Content: []byte("three")}}, "h3", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,11 +93,11 @@ func TestRollbackDoesNotRecycleGenerationNumbers(t *testing.T) {
 func TestPoisonSurvivesLaterGenerations(t *testing.T) {
 	s := testStore(t)
 
-	g, _ := s.PutGeneration("metro", []GenFile{{Path: "/c", Content: []byte("x")}}, "h", "", "")
+	g, _ := s.PutGeneration("metro", []GenFile{{Name: "/c", Content: []byte("x")}}, "h", "", "")
 	if err := s.PoisonGeneration("metro", g, "object count fell off a cliff"); err != nil {
 		t.Fatal(err)
 	}
-	s.PutGeneration("metro", []GenFile{{Path: "/c", Content: []byte("y")}}, "h2", "", "")
+	s.PutGeneration("metro", []GenFile{{Name: "/c", Content: []byte("y")}}, "h2", "", "")
 
 	d, _ := s.GetDesired("metro")
 	if why, ok := d.Poisoned[g]; !ok || why == "" {
@@ -108,8 +108,8 @@ func TestPoisonSurvivesLaterGenerations(t *testing.T) {
 func TestGenerationsAreScopedPerSite(t *testing.T) {
 	s := testStore(t)
 
-	s.PutGeneration("metro", []GenFile{{Path: "/c", Content: []byte("m")}}, "hm", "", "")
-	s.PutGeneration("depot", []GenFile{{Path: "/c", Content: []byte("d")}}, "hd", "", "")
+	s.PutGeneration("metro", []GenFile{{Name: "/c", Content: []byte("m")}}, "hm", "", "")
+	s.PutGeneration("depot", []GenFile{{Name: "/c", Content: []byte("d")}}, "hd", "", "")
 
 	if got := s.ListGenerations("metro"); len(got) != 1 {
 		t.Errorf("metro sees %v", got)

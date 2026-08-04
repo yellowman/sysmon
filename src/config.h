@@ -848,6 +848,7 @@ extern char *parser_aggregator;
 extern char *parser_agg_token;
 extern char *parser_agg_ca;
 extern char *parser_gendir;
+extern int parser_listenport;
 extern char *parser_sitedesc;
 extern bool parser_catch_snmptrap;
 extern char *parser_username;
@@ -1032,14 +1033,21 @@ void aggregator_set_target(const char *);
 
 /* confgen.c - config generations.
 
-   The config file is still the source of truth on this box; a sysmon-web
-   holds desired state and these reconcile the two. confset_* records what
-   the parser actually opened, which is what gets hashed - a hash over a
-   guess about which files are included would be worse than none. */
-extern char configfile[]; /* the main config file, from syswatch.c */
+   The seed config named by -f (or CFILE) is read-only to this daemon,
+   always. A managed box keeps its running copy and its rollback copy in a
+   directory it owns - see "config generation-dir" - so nothing here ever
+   needs /etc to be writable by the user the daemon drops to.
 
+   confset_* records what the parser actually opened, which is what gets
+   hashed: a hash over a guess about which files are included would be
+   worse than none. */
+extern char configfile[]; /* the seed config file, from syswatch.c */
+
+/* A file of a config, identified by its name - the string in the include
+   directive, or the main file's basename. Never a path: nothing the far
+   end sends is ever used to build a filename. */
 struct confgen_file {
-	char *path;
+	char *name;
 	unsigned char *data;
 	long len;
 };
@@ -1049,22 +1057,31 @@ struct confgen_file {
 #define CONFGEN_MAX_PAYLOAD (8 * 1024 * 1024)
 
 void confset_reset(void);
-void confset_record(const char *);
+void confset_record(const char *, const char *);
 int confset_count(void);
+const char *confset_name(int);
 const char *confset_path(int);
+bool confgen_manageable(char *, size_t);
 
 void confgen_report(struct clientstatus *);
 void confgen_send(struct clientstatus *);
 void confgen_receive(struct clientstatus *, char *);
 void confgen_do_rollback(struct clientstatus *);
+void confgen_do_revert(struct clientstatus *);
 
 bool confgen_hash(char *, size_t);
+bool confgen_hash_files(struct confgen_file *, int, char *, size_t);
 unsigned long confgen_generation(void);
-void confgen_load_state(void);
+const char *confgen_statedir(void);
+const char *confgen_active_config(void);
+bool confgen_is_managed_file(const char *);
 void confgen_set_statedir(const char *);
+void confgen_lock_statedir(void);
+void confgen_prepare(uid_t, gid_t);
 bool confgen_apply(unsigned long, struct confgen_file *, int, char *, size_t,
 	unsigned long *);
 bool confgen_rollback(char *, size_t);
+bool confgen_revert(char *, size_t);
 char *confgen_b64encode(const unsigned char *, long);
 unsigned char *confgen_b64decode(const char *, long *);
 

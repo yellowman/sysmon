@@ -63,6 +63,7 @@ char *parser_aggregator = NULL;
 char *parser_agg_token = NULL;
 char *parser_agg_ca = NULL;
 char *parser_gendir = NULL;
+int parser_listenport = -1;   /* -1 = not configured; 0 = explicitly off */
 char *parser_sitedesc = NULL;
 char *parser_savestate = NULL;
 char *parser_statusfile = NULL;
@@ -1540,6 +1541,40 @@ config\ aggregator-token\ [^;]+;        {
 
 };
 
+config\ listen\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  parser_pos1 = strchr( parser_pos1+1, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "config listen needs a port or \"off\" on line %d in %s",
+		line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1++;
+  while (*parser_pos1 == ' ' || *parser_pos1 == '\t' || *parser_pos1 == '"')
+	parser_pos1++;
+
+  /*
+   * The client socket is opt-in. sysmond spent most of its life listening
+   * on 1345 as root, and that socket has been its largest attack surface
+   * for as long as it has existed. A daemon that dials out to a sysmon-web
+   * does not need it at all, so it is only opened when a config or a -p
+   * asks for it - which is also what says "I am using the sysmon client
+   * against this box directly".
+   */
+  if (strncmp(parser_pos1, "off", 3) == 0 || strncmp(parser_pos1, "no", 2) == 0)
+	parser_listenport = 0;
+  else
+	parser_listenport = atoi(parser_pos1);
+
+  if (debug)
+    print_err(0, "listen : %d", parser_listenport);
+
+};
+
 config\ generation-dir\ [^;]+;        {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -2864,41 +2899,83 @@ void open_new_file(char *filename, FILE *current_file)
 	save_current_parsing_filename = current_parsing_filename;
 	include_stack = YY_CURRENT_BUFFER;
 
-	new_file = fopen(filename, "r");
-	if (new_file == NULL && filename[0] != '/' &&
-		save_current_parsing_filename != NULL)
-	{
-		/*
-		 * A relative include has always been resolved against the
-		 * working directory, which is fine at startup and wrong
-		 * afterwards: the daemon moves to / once it is running, so the
-		 * same include silently disappears on a SIGHUP reload. Falling
-		 * back to the including file's own directory is what the string
-		 * meant in the first place, and cannot break a config that
-		 * already resolved.
-		 */
-		char sibling[PATH_MAX];
-		char *slash;
+	char sibling[PATH_MAX];
+	char *slash;
+	const char *include_name = filename;
+	bool managed;
 
+	/*
+	 * Where a relative include resolves.
+	 *
+	 * Inside the managed config directory the answer is "next to the file
+	 * that included it", full stop. Trying the working directory there
+	 * would be a real hole: the daemon's working directory is / by the
+	 * time it is running, so `include "hosts.conf"` would prefer
+	 * /hosts.conf to the managed copy, and anyone who can create a file in
+	 * / would decide what this box monitors.
+	 *
+	 * Outside it, the working directory is tried first, because that is
+	 * what a relative include has always meant and changing it could point
+	 * an existing config at a different file. The sibling is a fallback
+	 * only: it turns "the include silently vanished after a SIGHUP,
+	 * because the daemon had moved to /" into "the include was found where
+	 * it was written", and cannot change a config that already resolved.
+	 */
+	managed = confgen_is_managed_file(save_current_parsing_filename);
+
+	sibling[0] = '\0';
+	if (filename[0] != '/' && save_current_parsing_filename != NULL)
+	{
 		snprintf(sibling, sizeof(sibling), "%s", save_current_parsing_filename);
 		slash = strrchr(sibling, '/');
 		if (slash != NULL)
 		{
 			snprintf(slash + 1, sizeof(sibling) - (size_t)(slash + 1 - sibling),
 				"%s", filename);
+		}
+		else
+		{
+			sibling[0] = '\0';
+		}
+	}
+
+	if (managed)
+	{
+		if (strchr(filename, '/') != NULL)
+		{
+			print_err(1, "parser.l: include \"%s\" in a managed config names a "
+				"path; only plain filenames are read from %s",
+				filename, confgen_statedir());
+			return;
+		}
+		if (sibling[0] == '\0')
+			return;
+		new_file = fopen(sibling, "r");
+		if (new_file != NULL)
+			filename = sibling;
+	}
+	else
+	{
+		new_file = fopen(filename, "r");
+		if (new_file == NULL && sibling[0] != '\0')
+		{
 			new_file = fopen(sibling, "r");
 			if (new_file != NULL)
 				filename = sibling;
 		}
 	}
+
 	if (new_file == NULL)
 	{
                 perror(filename);
                 return;
 	}
 	/* Record it only once it opened: a missing include is not part of
-	   the config, and hashing a file that is not there is not possible. */
-	confset_record(filename);
+	   the config, and hashing a file that is not there is not possible.
+	   The name recorded is the string the config used, not where it was
+	   found - that is the identity a delivery names, and it has to mean
+	   the same thing on a box whose seed lives somewhere else. */
+	confset_record(include_name, filename);
 	yyin = new_file;
 	yy_switch_to_buffer(yy_create_buffer( yyin, YY_BUF_SIZE ) );
 /* 	yyrestart(new_file); */
@@ -3565,6 +3642,7 @@ void initalize_parser()
 	parser_savestate = NULL;
 	parser_statusfile = NULL;
 	parser_gendir = NULL;
+	parser_listenport = -1;
 	parser_statustempdir = NULL;
 	parser_pidfile = STRDUP (PIDFILE, "default PID file name");
 	parser_logging = NULL;

@@ -127,7 +127,7 @@ func (a *AgentListener) handshake(conn net.Conn) {
 		token = fields[2]
 	}
 
-	if !validSiteName(site) {
+	if !ValidSiteName(site) {
 		fmt.Fprintf(conn, "444 bad site name\r\n")
 		conn.Close()
 		log.Printf("agents: %s claimed an unusable site name %q", remote, site)
@@ -151,9 +151,11 @@ func (a *AgentListener) handshake(conn net.Conn) {
 	log.Printf("agents: site %s connected from %s", site, remote)
 }
 
-// validSiteName mirrors the daemon's own rule. A colon would make
-// "site:object" ambiguous to split, so it is refused at both ends.
-func validSiteName(s string) bool {
+// ValidSiteName mirrors the daemon's own rule. A colon would make
+// "site:object" ambiguous to split, so it is refused everywhere a site
+// name is accepted: here, at the daemon's config parser, and at the admin
+// page that mints a token for one.
+func ValidSiteName(s string) bool {
 	if s == "" || len(s) > 64 {
 		return false
 	}

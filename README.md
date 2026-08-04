@@ -112,11 +112,28 @@ notifications, and CI that builds everything on every push.
 
 ## Aggregating several sysmonds
 
-One sysmon-web can front a fleet: pass several daemons to `-sysmon`,
-comma-separated, and it polls them all concurrently.
+One sysmon-web fronts a fleet. **Daemons dial in; sysmon-web listens.**
+Neither side does the opposite by default:
 
 ```sh
-sysmon-web -sysmon "metro.noc:1345,north.noc:1345" ...
+# sysmon-web: listens on :1347, generates and logs a certificate on first run
+sysmon-web ...
+
+# each box, in its sysmon.conf:
+config sitename  "metro";
+config aggregator "sysmon-web.example.net:1347";
+config aggregator-token "...";                 # minted on the admin page
+config aggregator-ca "/etc/ssl/sysmon-web-agent.pem";
+```
+
+sysmond **no longer listens on 1345 unless asked**. That socket was open on
+every sysmond for most of the daemon's life, unauthenticated until `AUTH`,
+on a process that ran as root; it is now opt-in with `config listen 1345`
+(or `-p`), which is what you want if you use the `sysmon(1)` client against
+a box directly. sysmon-web likewise only dials out if given `-sysmon`:
+
+```sh
+sysmon-web -sysmon "metro.noc:1345,north.noc:1345" ...   # the old arrangement
 ```
 
 The design is in [docs/sysmond-aggregation.md](docs/sysmond-aggregation.md);
@@ -148,9 +165,16 @@ the shape of it:
   A box that was edited at the console is never silently overwritten: the
   operator is offered the diff, and adopting the local version is the
   default, because the person at the console usually had a reason.
-  Managing a box's config means letting the daemon write its own config
-  directory after it drops privileges, which is why nothing is ever
-  delivered to a box that has not been explicitly adopted.
+- **`/etc/sysmon.conf` is never written.** A managed box keeps its running
+  copy under a directory it owns (`/var/lib/sysmon`, or `config
+  generation-dir`), created for it at startup while still root, and loads
+  that instead. The seed file stays exactly as the operator wrote it, is
+  what the box falls back to if that directory is emptied, and is what
+  "Unmanage" returns it to. The alternative - writing `/etc` from a
+  daemon that has dropped privileges - is a bad trade to ask for in
+  exchange for remote config. Files are named rather than located: a
+  delivery carries plain filenames, and the daemon decides where they go,
+  so nothing an aggregator sends is ever used to build a path.
 - **Rollouts are canaried.** A generation goes to one box first, and
   "applied" is not success on its own: object count and alert rate are
   watched, and a spike rolls that box back automatically and blocks the

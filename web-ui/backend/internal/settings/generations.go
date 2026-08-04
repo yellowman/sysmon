@@ -25,11 +25,17 @@ var (
 	bucketGenFiles   = []byte("gen_files")   // site\x00gen -> []GenFile
 )
 
-// GenFile is one config file of a generation, with the path it lives at on
-// the target box. The path is part of the hash, so it is part of the
-// identity of the generation - not a delivery detail.
+// GenFile is one config file of a generation, identified by its name: the
+// string that appears in the include directive, or the main file's
+// basename. The name is part of the hash, so it is part of the identity of
+// the generation.
+//
+// A name and not a path, because a config is the same config whether the
+// box is reading it as a seed from /etc or as the running copy from its
+// generation directory - and because a path from here is a path the daemon
+// would have to be willing to write.
 type GenFile struct {
-	Path    string `json:"path"`
+	Name    string `json:"name"`
 	Content []byte `json:"content"`
 }
 
@@ -217,6 +223,33 @@ func (s *Store) SetDesiredGeneration(site string, gen uint64, hash string) error
 		if gen > d.HighWater {
 			d.HighWater = gen
 		}
+		blob, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(site), blob)
+	})
+}
+
+// Unadopt stops managing a site. The generations are kept - they are the
+// record of what was delivered and when - but nothing is desired any more,
+// so nothing is offered for delivery and the box shows as unmanaged.
+func (s *Store) Unadopt(site string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(bucketGenDesired)
+		if err != nil {
+			return err
+		}
+		var d Desired
+		if blob := b.Get([]byte(site)); blob != nil {
+			if e := json.Unmarshal(blob, &d); e != nil {
+				return e
+			}
+		}
+		d.Site = site
+		d.Adopted = false
+		d.Generation = 0
+		d.Hash = ""
 		blob, err := json.Marshal(d)
 		if err != nil {
 			return err

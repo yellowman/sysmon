@@ -16,36 +16,38 @@ import (
 // Vector produced by:
 //
 //	mkdir /tmp/sysmon-hash-vector
-//	printf 'root = "core";\nconfig authkey "k";\nobject core {\n\tip "127.0.0.1";\n\ttype ping;\n\tdesc "core";\n};\n' \
+//	printf 'root = "core";\nconfig authkey "k";\nconfig listen 13452;\nobject core {\n\tip "127.0.0.1";\n\ttype ping;\n\tdesc "core";\n};\n' \
 //	  > /tmp/sysmon-hash-vector/sysmon.conf
-//	sysmond -f /tmp/sysmon-hash-vector/sysmon.conf -p 13452 -d
+//	sysmond -f /tmp/sysmon-hash-vector/sysmon.conf -d
 //	AUTH k / CONFIG-GEN
-//	  -> 333 0 f2114b41...87db 1
+//	  -> 333 0 e1668374...1299 1
 //
-// Note the path is part of the hash, so the vector carries the path it was
-// computed at.
+// The file is identified by its name, not its path - which is what lets
+// the same config hash the same as a seed in /etc and as the running copy
+// in a generation directory.
 const (
-	vectorPath = "/tmp/sysmon-hash-vector/sysmon.conf"
-	vectorBody = "root = \"core\";\nconfig authkey \"k\";\nobject core {\n\tip \"127.0.0.1\";\n\ttype ping;\n\tdesc \"core\";\n};\n"
-	vectorHash = "f2114b41671929d8fc67b5b4486535210d1013fcd84bfc1ede8aafcb7baf87db"
+	vectorName = "sysmon.conf"
+	vectorBody = "root = \"core\";\nconfig authkey \"k\";\nconfig listen 13452;\nobject core {\n\tip \"127.0.0.1\";\n\ttype ping;\n\tdesc \"core\";\n};\n"
+	vectorHash = "e1668374fe84f9be431573c5c53bd1307808ea5f0e0028e6c8143fae7d4c1299"
 )
 
 func TestHashMatchesTheDaemon(t *testing.T) {
-	got := HashFileSet([]string{vectorPath}, [][]byte{[]byte(vectorBody)})
+	got := HashFileSet([]string{vectorName}, [][]byte{[]byte(vectorBody)})
 	if got != vectorHash {
 		t.Errorf("this process and sysmond disagree about the config hash\n got  %s\n want %s",
 			got, vectorHash)
 	}
 }
 
-// The path is hashed, not just the content: two boxes running identical
-// bytes at different paths are not running the same config, because a
-// delivery names paths.
-func TestHashCoversThePath(t *testing.T) {
-	a := HashFileSet([]string{"/etc/sysmon.conf"}, [][]byte{[]byte("x")})
-	b := HashFileSet([]string{"/usr/local/etc/sysmon.conf"}, [][]byte{[]byte("x")})
+// The name is hashed, so renaming an include is a change - but the
+// directory it is read from is not part of the name, which is what lets
+// the same config hash identically as a seed in /etc and as the running
+// copy in the generation directory.
+func TestHashCoversTheName(t *testing.T) {
+	a := HashFileSet([]string{"hosts.conf"}, [][]byte{[]byte("x")})
+	b := HashFileSet([]string{"routers.conf"}, [][]byte{[]byte("x")})
 	if a == b {
-		t.Error("the same bytes at a different path hash the same")
+		t.Error("the same bytes under a different name hash the same")
 	}
 }
 
@@ -79,7 +81,11 @@ func TestDocumentHashAgreesWithFileSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := HashFileSet([]string{main, inc}, [][]byte{[]byte(mainBody), []byte(incBody)})
+	// Basenames: a config's identity cannot depend on which directory it
+	// is being read out of, or a box would read as modified the moment its
+	// running copy moved from /etc into the generation directory.
+	want := HashFileSet([]string{"sysmon.conf", "hosts.conf"},
+		[][]byte{[]byte(mainBody), []byte(incBody)})
 	if got := d.Hash(); got != want {
 		t.Errorf("Document.Hash() = %s, HashFileSet = %s", got, want)
 	}
