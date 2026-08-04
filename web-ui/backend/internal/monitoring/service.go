@@ -667,10 +667,15 @@ func (s *Service) StopPoller() {
 // hostFromXML converts one <ObjectStatus> block into the API model. Shared
 // by the bulk CONF path and the per-object SHOWOBJ fallback so the two can
 // never drift apart.
-func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time) (models.HostStatus, string) {
+func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (models.HostStatus, string) {
 	// Create host status entry
 	host := models.HostStatus{
-		ObjectName:    xmlObj.Object,
+		// One place qualifies, so every store downstream - history,
+		// push, delta revisions, layout - inherits the namespace
+		// without knowing it exists.
+		ObjectName:    Qualify(site, xmlObj.Object),
+		LocalName:     xmlObj.Object,
+		Site:          site,
 		Hostname:      xmlObj.HostName,
 		Description:   xmlObj.ObjectMessage,
 		IPv4Address:   "",
@@ -907,6 +912,64 @@ func parseSeqField(line string, n int) uint64 {
 	return v
 }
 
+// fetchSite asks the daemon for its identity. Failure is not an error:
+// "local" is the right answer for a daemon that has never been told it is
+// part of a fleet.
+func fetchSite(conn net.Conn, reader *bufio.Reader) (name, desc string) {
+	name = "local"
+
+	if _, err := conn.Write([]byte("SITE\n")); err != nil {
+		return name, ""
+	}
+	for {
+		line, err := reader.ReadString('\n')
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "444") || strings.HasPrefix(trimmed, "403") {
+			return name, ""
+		}
+		if strings.HasPrefix(trimmed, "333") {
+			return name, desc
+		}
+		if v, ok := xmlField(trimmed, "SiteName"); ok && v != "" {
+			name = v
+		}
+		if v, ok := xmlField(trimmed, "SiteDescription"); ok {
+			desc = v
+		}
+		if err != nil {
+			return name, desc
+		}
+	}
+}
+
+// xmlField pulls the text out of a one-line <Tag>text</Tag>.
+func xmlField(line, tag string) (string, bool) {
+	open, close := "<"+tag+">", "</"+tag+">"
+	if !strings.HasPrefix(line, open) || !strings.HasSuffix(line, close) {
+		return "", false
+	}
+	return line[len(open) : len(line)-len(close)], true
+}
+
+// Qualify builds the fleet-wide key for an object.
+func Qualify(site, object string) string {
+	if site == "" || site == "local" {
+		return object
+	}
+	return site + ":" + object
+}
+
+// SplitQualified separates a fleet-wide key back into its parts. A name
+// with no site is returned as-is, which is what a single-box install and
+// every pre-namespace stored key look like.
+func SplitQualified(name string) (site, object string) {
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		return name[:i], name[i+1:]
+	}
+	return "", name
+}
+
 func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
@@ -977,6 +1040,12 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 		return nil, fmt.Errorf("MODE xml failed: %s", resp.Message)
 	}
 	s.sessionLog.Log("MODE xml", resp.Message, false, "")
+
+	// Who is this daemon? The answer becomes the first half of every
+	// object name we store, so it has to be known before any object is
+	// built. An older daemon that does not know SITE reports "local",
+	// which is exactly what a single-box install wants anyway.
+	daemonInfo.Site, daemonInfo.SiteDesc = fetchSite(conn, reader)
 
 	// Step 2: Get list of ALL objects with STATAL command
 	// CRITICAL: Use STATAL (not STATO or STAT) because:
@@ -1052,7 +1121,7 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	if bulkOK {
 		objectNames = objectNames[:0]
 		for _, xmlObj := range bulkObjs {
-			host, checkType := hostFromXML(xmlObj, daemonInfo.StartTime)
+			host, checkType := hostFromXML(xmlObj, daemonInfo.StartTime, daemonInfo.Site)
 			accumulateHost(status, host, checkType, &hostsUp, &hostsDown)
 			objectNames = append(objectNames, xmlObj.Object)
 		}
@@ -1191,7 +1260,7 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 			}
 		}
 
-		host, checkType := hostFromXML(xmlObj, daemonInfo.StartTime)
+		host, checkType := hostFromXML(xmlObj, daemonInfo.StartTime, daemonInfo.Site)
 		accumulateHost(status, host, checkType, &hostsUp, &hostsDown)
 	}
 
@@ -1407,6 +1476,9 @@ func authenticate(conn net.Conn, reader *bufio.Reader, authKey string) error {
 
 // AckHost acknowledges an alert for a specific host
 func (s *Service) AckHost(hostname string, authKey string) error {
+	// The caller holds a fleet-wide "site:object" key; the daemon that
+	// owns it has never heard of the site half.
+	_, hostname = SplitQualified(hostname)
 	hostname = sanitizeCmd(hostname)
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
@@ -1466,6 +1538,9 @@ func (s *Service) AckHost(hostname string, authKey string) error {
 
 // UpdateHostStatus updates a host with a status note
 func (s *Service) UpdateHostStatus(hostname string, note string, authKey string) error {
+	// The caller holds a fleet-wide "site:object" key; the daemon that
+	// owns it has never heard of the site half.
+	_, hostname = SplitQualified(hostname)
 	hostname = sanitizeCmd(hostname)
 	note = sanitizeCmd(note)
 	// Connect to sysmon daemon
@@ -1526,6 +1601,9 @@ func (s *Service) UpdateHostStatus(hostname string, note string, authKey string)
 
 // ToggleTrace toggles debug tracing for a specific host
 func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
+	// The caller holds a fleet-wide "site:object" key; the daemon that
+	// owns it has never heard of the site half.
+	_, hostname = SplitQualified(hostname)
 	hostname = sanitizeCmd(hostname)
 	// Connect to sysmon daemon
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
@@ -1915,6 +1993,9 @@ func (s *Service) GetObjectsXML() (string, error) {
 
 // GetObjectXML returns raw XML for a single monitored object
 func (s *Service) GetObjectXML(hostname string) (string, error) {
+	// The caller holds a fleet-wide "site:object" key; the daemon that
+	// owns it has never heard of the site half.
+	_, hostname = SplitQualified(hostname)
 	hostname = sanitizeCmd(hostname)
 	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
 	if err != nil {
@@ -2041,6 +2122,9 @@ func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperati
 
 	// Process each hostname
 	for i, hostname := range hostnames {
+		// The caller holds a fleet-wide "site:object" key; the daemon that
+		// owns it has never heard of the site half.
+		_, hostname = SplitQualified(hostname)
 		hostname = sanitizeCmd(hostname)
 		cmd := fmt.Sprintf("ACK %s\n", hostname)
 		_, err := conn.Write([]byte(cmd))
@@ -2153,6 +2237,9 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 	// Process each hostname
 	note = sanitizeCmd(note)
 	for i, hostname := range hostnames {
+		// The caller holds a fleet-wide "site:object" key; the daemon that
+		// owns it has never heard of the site half.
+		_, hostname = SplitQualified(hostname)
 		hostname = sanitizeCmd(hostname)
 		cmd := fmt.Sprintf("UPD %s %s\n", hostname, note)
 		_, err := conn.Write([]byte(cmd))
@@ -2256,6 +2343,9 @@ func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey strin
 
 	// Process each hostname
 	for i, hostname := range hostnames {
+		// The caller holds a fleet-wide "site:object" key; the daemon that
+		// owns it has never heard of the site half.
+		_, hostname = SplitQualified(hostname)
 		hostname = sanitizeCmd(hostname)
 		cmd := fmt.Sprintf("TRACE %s\n", hostname)
 		_, err := conn.Write([]byte(cmd))

@@ -240,7 +240,13 @@
             return {
                 rev: 0,
                 index: new Map(),
+                // The key is fleet-wide ("site:object") and is what every
+                // API call and stored row uses. The label is what a person
+                // reads: the bare name, with the site shown separately so
+                // it does not have to be parsed back out of the name.
                 hostKey(h) { return h.object_name || h.hostname; },
+                hostLabel(h) { return h.local_name || h.object_name || h.hostname; },
+                hostSite(h) { return h.site && h.site !== 'local' ? h.site : ''; },
 
                 // Returns {full, hosts, changed, removed, daemon, stats}.
                 // `hosts` is always the complete current list; `changed` /

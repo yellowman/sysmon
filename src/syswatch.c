@@ -90,6 +90,9 @@ char *recentcolor = NULL;
 char *globhdr = NULL;
 char *globhdrval = NULL;
 char *authkey = NULL;
+/* Unset means "local", so a single-box install needs no config change. */
+char *sitename = NULL;
+char *sitedesc = NULL;
 char *path_savestate = NULL;
 char *statefile = NULL;
 #ifdef HAVE_LIBPTHREAD

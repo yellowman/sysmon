@@ -1137,6 +1137,38 @@ void send_traps(struct clientstatus *client, unsigned long since)
 	#undef TRAP_SEND
 }
 
+/*
+ * SITE
+ *
+ * Who this daemon is. The name is the key half of every "site:object" a
+ * client stores; the description is the label a person reads. An
+ * unconfigured daemon answers "local" so a single-box install needs no
+ * config change and no special case in the client.
+ */
+void send_site(struct clientstatus *client)
+{
+	char buffer[TEMPBUF_SIZE];
+
+	if (client->xml)
+	{
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SITE_NAME,
+			sitename != NULL ? sitename : "local", XML_SITE_NAME);
+		if (sendline(client->filedes, buffer) == -1)
+			return;
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SITE_DESC,
+			sitedesc != NULL ? sitedesc : "", XML_SITE_DESC);
+		if (sendline(client->filedes, buffer) == -1)
+			return;
+		sendline(client->filedes, "333 site");
+		return;
+	}
+
+	snprintf(buffer, sizeof(buffer), "333 %s %s",
+		sitename != NULL ? sitename : "local",
+		sitedesc != NULL ? sitedesc : "");
+	sendline(client->filedes, buffer);
+}
+
 void send_uptime(struct clientstatus *client, time_t now_t)
 {
 	char buffer[256];
@@ -1260,6 +1292,10 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	else if (strncmp(buff, "TRACE ", 6) == 0)
 	{
 		srv_client_do_trace(here, buff);
+	}
+	else if (strncmp(buff, "SITE", 4) == 0)
+	{
+		send_site(here);
 	}
 	else if (strncmp(buff, "TRAPS", 5) == 0)
 	{

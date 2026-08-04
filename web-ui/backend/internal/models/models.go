@@ -209,11 +209,15 @@ type StatusDelta struct {
 
 // DaemonInfo represents sysmon daemon information
 type DaemonInfo struct {
-	Version        string    `json:"version"`
-	Uptime         int64     `json:"uptime_seconds"`
-	StartTime      time.Time `json:"start_time"`
-	CurrentTime    time.Time `json:"current_time"`
-	PID            int       `json:"pid"`
+	Version     string    `json:"version"`
+	Uptime      int64     `json:"uptime_seconds"`
+	StartTime   time.Time `json:"start_time"`
+	CurrentTime time.Time `json:"current_time"`
+	PID         int       `json:"pid"`
+	// Site is this daemon's key half of "site:object"; SiteDesc is the
+	// label a person reads. An unconfigured daemon reports "local".
+	Site           string    `json:"site"`
+	SiteDesc       string    `json:"site_desc,omitempty"`
 	ConfigFile     string    `json:"config_file"`
 	ConfigLoadTime time.Time `json:"config_load_time"`
 	Paused         bool      `json:"paused"`
@@ -221,7 +225,15 @@ type DaemonInfo struct {
 
 // HostStatus represents the status of a monitored host
 type HostStatus struct {
-	ObjectName     string        `json:"object_name"` // Unique sysmon object name
+	// ObjectName is the fleet-wide key: "site:object". It is what every
+	// store is keyed on - history, push collapse, map layout, delta
+	// revisions - so two sites' coreswitch can never collide.
+	ObjectName string `json:"object_name"`
+	// LocalName is the bare name the owning daemon knows it by, which is
+	// what goes back over the wire in ACK/UPD/TRACE, and what the UI shows
+	// when only one site is in view.
+	LocalName      string        `json:"local_name,omitempty"`
+	Site           string        `json:"site,omitempty"`
 	Hostname       string        `json:"hostname"`
 	Description    string        `json:"description,omitempty"` // Notes/description from config
 	IPv4Address    string        `json:"ipv4_address,omitempty"`

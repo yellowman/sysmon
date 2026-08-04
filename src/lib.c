@@ -14,6 +14,31 @@
  */
 unsigned long glob_change_seq = 0;
 
+/*
+ * A sitename becomes the part before the colon in every qualified object
+ * name a client stores, logs and routes on. Restrict it to what can pass
+ * through all of that untouched: no colon (which would make the split
+ * ambiguous), no whitespace or quotes (which would need escaping in every
+ * log line, key and URL path).
+ */
+bool valid_sitename(const char *name)
+{
+	const char *c;
+
+	if (name == NULL || *name == '\0')
+		return FALSE;
+
+	for (c = name; *c != '\0'; c++)
+	{
+		if (*c >= 'a' && *c <= 'z') continue;
+		if (*c >= 'A' && *c <= 'Z') continue;
+		if (*c >= '0' && *c <= '9') continue;
+		if (*c == '-' || *c == '_') continue;
+		return FALSE;
+	}
+	return TRUE;
+}
+
 void object_changed(struct hostinfo *svc)
 {
 	if (svc == NULL)

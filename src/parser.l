@@ -58,6 +58,8 @@ char *parser_replyto = NULL;
 char *parser_errorsto = NULL;
 char *parser_header = NULL;
 char *parser_authkey = NULL;
+char *parser_sitename = NULL;
+char *parser_sitedesc = NULL;
 char *parser_savestate = NULL;
 char *parser_statusfile = NULL;
 char *parser_statustempdir = NULL;
@@ -1475,6 +1477,80 @@ config\ header\ [^;]+;          {
 
   if (debug)
     print_err(0, "header : %s", parser_header); 
+
+};
+
+config\ sitename\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /*
+   * This name is the key half of every "site:object" a client stores, so
+   * a colon in it would make the qualified name ambiguous to split. Say
+   * so here rather than let it become an unaddressable daemon.
+   */
+  if (!valid_sitename(parser_pos1))
+  {
+	print_err(1, "config sitename \"%s\" in %s line %d: only letters, digits, - and _ are allowed",
+		parser_pos1, current_parsing_filename, line_no);
+	badconfig = TRUE;
+	break;
+  }
+
+  if (parser_sitename != NULL)
+  {
+	FREE(parser_sitename);
+  }
+  parser_sitename = STRDUP(parser_pos1, "parser.l:parser_sitename");
+
+  if (debug)
+    print_err(0, "sitename : %s", parser_sitename);
+
+};
+
+config\ sitedesc\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* Free text: nothing keys on it, so nothing to validate. */
+  if (parser_sitedesc != NULL)
+  {
+	FREE(parser_sitedesc);
+  }
+  parser_sitedesc = STRDUP(parser_pos1, "parser.l:parser_sitedesc");
+
+  if (debug)
+    print_err(0, "sitedesc : %s", parser_sitedesc);
 
 };
 
@@ -3326,6 +3402,8 @@ void initalize_parser()
 	parser_errorsto = NULL;
 	parser_header = NULL;
 	parser_authkey = NULL;
+	parser_sitename = NULL;
+	parser_sitedesc = NULL;
 	parser_savestate = NULL;
 	parser_statusfile = NULL;
 	parser_statustempdir = NULL;
