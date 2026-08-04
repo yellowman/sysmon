@@ -15,6 +15,13 @@
             <a href="/admin.html" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
                 <i class="fas fa-arrow-left mr-1"></i>Admin
             </a>
+            <!-- Every box needs this file. Offering it here beats telling
+                 somebody to find it on the server, which is how they end up
+                 copying the wrong one. -->
+            <a href="/api/settings/agents/ca" download="aggregator-ca.pem"
+               class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
+                <i class="fas fa-download mr-1"></i>CA certificate
+            </a>
             <button @click="showAdd = !showAdd"
                     class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
                 <i class="fas fa-plus mr-1"></i>Add a box
@@ -39,6 +46,13 @@
                 <label class="block text-[10px] font-semibold uppercase tracking-wider text-amber-900 mt-3 mb-1">
                     Add these lines to /etc/sysmon.conf on the box
                 </label>
+                <p class="text-[11px] text-amber-800 mb-1">
+                    The box also needs the CA certificate, as
+                    <span class="mono">aggregator-ca.pem</span> in its state
+                    directory (<span class="mono">/var/db/sysmon</span>).
+                    <a href="/api/settings/agents/ca" download="aggregator-ca.pem"
+                       class="underline">Download it</a>.
+                </p>
                 <pre class="text-xs bg-white rounded p-3 overflow-x-auto border border-amber-200"
                      x-text="configSnippet()"></pre>
             </div>
@@ -137,6 +151,11 @@
     <p class="text-[11px] text-gray-400 mt-3">
         A token proves a box to this server; the certificate proves this server
         to the box. Both are needed. Only an administrator sees this page.
+        The same jobs from a terminal:
+        <span class="mono">sysmon-web -mint-agent &lt;site&gt;</span>,
+        <span class="mono">-list-agents</span>,
+        <span class="mono">-revoke-agent &lt;site&gt;</span>,
+        <span class="mono">-show-ca</span>.
     </p>
 </div>
 

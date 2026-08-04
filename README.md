@@ -213,11 +213,12 @@ curl -b cookies -X POST https://sysmon-web.example.net/api/settings/agents \
 
 Only an administrator can reach that page or that endpoint.
 
-**3. Copy the certificate to the box.**
+**3. Copy the certificate to the box.** The page has a **CA certificate**
+button, or use `-show-ca`.
 
 ```sh
 ssh box mkdir -p /var/db/sysmon
-scp /var/lib/sysmon/agent/agent-cert.pem box:/var/db/sysmon/aggregator-ca.pem
+sysmon-web -show-ca | ssh box 'cat > /var/db/sysmon/aggregator-ca.pem'
 ```
 
 **4. Add four lines to the box's `/etc/sysmon.conf`.**
@@ -240,6 +241,28 @@ The box now sends its status. Its config stays read-only.
 **6. Adopt the box, to manage its config.** Open the Fleet page and click
 Adopt. sysmon-web then keeps a copy of the config the box is running. You
 can edit and deliver it after that step, and not before.
+
+### The same jobs from a terminal
+
+Boxes get built by scripts, so everything the page does is a command as
+well. These run and exit.
+
+```sh
+sysmon-web -mint-agent metro -agent-label "Metro Station - rack 4"
+sysmon-web -list-agents
+sysmon-web -revoke-agent metro
+sysmon-web -show-ca
+```
+
+`-mint-agent` writes the config lines to standard output and its advice to
+standard error, so a provisioning script can append the first straight to
+the box's config. Add `-replace-agent` to replace a live token, which
+stops the box holding the old one.
+
+These open `settings.db` directly, and a running sysmon-web holds that
+file. So they work with the service stopped, or on a machine where it has
+never been started; while it is running, use the page. `-show-ca` needs no
+database and works either way.
 
 Three things to know:
 
