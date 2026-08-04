@@ -258,6 +258,9 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_VERSION,
+			obj->data->snmp_version == SNMP_VERSION_1 ? "1" : "2c", XML_SNMP_VERSION);
+		SEND_OR_ABORT(fd, fh, buffer);
 		if (obj->data->snmp_oid != NULL)
 		{
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);

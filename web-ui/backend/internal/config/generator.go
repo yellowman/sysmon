@@ -262,6 +262,11 @@ func Generate(config *models.Config) (string, error) {
 		if host.SNMPOIDSec != "" {
 			sb.WriteString(fmt.Sprintf("\tsnmp-oid-sec \"%s\";\n", q(host.SNMPOIDSec)))
 		}
+		// Only written when it is not the default, so an untouched config
+		// does not sprout a directive the operator never asked for.
+		if host.SNMPVersion == "1" {
+			sb.WriteString("\tsnmp-version \"1\";\n")
+		}
 		if host.SNMPType != "" {
 			sb.WriteString(fmt.Sprintf("\tsnmp-type \"%s\";\n", q(host.SNMPType)))
 		}

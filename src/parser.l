@@ -77,6 +77,9 @@ char *parser_community = NULL;
 char *parser_oid = NULL;
 char *parser_snmp_oid_sec = NULL;
 char *parser_snmp_type = NULL;
+/* v2c unless an object says otherwise: it is what everything since the
+   late 90s speaks, and v1 cannot carry a 64-bit counter. */
+int parser_snmp_version = SNMP_VERSION_2C;
 int parser_i_snmp_type = -1;
 char *parser_snmp_low = NULL;
 char *parser_snmp_high = NULL;
@@ -657,6 +660,7 @@ object[^\{]+{WS}+\{	{
   parser_reverse = FALSE;
   parser_snmp_octets = FALSE;
   parser_trap_alert = FALSE;
+  parser_snmp_version = SNMP_VERSION_2C;
   for (temp_int=6;strlen(yytext)> temp_int;temp_int++)
   {
 	if (!isspace(yytext[temp_int]))
@@ -2081,6 +2085,45 @@ snmp-oid-sec\ [^;]+;          {
 
 }
 
+snmp-version\ [^;]+;       {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: snmp-version specified when not inside an object at line %d", line_no);
+
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* "1"/"v1" and "2c"/"v2c"/"2" are all things people write */
+  if (strcasecmp(parser_pos1, "1") == 0 || strcasecmp(parser_pos1, "v1") == 0)
+  {
+	parser_snmp_version = SNMP_VERSION_1;
+  } else if (strcasecmp(parser_pos1, "2c") == 0 ||
+	strcasecmp(parser_pos1, "v2c") == 0 || strcasecmp(parser_pos1, "2") == 0) {
+	parser_snmp_version = SNMP_VERSION_2C;
+  } else {
+	print_err(1, "snmp-version \"%s\" in %s line %d is not 1 or 2c - using 2c",
+		parser_pos1, current_parsing_filename, line_no);
+	parser_snmp_version = SNMP_VERSION_2C;
+  }
+
+  if (debug)
+    print_err(0, "snmp-version : %s", parser_pos1);
+}
+
 snmp-type\ [^;]+;          {
   if (parser_name == NULL)
         print_err(1, "WARNING: snmp-type specified when not inside an object at line %d", line_no);
@@ -2981,6 +3024,8 @@ void add_object()
 			new_ele->value->data->snmp_test_type = parser_i_snmp_type;
 		}
 
+		new_ele->value->data->snmp_version = parser_snmp_version;
+
 		if (parser_i_snmp_type == SYSM_SNMP_TYPE_REBOOT)
 		{
 			if (new_ele->value->data->snmp_oid != NULL)
@@ -3316,6 +3361,7 @@ void initalize_parser()
 	parser_i_rtt_samples = 5;  /* Default: 5 samples */
 	parser_html_refresh = 60;
 	parser_snmp_type = NULL;
+	parser_snmp_version = SNMP_VERSION_2C;
 	parser_snmp_low = NULL;
 	parser_snmp_high = NULL;
 	parser_snmp_exact = NULL;

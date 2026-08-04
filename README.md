@@ -31,7 +31,7 @@ notifications, and CI that builds everything on every push.
   as 64-bit rather than guessed at, which the old net-snmp path got
   wrong. Both halves are fuzzed under ASan/UBSan, and `make check` runs a
   differential test against net-snmp's own client when you point it at an
-  agent
+  agent. Per-object `snmp-version "1";` for agents too old for v2c
 - Dependency trees: when a router dies, its children don't page you
 - Flap damping, ack/notification thresholds, per-contact schedules
 - **SNMP trap reception, decoded**: v1 and v2c traps are parsed - trap

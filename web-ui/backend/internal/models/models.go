@@ -112,11 +112,13 @@ type Host struct {
 	SNMPUpMsg     string `json:"snmpupmsg,omitempty"`     // Custom message when SNMP check passes
 	SNMPDownMsg   string `json:"snmpdownmsg,omitempty"`   // Custom message when SNMP check fails
 	SNMPType      string `json:"snmptype,omitempty"`      // SNMP check type (high/low/range/exact/rate/uptime)
-	SNMPHigh      int64  `json:"snmphigh,omitempty"`      // upper threshold
-	SNMPLow       int64  `json:"snmplow,omitempty"`       // lower threshold
-	SNMPExact     int64  `json:"snmpexact,omitempty"`     // exact value to match
-	SNMPRate      int64  `json:"snmprate,omitempty"`      // rate per second threshold
-	SNMPOctets    bool   `json:"snmpoctets,omitempty"`    // convert bytes to bits for rate
+	// SNMPVersion is "1" or "2c"; empty means the daemon default (2c).
+	SNMPVersion string `json:"snmpversion,omitempty"`
+	SNMPHigh    int64  `json:"snmphigh,omitempty"`   // upper threshold
+	SNMPLow     int64  `json:"snmplow,omitempty"`    // lower threshold
+	SNMPExact   int64  `json:"snmpexact,omitempty"`  // exact value to match
+	SNMPRate    int64  `json:"snmprate,omitempty"`   // rate per second threshold
+	SNMPOctets  bool   `json:"snmpoctets,omitempty"` // convert bytes to bits for rate
 
 	// DNS check settings
 	DNSQuery     string `json:"dnsquery,omitempty"`     // DNS hostname to query
