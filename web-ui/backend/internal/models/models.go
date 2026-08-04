@@ -184,7 +184,10 @@ type ConfigUpdate struct {
 
 // SysmonStatus represents the live sysmon daemon status
 type SysmonStatus struct {
+	// Daemon is the primary daemon, so a single-box client sees what it
+	// always did; Daemons is the whole fleet.
 	Daemon     DaemonInfo   `json:"daemon"`
+	Daemons    []DaemonInfo `json:"daemons,omitempty"`
 	Hosts      []HostStatus `json:"hosts"`
 	Statistics Stats        `json:"statistics"`
 	SNMPTraps  *TrapInfo    `json:"snmp_traps,omitempty"`
@@ -205,6 +208,17 @@ type StatusDelta struct {
 	Statistics Stats        `json:"statistics"`        // always included (small)
 	Changed    []HostStatus `json:"changed"`           // hosts new-or-changed since `since`
 	Removed    []string     `json:"removed,omitempty"` // object names removed since `since`
+}
+
+// SiteInfo is one sysmond in the fleet, as the site picker sees it.
+type SiteInfo struct {
+	Site        string    `json:"site"`
+	Description string    `json:"description,omitempty"`
+	Address     string    `json:"address"`
+	Reachable   bool      `json:"reachable"`
+	LastError   string    `json:"last_error,omitempty"`
+	LastSeen    time.Time `json:"last_seen,omitempty"`
+	Hosts       int       `json:"hosts"`
 }
 
 // DaemonInfo represents sysmon daemon information

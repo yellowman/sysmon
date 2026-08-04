@@ -30,8 +30,48 @@ func sanitizeCmd(s string) string {
 }
 
 // Service handles monitoring queries to sysmon daemon
+// daemon is one sysmond and everything we track about it. A fleet is a
+// list of these; a single-box install is a list of one, which is why the
+// aggregation adds no special case to the single-box path.
+type daemon struct {
+	addr string
+
+	mu       sync.Mutex
+	site     string // "local" until the daemon says otherwise
+	siteDesc string
+	info     models.DaemonInfo
+	lastErr  string
+	lastOK   time.Time
+
+	// Incremental fetch state.
+	//
+	// confSeq is the highest object sequence this daemon has reported. It
+	// goes back as CONF's argument, so a cycle where nothing changed
+	// transfers two lines. hostCache keeps the objects we already know,
+	// since the daemon will not resend them.
+	//
+	// fullResyncAt forces a whole dump periodically: counters like
+	// total_checked tick without being a "change", so an object that never
+	// changes state would otherwise show numbers frozen at whenever we
+	// last saw it.
+	confSeq      uint64
+	hostCache    map[string]XMLObjectStatus
+	fullResyncAt time.Time
+
+	// Traps collected from this daemon, newest first. trapSeq is the
+	// highest trap sequence it has reported; trapsLost counts the ones its
+	// ring overwrote before we asked for them.
+	trapSeq     uint64
+	trapHistory []xmlTrap
+	trapsLost   int
+}
+
 type Service struct {
-	sysmonAddr string
+	// daemons is the fleet, in the order they were configured. The first
+	// is the primary: it is what a single-daemon API field reports, so a
+	// one-box install sees exactly what it always did.
+	daemons    []*daemon
+	sysmonAddr string // the primary's address, kept for error messages
 	sessionLog *SessionLogger
 
 	cacheMu sync.Mutex
@@ -62,28 +102,6 @@ type Service struct {
 	// object dump - is privileged; without a key we fall back to asking
 	// for each object separately.
 	authKeyFn func() string
-
-	// Incremental fetch state (guarded by cacheMu).
-	//
-	// confSeq is the highest object sequence sysmond has reported. It goes
-	// back as CONF's argument, so a cycle where nothing changed transfers
-	// two lines. hostCache keeps the objects we already know, since the
-	// daemon will not resend them.
-	//
-	// fullResyncAt forces a whole dump periodically: counters like
-	// total_checked tick without being a "change", so an object that never
-	// changes state would otherwise show numbers frozen at whenever we
-	// last saw it.
-	confSeq      uint64
-	hostCache    map[string]XMLObjectStatus
-	fullResyncAt time.Time
-
-	// Traps collected from sysmond, newest first. trapSeq is the highest
-	// trap sequence the daemon has reported; trapsLost counts the ones its
-	// ring overwrote before we asked for them.
-	trapSeq     uint64
-	trapHistory []xmlTrap
-	trapsLost   int
 }
 
 // fullResyncEvery bounds how stale a quiet object's counters can get.
@@ -226,14 +244,49 @@ func (s *Service) History() *HistoryStore {
 	return s.history
 }
 
+// NewService takes one or more sysmond addresses, comma-separated. One
+// address is the ordinary single-box case and behaves exactly as it always
+// has; several make this the front end for a fleet.
 func NewService(sysmonAddr string) *Service {
-	return &Service{
+	s := &Service{
 		sysmonAddr: sysmonAddr,
 		sessionLog: NewSessionLogger(500, 100), // Keep last 500 entries, 100 errors
 		hostRev:    make(map[string]int64),
 		hostSig:    make(map[string]uint64),
 		removedAt:  make(map[string]int64),
 	}
+	for _, addr := range strings.Split(sysmonAddr, ",") {
+		addr = strings.TrimSpace(addr)
+		if addr == "" {
+			continue
+		}
+		s.daemons = append(s.daemons, &daemon{addr: addr, site: "local"})
+	}
+	if len(s.daemons) == 0 {
+		s.daemons = append(s.daemons, &daemon{addr: sysmonAddr, site: "local"})
+	}
+	s.sysmonAddr = s.daemons[0].addr
+	return s
+}
+
+// Sites reports the fleet: who is configured, what they call themselves,
+// and whether the last poll reached them.
+func (s *Service) Sites() []models.SiteInfo {
+	out := make([]models.SiteInfo, 0, len(s.daemons))
+	for _, d := range s.daemons {
+		d.mu.Lock()
+		out = append(out, models.SiteInfo{
+			Site:        d.site,
+			Description: d.siteDesc,
+			Address:     d.addr,
+			Reachable:   d.lastErr == "",
+			LastError:   d.lastErr,
+			LastSeen:    d.lastOK,
+			Hosts:       len(d.hostCache),
+		})
+		d.mu.Unlock()
+	}
+	return out
 }
 
 // hostKey is the stable identity for a host across snapshots.
@@ -438,7 +491,7 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		s.fetchDone = make(chan struct{})
 		s.cacheMu.Unlock()
 
-		status, err := s.fetchStatus()
+		status, err := s.fetchFleet()
 
 		s.cacheMu.Lock()
 		var events []HistoryEvent
@@ -476,7 +529,7 @@ func (s *Service) Refresh() {
 	s.fetchDone = make(chan struct{})
 	s.cacheMu.Unlock()
 
-	status, err := s.fetchStatus()
+	status, err := s.fetchFleet()
 
 	s.cacheMu.Lock()
 	var events []HistoryEvent
@@ -584,6 +637,74 @@ func (s *Service) pruneRemovedLocked() {
 	if cutoff > s.minDeltaRev {
 		s.minDeltaRev = cutoff
 	}
+}
+
+// FilterSite narrows a status to one site. Used to serve ?site= without
+// making the client download the rest of the fleet.
+func FilterSite(status *models.SysmonStatus, site string) *models.SysmonStatus {
+	if status == nil || site == "" {
+		return status
+	}
+	out := *status
+	out.Hosts = make([]models.HostStatus, 0, len(status.Hosts))
+	out.Statistics = models.Stats{
+		ChecksByType:   make(map[string]int),
+		ChecksByStatus: make(map[string]int),
+	}
+	for _, h := range status.Hosts {
+		if h.Site != site {
+			continue
+		}
+		out.Hosts = append(out.Hosts, h)
+		out.Statistics.TotalHosts++
+		switch h.OverallStatus {
+		case "CRITICAL":
+			out.Statistics.CriticalHosts++
+		case "WARNING":
+			out.Statistics.WarningHosts++
+		default:
+			out.Statistics.HealthyHosts++
+		}
+		out.Statistics.ChecksByStatus[h.OverallStatus]++
+		if len(h.Checks) > 0 && h.Checks[0].Type != "" {
+			out.Statistics.ChecksByType[h.Checks[0].Type]++
+		}
+	}
+	for _, di := range status.Daemons {
+		if di.Site == site {
+			out.Daemon = di
+			out.Daemons = []models.DaemonInfo{di}
+			break
+		}
+	}
+	return &out
+}
+
+// FilterDeltaSite narrows a delta the same way.
+//
+// The revision stays global and monotonic: a client whose delta comes back
+// empty because the change was in a site it does not watch just stores the
+// new rev and moves on. Widening the filter is the case that needs care -
+// the client has never seen the sites it was excluding - and is handled by
+// the caller forcing a full resync.
+func FilterDeltaSite(d *models.StatusDelta, site string) *models.StatusDelta {
+	if d == nil || site == "" {
+		return d
+	}
+	out := *d
+	out.Changed = make([]models.HostStatus, 0, len(d.Changed))
+	for _, h := range d.Changed {
+		if h.Site == site {
+			out.Changed = append(out.Changed, h)
+		}
+	}
+	out.Removed = nil
+	for _, name := range d.Removed {
+		if s, _ := SplitQualified(name); s == site {
+			out.Removed = append(out.Removed, name)
+		}
+	}
+	return &out
 }
 
 // GetDelta returns the changes since the client's revision. If the client
@@ -792,7 +913,7 @@ func accumulateHost(status *models.SysmonStatus, host models.HostStatus, checkTy
 // an error) whenever the bulk path is unavailable - no key, a daemon that
 // refuses, a daemon too old to know the command - and the caller falls
 // back to asking object by object.
-func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs []XMLObjectStatus, ok bool) {
+func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Reader) (objs []XMLObjectStatus, ok bool) {
 	key := s.authKey()
 	if key == "" {
 		// Worth saying out loud: without it every poll walks the objects
@@ -810,12 +931,12 @@ func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs 
 	// Ask only for what moved since last time. Periodically - and on the
 	// first cycle - ask for everything anyway, so counters that tick
 	// without counting as a change do not drift.
-	s.cacheMu.Lock()
-	since := s.confSeq
-	if s.hostCache == nil || time.Since(s.fullResyncAt) > fullResyncEvery {
+	d.mu.Lock()
+	since := d.confSeq
+	if d.hostCache == nil || time.Since(d.fullResyncAt) > fullResyncEvery {
 		since = 0
 	}
-	s.cacheMu.Unlock()
+	d.mu.Unlock()
 
 	cmd := "CONF\n"
 	if since > 0 {
@@ -865,27 +986,27 @@ func (s *Service) fetchAllObjectsXML(conn net.Conn, reader *bufio.Reader) (objs 
 
 	// Merge into what we already hold. An incremental reply carrying
 	// nothing is the normal case on a quiet network, and is a success.
-	s.cacheMu.Lock()
-	if since == 0 || s.hostCache == nil {
-		s.hostCache = make(map[string]XMLObjectStatus, len(objs))
-		s.fullResyncAt = time.Now()
+	d.mu.Lock()
+	if since == 0 || d.hostCache == nil {
+		d.hostCache = make(map[string]XMLObjectStatus, len(objs))
+		d.fullResyncAt = time.Now()
 	}
-	if daemonSeq < s.confSeq {
+	if daemonSeq < d.confSeq {
 		// The daemon restarted: its counter went backwards, so everything
 		// we hold is from a previous life.
 		s.sessionLog.Log("CONF", "sysmond sequence went backwards - resyncing", false, "")
-		s.hostCache = make(map[string]XMLObjectStatus, len(objs))
-		s.fullResyncAt = time.Time{}
+		d.hostCache = make(map[string]XMLObjectStatus, len(objs))
+		d.fullResyncAt = time.Time{}
 	}
 	for _, o := range objs {
-		s.hostCache[o.Object] = o
+		d.hostCache[o.Object] = o
 	}
-	s.confSeq = daemonSeq
-	merged := make([]XMLObjectStatus, 0, len(s.hostCache))
-	for _, o := range s.hostCache {
+	d.confSeq = daemonSeq
+	merged := make([]XMLObjectStatus, 0, len(d.hostCache))
+	for _, o := range d.hostCache {
 		merged = append(merged, o)
 	}
-	s.cacheMu.Unlock()
+	d.mu.Unlock()
 
 	if len(merged) == 0 {
 		return nil, false
@@ -910,6 +1031,123 @@ func parseSeqField(line string, n int) uint64 {
 		return 0
 	}
 	return v
+}
+
+// sortHostsByUrgency puts what is broken at the top: CRITICAL, then
+// WARNING, then OK, alphabetical within each.
+func sortHostsByUrgency(hosts []models.HostStatus) {
+	sort.SliceStable(hosts, func(i, j int) bool {
+		hostI := hosts[i]
+		hostJ := hosts[j]
+
+		// Define priority: CRITICAL=0, WARNING=1, OK=2
+		priorityI := 2 // OK
+		if hostI.OverallStatus == "CRITICAL" {
+			priorityI = 0
+		} else if hostI.OverallStatus == "WARNING" {
+			priorityI = 1
+		}
+
+		priorityJ := 2 // OK
+		if hostJ.OverallStatus == "CRITICAL" {
+			priorityJ = 0
+		} else if hostJ.OverallStatus == "WARNING" {
+			priorityJ = 1
+		}
+
+		// Sort by priority first
+		if priorityI != priorityJ {
+			return priorityI < priorityJ
+		}
+
+		// Within same priority, sort alphabetically by hostname
+		return hostI.Hostname < hostJ.Hostname
+	})
+}
+
+// fetchFleet polls every daemon and merges them into one view.
+//
+// Boxes are polled concurrently, because a fleet's poll cycle should be as
+// slow as its slowest member rather than the sum of all of them. One
+// unreachable daemon is recorded against that daemon and does not fail the
+// cycle - the rest of the fleet is still worth showing, and a site that
+// has gone dark is exactly what the operator needs to see.
+func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
+	type result struct {
+		status *models.SysmonStatus
+		err    error
+	}
+
+	results := make([]result, len(s.daemons))
+	var wg sync.WaitGroup
+	for i, d := range s.daemons {
+		wg.Add(1)
+		go func(i int, d *daemon) {
+			defer wg.Done()
+			st, err := s.fetchStatus(d)
+			results[i] = result{st, err}
+
+			d.mu.Lock()
+			if err != nil {
+				d.lastErr = err.Error()
+			} else {
+				d.lastErr = ""
+				d.lastOK = time.Now()
+				d.info = st.Daemon
+			}
+			d.mu.Unlock()
+		}(i, d)
+	}
+	wg.Wait()
+
+	merged := &models.SysmonStatus{
+		Hosts: []models.HostStatus{},
+		Statistics: models.Stats{
+			ChecksByType:   make(map[string]int),
+			ChecksByStatus: make(map[string]int),
+		},
+	}
+
+	reached := 0
+	var firstErr error
+	for _, r := range results {
+		if r.err != nil {
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
+		}
+		reached++
+		merged.Daemons = append(merged.Daemons, r.status.Daemon)
+		merged.Hosts = append(merged.Hosts, r.status.Hosts...)
+		merged.Statistics.TotalHosts += r.status.Statistics.TotalHosts
+		merged.Statistics.HealthyHosts += r.status.Statistics.HealthyHosts
+		merged.Statistics.WarningHosts += r.status.Statistics.WarningHosts
+		merged.Statistics.CriticalHosts += r.status.Statistics.CriticalHosts
+		merged.Statistics.TotalChecks += r.status.Statistics.TotalChecks
+		for k, v := range r.status.Statistics.ChecksByType {
+			merged.Statistics.ChecksByType[k] += v
+		}
+		for k, v := range r.status.Statistics.ChecksByStatus {
+			merged.Statistics.ChecksByStatus[k] += v
+		}
+	}
+
+	// Nothing answered: that is a real failure, and the caller's error
+	// handling (and the UI's error widget) should see it.
+	if reached == 0 {
+		if firstErr == nil {
+			firstErr = fmt.Errorf("no sysmond configured")
+		}
+		return nil, firstErr
+	}
+
+	// The primary's daemon info is what a single-box client reads.
+	if len(merged.Daemons) > 0 {
+		merged.Daemon = merged.Daemons[0]
+	}
+	sortHostsByUrgency(merged.Hosts)
+	return merged, nil
 }
 
 // fetchSite asks the daemon for its identity. Failure is not an error:
@@ -970,11 +1208,11 @@ func SplitQualified(name string) (site, object string) {
 	return "", name
 }
 
-func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
+func (s *Service) fetchStatus(d *daemon) (*models.SysmonStatus, error) {
 	// Connect to sysmon daemon
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+	conn, err := net.DialTimeout("tcp", d.addr, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", s.sysmonAddr, err)
+		return nil, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", d.addr, err)
 	}
 	defer conn.Close()
 
@@ -1046,6 +1284,9 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	// built. An older daemon that does not know SITE reports "local",
 	// which is exactly what a single-box install wants anyway.
 	daemonInfo.Site, daemonInfo.SiteDesc = fetchSite(conn, reader)
+	d.mu.Lock()
+	d.site, d.siteDesc = daemonInfo.Site, daemonInfo.SiteDesc
+	d.mu.Unlock()
 
 	// Step 2: Get list of ALL objects with STATAL command
 	// CRITICAL: Use STATAL (not STATO or STAT) because:
@@ -1112,11 +1353,11 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 	})
 
 	// One command for everything, when the daemon will give it to us.
-	bulkObjs, bulkOK := s.fetchAllObjectsXML(conn, reader)
+	bulkObjs, bulkOK := s.fetchAllObjectsXML(d, conn, reader)
 	if bulkOK {
 		// Same connection, already authenticated: ask for the traps that
 		// arrived since last cycle while we are here.
-		s.fetchTraps(conn, reader)
+		s.fetchTraps(d, conn, reader)
 	}
 	if bulkOK {
 		objectNames = objectNames[:0]
@@ -1266,33 +1507,7 @@ func (s *Service) fetchStatus() (*models.SysmonStatus, error) {
 
 	// Sort hosts: CRITICAL first, then WARNING, then OK
 	// Within each status level, sort alphabetically by hostname
-	sort.SliceStable(status.Hosts, func(i, j int) bool {
-		hostI := status.Hosts[i]
-		hostJ := status.Hosts[j]
-
-		// Define priority: CRITICAL=0, WARNING=1, OK=2
-		priorityI := 2 // OK
-		if hostI.OverallStatus == "CRITICAL" {
-			priorityI = 0
-		} else if hostI.OverallStatus == "WARNING" {
-			priorityI = 1
-		}
-
-		priorityJ := 2 // OK
-		if hostJ.OverallStatus == "CRITICAL" {
-			priorityJ = 0
-		} else if hostJ.OverallStatus == "WARNING" {
-			priorityJ = 1
-		}
-
-		// Sort by priority first
-		if priorityI != priorityJ {
-			return priorityI < priorityJ
-		}
-
-		// Within same priority, sort alphabetically by hostname
-		return hostI.Hostname < hostJ.Hostname
-	})
+	sortHostsByUrgency(status.Hosts)
 
 	// Fill in statistics
 	status.Statistics.TotalHosts = len(objectNames)

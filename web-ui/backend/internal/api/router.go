@@ -94,6 +94,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
+	r.mux.HandleFunc("/api/sites", r.handleSites)
 	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
 	r.mux.HandleFunc("/api/map/layout", r.handleMapLayout)
 	r.mux.HandleFunc("/api/templates", r.handleTemplates)
@@ -427,6 +428,10 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	// ?site= narrows to one daemon, so a client watching one site never
+	// downloads the rest of the fleet.
+	site := req.URL.Query().Get("site")
+
 	// Delta mode: ?since=<rev> returns only what changed, for cheap live
 	// polling (and the basis for an SSE stream later).
 	if sinceStr := req.URL.Query().Get("since"); sinceStr != "" {
@@ -436,11 +441,18 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 			return
 		}
 		delta := r.monitoring.GetDelta(since)
+		if site != "" {
+			delta = monitoring.FilterDeltaSite(delta, site)
+		}
 		if delta.Daemon.PID == 0 {
 			delta.Daemon.PID = r.daemonPID()
 		}
 		r.sendJSON(w, delta)
 		return
+	}
+
+	if site != "" {
+		status = monitoring.FilterSite(status, site)
 	}
 
 	// sysmond's TCP protocol doesn't expose its PID; read it from the
@@ -581,6 +593,12 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 	}
 
 	r.sendJSON(w, alerts)
+}
+
+// handleSites lists the fleet, so a site picker can offer names rather
+// than asking someone to type one.
+func (r *Router) handleSites(w http.ResponseWriter, req *http.Request) {
+	r.sendJSON(w, map[string]interface{}{"sites": r.monitoring.Sites()})
 }
 
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {
