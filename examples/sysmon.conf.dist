@@ -90,7 +90,16 @@ config maxqueued 50;
 # the socket is bound at startup while sysmond is still root - enabling
 # this on a running daemon needs a restart, not a SIGHUP.
 # Traps are decoded (v1 and v2c) and logged with what the device said.
-# To page on them, add "trap_alert;" to the object with that IP as well.
+#
+# A trap is only accepted from an object that says "trap_alert;" and
+# names the device by ADDRESS. Everything else arriving on the port is
+# discarded unread - trap PDUs are unauthenticated UDP with a source
+# anybody can write, so an allowlist is the only thing that decides
+# whether a packet is worth the work of parsing it.
+#
+# Write the address, not a hostname: the match is made on the source
+# address of the packet and nothing is resolved while a trap is being
+# handled. sysmond names any object that gets this wrong at startup.
 #config snmp-trap;		# catch snmp-traps
 
 object my.default.gateway-obj {
