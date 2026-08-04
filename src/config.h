@@ -1006,6 +1006,15 @@ int test_tcp(char*, int);
 /* talktcp.c */
 int sendline(int , char *);
 
+/* tlsio.c - TLS on the aggregator link only; every other descriptor looks
+   itself up, finds nothing, and behaves exactly as it always has. */
+int tls_connect(const char *, int, const char *);
+void tls_disconnect(int);
+void tls_forget(int);
+int tls_pending(int);
+int tls_read(int, void *, int);
+int tls_write(int, const void *, int);
+
 void hard_copy(struct hostinfo *old, struct hostinfo *new);
 void dump_to_file(char *, int, time_t );
 void add_line(FILE *, struct hostinfo, int, time_t);

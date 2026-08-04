@@ -146,7 +146,7 @@ int sendline(int fd, char *buffer)
 	memset(space, 0, strlen(buffer)+3);
 	strncpy(space, buffer, strlen(buffer)); /* copy stuff to temp buffer */
 	strncat(space, "\r\n", 2); /* add end stuff */
-	val = write(fd, space, strlen(space)/* - test - jared +1 */);
+	val = tls_write(fd, space, strlen(space));
 	if (val == -1)
 	{
 		if (debug)
@@ -242,7 +242,12 @@ int getline_tcp(int fd, char *buffer)
 
         while ( 1 ) /* while forever */
         {
-		if (clienthead == NULL)
+		if (tls_pending(fd) > 0)
+		{
+			/* TLS has already read this record off the socket, so
+			   select() will never report it readable again. */
+			ret = 1;
+		} else if (clienthead == NULL)
 		{
 			ret = data_waiting_read(fd, 1);
 		} else if (clienthead->filedes == -1)
@@ -271,7 +276,7 @@ int getline_tcp(int fd, char *buffer)
 		red = 0; /* init it */
 		if (ret > 0) /* if there's data waiting */
 		{
-	                red = read(fd, &buf, 1);
+			red = tls_read(fd, &buf, 1);
 		}
 
                 if (red == -1)
