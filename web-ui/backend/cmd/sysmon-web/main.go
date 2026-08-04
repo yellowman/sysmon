@@ -392,6 +392,12 @@ func main() {
 	}
 	defer settingsStore.Close()
 
+	// The same store holds desired config state per site. Without it every
+	// site reads as unmanaged and nothing is ever delivered, which is the
+	// right behaviour for a box nobody has adopted rather than a degraded
+	// one.
+	monitoringService.SetGenerations(settingsStore)
+
 	// pushFactory rebuilds the push service from a config. Used by main
 	// for boot, and by the router for on-demand reinit if boot failed
 	// (e.g. push.db was unwritable at boot but the operator has since

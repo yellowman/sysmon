@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"sysmon-web/internal/models"
+	"sysmon-web/internal/settings"
 )
 
 // sanitizeCmd removes newlines and control characters from user input
@@ -66,6 +67,11 @@ type daemon struct {
 	hostCache    map[string]XMLObjectStatus
 	fullResyncAt time.Time
 
+	// Config distribution state, and the lock that keeps a delivery from
+	// interleaving with a status poll on a shared inbound socket.
+	conf   confState
+	confMu sync.Mutex
+
 	// lastHosts is the last thing this site actually said, kept so a site
 	// that stops answering can be shown as stale rather than deleted.
 	// It is the built model, not the XML, because the bulk path and the
@@ -96,6 +102,10 @@ type Service struct {
 	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.
 	history      *HistoryStore
+	// generations is the desired-state store for config distribution.
+	// Nil means this process is not managing anyone's config, which is
+	// the correct state for a single-box install that never asked for it.
+	generations *settings.Store
 	cachedStatus *models.SysmonStatus
 	cacheTime    time.Time
 	fetching     bool
@@ -261,6 +271,22 @@ func (s *Service) History() *HistoryStore {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	return s.history
+}
+
+// SetGenerations attaches the desired-state store. Without one, every site
+// reads as unmanaged and nothing is ever delivered - which is the right
+// behaviour, not a degraded one.
+func (s *Service) SetGenerations(st *settings.Store) {
+	s.cacheMu.Lock()
+	s.generations = st
+	s.cacheMu.Unlock()
+}
+
+// Generations returns the desired-state store, or nil.
+func (s *Service) Generations() *settings.Store {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return s.generations
 }
 
 // NewService takes one or more sysmond addresses, comma-separated. One
@@ -1346,6 +1372,13 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	if inbound {
+		// One socket, two users. A config delivery on a dialled-in
+		// daemon has to have the connection to itself - interleaving a
+		// multi-megabyte CONFIG-PUT with a status poll on the same
+		// socket would put both halves' replies in the wrong reader.
+		d.confMu.Lock()
+		defer d.confMu.Unlock()
+
 		// A conversation that breaks means the link is broken: drop it
 		// and let the daemon dial back in with clean sequence numbers.
 		defer func() {
@@ -1491,8 +1524,12 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	bulkObjs, bulkOK := s.fetchAllObjectsXML(d, conn, reader)
 	if bulkOK {
 		// Same connection, already authenticated: ask for the traps that
-		// arrived since last cycle while we are here.
+		// arrived since last cycle, and what config the box is running,
+		// while we are here. Both are one line when nothing changed, and
+		// asking every cycle is what makes "somebody edited this box"
+		// visible in seconds rather than whenever someone looks.
 		s.fetchTraps(d, conn, reader)
+		s.fetchConfigGen(d, conn, reader)
 	}
 	if bulkOK {
 		objectNames = objectNames[:0]

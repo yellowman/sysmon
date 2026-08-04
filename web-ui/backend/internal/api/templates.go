@@ -27,6 +27,7 @@ func InitTemplates(dir string) error {
 		"history.html",
 		"map.html",
 		"config.html",
+		"fleet.html",
 		"admin.html",
 		"metrics.html",
 	}
@@ -148,6 +149,12 @@ func (r *Router) handleHistoryPage(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleConfigPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "config.html", PageData{Active: "config"})
+}
+
+// The fleet page is where config distribution lives: what each box is
+// running, what it should be, and the two actions that change that.
+func (r *Router) handleFleetPage(w http.ResponseWriter, req *http.Request) {
+	r.renderTemplate(w, "fleet.html", PageData{Active: "fleet"})
 }
 
 func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {

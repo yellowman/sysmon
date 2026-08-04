@@ -1584,7 +1584,7 @@ void	check_for_new_clients()
 void	service_clients()
 {
 	struct clientstatus *here;
-	char throwmeout[TEMPBUF_SIZE], buff[1024];
+	char buff[1024];
 	struct timeval tv;
 	fd_set rd,wr,except;
 	time_t now_t;
@@ -1619,8 +1619,23 @@ void	service_clients()
 				continue;
 			if (FD_ISSET(here->filedes, &rd))
 			{
+				/*
+				 * One line, one command. There used to be a second
+				 * getline_tcp() here throwing a line away, to swallow the
+				 * LF left over from a CRLF - which getline_tcp already
+				 * skips on its own, as leading whitespace, at the start of
+				 * the next read.
+				 *
+				 * It was not harmless. Whenever a client sent a command
+				 * and its payload in one segment - or simply pipelined two
+				 * commands - the discarded line was the client's next
+				 * line, not a stray LF. CONFIG-PUT made that visible
+				 * (the daemon ate the first line of the delivery and then
+				 * blocked waiting for bytes that had already arrived), but
+				 * any pipelining client was silently losing every second
+				 * command before that.
+				 */
 				getline_tcp(here->filedes, buff);
-				getline_tcp(here->filedes, throwmeout);
 				do_service(here, buff, now_t);
 				here->lastactivity = now_t;
 			}
