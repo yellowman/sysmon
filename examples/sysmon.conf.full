@@ -50,7 +50,6 @@ config logging file;   # sysmond.log in the state directory
 
 # --- Status File ---
 config statusfile html "/usr/local/htdocs/sysmon.html";
-config statustempdir "/var/run/sysmon";
 config showupalso;              # Show UP hosts in status file
 config html refresh 30;         # HTML auto-refresh in seconds
 config date "ISO";              # Date format: ISO, DEC, or strftime(3) codes
@@ -74,7 +73,7 @@ config snmp-trap;               # Enable SNMP trap monitoring (port 162)
 # Check state survives a restart automatically now - no directive. It is
 # kept as sysmond.state in the state directory.
 #config statedir "/var/db/sysmon";
-# config pidfile "/var/run/sysmond.pid";
+# The pidfile is sysmond.pid in the state directory - no directive.
 
 # --- Include Files ---
 # include "/etc/sysmon.d/routers.conf";
