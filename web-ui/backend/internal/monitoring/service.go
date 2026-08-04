@@ -36,6 +36,14 @@ func sanitizeCmd(s string) string {
 type daemon struct {
 	addr string
 
+	// inbound daemons dialled us: their connection is long-lived and
+	// reused every cycle rather than redialled, because a TLS handshake
+	// per second per site is waste and the box may not be reachable from
+	// here at all.
+	inbound bool
+	conn    net.Conn
+	reader  *bufio.Reader
+
 	mu       sync.Mutex
 	site     string // "local" until the daemon says otherwise
 	siteDesc string
@@ -70,6 +78,9 @@ type Service struct {
 	// daemons is the fleet, in the order they were configured. The first
 	// is the primary: it is what a single-daemon API field reports, so a
 	// one-box install sees exactly what it always did.
+	// fleetMu guards the daemons slice itself; each daemon guards its own
+	// state. A dialled-in site can join or reconnect at any moment.
+	fleetMu    sync.Mutex
 	daemons    []*daemon
 	sysmonAddr string // the primary's address, kept for error messages
 	sessionLog *SessionLogger
@@ -271,14 +282,25 @@ func NewService(sysmonAddr string) *Service {
 
 // Sites reports the fleet: who is configured, what they call themselves,
 // and whether the last poll reached them.
+// fleet is a snapshot of the daemon list, safe to range over while a site
+// dials in or reconnects.
+func (s *Service) fleet() []*daemon {
+	s.fleetMu.Lock()
+	defer s.fleetMu.Unlock()
+	out := make([]*daemon, len(s.daemons))
+	copy(out, s.daemons)
+	return out
+}
+
 func (s *Service) Sites() []models.SiteInfo {
-	out := make([]models.SiteInfo, 0, len(s.daemons))
-	for _, d := range s.daemons {
+	var out []models.SiteInfo
+	for _, d := range s.fleet() {
 		d.mu.Lock()
 		out = append(out, models.SiteInfo{
 			Site:        d.site,
 			Description: d.siteDesc,
 			Address:     d.addr,
+			Inbound:     d.inbound,
 			Reachable:   d.lastErr == "",
 			LastError:   d.lastErr,
 			LastSeen:    d.lastOK,
@@ -1078,9 +1100,10 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 		err    error
 	}
 
-	results := make([]result, len(s.daemons))
+	fleet := s.fleet()
+	results := make([]result, len(fleet))
 	var wg sync.WaitGroup
-	for i, d := range s.daemons {
+	for i, d := range fleet {
 		wg.Add(1)
 		go func(i int, d *daemon) {
 			defer wg.Done()
@@ -1208,24 +1231,70 @@ func SplitQualified(name string) (site, object string) {
 	return "", name
 }
 
-func (s *Service) fetchStatus(d *daemon) (*models.SysmonStatus, error) {
-	// Connect to sysmon daemon
-	conn, err := net.DialTimeout("tcp", d.addr, 5*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", d.addr, err)
+// connection returns the socket to talk to this daemon on: the live one it
+// dialled in with, or a fresh dial.
+func (d *daemon) connection() (net.Conn, *bufio.Reader, bool, error) {
+	d.mu.Lock()
+	inbound, conn, reader, addr := d.inbound, d.conn, d.reader, d.addr
+	d.mu.Unlock()
+
+	if inbound {
+		if conn == nil {
+			return nil, nil, true, fmt.Errorf("site %s is not connected", d.site)
+		}
+		return conn, reader, true, nil
 	}
-	defer conn.Close()
+
+	c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", addr, err)
+	}
+	return c, nil, false, nil
+}
+
+// dropConnection closes a dialled-in link so the daemon reconnects.
+func (d *daemon) dropConnection() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.conn != nil {
+		d.conn.Close()
+		d.conn = nil
+		d.reader = nil
+	}
+}
+
+func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error) {
+	// Connect to sysmon daemon
+	// A daemon that dialled us keeps its connection open; one we dial gets
+	// a fresh socket per cycle. Either way what follows is the same
+	// conversation.
+	conn, reader, inbound, err := d.connection()
+	if err != nil {
+		return nil, err
+	}
 
 	// Per-chunk, not per-fetch: a hung daemon is still caught in seconds,
 	// but a big config walking object by object is not cut off halfway.
 	// (30s was less than an 800-object walk takes, so the fetch used to
 	// time out on exactly the configs that most needed it.)
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
-	reader := bufio.NewReader(conn)
 
-	// Read welcome banner first
-	if err := readWelcomeBanner(reader); err != nil {
-		return nil, err
+	if inbound {
+		// A conversation that breaks means the link is broken: drop it
+		// and let the daemon dial back in with clean sequence numbers.
+		defer func() {
+			if err != nil {
+				d.dropConnection()
+			}
+		}()
+	} else {
+		defer conn.Close()
+		reader = bufio.NewReader(conn)
+
+		// Read welcome banner first
+		if err = readWelcomeBanner(reader); err != nil {
+			return nil, err
+		}
 	}
 
 	// Get daemon information before entering XML mode
@@ -1331,7 +1400,7 @@ func (s *Service) fetchStatus(d *daemon) (*models.SysmonStatus, error) {
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
 	daemonInfo.Paused = daemonPaused
-	status := &models.SysmonStatus{
+	status = &models.SysmonStatus{
 		Daemon: daemonInfo,
 		Hosts:  []models.HostStatus{},
 		Statistics: models.Stats{
@@ -1515,10 +1584,15 @@ func (s *Service) fetchStatus(d *daemon) (*models.SysmonStatus, error) {
 	status.Statistics.CriticalHosts = hostsDown
 	// WarningHosts and ChecksByType/ChecksByStatus are incremented in the loop above
 
-	// Send QUIT to close connection cleanly
-	if _, err := conn.Write([]byte("QUIT\n")); err != nil {
-		// Log but don't fail - connection is closing anyway
-		s.sessionLog.Log("QUIT", "", true, fmt.Sprintf("Error sending QUIT: %v", err))
+	// Send QUIT to close connection cleanly - but only on a socket we
+	// dialled. A daemon that dialled us keeps this connection for its
+	// whole life, and QUIT would make it hang up and reconnect on every
+	// single cycle.
+	if !inbound {
+		if _, werr := conn.Write([]byte("QUIT\n")); werr != nil {
+			// Log but don't fail - connection is closing anyway
+			s.sessionLog.Log("QUIT", "", true, fmt.Sprintf("Error sending QUIT: %v", werr))
+		}
 	}
 
 	// Log successful completion

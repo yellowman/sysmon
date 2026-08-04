@@ -191,6 +191,9 @@ func main() {
 	socketGroup := flag.String("socket-group", "", "group for the FastCGI socket (default: first of www, www-data, nobody)")
 	procUser := flag.String("user", "", "drop to this user when started as root (default: first of _sysmon, nobody)")
 	procGroup := flag.String("group", "", "drop to this group when started as root (default: first of _sysmon, nobody)")
+	agentListen := flag.String("agent-listen", "", "TLS address to accept sysmond connections on (e.g. :1347); empty disables")
+	agentCert := flag.String("agent-cert", "", "certificate for -agent-listen")
+	agentKey := flag.String("agent-key", "", "private key for -agent-listen")
 	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
@@ -422,6 +425,26 @@ func main() {
 			log.Printf("WARNING: push notification init failed: %v (will retry on next settings change)", err)
 		} else {
 			pushService = svc
+		}
+	}
+
+	// Daemons that dial in. Off unless an address and certificate are
+	// given: TLS is not optional on this listener, because it carries a
+	// bearer token and, later, whole configs.
+	if *agentListen != "" {
+		if *agentCert == "" || *agentKey == "" {
+			log.Printf("WARNING: -agent-listen needs -agent-cert and -agent-key; not accepting daemon connections")
+		} else {
+			al, aerr := monitoring.ListenForAgents(*agentListen, *agentCert, *agentKey,
+				monitoringService,
+				func(site, token, addr string) bool {
+					return settingsStore.CheckAgentToken(site, token, addr)
+				})
+			if aerr != nil {
+				log.Printf("WARNING: %v", aerr)
+			} else {
+				defer al.Close()
+			}
 		}
 	}
 

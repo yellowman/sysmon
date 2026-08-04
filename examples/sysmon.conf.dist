@@ -30,6 +30,19 @@ config maxqueued 50;
 #config sitename "sysmon-metro";
 #config sitedesc "Metro Station Monitoring (Linux)";
 
+# Dial out to a sysmon-web rather than waiting to be dialled. A monitoring
+# box usually sits behind NAT or on a management VLAN, so outbound-only
+# means no inbound firewall rule per site. The token proves this daemon to
+# the aggregator; the config authkey above still proves the aggregator to
+# this daemon when it asks for CONF.
+#
+# The link is never load-bearing: if it cannot be made, or drops, checks
+# and pages carry on exactly as on a standalone box and the daemon retries
+# with a backoff.
+#config aggregator "sysmon-web.example.net:1347";
+#config aggregator-token "paste the token the admin page minted";
+#config aggregator-ca "/etc/ssl/sysmon-web-ca.pem";   # omit to use the system trust store
+
 # Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
 # the socket is bound at startup while sysmond is still root - enabling
 # this on a running daemon needs a restart, not a SIGHUP.

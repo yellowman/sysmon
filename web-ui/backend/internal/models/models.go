@@ -212,13 +212,15 @@ type StatusDelta struct {
 
 // SiteInfo is one sysmond in the fleet, as the site picker sees it.
 type SiteInfo struct {
-	Site        string    `json:"site"`
-	Description string    `json:"description,omitempty"`
-	Address     string    `json:"address"`
-	Reachable   bool      `json:"reachable"`
-	LastError   string    `json:"last_error,omitempty"`
-	LastSeen    time.Time `json:"last_seen,omitempty"`
-	Hosts       int       `json:"hosts"`
+	Site        string `json:"site"`
+	Description string `json:"description,omitempty"`
+	Address     string `json:"address"`
+	// Inbound means the daemon dialled us rather than us dialling it.
+	Inbound   bool      `json:"inbound,omitempty"`
+	Reachable bool      `json:"reachable"`
+	LastError string    `json:"last_error,omitempty"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+	Hosts     int       `json:"hosts"`
 }
 
 // DaemonInfo represents sysmon daemon information
