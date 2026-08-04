@@ -110,6 +110,41 @@ notifications, and CI that builds everything on every push.
   (`.github/workflows/ios.yml`)
 - Both runs double as the compile gate for the app code
 
+## Aggregating several sysmonds
+
+One sysmon-web can front a fleet. The design is in
+[docs/sysmond-aggregation.md](docs/sysmond-aggregation.md); the shape of it:
+
+- **Objects are namespaced** `site:object`. Each daemon carries a short
+  `sitename` (the key, appearing in every alert and stored row) and a
+  `sitedesc` (the human label the site selector shows). That qualified name
+  keys alerts, history, push collapse, map layout and acknowledgements, so
+  two sites' `coreswitch` never collide.
+- **Anything that acts on one daemon gets a site selector** - config
+  editing, the map, backups, reload. Status views aggregate across sites
+  and filter optionally.
+- **sysmond dials out to sysmon-web**, over TLS with a per-box token, and
+  status and config share the one connection. Monitoring boxes live behind
+  NAT and on management VLANs; outbound-only means no inbound firewall
+  rules and no per-site VPN. A daemon that cannot reach sysmon-web keeps
+  running its last known-good config and keeps paging - the monitoring
+  outlives its management plane.
+- **Config is distributed whole-file, pull, and validated on the target**
+  with `sysmond -c` before the swap. sysmon-web holds desired state, the
+  daemon reports what it is actually running, and the difference is a hash
+  comparison rather than a merge: in sync, pending, locally modified,
+  unmanaged, or rejected. A box that was edited at the console is never
+  silently overwritten - the operator is offered the diff, and adopting the
+  local version is the default.
+- **Rollouts are canaried.** A generation goes to one box first, and
+  "applied" is not success on its own: object count and alert rate are
+  watched, and a spike rolls that box back automatically and blocks the
+  rest of the fleet.
+- **The dependency map is per site**, because `dep` cannot cross daemons.
+  Several sites can share a canvas as separate clusters, but no cross-site
+  edge is invented - the honest way to express one is a `type sysm` check
+  against the upstream daemon.
+
 ## Quick start
 
 ### Daemon
