@@ -2208,6 +2208,12 @@ int main(int argc, char **argv)
 	/* Parse the configuration */
 	currenthead = loadconfig(configfile);
 	update_globs_from_parser();
+
+	/* Which generation the config on disk is. Read after the parse
+	   because "config generation-dir" may have moved where it is kept -
+	   and read at all so a box that reboots does not come back claiming
+	   to be unmanaged and get re-delivered what it already runs. */
+	confgen_load_state();
 	if (max_numnei > maxqueued && (!quiet))
 	{
 		print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",
