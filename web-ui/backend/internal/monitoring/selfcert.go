@@ -162,6 +162,11 @@ func AgentDialTarget() string {
 	return agentDial.target
 }
 
+// DefaultAgentPort is the one place the agent listener's port number
+// lives. The -agent-listen flag default and DialTarget's fallback both
+// read it, so they cannot drift apart.
+const DefaultAgentPort = "1347"
+
 // DialTarget builds that line from the two flags that decide it.
 //
 // The name comes from -agent-names, because that is what the certificate
@@ -169,7 +174,7 @@ func AgentDialTarget() string {
 // -agent-listen, because a hardcoded 1347 hands somebody on another port
 // a config that cannot connect.
 func DialTarget(agentNames, agentListen string) string {
-	port := "1347"
+	port := DefaultAgentPort
 	if _, p, err := net.SplitHostPort(agentListen); err == nil && p != "" {
 		port = p
 	}

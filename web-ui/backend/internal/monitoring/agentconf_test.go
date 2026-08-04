@@ -46,6 +46,41 @@ func TestAgentConfigBlockParses(t *testing.T) {
 	}
 }
 
+// The lexer ends a string at the next quote and a directive at the next
+// semicolon, with no escapes. A hostile label must bend, not break the
+// file - and the daemon must read back the bent value, not a prefix of
+// it. "-t -D" prints what it parsed, which is the whole point: the quote
+// case used to pass -t silently while sitedesc came out as `rack \`.
+func TestAgentConfigBlockSurvivesAHostileLabel(t *testing.T) {
+	daemon := findSysmond()
+	if daemon == "" {
+		t.Skip("sysmond is not built; run make in src/ first")
+	}
+
+	block := AgentConfigBlock("metro", "rack \"A\"; east\nwing", "web.example.net:1347", "tok")
+
+	full := block + "\nroot = \"gw\";\n\nobject gw {\n" +
+		"\tip \"127.0.0.1\";\n\ttype ping;\n\tdesc \"gateway\";\n" +
+		"\tcontact \"nobody@example.net\";\n};\n"
+	path := filepath.Join(t.TempDir(), "sysmon.conf")
+	if err := os.WriteFile(path, []byte(full), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := exec.Command(daemon, "-t", "-D", "-f", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("cannot run %s -t -D: %v\n%s", daemon, err, out)
+	}
+	if !strings.Contains(string(out), "sitedesc : rack 'A', east wing") {
+		t.Fatalf("the daemon did not read back the bent label:\n%s\n---\n%s", out, full)
+	}
+	for _, bad := range []string{"Unknown information", "misbalanced", "missing quotes"} {
+		if strings.Contains(string(out), bad) {
+			t.Fatalf("the daemon complained (%q):\n%s\n---\n%s", bad, out, full)
+		}
+	}
+}
+
 // The token is the one thing here that cannot be looked up again, so it
 // has to be in the text a person copies.
 func TestAgentConfigBlockHoldsTheToken(t *testing.T) {
@@ -82,15 +117,10 @@ func TestDialTarget(t *testing.T) {
 
 func findSysmond() string {
 	// The test runs in web-ui/backend/internal/monitoring.
-	for _, p := range []string{
-		"../../../../src/sysmond",
-		"../../../../src/syswatch",
-	} {
-		if st, err := os.Stat(p); err == nil && st.Mode()&0o111 != 0 {
-			abs, err := filepath.Abs(p)
-			if err == nil {
-				return abs
-			}
+	p := "../../../../src/sysmond"
+	if st, err := os.Stat(p); err == nil && st.Mode()&0o111 != 0 {
+		if abs, err := filepath.Abs(p); err == nil {
+			return abs
 		}
 	}
 	return ""

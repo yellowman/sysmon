@@ -34,12 +34,17 @@
 
          A modal, and the whole config block rather than the token alone.
          The person here is building a box, so give them the finished text
-         and one button. Nothing to write out, and nothing to look up. -->
+         and one button. Nothing to write out, and nothing to look up.
+
+         A stray click on the background does NOT close it. The token in
+         here is unrecoverable, and dismiss-on-outside-click is the one
+         convention that destroys it by accident. Closing is deliberate:
+         a button or Escape, and either one asks first if the config was
+         never copied. -->
     <div x-show="fresh.token" x-cloak
-         @keydown.escape.window="fresh = {}"
+         @keydown.escape.window="closeFresh()"
          class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
-        <div class="w-full max-w-3xl rounded-lg bg-white shadow-xl border border-gray-200"
-             @click.outside="fresh = {}">
+        <div class="w-full max-w-3xl rounded-lg bg-white shadow-xl border border-gray-200">
             <div class="flex items-start justify-between gap-3 border-b border-gray-100 p-4">
                 <div>
                     <h2 class="text-base font-bold text-gray-900">
@@ -49,7 +54,7 @@
                         Do these two things on the box, then start sysmond.
                     </p>
                 </div>
-                <button @click="fresh = {}" class="text-gray-400 hover:text-gray-700 text-sm px-2 py-1">
+                <button @click="closeFresh()" class="text-gray-400 hover:text-gray-700 text-sm px-2 py-1">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -96,7 +101,7 @@
             </div>
 
             <div class="flex justify-end border-t border-gray-100 p-4">
-                <button @click="fresh = {}"
+                <button @click="closeFresh()"
                         class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">
                     Done
                 </button>
@@ -201,6 +206,7 @@ function agentsPage() {
         newAgent: { site: '', label: '' },
         fresh: {},
         copied: false,
+        copiedOnce: false,
         busy: false,
         notice: '',
         noticeBad: false,
@@ -228,11 +234,18 @@ function agentsPage() {
         // The server writes this block: it knows the name and the port the
         // daemons must dial, and this page does not. The four lines below
         // are a floor, not a copy - if the block ever fails to arrive, the
-        // token still gets shown instead of being lost.
+        // token still gets shown instead of being lost. Same rule as the
+        // server: the sysmond lexer has no escapes, so the label sheds
+        // quotes and semicolons rather than breaking the file.
         configSnippet() {
+            // Alpine evaluates this while the modal is hidden and fresh
+            // is {}, so an empty answer has to come first.
+            if (!this.fresh.token) return '';
             if (this.fresh.config) return this.fresh.config;
+            const label = (this.fresh.label || this.fresh.site || '')
+                .replace(/"/g, "'").replace(/;/g, ',').replace(/[\x00-\x1f\x7f]/g, ' ');
             return 'config sitename  "' + this.fresh.site + '";\n' +
-                   'config sitedesc  "' + (this.fresh.label || this.fresh.site) + '";\n' +
+                   'config sitedesc  "' + label + '";\n' +
                    'config aggregator "' + window.location.hostname + ':1347";\n' +
                    'config aggregator-token "' + this.fresh.token + '";';
         },
@@ -240,7 +253,20 @@ function agentsPage() {
         copySnippet() {
             navigator.clipboard.writeText(this.configSnippet());
             this.copied = true;
+            this.copiedOnce = true;
             setTimeout(() => this.copied = false, 2000);
+        },
+
+        // The token cannot be shown again, so closing an uncopied panel
+        // asks first. `copied` is the two-second button flash; copiedOnce
+        // is the fact that matters here.
+        closeFresh() {
+            if (!this.fresh.token) return;
+            if (!this.copiedOnce &&
+                !confirm('You did not copy the config. The token in it cannot ' +
+                         'be shown again.\n\nClose anyway?')) return;
+            this.fresh = {};
+            this.copiedOnce = false;
         },
 
         say(msg, bad) { this.notice = msg; this.noticeBad = !!bad; },
@@ -270,6 +296,7 @@ function agentsPage() {
                                           {site: site, label: label, replace: !!replace});
                 this.fresh = {site: d.site, token: d.token, label: label,
                               config: d.config};
+                this.copiedOnce = false;
                 this.showAdd = false;
                 this.newAgent = {site: '', label: ''};
                 this.say('');

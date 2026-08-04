@@ -150,6 +150,17 @@ func mintAgent(store *settings.Store, site, label string, replace bool, agentNam
 	// streams so a provisioning script can append the first straight to
 	// the box's config, and a person still gets told what to do.
 	//
+	// This command reads its own flags, not the running service's. With
+	// no -agent-names the aggregator line is a guess from the hostname,
+	// and a wrong guess fails on the box as a certificate error. Say so
+	// now, next to the line, not then.
+	if agentNames == "" {
+		fmt.Fprintf(os.Stderr,
+			"\nNOTE: no -agent-names given, so \"config aggregator\" guesses this\n"+
+				"machine's hostname and the default port. Pass the same -agent-names\n"+
+				"and -agent-listen the service runs with if they differ.\n")
+	}
+	//
 	// The certificate is a file. Naming it is more use than wrapping it in
 	// a command that would only ever print it.
 	fmt.Fprintf(os.Stderr,
