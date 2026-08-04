@@ -96,12 +96,20 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/sites", r.handleSites)
 
-	// Config distribution. Reading state is open to anyone who can see the
-	// UI; everything that changes what a box runs is admin-only and POST,
-	// so no stale tab or link prefetch can deliver a config.
+	// Config distribution. Everything that changes what a box runs is
+	// admin-only and POST, so no stale tab or link prefetch can deliver a
+	// config.
+	//
+	// Reading splits in two, and the line is content, not verb. Per-site
+	// STATUS - which generation a box runs, whether it has drifted - is
+	// open to anyone who can see the UI, because that belongs on a
+	// wallboard. Config CONTENT is admin-only, because a config file
+	// holds config authkey, aggregator-token, SNMP communities and
+	// radius secrets. A GET that returns file bytes is as sensitive as
+	// /api/config itself and is gated the same way.
 	r.mux.HandleFunc("/api/config/fleet", r.handleConfigFleet)
-	r.mux.HandleFunc("/api/config/site/", r.handleConfigSite)
-	r.mux.HandleFunc("/api/config/generations/", r.handleConfigGenerations)
+	r.mux.HandleFunc("/api/config/site/", auth.RequireAdmin(r.handleConfigSite))
+	r.mux.HandleFunc("/api/config/generations/", auth.RequireAdmin(r.handleConfigGenerations))
 	r.mux.HandleFunc("/api/config/adopt/", auth.RequireAdmin(r.handleConfigAdopt))
 	r.mux.HandleFunc("/api/config/stage/", auth.RequireAdmin(r.handleConfigStage))
 	r.mux.HandleFunc("/api/config/deliver/", auth.RequireAdmin(r.handleConfigDeliver))

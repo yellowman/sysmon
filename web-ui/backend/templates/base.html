@@ -337,8 +337,17 @@
                         full = false;
                         changed = d.changed || [];
                         removed = d.removed || [];
-                        for (const h of changed) this.index.set(hostKey(h), h);
+                        // Removals first, then changes. The server keeps
+                        // the two lists disjoint, so the order is not
+                        // supposed to matter - but if a name ever appears
+                        // in both, the honest reading is that it is here
+                        // now: "removed" is a thing that happened, and
+                        // "changed" carries the row's current state. The
+                        // other order deletes a host that exists, and it
+                        // stays gone until its signature next moves.
+                        // hosts.html applies them this way round too.
                         for (const name of removed) this.index.delete(name);
+                        for (const h of changed) this.index.set(hostKey(h), h);
                     }
                     this.rev = d.rev || 0;
                     return {

@@ -3026,14 +3026,34 @@ void open_new_file(char *filename, FILE *current_file)
 /* 	yyrestart(new_file); */
 	templn = line_no;
 	line_no = 1;
-	current_parsing_filename = filename;
+
+	/*
+	 * Take a copy the frame owns before recording the name.
+	 *
+	 * "filename" can be the global parser_include buffer, and the
+	 * include rule FREE()s that the moment it reads the next include.
+	 * So an include inside an include frees the name this frame is
+	 * parsing under, and restoring it below would hand the rest of this
+	 * file a dangling pointer - every error message after the inner
+	 * include reads freed memory.
+	 *
+	 * sibling[] is this frame's own storage and lives until we return,
+	 * which is exactly as long as any frame beneath us can run. It has
+	 * done its job by now (the file is open and recorded), so it can
+	 * hold the name.
+	 */
+	if (filename != sibling)
+		snprintf(sibling, sizeof(sibling), "%s", filename);
+	current_parsing_filename = sibling;
 
 	sysmon_conf_yylex();
 
 	/* Put the name back. It was saved and never restored, so every parse
 	   error after an include used to be reported against the include
 	   rather than the file it was really in - and now that the name can
-	   point at a buffer in this frame, leaving it set would outlive it. */
+	   point at a buffer in this frame, leaving it set would outlive it.
+	   The saved pointer is the caller's own sibling[] (or the top-level
+	   config path), so it is still alive to go back to. */
 	current_parsing_filename = save_current_parsing_filename;
 
 	line_no = templn;
