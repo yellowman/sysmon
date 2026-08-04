@@ -820,26 +820,35 @@ void process_snmp_trap(int skt)
 	time(&now);
 
 	/*
+	 * Who sent this, before anything else is done with it.
+	 *
+	 * The source decides acceptance, and it decides first: a packet from
+	 * an address no object claims is dropped here, unparsed, unlogged and
+	 * unstored. Anyone can send to UDP 162 from any address they care to
+	 * write, so the work done before that question is answered is work an
+	 * unauthenticated stranger gets to command.
+	 *
+	 * The v1 agent-addr field no longer selects an object. It is inside
+	 * the packet, so it is written by whoever sent it - trusting it meant
+	 * an unconfigured sender could pick which monitored device got paged
+	 * about, just by naming it. A relay must now be a configured object
+	 * in its own right; the agent address is still decoded and shown, it
+	 * simply cannot let a stranger in.
+	 */
+	obj = find_trap_source(ip_string);
+	if (obj == NULL) {
+		if (debug)
+			print_err(1, "discarding a %d byte packet on the trap port from %s: "
+				"no object with trap_alert names that address", len, ip_string);
+		return;
+	}
+
+	/*
 	 * Read what the device actually said. decode_snmp_trap() always
 	 * leaves something printable behind, so the log line and the trap
 	 * history are useful even when the packet is junk.
 	 */
 	decode_snmp_trap(buffer, (size_t)len, &trap);
-
-	obj = find_object_by_ip(ip_string);
-
-	/*
-	 * A v1 trap carries the agent's own address, which is what matters
-	 * when a proxy or a NAT forwards it: the packet comes from the
-	 * relay, but the event belongs to the device named inside.
-	 */
-	if (obj == NULL && trap.agent[0] != '\0' &&
-	    strcmp(trap.agent, ip_string) != 0) {
-		obj = find_object_by_ip(trap.agent);
-		if (obj != NULL && debug)
-			print_err(1, "trap relayed by %s matched agent-addr %s",
-				ip_string, trap.agent);
-	}
 
 	if (trap.decoded) {
 		print_err(1, "snmp trap from %s: %s (%s%s%s) - %s [%d bytes, %s]",
@@ -857,94 +866,113 @@ void process_snmp_trap(int skt)
 		print_in_hex(buffer, len);
 	}
 
-	if (obj != NULL && obj->data->trap_alert) {
-		alert_enabled = TRUE;
-		/*
-		 * Only page for something that really was a trap. Before the
-		 * packet was decoded, any UDP datagram from a monitored
-		 * address woke somebody up - which made a page trivial to
-		 * provoke with a spoofed packet, and meant a stray scanner
-		 * could do it by accident.
-		 */
-		if (trap.alertable) {
-			send_trap_alert(obj, ip_string, &trap);
-			alert_sent = TRUE;
-		} else {
-			print_err(1, "not paging %s: the packet from %s was not an snmp trap",
-				obj->data->hostname, ip_string);
-		}
-	} else if (debug && obj != NULL) {
-		print_err(1, "trap from %s - object %s found but trap_alert not enabled",
-			ip_string, obj->data->hostname);
-	} else if (debug) {
-		print_err(1, "trap from %s - no matching object found", ip_string);
+	/*
+	 * Getting here means the source is a configured object with
+	 * trap_alert set - that is what find_trap_source() answers, and
+	 * nothing else reaches this line.
+	 */
+	alert_enabled = TRUE;
+
+	/*
+	 * Only page for something that really was a trap. Before the packet
+	 * was decoded, any UDP datagram from a monitored address woke
+	 * somebody up - which made a page trivial to provoke with a spoofed
+	 * packet, and meant a stray scanner could do it by accident.
+	 */
+	if (trap.alertable) {
+		send_trap_alert(obj, ip_string, &trap);
+		alert_sent = TRUE;
+	} else {
+		print_err(1, "not paging %s: the packet from %s was not an snmp trap",
+			obj->data->hostname, ip_string);
 	}
 
 	/*
-	 * Remember it either way. A trap from an address nobody configured
-	 * is exactly the thing an operator wants to see in the web UI - it
-	 * is usually a device that should have been monitored all along.
+	 * Kept for the web UI. Only accepted traps are held now: the history
+	 * used to collect anything that arrived, on the argument that a trap
+	 * from an unconfigured address is a device somebody forgot to
+	 * monitor. That argument holds right up until a stranger fills the
+	 * ring with forged packets and pushes the real ones out of it.
 	 */
 	trap_history_add(ip_string, now, len, &trap,
-		obj != NULL ? (char *)obj->unique_name : NULL,
-		alert_enabled, alert_sent);
+		(char *)obj->unique_name, alert_enabled, alert_sent);
 }
 
 
 /*
- * find_object_by_ip - Find a monitored object by its IP address
+ * find_trap_source - which configured object may send us this trap
  *
- * Searches through all configured objects and returns the first one
- * that matches the given IP address string.
+ * A trap is accepted only from an address an operator wrote down and
+ * marked trap_alert. Everything else is discarded where it arrives.
  *
- * Returns: pointer to graph_elements if found, NULL otherwise
+ * That is a deliberate allowlist, and it replaces a best-effort match
+ * that tried to be helpful and could not be. The old one walked every
+ * object calling gethostbyname() - the one uncached lookup left in this
+ * daemon, in a process with a single select() loop - so a packet from an
+ * address matching nothing cost a synchronous resolution of the entire
+ * object list. Port 162 is unauthenticated UDP with a forgeable source,
+ * which made "an address matching nothing" the cheapest thing in the
+ * world to send and the most expensive thing here to receive.
+ *
+ * Now an unknown source costs one walk of string compares and no
+ * network at all. The comparison is literal, so an object that wants
+ * traps must name an address rather than a hostname; check_trap_sources()
+ * says so at load time, where it can still be fixed.
+ *
+ * Returns: the object, or NULL - and NULL means discard.
  */
-struct graph_elements *find_object_by_ip(char *ip_string)
+struct graph_elements *find_trap_source(char *ip_string)
 {
 	struct all_elements_list *walker;
-	struct hostent *he;
-	char ip_addr[INET_ADDRSTRLEN];
 
-	if (ip_string == NULL) {
+	if (ip_string == NULL)
 		return NULL;
-	}
 
-	/*
-	 * PASS 1: Check for direct IP string matches (no DNS)
-	 * This is fast and handles the common case where hostname IS the IP
-	 */
 	for (walker = currenthead; walker != NULL; walker = walker->next) {
-		if (walker->value == NULL || walker->value->data == NULL) {
+		if (walker->value == NULL || walker->value->data == NULL)
 			continue;
-		}
+		if (!walker->value->data->trap_alert)
+			continue;
+		if (walker->value->data->hostname == NULL)
+			continue;
 
-		/* Check if hostname is directly the IP address */
-		if (strcmp((char *)walker->value->data->hostname, ip_string) == 0) {
+		if (strcmp((char *)walker->value->data->hostname, ip_string) == 0)
 			return walker->value;
-		}
 	}
 
-	/*
-	 * PASS 2: DNS resolution (only if pass 1 failed)
-	 * This is slower but necessary for hostname-based configs
-	 */
+	return NULL;
+}
+
+/*
+ * check_trap_sources - warn about objects whose traps can never arrive
+ *
+ * trap_alert on an object named by hostname is a silent no-op: matching
+ * is by address, and this daemon does not resolve names on the trap path
+ * on purpose. Rather than let those traps vanish, say so once per load,
+ * naming the object, while somebody is still looking at the config.
+ */
+void check_trap_sources(void)
+{
+	struct all_elements_list *walker;
+	struct in_addr scratch;
+
 	for (walker = currenthead; walker != NULL; walker = walker->next) {
-		if (walker->value == NULL || walker->value->data == NULL) {
+		if (walker->value == NULL || walker->value->data == NULL)
 			continue;
-		}
+		if (!walker->value->data->trap_alert)
+			continue;
+		if (walker->value->data->hostname == NULL)
+			continue;
 
-		/* Try to resolve hostname to IP and compare */
-		he = gethostbyname((char *)walker->value->data->hostname);
-		if (he != NULL && he->h_addr_list[0] != NULL) {
-			if (inet_ntop(AF_INET, he->h_addr_list[0], ip_addr, sizeof(ip_addr)) != NULL) {
-				if (strcmp(ip_addr, ip_string) == 0) {
-					return walker->value;
-				}
-			}
-		}
+		if (inet_pton(AF_INET, (char *)walker->value->data->hostname,
+				&scratch) == 1)
+			continue;
+
+		print_err(1, "object %s has trap_alert but its ip \"%s\" is a name, "
+			"not an address - traps are matched by source address, so "
+			"traps from this device will be discarded. Write the address.",
+			walker->value->unique_name, walker->value->data->hostname);
 	}
-
-	return NULL;  /* Not found */
 }
 
 /*

@@ -1156,7 +1156,8 @@ void stop_check_dns(struct monitorent *);
 /* snmp.c */
 void service_test_snmp(struct monitorent *);
 void start_test_snmp(struct monitorent *);
-struct graph_elements *find_object_by_ip(char *);
+struct graph_elements *find_trap_source(char *);
+void check_trap_sources(void);
 void send_trap_alert(struct graph_elements *, char *, struct trap_content *);
 
 /* trapdecode.c - BER reading, shared with the SNMP client */
