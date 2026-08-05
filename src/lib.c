@@ -792,6 +792,13 @@ void	syslogmsg(char *message, time_t now)
 	}
 	if (facility == -3)
 	{
+		/* "log to a file" and "no file named yet" is a window, not a
+		   state: facility is set as the config line is read and the
+		   path a moment later. Passing NULL to fopen() is undefined -
+		   glibc happens to return EFAULT, which is why this only ever
+		   showed up under valgrind rather than as a crash. */
+		if (log_file == NULL)
+			return;
 		fh = fopen(log_file, "a+");
 		if (fh != NULL)
 		{
