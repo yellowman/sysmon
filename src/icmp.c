@@ -1010,11 +1010,19 @@ void stop_test_pktloss(struct monitorent *here)
  * Features:
  * - ICMP-based RTT measurement
  * - RFC 3550 jitter calculation
- * - Rolling average over N samples
+ * - Mean RTT over the rtt_samples probes of one check
  * - Per-host thresholds
  */
 
-/* RTT tracking structure */
+/*
+ * RTT tracking structure.
+ *
+ * One of these lives for exactly one check: start_test_rtt() allocates
+ * it, stop_test_rtt() frees it. That lifetime is what makes the plain
+ * sum/count below correct rather than lazy - the counters only ever
+ * cover this check's rtt_samples probes, so there is no window to slide
+ * and no history to keep between checks.
+ */
 struct rtt_data {
 	struct pingdata *ping;              /* Reuse existing ICMP infrastructure */
 
@@ -1022,7 +1030,7 @@ struct rtt_data {
 	double rtt_current;                 /* Current RTT in milliseconds */
 	double rtt_min;                     /* Minimum RTT seen */
 	double rtt_max;                     /* Maximum RTT seen */
-	double rtt_avg;                     /* Rolling average RTT */
+	double rtt_avg;                     /* Mean of this check's samples */
 	double rtt_sum;                     /* Sum for averaging */
 	unsigned int rtt_count;             /* Number of RTT samples collected */
 
