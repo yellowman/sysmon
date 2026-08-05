@@ -20,7 +20,7 @@ import (
 // The window is as long as a browser throttles a background tab, which
 // is minutes.
 func TestReAddedHostIsNotAlsoReportedRemoved(t *testing.T) {
-	s := NewService("")
+	s := NewService()
 
 	snapshot := func(names ...string) {
 		st := &models.SysmonStatus{}
@@ -66,7 +66,7 @@ func TestReAddedHostIsNotAlsoReportedRemoved(t *testing.T) {
 // The ordinary removal must still be reported, or the fix above would
 // just be "never report removals".
 func TestRemovedHostIsStillReportedRemoved(t *testing.T) {
-	s := NewService("")
+	s := NewService()
 
 	snapshot := func(names ...string) {
 		st := &models.SysmonStatus{}

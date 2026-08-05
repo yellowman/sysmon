@@ -165,8 +165,10 @@ sysmond opens the connection to sysmon-web, not the other way around, and
   unauthenticated until `AUTH`, on a process that ran as root - and it was
   the largest piece of attack surface the daemon had. Inverting the
   direction retires it for anyone using sysmon-web.
-- sysmon-web does not dial anyone unless `-sysmon` asks it to. It listens
-  on 1347 and waits.
+- sysmon-web does not dial anyone, ever. It listens on 1347 and waits.
+  The code that dialled a daemon is gone rather than defaulted off: it was
+  a second way in with a second credential (the shared authkey), and one
+  direction that is always right beats two that mostly are.
 
 The `sysmon(1)` client still connects to a daemon directly, and that is
 still a perfectly good way to run - it is what `config listen` is for. It

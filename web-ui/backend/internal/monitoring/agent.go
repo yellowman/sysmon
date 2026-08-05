@@ -181,7 +181,7 @@ func (s *Service) adoptAgent(site, remote string, conn net.Conn, reader *bufio.R
 
 	for _, d := range s.daemons {
 		d.mu.Lock()
-		same := d.site == site && d.inbound
+		same := d.site == site
 		d.mu.Unlock()
 		if !same {
 			continue
@@ -204,10 +204,9 @@ func (s *Service) adoptAgent(site, remote string, conn net.Conn, reader *bufio.R
 	}
 
 	s.daemons = append(s.daemons, &daemon{
-		addr:    remote,
-		site:    site,
-		inbound: true,
-		conn:    conn,
-		reader:  reader,
+		addr:   remote,
+		site:   site,
+		conn:   conn,
+		reader: reader,
 	})
 }

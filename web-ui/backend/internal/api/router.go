@@ -960,8 +960,10 @@ func (r *Router) handleAdminDebug(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.ToggleDebug(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.ToggleDebug(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -982,8 +984,10 @@ func (r *Router) handleAdminSNMPDebug(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.ToggleSNMPDebug(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.ToggleSNMPDebug(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -1004,8 +1008,10 @@ func (r *Router) handleAdminExpireDNS(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.ExpireDNS(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.ExpireDNS(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -1026,8 +1032,10 @@ func (r *Router) handleAdminPrintQ(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.PrintQueue(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.PrintQueue(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -1048,8 +1056,10 @@ func (r *Router) handleAdminNFD(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.GetNextFD(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.GetNextFD(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -1070,8 +1080,10 @@ func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.KillDaemon(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.KillDaemon(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())

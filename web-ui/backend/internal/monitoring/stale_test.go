@@ -22,7 +22,8 @@ type fakeSysmond struct {
 	objects []string
 
 	mu   sync.Mutex
-	dark bool // stop answering, as a daemon that fell off the network does
+	dark bool     // stop answering, as a daemon that fell off the network does
+	live net.Conn // the connection it dialled in on
 }
 
 func startFakeSysmond(t *testing.T, site string, objects ...string) *fakeSysmond {
@@ -39,10 +40,18 @@ func startFakeSysmond(t *testing.T, site string, objects ...string) *fakeSysmond
 
 func (f *fakeSysmond) addr() string { return f.ln.Addr().String() }
 
+// goDark is what a box falling off the network looks like from here: the
+// link it dialled in on stops being a link. sysmon-web finds out on its
+// next poll and has nothing to redial - the box has to come back by
+// itself.
 func (f *fakeSysmond) goDark() {
 	f.mu.Lock()
 	f.dark = true
+	c := f.live
 	f.mu.Unlock()
+	if c != nil {
+		c.Close()
+	}
 }
 
 func (f *fakeSysmond) isDark() bool {
@@ -65,10 +74,12 @@ func (f *fakeSysmond) serve() {
 	}
 }
 
+// session answers on a connection that has already been adopted, so
+// there is no welcome banner: the HELLO/token handshake is over by the
+// time sysmon-web starts polling.
 func (f *fakeSysmond) session(conn net.Conn) {
 	defer conn.Close()
 	r := bufio.NewReader(conn)
-	fmt.Fprintf(conn, "111 sysmond ready\r\n")
 
 	for {
 		line, err := r.ReadString('\n')
@@ -108,11 +119,28 @@ func (f *fakeSysmond) session(conn net.Conn) {
 	}
 }
 
+// connect dials the fake and adopts the socket into the fleet, which is
+// exactly what AgentListener.handshake does once a box has proved itself.
+// Daemons dial in; nothing here is ever dialled by sysmon-web.
+func connect(t *testing.T, svc *Service, f *fakeSysmond) {
+	t.Helper()
+	c, err := net.Dial("tcp", f.addr())
+	if err != nil {
+		t.Fatalf("dialling the fake daemon: %v", err)
+	}
+	f.mu.Lock()
+	f.live = c
+	f.mu.Unlock()
+	svc.adoptAgent(f.site, c.RemoteAddr().String(), c, bufio.NewReader(c))
+}
+
 func TestUnreachableSiteGoesStaleNotRemoved(t *testing.T) {
 	a := startFakeSysmond(t, "site-a", "gw", "sw1")
 	b := startFakeSysmond(t, "site-b", "gw", "edge")
 
-	svc := NewService(a.addr() + "," + b.addr())
+	svc := NewService()
+	connect(t, svc, a)
+	connect(t, svc, b)
 
 	first, err := svc.fetchFleet()
 	if err != nil {
@@ -179,15 +207,15 @@ func TestUnreachableSiteGoesStaleNotRemoved(t *testing.T) {
 // must not invent hosts.
 func TestNeverReachedSiteContributesNothing(t *testing.T) {
 	a := startFakeSysmond(t, "site-a", "gw")
+	dead := startFakeSysmond(t, "site-dead", "ghost")
 
-	dead, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadAddr := dead.Addr().String()
-	dead.Close() // nothing is listening there now
+	svc := NewService()
+	connect(t, svc, a)
+	connect(t, svc, dead)
+	// It dropped its link before we ever completed a poll, so there is
+	// nothing recorded for it and nothing to keep.
+	dead.goDark()
 
-	svc := NewService(a.addr() + "," + deadAddr)
 	status, err := svc.fetchFleet()
 	if err != nil {
 		t.Fatalf("poll: %v", err)

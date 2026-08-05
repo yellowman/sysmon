@@ -488,13 +488,16 @@ func (s *Service) daemonFor(site string) *daemon {
 	return nil
 }
 
-// withDaemonConn runs fn on an authenticated connection to a site.
+// withDaemonConn runs fn on the connection to a site.
 //
-// A dialled daemon gets a fresh socket, which keeps a long config transfer
-// off the poller's connection entirely. A daemon that dialled us has only
-// the one connection, so the poller is locked out for the duration - which
-// is correct: a delivery is not something to interleave with a status
-// fetch on the same socket.
+// A daemon has one connection - the one it dialled in on - so the poller
+// is locked out for the duration. That is correct: a delivery is not
+// something to interleave with a status fetch on the same socket.
+//
+// No authentication step. The daemon verified our certificate before
+// sending a byte and we verified its per-box token before answering, so
+// the link is already proven both ways and asking it to AUTH would prove
+// less.
 func (s *Service) withDaemonConn(site string, fn func(net.Conn, *bufio.Reader) error) error {
 	d := s.daemonFor(site)
 	if d == nil {
@@ -502,46 +505,18 @@ func (s *Service) withDaemonConn(site string, fn func(net.Conn, *bufio.Reader) e
 	}
 
 	d.mu.Lock()
-	inbound, conn, reader, addr := d.inbound, d.conn, d.reader, d.addr
+	conn, reader := d.conn, d.reader
 	d.mu.Unlock()
 
-	if inbound {
-		if conn == nil {
-			return fmt.Errorf("site %q is not connected", site)
-		}
-		// Already authenticated, both ways, by TLS and by its token - see
-		// fetchAllObjectsXML. Hold the poller off this socket for the
-		// length of the exchange and get on with it.
-		d.confMu.Lock()
-		defer d.confMu.Unlock()
-		conn.SetDeadline(time.Now().Add(120 * time.Second))
-		defer conn.SetDeadline(time.Time{})
-		return fn(conn, reader)
+	if conn == nil {
+		return fmt.Errorf("site %q is not connected", site)
 	}
 
-	// A daemon we dial is a listening daemon, and that path still uses the
-	// shared authkey - it is the only credential a listening socket has.
-	key := s.authKey()
-	if key == "" {
-		return fmt.Errorf("managing a dialled daemon needs its authkey, " +
-			"which is not configured here")
-	}
-
-	fresh, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("dialling %s: %w", addr, err)
-	}
-	defer fresh.Close()
-	fresh.SetDeadline(time.Now().Add(120 * time.Second))
-
-	r := bufio.NewReader(fresh)
-	if err := readWelcomeBanner(r); err != nil {
-		return err
-	}
-	if err := authenticate(fresh, r, key); err != nil {
-		return fmt.Errorf("authenticating to %s: %w", site, err)
-	}
-	return fn(fresh, r)
+	d.confMu.Lock()
+	defer d.confMu.Unlock()
+	conn.SetDeadline(time.Now().Add(120 * time.Second))
+	defer conn.SetDeadline(time.Time{})
+	return fn(conn, reader)
 }
 
 // AdoptSite takes what is really on the box and makes it the first desired
