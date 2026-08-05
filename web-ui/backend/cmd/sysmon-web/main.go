@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -182,7 +183,6 @@ func main() {
 	// Command line flags
 	socketPath := flag.String("socket", defaultSocket, "FastCGI socket path")
 	configPath := flag.String("config", "/etc/sysmon.conf", "Sysmon config file path")
-	sysmonAddr := flag.String("sysmon", "localhost:1345", "Sysmon daemon address (default port 1345)")
 	auditLog := flag.String("audit", "/var/log/sysmon-web-audit.log", "Audit log path")
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
 	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")
@@ -191,9 +191,36 @@ func main() {
 	socketGroup := flag.String("socket-group", "", "group for the FastCGI socket (default: first of www, www-data, nobody)")
 	procUser := flag.String("user", "", "drop to this user when started as root (default: first of _sysmon, nobody)")
 	procGroup := flag.String("group", "", "drop to this group when started as root (default: first of _sysmon, nobody)")
+	agentListen := flag.String("agent-listen", ":"+monitoring.DefaultAgentPort, "TLS address to accept sysmond connections on; empty disables")
+	agentCert := flag.String("agent-cert", "", "certificate for -agent-listen (default: self-signed, generated once)")
+	agentKey := flag.String("agent-key", "", "private key for -agent-listen")
+	agentNames := flag.String("agent-names", "", "comma-separated names/IPs daemons dial this process by, for the generated certificate")
+	// Managing monitoring boxes from a terminal - the same three things the
+	// admin page does, for scripts that build machines.
+	mintAgentSite := flag.String("mint-agent", "", "mint a token for a site and print the config lines, then exit")
+	mintAgentLabel := flag.String("agent-label", "", "label for -mint-agent (what machine this is)")
+	replaceAgent := flag.Bool("replace-agent", false, "allow -mint-agent to replace a live token, stopping the box that holds it")
+	listAgentsFlag := flag.Bool("list-agents", false, "list monitoring boxes and exit")
+	revokeAgentSite := flag.String("revoke-agent", "", "revoke a site's token and exit")
 	debug := flag.Bool("debug", false, "run in the foreground and log to stderr (otherwise the daemon is silent)")
 	foreground := flag.Bool("foreground", false, "run in the foreground without daemonizing (for systemd/rc supervisors); still silent unless -debug")
 	flag.Parse()
+
+	// Commands run and exit. They come before anything that binds a
+	// socket or drops privileges, so they work on a host where the
+	// service has never been started.
+	cli := cliOptions{
+		serviceUser:  *procUser,
+		serviceGroup: *procGroup,
+		mint:         *mintAgentSite,
+		label:        *mintAgentLabel,
+		replace:      *replaceAgent,
+		list:         *listAgentsFlag,
+		revoke:       *revokeAgentSite,
+	}
+	if cli.wanted() {
+		os.Exit(runCLI(cli, *agentNames, *agentListen))
+	}
 
 	isDaemonChild := os.Getenv(daemonEnvMarker) == "1"
 
@@ -354,7 +381,16 @@ func main() {
 	log.Printf("Templates loaded successfully from %s", finalTemplateDir)
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
-	monitoringService := monitoring.NewService(*sysmonAddr)
+	monitoringService := monitoring.NewService()
+	// CONF - sysmond's bulk object dump, and the difference between a
+	// one-round-trip poll and one round trip per host - is privileged.
+	monitoringService.SetAuthKeyProvider(func() string {
+		snap, err := configService.GetConfig()
+		if err != nil {
+			return ""
+		}
+		return snap.Config.Global.AuthKey
+	})
 
 	// Host up/down transition history, persisted so it survives restarts.
 	if historyStore, err := monitoring.OpenHistory(filepath.Join(stateDir, "history.db")); err != nil {
@@ -366,7 +402,10 @@ func main() {
 	// Refresh the status cache in the background so the per-host sysmond
 	// fetch happens off the request path - UI/app requests serve from a
 	// warm cache instead of each one driving a fresh N-round-trip query.
-	monitoringService.StartPoller(2 * time.Second)
+	// One second, and one connection: each cycle asks sysmond only for the
+	// objects and traps that changed since the last one, so a quiet
+	// network costs two round trips and transfers nothing.
+	monitoringService.StartPoller(1 * time.Second)
 	defer monitoringService.StopPoller()
 
 	// Web-only settings (push credentials etc.) live in their own bbolt
@@ -376,6 +415,12 @@ func main() {
 		log.Fatalf("Failed to initialize settings store: %v", err)
 	}
 	defer settingsStore.Close()
+
+	// The same store holds desired config state per site. Without it every
+	// site reads as unmanaged and nothing is ever delivered, which is the
+	// right behaviour for a box nobody has adopted rather than a degraded
+	// one.
+	monitoringService.SetGenerations(settingsStore)
 
 	// pushFactory rebuilds the push service from a config. Used by main
 	// for boot, and by the router for on-demand reinit if boot failed
@@ -410,6 +455,70 @@ func main() {
 			log.Printf("WARNING: push notification init failed: %v (will retry on next settings change)", err)
 		} else {
 			pushService = svc
+		}
+	}
+
+	// Daemons that dial in - the normal way a site connects, and on by
+	// default. sysmond no longer listens unless asked to: its client
+	// socket spent most of its life open, unauthenticated and owned by a
+	// root process, and inverting the direction retires it.
+	//
+	// TLS is not optional here, because this carries a bearer token and
+	// whole configs. Without a supplied certificate one is generated and
+	// kept, rather than the listener silently not starting - a default
+	// that needs a CA before anything works is a default that gets worked
+	// around, usually by disabling verification somewhere.
+	// What a box must dial to reach this process. The admin page prints
+	// it in the config block it hands out. Set even with the listener
+	// off: a token minted now is for a box that connects later, and the
+	// best guess beats an empty line - the CLI guesses the same way.
+	monitoring.SetAgentDialTarget(monitoring.DialTarget(*agentNames, *agentListen))
+
+	if *agentListen != "" {
+		certFile, keyFile := *agentCert, *agentKey
+
+		if certFile == "" || keyFile == "" {
+			var names []string
+			for _, n := range strings.Split(*agentNames, ",") {
+				if n = strings.TrimSpace(n); n != "" {
+					names = append(names, n)
+				}
+			}
+			if len(names) == 0 {
+				if h, herr := os.Hostname(); herr == nil && h != "" {
+					names = append(names, h)
+				}
+				names = append(names, "localhost", "127.0.0.1")
+			}
+
+			var cerr error
+			certFile, keyFile, cerr = monitoring.EnsureAgentCert(
+				filepath.Join(stateDir, "agent"), names)
+			if cerr != nil {
+				log.Printf("WARNING: cannot prepare a certificate for %s: %v", *agentListen, cerr)
+				certFile = ""
+			} else if valid, verr := monitoring.CertNames(certFile); verr == nil {
+				log.Printf("agents: using %s, valid for %s", certFile, valid)
+				log.Printf("agents: each sysmond needs this file as " +
+					"'config aggregator-ca' and must dial one of those names")
+			}
+		}
+
+		if certFile != "" {
+			// Remembered so the admin page can offer it for download: a
+			// box cannot verify this server without it.
+			monitoring.SetAgentCertPath(certFile)
+
+			al, aerr := monitoring.ListenForAgents(*agentListen, certFile, keyFile,
+				monitoringService,
+				func(site, token, addr string) bool {
+					return settingsStore.CheckAgentToken(site, token, addr)
+				})
+			if aerr != nil {
+				log.Printf("WARNING: %v", aerr)
+			} else {
+				defer al.Close()
+			}
 		}
 	}
 

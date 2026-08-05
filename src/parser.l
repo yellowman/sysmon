@@ -44,11 +44,19 @@ bool parser_snmp_octets = FALSE;
 bool parser_catch_snmptrap = FALSE;
 bool parser_trap_alert = FALSE;
 char *parser_rtt_threshold = NULL;
-int parser_i_rtt_threshold = 0;
+int parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
+/* pktloss_tolerance: how many lost packets a cycle may have before it
+   alerts. The daemon has always had the field and compared against it -
+   it simply had no directive, so it was stuck on its default of 0
+   (alert on any loss) and no config could say otherwise. */
+char *parser_pktloss_tolerance = NULL;
+int parser_i_pktloss_tolerance = -1;
 char *parser_jitter_threshold = NULL;
 int parser_i_jitter_threshold = 0;
 char *parser_rtt_samples = NULL;
 int parser_i_rtt_samples = 5;  /* Default: 5 samples */
+char *parser_rtt_interval = NULL;
+int parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
 char *parser_sender = NULL;
 char *parser_subject = NULL;
 char *parser_upcolor = NULL;
@@ -58,6 +66,13 @@ char *parser_replyto = NULL;
 char *parser_errorsto = NULL;
 char *parser_header = NULL;
 char *parser_authkey = NULL;
+char *parser_sitename = NULL;
+char *parser_aggregator = NULL;
+char *parser_agg_token = NULL;
+char *parser_agg_ca = NULL;
+char *parser_statedir = NULL;
+int parser_listenport = -1;   /* -1 = not configured; 0 = explicitly off */
+char *parser_sitedesc = NULL;
 char *parser_savestate = NULL;
 char *parser_statusfile = NULL;
 char *parser_statustempdir = NULL;
@@ -77,6 +92,9 @@ char *parser_community = NULL;
 char *parser_oid = NULL;
 char *parser_snmp_oid_sec = NULL;
 char *parser_snmp_type = NULL;
+/* v2c unless an object says otherwise: it is what everything since the
+   late 90s speaks, and v1 cannot carry a 64-bit counter. */
+int parser_snmp_version = SNMP_VERSION_2C;
 int parser_i_snmp_type = -1;
 char *parser_snmp_low = NULL;
 char *parser_snmp_high = NULL;
@@ -360,17 +378,10 @@ config{WS}statustempdir{WS}[^;]+{WS}*;       {
     print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
     break;
   }
-  if (parser_statustempdir != NULL)
-  {
-    FREE(parser_statustempdir);
-  }
-  parser_statustempdir = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_statustempdir");
-  strncpy( parser_statustempdir, parser_pos1, parser_pos2 - parser_pos1 );
-
-  parser_statustempdir[ parser_pos2 - parser_pos1 ] = '\0';
-
-  if (debug)
-    print_err(0, "statustempdir : %s", parser_statustempdir);
+  *parser_pos2 = '\0';
+  print_err(1, "config statustempdir is no longer used (%s line %d); "
+    "the status page is built in the state directory, not %s",
+    current_parsing_filename, line_no, parser_pos1);
 }
 
 config{WS}cssfile{WS}[^;]+{WS}*;       {
@@ -403,6 +414,26 @@ config{WS}cssfile{WS}[^;]+{WS}*;       {
     print_err(0, "cssfile : %s", parser_cssfile); 
 }
 
+config\ logging\ file{WS}*;       {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  /* Log to a file rather than syslog. Which file is not a question any
+     more - it is sysmond.log in the state directory. */
+  parser_logging_fac = -3;
+  /* Only the facility, not the path. Which file this is depends on the
+     state directory, and "config statedir" is usually further down the
+     file - opening one here would name it from whatever the default was
+     at line 2 and write the log somewhere the operator did not ask for.
+     loadconfig() sets log_file once the whole file has been read, when
+     the answer is settled. Until then syslogmsg() sees no path and says
+     nothing; parse-time messages still reach stderr, which is where
+     someone running "sysmond -t" is looking anyway. */
+  if (not_started_yet == TRUE)
+	facility = -3;
+
+};
+
 config\ logging\ file\ [^;]+{WS}*;       {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -421,20 +452,22 @@ config\ logging\ file\ [^;]+{WS}*;       {
 	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
 	break;
   }
-  if (parser_logging != NULL)
-  {
-        FREE(parser_logging);
-  }
-  parser_logging = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_name");
-  strncpy( parser_logging, parser_pos1, parser_pos2 - parser_pos1 );
+  *parser_pos2 = '\0';
+  print_err(1, "config logging file no longer takes a path (%s line %d); "
+	"the log is sysmond.log in the state directory, not %s. "
+	"Write \"config logging file;\".",
+	current_parsing_filename, line_no, parser_pos1);
 
-  parser_logging[ parser_pos2 - parser_pos1 ] = '\0';
-  if (debug)
-    print_err(0, "logging : %s", parser_logging); 
-
+  /* Deprecated spelling, same effect as the bare form above - and it
+     takes the same path, which is the whole fix here. It used to call
+     use_logging_now(), whose -3 branch read parser_logging: a syslog
+     facility name that nothing sets on this route, so it was NULL, so
+     this line segfaulted sysmond at startup. The crash was on the exact
+     directive every pre-statedir install has, while printing the notice
+     telling the operator to change it. */
   parser_logging_fac = -3;
   if (not_started_yet == TRUE)
-	use_logging_now();
+	facility = -3;
 }
 
 config\ logging\ syslog\ [^;]+{WS}*;       {
@@ -472,6 +505,7 @@ config\ logging\ syslog\ [^;]+{WS}*;       {
 	print_err(0, "invalid facility %s specified", parser_logging);
 	FREE(parser_logging);
 	parser_logging = NULL;
+	parser_logging_fac = 0;   /* 0 = the config said nothing about logging */
   }
   if (not_started_yet == TRUE)
 	use_logging_now();
@@ -495,16 +529,14 @@ config\ pidfile\ [^;]+{WS}*;       {
 	print_err(1, "misbalanced quotes on line %d (pidfile) in %s", line_no, current_parsing_filename);
 	break;
   }
-  if (parser_pidfile != NULL)
-  {
-        FREE(parser_pidfile);
-  }
-  parser_pidfile = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_logging");
-  strncpy( parser_pidfile, parser_pos1, parser_pos2 - parser_pos1 );
-
-  parser_pidfile[ parser_pos2 - parser_pos1 ] = '\0';
-  if (debug)
-    print_err(0, "pidfile : %s", parser_pidfile); 
+  *parser_pos2 = '\0';
+  /* Worth a real warning rather than a debug line: a service manager holds
+     this path from outside sysmon.conf, so somebody has a unit file or an
+     rc script to update as well. */
+  print_err(1, "config pidfile is no longer used (%s line %d); the pidfile "
+    "is sysmond.pid in the state directory, not %s - update any systemd "
+    "PIDFile= or rc script that refers to it",
+    current_parsing_filename, line_no, parser_pos1); 
 }
 
 config\ date\ [^;]+{WS}*;       {
@@ -657,6 +689,27 @@ object[^\{]+{WS}+\{	{
   parser_reverse = FALSE;
   parser_snmp_octets = FALSE;
   parser_trap_alert = FALSE;
+  parser_snmp_version = SNMP_VERSION_2C;
+  /* -1 means "this object did not say", so the default stands. Reset
+     per object or one object's tolerance would silently apply to every
+     object after it. */
+  parser_i_pktloss_tolerance = -1;
+  /*
+   * And the same for every rtt knob, for exactly the same reason.
+   *
+   * These are file-scope and were reset only by initalize_parser(),
+   * which runs once per config load - so a value set on one object was
+   * still sitting there when the next object closed, and got written
+   * into it. Measured: two rtt objects, the first with
+   * "rtt_interval 900", the second with none. The second probed at
+   * 900ms too, and swapping their order in the file swapped which one
+   * got the default. A per-object directive that depends on file order
+   * is not a per-object directive.
+   */
+  parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
+  parser_i_jitter_threshold = 0;
+  parser_i_rtt_samples = 5;
+  parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
   for (temp_int=6;strlen(yytext)> temp_int;temp_int++)
   {
 	if (!isspace(yytext[temp_int]))
@@ -1474,6 +1527,266 @@ config\ header\ [^;]+;          {
 
 };
 
+config\ aggregator\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* host:port of the sysmon-web to dial out to */
+  if (parser_aggregator != NULL)
+  {
+	FREE(parser_aggregator);
+  }
+  parser_aggregator = STRDUP(parser_pos1, "parser.l:parser_aggregator");
+
+};
+
+config\ aggregator-token\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* bearer token proving this daemon to the aggregator */
+  if (parser_agg_token != NULL)
+  {
+	FREE(parser_agg_token);
+  }
+  parser_agg_token = STRDUP(parser_pos1, "parser.l:parser_agg_token");
+
+};
+
+config\ listen\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  parser_pos1 = strchr( parser_pos1+1, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "config listen needs a port or \"off\" on line %d in %s",
+		line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1++;
+  while (*parser_pos1 == ' ' || *parser_pos1 == '\t' || *parser_pos1 == '"')
+	parser_pos1++;
+
+  /*
+   * The client socket is opt-in. sysmond spent most of its life listening
+   * on 1345 as root, and that socket has been its largest attack surface
+   * for as long as it has existed. A daemon that dials out to a sysmon-web
+   * does not need it at all, so it is only opened when a config or a -p
+   * asks for it - which is also what says "I am using the sysmon client
+   * against this box directly".
+   */
+  if (strncmp(parser_pos1, "off", 3) == 0 || strncmp(parser_pos1, "no", 2) == 0)
+	parser_listenport = 0;
+  else
+	parser_listenport = atoi(parser_pos1);
+
+  if (debug)
+    print_err(0, "listen : %d", parser_listenport);
+
+};
+
+config\ statedir\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /*
+   * One directory for everything this daemon writes: the pidfile, the log
+   * if it logs to a file, the shutdown state dump, the scratch file the
+   * status page is built in, and the config generations a sysmon-web
+   * delivers. There used to be a directive per file, which meant a
+   * delivered config could aim any of them anywhere the daemon could
+   * write - and meant five paths to get right instead of one.
+   */
+  if (parser_statedir != NULL)
+  {
+	FREE(parser_statedir);
+  }
+  parser_statedir = STRDUP(parser_pos1, "parser.l:parser_statedir");
+
+};
+
+config\ generation-dir\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* The old name for "config statedir", from when generations were the
+     only thing kept there. Still honoured - it means the same directory. */
+  if (parser_statedir != NULL)
+  {
+	FREE(parser_statedir);
+  }
+  parser_statedir = STRDUP(parser_pos1, "parser.l:parser_statedir");
+  print_err(1, "config generation-dir is now called \"config statedir\" "
+	"(%s line %d); it holds the pidfile, the log and the state dump too",
+	current_parsing_filename, line_no);
+
+};
+
+config\ aggregator-ca\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* The CA that signs the aggregator's certificate is now a file in the
+     state directory - aggregator-ca.pem - because it is something the
+     operator copies onto the box, and a known name is one less thing to
+     agree on between the two ends. */
+  print_err(1, "config aggregator-ca is no longer used (%s line %d); put "
+	"the certificate at aggregator-ca.pem in the state directory, not %s",
+	current_parsing_filename, line_no, parser_pos1);
+
+};
+
+config\ sitename\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /*
+   * This name is the key half of every "site:object" a client stores, so
+   * a colon in it would make the qualified name ambiguous to split. Say
+   * so here rather than let it become an unaddressable daemon.
+   */
+  if (!valid_sitename(parser_pos1))
+  {
+	print_err(1, "config sitename \"%s\" in %s line %d: only letters, digits, - and _ are allowed",
+		parser_pos1, current_parsing_filename, line_no);
+	badconfig = TRUE;
+	break;
+  }
+
+  if (parser_sitename != NULL)
+  {
+	FREE(parser_sitename);
+  }
+  parser_sitename = STRDUP(parser_pos1, "parser.l:parser_sitename");
+
+  if (debug)
+    print_err(0, "sitename : %s", parser_sitename);
+
+};
+
+config\ sitedesc\ [^;]+;        {
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* Free text: nothing keys on it, so nothing to validate. */
+  if (parser_sitedesc != NULL)
+  {
+	FREE(parser_sitedesc);
+  }
+  parser_sitedesc = STRDUP(parser_pos1, "parser.l:parser_sitedesc");
+
+  if (debug)
+    print_err(0, "sitedesc : %s", parser_sitedesc);
+
+};
+
 config\ authkey\ [^;]+;          {
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
@@ -1526,13 +1839,10 @@ config\ savestate\ [^;]+;          {
   {
         FREE(parser_savestate);
   }
-  parser_savestate = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_savestate");
-
-  strncpy( parser_savestate, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_savestate[ parser_pos2 - parser_pos1 ] = '\0';
-
-  if (debug)
-    print_err(0, "savestate : %s", parser_savestate);
+  *parser_pos2 = '\0';
+  print_err(1, "config savestate no longer takes a path (%s line %d); "
+    "the state dump is state.xml in the state directory, not %s",
+    current_parsing_filename, line_no, parser_pos1);
 
 };
 
@@ -1578,6 +1888,46 @@ port\ [^;]+;          {
 
 }
 
+pktloss_tolerance\ [^;]+;      {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: pktloss_tolerance specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_pktloss_tolerance != NULL)
+  {
+        FREE(parser_pktloss_tolerance);
+  }
+  parser_pktloss_tolerance = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_pktloss_tolerance");
+
+  strncpy( parser_pktloss_tolerance, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_pktloss_tolerance[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_pktloss_tolerance = atol(parser_pktloss_tolerance);
+  if (parser_i_pktloss_tolerance < 0)
+  {
+	print_err(1, "Invalid pktloss_tolerance (must be >= 0) in %s line %d",
+		current_parsing_filename, line_no);
+	parser_i_pktloss_tolerance = 0;
+  }
+  if (debug)
+    print_err(0, "pktloss_tolerance : %s/%d ", parser_pktloss_tolerance, parser_i_pktloss_tolerance);
+
+}
+
 rtt_threshold\ [^;]+;          {
   if (parser_name == NULL)
 	print_err(1, "WARNING: rtt_threshold specified when not inside an object at line %d", line_no);
@@ -1607,6 +1957,12 @@ rtt_threshold\ [^;]+;          {
   parser_rtt_threshold[ parser_pos2 - parser_pos1 ] = '\0';
 
   parser_i_rtt_threshold = atol(parser_rtt_threshold);
+  if (parser_i_rtt_threshold < 0)
+  {
+	print_err(1, "Invalid rtt_threshold (must be >= 0) in %s line %d",
+		current_parsing_filename, line_no);
+	parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
+  }
   if (debug)
     print_err(0, "rtt_threshold : %s/%d ", parser_rtt_threshold, parser_i_rtt_threshold);
 
@@ -1683,6 +2039,52 @@ rtt_samples\ [^;]+;          {
   }
   if (debug)
     print_err(0, "rtt_samples : %s/%d ", parser_rtt_samples, parser_i_rtt_samples);
+
+}
+
+rtt_interval\ [^;]+;         {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: rtt_interval specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_rtt_interval != NULL)
+  {
+        FREE(parser_rtt_interval);
+  }
+  parser_rtt_interval = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_rtt_interval");
+
+  strncpy( parser_rtt_interval, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_rtt_interval[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_rtt_interval = atol(parser_rtt_interval);
+  /* Spacing the probes is the point of the knob, so refuse a value that
+     removes the spacing. The ceiling keeps one check from occupying a
+     queue slot for minutes: rtt_samples * rtt_interval is how long the
+     check takes, and the queue is finite. */
+  if (parser_i_rtt_interval < RTT_MIN_INTERVAL_MS ||
+      parser_i_rtt_interval > RTT_MAX_INTERVAL_MS)
+  {
+	print_err(1, "Invalid rtt_interval (must be %d-%d ms) in %s line %d",
+		RTT_MIN_INTERVAL_MS, RTT_MAX_INTERVAL_MS,
+		current_parsing_filename, line_no);
+	parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
+  }
+  if (debug)
+    print_err(0, "rtt_interval : %s/%d ", parser_rtt_interval, parser_i_rtt_interval);
 
 }
 
@@ -2079,6 +2481,45 @@ snmp-oid-sec\ [^;]+;          {
   if (debug)
     print_err(0, "snmp_oid_sec : %s", parser_snmp_oid_sec);
 
+}
+
+snmp-version\ [^;]+;       {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: snmp-version specified when not inside an object at line %d", line_no);
+
+  /* Search for extra newlines that are not being counted */
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, '"' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, '"' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  *parser_pos2 = '\0';
+
+  /* "1"/"v1" and "2c"/"v2c"/"2" are all things people write */
+  if (strcasecmp(parser_pos1, "1") == 0 || strcasecmp(parser_pos1, "v1") == 0)
+  {
+	parser_snmp_version = SNMP_VERSION_1;
+  } else if (strcasecmp(parser_pos1, "2c") == 0 ||
+	strcasecmp(parser_pos1, "v2c") == 0 || strcasecmp(parser_pos1, "2") == 0) {
+	parser_snmp_version = SNMP_VERSION_2C;
+  } else {
+	print_err(1, "snmp-version \"%s\" in %s line %d is not 1 or 2c - using 2c",
+		parser_pos1, current_parsing_filename, line_no);
+	parser_snmp_version = SNMP_VERSION_2C;
+  }
+
+  if (debug)
+    print_err(0, "snmp-version : %s", parser_pos1);
 }
 
 snmp-type\ [^;]+;          {
@@ -2627,20 +3068,128 @@ void open_new_file(char *filename, FILE *current_file)
 	save_current_parsing_filename = current_parsing_filename;
 	include_stack = YY_CURRENT_BUFFER;
 
-	new_file = fopen(filename, "r");
+	char sibling[PATH_MAX];
+	const char *include_name = filename;
+
+	/*
+	 * An include is opened exactly as written, first, always. A config
+	 * that resolves today resolves the same way after this - nothing here
+	 * can change which file a working config opens, and that is the whole
+	 * design of it. Absolute paths are what a config is expected to use
+	 * and they never touch anything below.
+	 *
+	 * A relative include is ambiguous, because it resolves against the
+	 * working directory and sysmond does not set one - it inherits
+	 * whatever started it, which differs between a shell, systemd
+	 * (defaults to /) and an rc.d script. When that ambiguity has gone
+	 * wrong the include does not resolve at all, and *that* case gets one
+	 * repair: try the config file's own directory before giving up.
+	 *
+	 * It is a fallback and not a redirect, which is the distinction that
+	 * makes it safe: it can only turn an include that was silently
+	 * missing into one that loads. It says so when it fires, because a
+	 * repair nobody can see is the kind that is confusing years later.
+	 */
+	if (confgen_is_managed_file(save_current_parsing_filename))
+	{
+		/*
+		 * The managed directory, which is not a repair at all: these
+		 * files are copies this daemon wrote into one flat directory it
+		 * owns, so a bare filename names a member of the set that was
+		 * validated and anything else names something outside it.
+		 */
+		char *slash;
+
+		if (strchr(filename, '/') != NULL)
+		{
+			print_err(1, "parser.l: include \"%s\" in a managed config names a "
+				"path; only plain filenames are read from %s",
+				filename, confgen_statedir());
+			return;
+		}
+		snprintf(sibling, sizeof(sibling), "%s", save_current_parsing_filename);
+		slash = strrchr(sibling, '/');
+		if (slash == NULL)
+			return;
+		snprintf(slash + 1, sizeof(sibling) - (size_t)(slash + 1 - sibling),
+			"%s", filename);
+		new_file = fopen(sibling, "r");
+		if (new_file != NULL)
+			filename = sibling;
+	}
+	else
+	{
+		new_file = fopen(filename, "r");
+
+		if (new_file == NULL && filename[0] != '/')
+		{
+			char *slash;
+
+			snprintf(sibling, sizeof(sibling), "%s", configfile);
+			slash = strrchr(sibling, '/');
+			if (slash != NULL)
+			{
+				snprintf(slash + 1,
+					sizeof(sibling) - (size_t)(slash + 1 - sibling),
+					"%s", filename);
+				new_file = fopen(sibling, "r");
+				if (new_file != NULL)
+				{
+					print_err(1, "include \"%s\" did not resolve from the "
+						"working directory; using %s. Write it as an "
+						"absolute path to say which you meant.",
+						filename, sibling);
+					filename = sibling;
+				}
+			}
+		}
+	}
+
 	if (new_file == NULL)
 	{
                 perror(filename);
                 return;
 	}
+	/* Record it only once it opened: a missing include is not part of
+	   the config, and hashing a file that is not there is not possible.
+	   The name recorded is the string the config used, not where it was
+	   found - that is the identity a delivery names, and it has to mean
+	   the same thing on a box whose seed lives somewhere else. */
+	confset_record(include_name, filename);
 	yyin = new_file;
 	yy_switch_to_buffer(yy_create_buffer( yyin, YY_BUF_SIZE ) );
 /* 	yyrestart(new_file); */
 	templn = line_no;
 	line_no = 1;
-	current_parsing_filename = filename;
+
+	/*
+	 * Take a copy the frame owns before recording the name.
+	 *
+	 * "filename" can be the global parser_include buffer, and the
+	 * include rule FREE()s that the moment it reads the next include.
+	 * So an include inside an include frees the name this frame is
+	 * parsing under, and restoring it below would hand the rest of this
+	 * file a dangling pointer - every error message after the inner
+	 * include reads freed memory.
+	 *
+	 * sibling[] is this frame's own storage and lives until we return,
+	 * which is exactly as long as any frame beneath us can run. It has
+	 * done its job by now (the file is open and recorded), so it can
+	 * hold the name.
+	 */
+	if (filename != sibling)
+		snprintf(sibling, sizeof(sibling), "%s", filename);
+	current_parsing_filename = sibling;
 
 	sysmon_conf_yylex();
+
+	/* Put the name back. It was saved and never restored, so every parse
+	   error after an include used to be reported against the include
+	   rather than the file it was really in - and now that the name can
+	   point at a buffer in this frame, leaving it set would outlive it.
+	   The saved pointer is the caller's own sibling[] (or the top-level
+	   config path), so it is still alive to go back to. */
+	current_parsing_filename = save_current_parsing_filename;
 
 	line_no = templn;
 	fclose(new_file);
@@ -2825,6 +3374,27 @@ void add_object()
 
 		/* LOAD DATA into structure */
 		new_ele->value->data->hostname = STRDUP(parser_ip, "hostname");
+
+		/*
+		 * Keep what the name resolved to, not just the name.
+		 *
+		 * hp is the lookup done above to decide this object is worth
+		 * monitoring at all, so the address is already in hand and
+		 * costs nothing to record. Anything that later arrives with an
+		 * address and needs the object it belongs to - an snmp trap -
+		 * can then match on it directly, instead of resolving every
+		 * object in the config to find out. get_ip() hands back a
+		 * static buffer, so copy it now.
+		 */
+		new_ele->value->data->ipv4_str = NULL;
+		if (hp != NULL && hp->my_h_addr_v4 != NULL)
+		{
+			char *dotted = get_ip(hp);
+
+			if (dotted != NULL)
+				new_ele->value->data->ipv4_str =
+					STRDUP(dotted, "parser.l:ipv4_str");
+		}
 		new_ele->value->data->type = parser_i_type;
 		new_ele->value->data->port = parser_i_port;
 		new_ele->value->data->reverse = parser_reverse;
@@ -2833,6 +3403,7 @@ void add_object()
 		new_ele->value->data->rtt_threshold = parser_i_rtt_threshold;
 		new_ele->value->data->jitter_threshold = parser_i_jitter_threshold;
 		new_ele->value->data->rtt_samples = parser_i_rtt_samples;
+		new_ele->value->data->rtt_interval = parser_i_rtt_interval;
 		new_ele->value->data->max_wakeup_retries = 0;  /* 0 = use DEFAULT_MAX_WAKEUP_RETRIES */
 		new_ele->value->data->contact_when = parser_when;
 		new_ele->value->data->unique_id = gen_unique_id();
@@ -2938,7 +3509,10 @@ void add_object()
 		if (parser_i_type == SYSM_TYPE_PKTLOSS)
 		{
 			/* Initialize packet loss defaults */
-			new_ele->value->data->pktloss_tolerance = 0;  /* Alert on any loss by default */
+			/* Alert on any loss unless the object said otherwise. */
+			new_ele->value->data->pktloss_tolerance =
+				(parser_i_pktloss_tolerance >= 0) ?
+					(unsigned int)parser_i_pktloss_tolerance : 0;
 			new_ele->value->data->pktloss_history_hours = PKTLOSS_DEFAULT_HISTORY;
 			new_ele->value->data->pktloss_last_check = 0;
 		}
@@ -2980,6 +3554,8 @@ void add_object()
 		{
 			new_ele->value->data->snmp_test_type = parser_i_snmp_type;
 		}
+
+		new_ele->value->data->snmp_version = parser_snmp_version;
 
 		if (parser_i_snmp_type == SYSM_SNMP_TYPE_REBOOT)
 		{
@@ -3201,6 +3777,8 @@ void initalize_parser()
 		FREE(parser_pidfile);
 	if (parser_statusfile != NULL)
 		FREE(parser_statusfile);
+	if (parser_statedir != NULL)
+		FREE(parser_statedir);
 	if (parser_statustempdir != NULL)
 		FREE(parser_statustempdir);
 	if (parser_logging != NULL)
@@ -3281,8 +3859,15 @@ void initalize_parser()
 	parser_errorsto = NULL;
 	parser_header = NULL;
 	parser_authkey = NULL;
+	parser_sitename = NULL;
+	parser_aggregator = NULL;
+	parser_agg_token = NULL;
+	parser_agg_ca = NULL;
+	parser_sitedesc = NULL;
 	parser_savestate = NULL;
 	parser_statusfile = NULL;
+	parser_statedir = NULL;
+	parser_listenport = -1;
 	parser_statustempdir = NULL;
 	parser_pidfile = STRDUP (PIDFILE, "default PID file name");
 	parser_logging = NULL;
@@ -3309,13 +3894,16 @@ void initalize_parser()
 	parser_catch_snmptrap = 0;
 	parser_trap_alert = FALSE;
 	parser_rtt_threshold = NULL;
-	parser_i_rtt_threshold = 0;
+	parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
 	parser_jitter_threshold = NULL;
 	parser_i_jitter_threshold = 0;
 	parser_rtt_samples = NULL;
 	parser_i_rtt_samples = 5;  /* Default: 5 samples */
+	parser_rtt_interval = NULL;
+	parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
 	parser_html_refresh = 60;
 	parser_snmp_type = NULL;
+	parser_snmp_version = SNMP_VERSION_2C;
 	parser_snmp_low = NULL;
 	parser_snmp_high = NULL;
 	parser_snmp_exact = NULL;
@@ -3333,6 +3921,25 @@ void cleanup_after_parser()
 }
 
 
+/*
+ * Start logging to the syslog facility the config just named, rather
+ * than waiting for the parse to finish - what print_err() has to say
+ * about a config file is said while that file is being read.
+ *
+ * The -3 branch is file logging, and it is not reached from here any
+ * more: both "config logging file" rules set the facility themselves,
+ * because the file's name depends on a state directory the parse has
+ * probably not seen yet. It is kept correct rather than deleted, since
+ * the branch is one line and a wrong one is a crash.
+ *
+ * A wrong one was a crash. It read parser_logging, which holds a SYSLOG
+ * FACILITY NAME set by the "config logging syslog" rule; nothing wrote
+ * it on the file route, so it was NULL and this was STRDUP(NULL). The
+ * caller that got here with -3 was "config logging file "path";" - the
+ * exact directive every pre-statedir install has - so sysmond
+ * segfaulted at startup while printing the notice telling the operator
+ * to change it. The upgrade path was the crash path.
+ */
 void use_logging_now()
 {
 	facility = parser_logging_fac;
@@ -3340,7 +3947,7 @@ void use_logging_now()
 	{
 		if (log_file != NULL)
 			FREE(log_file);
-		log_file = STRDUP(parser_logging,"log file name");
+		log_file = STRDUP((char *)sysmon_logfile(), "log file name");
 	}
 }
 

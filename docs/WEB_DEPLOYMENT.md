@@ -98,7 +98,6 @@ ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
   -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
-  -sysmon localhost:1345 \
   -templates /usr/local/libexec/sysmon-web/templates \
   -backups /var/backups/sysmon \
   -audit /var/log/sysmon-web-audit.log

@@ -242,6 +242,10 @@ The ``config snmp-trap'' directive enables SNMP trap monitoring globally.
 When enabled, sysmond opens a UDP socket on port 162 to receive SNMP
 trap PDUs.  Individual objects can then use the trap_alert directive
 to enable trap monitoring for specific hosts.
+.PP
+A trap is accepted only when its source address belongs to an object
+that sets trap_alert.  Any other packet arriving on the port is
+discarded without being parsed or recorded.
 
 .SS authkey
 The ``config authkey'' directive sets an authentication key required for
@@ -249,8 +253,19 @@ privileged client commands.  Clients must send "AUTH <key>" to authenticate
 before performing certain operations.
 
 .SS savestate
-The ``config savestate'' directive specifies a file path where sysmond
-will save the complete monitoring state in XML format on shutdown.
+Removed. Check state is now saved and restored automatically, as
+sysmond.state in the state directory (see ``config statedir'').
+
+On shutdown sysmond records what it had learned about each object - how
+long it had been down, how many consecutive failures it was at, and
+whether anyone had already been paged about it - and puts it back at the
+next start. Without this a daemon restarted during an outage pages again
+for something it has already reported.
+
+A checkpoint older than twelve hours is ignored: it describes a network
+that has probably changed, and consecutive-failure counts from then mean
+nothing. Objects the checkpoint has never heard of - newly added, or
+renamed - start clean.
 
 .SH OBJECT DEFINITIONS
 Objects are defined using the following syntax:
@@ -330,15 +345,48 @@ Per-object custom page message format string.  Supports the same
 substitution variables as the global pmesg (set pmesg).
 
 .SS trap_alert
-Enable SNMP trap monitoring for this object.
+Enable SNMP trap monitoring for this object.  A trap is matched by
+comparing the source address of the packet against the address this
+object's
+.B ip
+resolved to when the config was loaded, so a hostname and a literal
+address work equally well and no name is resolved while a trap is being
+handled.  A device that changes address is picked up at the next config
+load.
 
 .SS rtt_threshold
 Round-trip time threshold in milliseconds.  If average RTT exceeds
-this value, an alert is triggered.
+this value, an alert is triggered.  Default 0, which means no latency
+alarm - the same as jitter_threshold, and the same reading.  An rtt
+object with neither threshold set still measures, records and reports
+its figures; it just alerts only when nothing answers at all.
 
 .SS jitter_threshold
 Jitter threshold in milliseconds.  If RTT variation exceeds this
-value, an alert is triggered.
+value, an alert is triggered.  A value of 0 disables the jitter test.
+
+.SS rtt_samples
+How many probes one rtt check sends.  The check's verdict is the mean
+RTT and RFC 3550 jitter over these probes.  Default 5.
+
+.SS rtt_interval
+Milliseconds between the probes of one rtt check (10-5000, default
+100).  Probes are sent on this schedule with several in flight, so one
+lost packet costs one sample, not the check.  rtt_samples times
+rtt_interval is roughly how long each check takes; slower spacing
+samples a wider window, which is usually what jitter measurement
+wants.
+
+.SS pktloss_tolerance
+How many of a pktloss check's probes may go unanswered before it
+alerts.  Default 0, which alerts on any loss at all.  Subscriber-facing
+radio usually wants a small allowance here, since it will lose packets
+in weather; a backhaul or a core link usually does not.
+
+.PP
+All four rtt directives and pktloss_tolerance are per object: an object
+that does not name one gets the default, not the value from whatever
+object came before it in the file.
 
 .SS SNMP Object Options
 

@@ -5,14 +5,31 @@ root = "my.default.gateway-obj";
 # Comments can look like this
 ; or this
 
-# create a file for web page users
+# Everything sysmond writes lives in one directory it owns: the pidfile,
+# the log, the shutdown state dump, the scratch file the status page is
+# built in, and any config a sysmon-web delivers. Default /var/db/sysmon,
+# created and handed to the dropped-privilege user at startup.
+#
+# There used to be a directive per file. One directory means one path to
+# get right instead of five, and means a delivered config cannot aim any
+# of them somewhere else.
+#config statedir "/var/db/sysmon";
+
+# Publish an HTML status page. This one keeps its path, because where the
+# page is published is the whole point of it - it is an output, not one of
+# the daemon's own working files. Built in the state directory and renamed
+# into place, so the web server never sees a half-written page.
 config statusfile html "/usr/local/htdocs/index.html";
-# Temp directory for building status file (writable by dropped-privilege user)
-# Recommended when using "config drop_privileges" - use a directory owned by
-# the nobody/daemon user (e.g., /var/run/sysmon, /tmp/sysmon)
-config statustempdir "/var/run/sysmon";
-# Log devices that are up/down
-config logging file "/var/log/sysmond.log";
+
+# Log to sysmond.log in the state directory instead of syslog.
+#config logging file;
+
+# Check state survives a restart automatically - no directive. sysmond
+# records what it knew about each object on the way down (down since when,
+# how many consecutive failures, whether anyone was already paged) and
+# puts it back on the way up, so a restart during an outage does not page
+# again for something already reported. A checkpoint older than twelve
+# hours is ignored rather than believed.
 # Configure an authentication key -- Default is none
 #config authkey "Debug";
 # Set the sender to be sysmon@localhost
@@ -22,7 +39,69 @@ config dnsexpire 7200;
 # Do not queue more than this many objects to be checked at once
 config maxqueued 50;
 
-# Not implemented yet
+# Who this daemon is, when several of them share one sysmon-web.
+# sitename is the key: it becomes the first half of every "site:object"
+# a client stores, so it is limited to letters, digits, - and _ , and
+# changing it later renames everything. sitedesc is just the label a
+# person reads and can be reworded any time. Unset means "local".
+#config sitename "sysmon-metro";
+#config sitedesc "Metro Station Monitoring (Linux)";
+
+# Dial out to a sysmon-web rather than waiting to be dialled. This is the
+# normal way to be monitored: a box usually sits behind NAT or on a
+# management VLAN, so outbound-only means no inbound firewall rule per
+# site - and no listening socket on this daemon at all. The token proves
+# this daemon to the aggregator; the config authkey above still proves the
+# aggregator to this daemon when it asks for CONF.
+#
+# The link is never load-bearing: if it cannot be made, or drops, checks
+# and pages carry on exactly as on a standalone box and the daemon retries
+# with a backoff.
+#config aggregator "sysmon-web.example.net:1347";
+#config aggregator-token "the token sysmon-web minted for this site";
+#
+# The certificate that signs the aggregator goes in the state directory as
+# aggregator-ca.pem. sysmon-web logs where it wrote its own on first start.
+# With no such file the system trust store is used, which is what a
+# publicly signed aggregator needs.
+
+# Listen for the sysmon client on TCP 1345.
+#
+# OFF unless you ask, and that is a deliberate change: this socket was
+# open on every sysmond for most of the daemon's life, unauthenticated
+# until AUTH and owned by a process that ran as root. Turn it on if you
+# use the sysmon(1) client against this box directly - which is the
+# stand-alone way to run, and does not need a sysmon-web at all.
+#
+# "-p <port>" on the command line does the same and overrides this.
+#config listen 1345;
+
+# THIS FILE IS NEVER WRITTEN. When a sysmon-web manages this box, the
+# config it delivers is kept in the state directory above - and the daemon
+# loads that instead of this file. This file stays as the operator wrote
+# it, is what the box falls back to if that directory is emptied, and is
+# what "Unmanage" in the UI returns the box to.
+#
+# "config statedir" is read from THIS file only: a delivered config cannot
+# move the directory the daemon is running out of. ("config generation-dir"
+# was the old name for it, from when generations were all it held.)
+
+# Catch SNMP traps on UDP 162. Off by default; port 162 is privileged, so
+# the socket is bound at startup while sysmond is still root - enabling
+# this on a running daemon needs a restart, not a SIGHUP.
+# Traps are decoded (v1 and v2c) and logged with what the device said.
+#
+# A trap is only accepted from an object that says "trap_alert;".
+# Everything else arriving on the port is discarded unread - trap PDUs
+# are unauthenticated UDP with a source anybody can write, so an
+# allowlist is the only thing that decides whether a packet is worth
+# the work of parsing it.
+#
+# Name the device however you name it everywhere else. The match is made
+# on the packet's source address against the address the object resolved
+# to when the config was loaded, so a hostname works as well as a
+# literal address, and nothing is resolved while a trap is in hand. A
+# device that changes address is picked up at the next load.
 #config snmp-trap;		# catch snmp-traps
 
 object my.default.gateway-obj {

@@ -29,7 +29,8 @@
 </head>
 <body class="bg-gray-50 antialiased">
     <!-- Navigation -->
-    <nav class="bg-white border-b border-gray-200" x-data="{mobileOpen: false}">
+    <nav class="bg-white border-b border-gray-200"
+         x-data="Object.assign({mobileOpen: false}, fleetState())" x-init="loadSites()">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-14">
                 <div class="flex">
@@ -55,6 +56,12 @@
                         <a href="/config.html" class="nav-link {{if eq .Active "config"}}active{{end}}">
                             <i class="fas fa-cog mr-2"></i>Configuration
                         </a>
+                        <a href="/fleet.html" class="nav-link {{if eq .Active "fleet"}}active{{end}}">
+                            <i class="fas fa-server mr-1"></i>Fleet
+                        </a>
+                        <a href="/templates.html" class="nav-link {{if eq .Active "templates"}}active{{end}}">
+                            <i class="fas fa-cubes mr-2"></i>Templates
+                        </a>
                         <a href="/admin.html" class="nav-link {{if eq .Active "admin"}}active{{end}}">
                             <i class="fas fa-tools mr-2"></i>Admin
                         </a>
@@ -64,6 +71,25 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-3">
+                    <!-- Which sysmond are we looking at. Only shown when
+                         there is more than one; a single-box install sees
+                         no selector at all. -->
+                    <template x-if="multiSite()">
+                        <select class="text-xs border border-gray-200 rounded px-2 py-1 max-w-[15rem]"
+                                :value="site"
+                                @change="setSite($event.target.value)"
+                                title="Which monitoring instance to show">
+                            <option value="">All sites</option>
+                            <template x-for="s in sites" :key="s.site">
+                                <option :value="s.site"
+                                        x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
+                            </template>
+                        </select>
+                    </template>
+                    <template x-if="siteGone">
+                        <span class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
+                              x-text="'site ' + siteGone + ' is no longer in the fleet'"></span>
+                    </template>
                     <span class="hidden sm:inline text-xs text-gray-400" x-data="{user: sessionStorage.getItem('sysmon_user') || ''}" x-text="user"></span>
                     <button onclick="fetch('/api/auth/logout',{method:'POST'}).then(()=>{sessionStorage.clear();window.location.href='/login.html'})"
                             class="text-xs text-gray-400 hover:text-gray-700">Logout</button>
@@ -84,6 +110,8 @@
                 <a href="/traps.html" class="mobile-nav {{if eq .Active "traps"}}active{{end}}"><i class="fas fa-exclamation-triangle mr-2 w-5 text-center"></i>SNMP Traps</a>
                 <a href="/history.html" class="mobile-nav {{if eq .Active "history"}}active{{end}}"><i class="fas fa-clock-rotate-left mr-2 w-5 text-center"></i>History</a>
                 <a href="/config.html" class="mobile-nav {{if eq .Active "config"}}active{{end}}"><i class="fas fa-cog mr-2 w-5 text-center"></i>Configuration</a>
+                <a href="/fleet.html" class="mobile-nav {{if eq .Active "fleet"}}active{{end}}"><i class="fas fa-server mr-2 w-5 text-center"></i>Fleet</a>
+                <a href="/templates.html" class="mobile-nav {{if eq .Active "templates"}}active{{end}}"><i class="fas fa-cubes mr-2 w-5 text-center"></i>Templates</a>
                 <a href="/admin.html" class="mobile-nav {{if eq .Active "admin"}}active{{end}}"><i class="fas fa-tools mr-2 w-5 text-center"></i>Admin</a>
                 <a href="/metrics.html" class="mobile-nav {{if eq .Active "metrics"}}active{{end}}"><i class="fas fa-chart-line mr-2 w-5 text-center"></i>Metrics</a>
             </div>
@@ -227,6 +255,60 @@
             };
         }
 
+
+        // The fleet, and which site the operator is looking at. Sticky
+        // across pages: somebody working on one box should not have to
+        // reselect it on every screen. A single-box install never sees a
+        // selector, because there is nothing to select.
+        function fleetState() {
+            return {
+                sites: [],
+                site: localStorage.getItem('sysmon-site') || '',
+                siteGone: '',
+                async loadSites() {
+                    try {
+                        const r = await apiCall('/api/sites');
+                        this.sites = r.sites || [];
+                        // A filter pointing at a site that has left the
+                        // fleet is not silently reset to "all" - a UI that
+                        // quietly starts showing everything is worse than
+                        // one that says the site it was watching is gone.
+                        if (this.site && !this.sites.some(s => s.site === this.site)) {
+                            this.siteGone = this.site;
+                        }
+                    } catch (e) { this.sites = []; }
+                },
+                setSite(v) {
+                    this.site = v;
+                    this.siteGone = '';
+                    localStorage.setItem('sysmon-site', v);
+                    window.location.reload();
+                },
+                // A method, not a getter: the nav builds its scope with
+                // Object.assign, which copies a getter's value once rather
+                // than the getter itself - so a getter here would freeze
+                // at false before the fleet ever loaded.
+                multiSite() { return this.sites.length > 1; }
+            };
+        }
+
+        // Naming, shared by every page.
+        //
+        // The key is fleet-wide ("site:object") and is what every API call
+        // and stored row uses. The label is what a person reads: the bare
+        // name, with the site shown separately so nobody has to parse it
+        // back out of a key. Plain functions rather than methods, because
+        // every page needs them and none of them owns the poller.
+        function hostKey(h) { return h.object_name || h.hostname; }
+        function hostLabel(h) { return h.local_name || h.object_name || h.hostname; }
+        function hostSite(h) { return h.site && h.site !== 'local' ? h.site : ''; }
+
+        // The site filter as a query parameter, for pages that fetch.
+        function siteQuery(sep) {
+            const v = localStorage.getItem('sysmon-site') || '';
+            return v ? (sep || '?') + 'site=' + encodeURIComponent(v) : '';
+        }
+
         // Shared live-status poller (delta protocol).
         //
         // First call fetches the full /api/monitoring/status; every
@@ -240,7 +322,6 @@
             return {
                 rev: 0,
                 index: new Map(),
-                hostKey(h) { return h.object_name || h.hostname; },
 
                 // Returns {full, hosts, changed, removed, daemon, stats}.
                 // `hosts` is always the complete current list; `changed` /
@@ -255,13 +336,22 @@
                     if (this.rev === 0 || d.full || d.hosts !== undefined) {
                         full = true;
                         const list = d.hosts !== undefined ? (d.hosts || []) : (d.changed || []);
-                        this.index = new Map(list.map(h => [this.hostKey(h), h]));
+                        this.index = new Map(list.map(h => [hostKey(h), h]));
                     } else {
                         full = false;
                         changed = d.changed || [];
                         removed = d.removed || [];
-                        for (const h of changed) this.index.set(this.hostKey(h), h);
+                        // Removals first, then changes. The server keeps
+                        // the two lists disjoint, so the order is not
+                        // supposed to matter - but if a name ever appears
+                        // in both, the honest reading is that it is here
+                        // now: "removed" is a thing that happened, and
+                        // "changed" carries the row's current state. The
+                        // other order deletes a host that exists, and it
+                        // stays gone until its signature next moves.
+                        // hosts.html applies them this way round too.
                         for (const name of removed) this.index.delete(name);
+                        for (const h of changed) this.index.set(hostKey(h), h);
                     }
                     this.rev = d.rev || 0;
                     return {

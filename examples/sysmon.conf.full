@@ -45,12 +45,11 @@ config dnslog 900;              # DNS cache log interval (default: 900)
 
 # --- Logging ---
 # Two forms: syslog facility or file path
-config logging file "/var/log/sysmond.log";
+config logging file;   # sysmond.log in the state directory
 # config logging syslog "daemon";
 
 # --- Status File ---
 config statusfile html "/usr/local/htdocs/sysmon.html";
-config statustempdir "/var/run/sysmon";
 config showupalso;              # Show UP hosts in status file
 config html refresh 30;         # HTML auto-refresh in seconds
 config date "ISO";              # Date format: ISO, DEC, or strftime(3) codes
@@ -71,8 +70,10 @@ config nologconnects;           # Don't log client connections
 config snmp-trap;               # Enable SNMP trap monitoring (port 162)
 
 # --- State ---
-config savestate "/var/log/sysmon/state.xml";
-# config pidfile "/var/run/sysmond.pid";
+# Check state survives a restart automatically now - no directive. It is
+# kept as sysmond.state in the state directory.
+#config statedir "/var/db/sysmon";
+# The pidfile is sysmond.pid in the state directory - no directive.
 
 # --- Include Files ---
 # include "/etc/sysmon.d/routers.conf";

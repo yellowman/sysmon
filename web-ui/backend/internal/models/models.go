@@ -22,8 +22,7 @@ type GlobalSettings struct {
 	FlapTime       int `json:"flaptime,omitempty"`       // flap detection time in seconds
 
 	// Ports
-	ClientPort   int `json:"clientport,omitempty"` // TCP port for sysmon client (default 1345)
-	SNMPTrapPort int `json:"trapport,omitempty"`   // UDP port for SNMP traps (default 162)
+	ClientPort int `json:"clientport,omitempty"` // TCP port for sysmon client (default 1345)
 
 	// Alert settings
 	PageInterval int    `json:"pageinterval,omitempty"` // reminder interval in minutes
@@ -95,13 +94,19 @@ type Host struct {
 	Type string `json:"type,omitempty"`
 	Port int    `json:"port,omitempty"`
 
-	// Ping/threshold settings (read-only from sysmond, not configurable via sysmon.conf)
+	// Ping status, read from sysmond and NOT configurable via sysmon.conf:
+	// the daemon hardcodes how many probes a plain ping check sends.
 	MinPings            int     `json:"minpings,omitempty"`
 	SendPings           int     `json:"sendpings,omitempty"`
 	PacketLossThreshold float64 `json:"packetlossthreshold,omitempty"`
-	RTTThreshold        int     `json:"rttthreshold,omitempty"`
-	JitterThreshold     int     `json:"jitterthreshold,omitempty"`
-	RTTSamples          int     `json:"rttsamples,omitempty"`
+
+	// RTT / latency check (type rtt) - all four are real per-object
+	// directives. RTTInterval is the ms between probes; the rest set the
+	// alert thresholds and how many probes make up the average.
+	RTTThreshold    int `json:"rttthreshold,omitempty"`
+	JitterThreshold int `json:"jitterthreshold,omitempty"`
+	RTTSamples      int `json:"rttsamples,omitempty"`
+	RTTInterval     int `json:"rttinterval,omitempty"`
 
 	// SNMP trap settings
 	TrapAlert bool `json:"trapalert,omitempty"`
@@ -113,11 +118,13 @@ type Host struct {
 	SNMPUpMsg     string `json:"snmpupmsg,omitempty"`     // Custom message when SNMP check passes
 	SNMPDownMsg   string `json:"snmpdownmsg,omitempty"`   // Custom message when SNMP check fails
 	SNMPType      string `json:"snmptype,omitempty"`      // SNMP check type (high/low/range/exact/rate/uptime)
-	SNMPHigh      int64  `json:"snmphigh,omitempty"`      // upper threshold
-	SNMPLow       int64  `json:"snmplow,omitempty"`       // lower threshold
-	SNMPExact     int64  `json:"snmpexact,omitempty"`     // exact value to match
-	SNMPRate      int64  `json:"snmprate,omitempty"`      // rate per second threshold
-	SNMPOctets    bool   `json:"snmpoctets,omitempty"`    // convert bytes to bits for rate
+	// SNMPVersion is "1" or "2c"; empty means the daemon default (2c).
+	SNMPVersion string `json:"snmpversion,omitempty"`
+	SNMPHigh    int64  `json:"snmphigh,omitempty"`   // upper threshold
+	SNMPLow     int64  `json:"snmplow,omitempty"`    // lower threshold
+	SNMPExact   int64  `json:"snmpexact,omitempty"`  // exact value to match
+	SNMPRate    int64  `json:"snmprate,omitempty"`   // rate per second threshold
+	SNMPOctets  bool   `json:"snmpoctets,omitempty"` // convert bytes to bits for rate
 
 	// DNS check settings
 	DNSQuery     string `json:"dnsquery,omitempty"`     // DNS hostname to query
@@ -183,7 +190,10 @@ type ConfigUpdate struct {
 
 // SysmonStatus represents the live sysmon daemon status
 type SysmonStatus struct {
+	// Daemon is the primary daemon, so a single-box client sees what it
+	// always did; Daemons is the whole fleet.
 	Daemon     DaemonInfo   `json:"daemon"`
+	Daemons    []DaemonInfo `json:"daemons,omitempty"`
 	Hosts      []HostStatus `json:"hosts"`
 	Statistics Stats        `json:"statistics"`
 	SNMPTraps  *TrapInfo    `json:"snmp_traps,omitempty"`
@@ -206,13 +216,30 @@ type StatusDelta struct {
 	Removed    []string     `json:"removed,omitempty"` // object names removed since `since`
 }
 
+// SiteInfo is one sysmond in the fleet, as the site picker sees it.
+type SiteInfo struct {
+	Site        string `json:"site"`
+	Description string `json:"description,omitempty"`
+	Address     string `json:"address"`
+	// Inbound means the daemon dialled us rather than us dialling it.
+	Inbound   bool      `json:"inbound,omitempty"`
+	Reachable bool      `json:"reachable"`
+	LastError string    `json:"last_error,omitempty"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+	Hosts     int       `json:"hosts"`
+}
+
 // DaemonInfo represents sysmon daemon information
 type DaemonInfo struct {
-	Version        string    `json:"version"`
-	Uptime         int64     `json:"uptime_seconds"`
-	StartTime      time.Time `json:"start_time"`
-	CurrentTime    time.Time `json:"current_time"`
-	PID            int       `json:"pid"`
+	Version     string    `json:"version"`
+	Uptime      int64     `json:"uptime_seconds"`
+	StartTime   time.Time `json:"start_time"`
+	CurrentTime time.Time `json:"current_time"`
+	PID         int       `json:"pid"`
+	// Site is this daemon's key half of "site:object"; SiteDesc is the
+	// label a person reads. An unconfigured daemon reports "local".
+	Site           string    `json:"site"`
+	SiteDesc       string    `json:"site_desc,omitempty"`
 	ConfigFile     string    `json:"config_file"`
 	ConfigLoadTime time.Time `json:"config_load_time"`
 	Paused         bool      `json:"paused"`
@@ -220,7 +247,15 @@ type DaemonInfo struct {
 
 // HostStatus represents the status of a monitored host
 type HostStatus struct {
-	ObjectName     string        `json:"object_name"` // Unique sysmon object name
+	// ObjectName is the fleet-wide key: "site:object". It is what every
+	// store is keyed on - history, push collapse, map layout, delta
+	// revisions - so two sites' coreswitch can never collide.
+	ObjectName string `json:"object_name"`
+	// LocalName is the bare name the owning daemon knows it by, which is
+	// what goes back over the wire in ACK/UPD/TRACE, and what the UI shows
+	// when only one site is in view.
+	LocalName      string        `json:"local_name,omitempty"`
+	Site           string        `json:"site,omitempty"`
 	Hostname       string        `json:"hostname"`
 	Description    string        `json:"description,omitempty"` // Notes/description from config
 	IPv4Address    string        `json:"ipv4_address,omitempty"`
@@ -238,6 +273,64 @@ type HostStatus struct {
 	TimeFailed     int64         `json:"time_failed,omitempty"`      // Seconds host has been down (0 if up)
 	LastOutage     *time.Time    `json:"last_outage,omitempty"`      // When last outage occurred
 	Checks         []CheckResult `json:"checks"`
+	// Stale means the site that owns this host is not answering, so what
+	// is shown is the last thing it said rather than current truth. The
+	// host is deliberately still here: a site going dark is a fact about
+	// the site, not a reason to make its hosts vanish from every map and
+	// alert list and then reappear minutes later.
+	Stale      bool       `json:"stale,omitempty"`
+	StaleSince *time.Time `json:"stale_since,omitempty"`
+
+	// RTT is what a "type rtt" check last measured, in milliseconds,
+	// and is nil for every other kind of object. A pointer rather than
+	// a zero value: 0.00ms is a real reading on loopback, so "no
+	// measurement" and "very fast" have to be distinguishable.
+	RTT *RTTStats `json:"rtt,omitempty"`
+
+	// PacketLoss is what a "type pktloss" check last counted, and is
+	// nil for every other kind of object.
+	PacketLoss *PacketLossStats `json:"packet_loss,omitempty"`
+
+	// SNMP is what a "type snmp" object last reported, nil otherwise.
+	SNMP *SNMPStats `json:"snmp,omitempty"`
+}
+
+// PacketLossStats is one pktloss cycle's counts.
+type PacketLossStats struct {
+	Sent     int     `json:"sent"`
+	Received int     `json:"received"`
+	Lost     int     `json:"lost"`
+	LossPct  float64 `json:"loss_pct"`
+	// Tolerance is how many lost packets the operator said were
+	// acceptable before this counts as a failure.
+	Tolerance int `json:"tolerance,omitempty"`
+}
+
+// SNMPStats is what an SNMP object last reported about itself. These
+// were parsed off the wire and then discarded before ever reaching a
+// page.
+type SNMPStats struct {
+	// SysUpTime is the device's own uptime in TimeTicks (1/100s).
+	SysUpTime int64 `json:"sysuptime_ticks,omitempty"`
+	// LastResponse is when the agent last answered, unix seconds.
+	LastResponse int64 `json:"last_response,omitempty"`
+}
+
+// RTTStats is one rtt check's latency and jitter figures.
+type RTTStats struct {
+	Min    float64 `json:"min_ms"`
+	Avg    float64 `json:"avg_ms"`
+	Max    float64 `json:"max_ms"`
+	Jitter float64 `json:"jitter_ms"` // RFC 3550 delay variation
+	// The operator's own limits, so a reader can be shown when a figure
+	// is near or past what they said was acceptable. Zero means unset.
+	Threshold       int `json:"threshold_ms,omitempty"`
+	JitterThreshold int `json:"jitter_threshold_ms,omitempty"`
+	// Replies out of Probes: the loss the average is hiding. A check
+	// that got 3 of 5 back still reports an average, and the ratio is
+	// how a reader knows to distrust it.
+	Replies int `json:"replies"`
+	Probes  int `json:"probes"`
 }
 
 // CheckResult represents a check result
@@ -313,7 +406,10 @@ type TrapSource struct {
 
 // TrapSummary represents trap statistics
 type TrapSummary struct {
-	TotalTraps      int            `json:"total_traps_hour"`
+	TotalTraps int `json:"total_traps_hour"`
+	// Lost counts traps sysmond's ring overwrote before sysmon-web
+	// collected them - visible rather than silently missing.
+	Lost            int            `json:"traps_lost,omitempty"`
 	TrapsByType     map[string]int `json:"traps_by_type"`
 	TrapsBySeverity map[string]int `json:"traps_by_severity"`
 }

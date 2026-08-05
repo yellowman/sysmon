@@ -13,7 +13,7 @@ LEX		= @LEX@
 CFILE           = @sysconfdir@/sysmon.conf
 INCLUDES	= -I/usr/local/include
 HELPER_PATH     = $(libexecdir)/sysmon-ping-helper
-CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ @SNMP@ $(INCLUDES)
+CFLAGS          = @CFLAGS@ '@SENDMAIL@' -DCFILE='"$(CFILE)"' -DPING_HELPER_PATH='"$(HELPER_PATH)"' @SNP@ @TLS@ $(INCLUDES)
 #@IPV6@
 
 LIBS		= @LIBS@
@@ -43,12 +43,12 @@ all:	@PROGS@
 DAEMON_OBJECTS = heartbeat.o syswatch.o page.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
-		radius.o md5.o parser.o snpp.o snmp.o pingv6.o logging.o dns.o ssh.o
+		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o savestate.o pingv6.o logging.o dns.o ssh.o
 
-sysmon: client.o talktcp.o lib.o  dnscache.o
+sysmon: client.o talktcp.o lib.o dnscache.o tlsio.o
 	-$(RM) sysmon
 	$(CC) $(LDFLAGS) -o sysmon client.o talktcp.o lib.o\
-		 dnscache.o $(LIBS)
+		 dnscache.o tlsio.o $(LIBS)
 
 sysmond: $(DAEMON_OBJECTS)
 	-$(RM) sysmond core sysmond.core
@@ -83,8 +83,40 @@ install:	all
 strip:
 	-strip @PROGS@
 
+# The trap decoder parses UDP packets from anyone who can reach port 162,
+# so it gets its own round-trip + fuzz harness. Run it under the
+# sanitizers; that combination is what makes the fuzzing worth anything.
+trapdecode-test: trapdecode_test.c trapdecode.c config.h
+	$(CC) $(CFLAGS) -o trapdecode-test trapdecode_test.c trapdecode.c
+
+# The SNMP client links the daemon objects it calls into. Run it with a
+# live agent to get the differential test against net-snmp as well:
+#   ./snmpget-test 127.0.0.1 161 public .1.3.6.1.2.1.1.3.0
+snmpget-test: snmpget_test.c snmp.c trapdecode.c config.h
+	$(CC) $(CFLAGS) -o snmpget-test snmpget_test.c snmp.c trapdecode.c
+
+# A config delivery arrives base64-encoded from the aggregator and is
+# decoded straight into this box's config files, so the decoder gets the
+# same prefix + fuzz treatment as the trap decoder. The hash is checked
+# here too: both ends compare it to decide whether a box is in sync, so a
+# hash that is not stable breaks fleet management silently.
+confgen-test: confgen_test.c confgen.c config.h
+	$(CC) $(CFLAGS) $(TLS_LIBS_TEST) -o confgen-test confgen_test.c confgen.c $(LIBS)
+
+# The checkpoint carries "have we already paged about this" across a
+# restart, so a file that is truncated, stale or from another version has
+# to end in "start clean" rather than in half-applied state.
+savestate-test: savestate_test.c savestate.c config.h
+	$(CC) $(CFLAGS) -o savestate-test savestate_test.c savestate.c
+
+check: trapdecode-test snmpget-test confgen-test savestate-test
+	./trapdecode-test
+	./snmpget-test
+	./confgen-test
+	./savestate-test
+
 clean:
-	-$(RM) *.o @PROGS@ sysmon-ping-helper core sysmond.core sysmon.core
+	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test core sysmond.core sysmon.core
 
 heartbeat.o: 	config.h Makefile heartbeat.c
 syswatch.o:	config.h Makefile syswatch.c
@@ -111,6 +143,11 @@ radius.o:	config.h Makefile radius.c
 md5.o:		config.h Makefile md5.c md5.h
 snpp.o:		config.h Makefile snpp.c
 snmp.o:		config.h Makefile snmp.c
+tlsio.o:	config.h Makefile tlsio.c
+aggregator.o:	config.h Makefile aggregator.c
+confgen.o:	config.h Makefile confgen.c
+savestate.o:	config.h Makefile savestate.c
+trapdecode.o:	config.h Makefile trapdecode.c
 pingv6.o:	config.h Makefile pingv6.c
 logging.o:	config.h Makefile logging.c
 ssh.o:		config.h Makefile ssh.c

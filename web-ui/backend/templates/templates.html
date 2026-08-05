@@ -1,0 +1,260 @@
+{{template "base" .}}
+
+{{define "title"}}Device templates{{end}}
+
+{{define "content"}}
+<div x-data="templatesPage()" x-init="init()">
+    <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
+        <div>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Device templates</h1>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide">
+                What a device type is, in checks - stamped out from the map's Add device button
+            </p>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="/map.html" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
+                <i class="fas fa-diagram-project mr-1"></i>Use on the map
+            </a>
+        </div>
+    </div>
+
+    <div x-show="notice" x-cloak class="mb-3 text-sm rounded p-3"
+         :class="noticeBad ? 'bg-red-50 border border-red-200 text-red-900' : 'bg-emerald-50 border border-emerald-200 text-emerald-900'"
+         x-text="notice"></div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- The list -->
+        <div class="lg:col-span-1 bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div class="px-3 py-2 border-b border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                <span x-text="list.length + ' templates'"></span>
+            </div>
+            <!-- Grouped, because a fleet has more device types than fit
+                 in one readable column and "which of these is a tower
+                 thing" is the first question anyone asks of the list. -->
+            <div class="max-h-[36rem] overflow-y-auto">
+                <template x-for="cat in categories()" :key="cat">
+                    <div>
+                        <div class="px-3 py-1 bg-gray-50 border-y border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                             x-text="cat"></div>
+                        <template x-for="t in inCategory(cat)" :key="t.id">
+                            <button @click="select(t)"
+                                    class="w-full text-left px-3 py-2 border-b border-gray-50 hover:bg-gray-50"
+                                    :class="sel && sel.id === t.id ? 'bg-gray-50' : ''">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-sm font-medium text-gray-900" x-text="t.name"></span>
+                                    <!-- A shipped template can be retuned; the edit
+                                         is stored over the top, same id. -->
+                                    <span x-show="!t.builtin"
+                                          class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">custom</span>
+                                </div>
+                                <div class="text-[11px] text-gray-500" x-text="(t.vendor ? t.vendor + ' · ' : '') + t.checks.length + ' checks'"></div>
+                            </button>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- What it contains -->
+        <div class="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-4" x-show="sel" x-cloak>
+            <h2 class="text-base font-bold text-gray-900" x-text="sel && sel.name"></h2>
+            <p class="text-xs text-gray-600 mt-1 mb-3" x-text="sel && sel.description"></p>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead class="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
+                        <tr>
+                            <th class="px-2 py-1.5 text-left">Object suffix</th>
+                            <th class="px-2 py-1.5 text-left">Type</th>
+                            <th class="px-2 py-1.5 text-left">Settings</th>
+                            <th class="px-2 py-1.5 text-left">Depends on</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(c, i) in (sel ? sel.checks : [])" :key="i">
+                            <tr class="border-t border-gray-100">
+                                <td class="px-2 py-1.5 mono" x-text="c.suffix || '(the device)'"></td>
+                                <td class="px-2 py-1.5 mono font-medium" x-text="c.type"></td>
+                                <td class="px-2 py-1.5 text-gray-600" x-text="settingsOf(c)"></td>
+                                <td class="px-2 py-1.5 text-gray-500"
+                                    x-text="c.depends_on_device ? 'the device' : 'the parent'"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- The JSON is the honest editor: these are stored as a JSON
+                 array, and a form over a schema that grows every time the
+                 daemon learns a check type would go stale faster than it
+                 could be written. -->
+            <div class="mt-4" x-show="isAdmin">
+                <div class="flex items-center justify-between mb-1">
+                    <label class="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                        Edit this template
+                    </label>
+                    <div class="flex gap-2">
+                        <button @click="revert()" x-show="sel && !sel.builtin"
+                                class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
+                            Back to shipped
+                        </button>
+                        <button @click="save()" :disabled="busy"
+                                class="px-3 py-1 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 disabled:opacity-40">
+                            Save
+                        </button>
+                    </div>
+                </div>
+                <textarea x-model="draft" rows="12" spellcheck="false"
+                          class="w-full px-3 py-2 border border-gray-200 rounded mono text-[11px] focus:ring-1 focus:ring-gray-900"></textarea>
+                <p class="text-[10px] text-gray-400 mt-1">
+                    Saving stores this over the shipped template of the same id.
+                    Thresholds here become <span class="mono">rtt_threshold</span>,
+                    <span class="mono">jitter_threshold</span>,
+                    <span class="mono">pktloss_tolerance</span> and the rest on every
+                    device stamped out from it.
+                </p>
+            </div>
+            <p x-show="!isAdmin" class="text-xs text-gray-500 mt-4">
+                A template becomes objects in sysmon.conf, so only an administrator can change one.
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+function templatesPage() {
+    return {
+        list: [],
+        sel: null,
+        draft: '',
+        notice: '',
+        noticeBad: false,
+        busy: false,
+        isAdmin: false,
+
+        init() {
+            // sessionStorage renders the right thing immediately; the
+            // server is asked because that is the copy that decides, and
+            // the one the PUT will be judged against.
+            this.isAdmin = sessionStorage.getItem('sysmon_role') === 'admin';
+            apiCall('/api/auth/me')
+                .then(me => { this.isAdmin = me.role === 'admin'; })
+                .catch(() => {});
+            this.load();
+        },
+
+        async load() {
+            try {
+                const r = await apiCall('/api/templates');
+                this.list = r.templates || [];
+                if (this.list.length && !this.sel) this.select(this.list[0]);
+            } catch (e) { this.say(e.message, true); }
+        },
+
+        // Categories in a deliberate order - the network from the outside
+        // in, then the plant that powers it - rather than alphabetically,
+        // which would put "Core" before "Tower" for no reason anyone
+        // reading the list cares about.
+        categories() {
+            const order = ['Tower / radio', 'Fiber / PON',
+                           'Core / transit / servers', 'Facilities / power', 'Generic'];
+            const present = [...new Set(this.list.map(t => t.category || 'Generic'))];
+            const known = order.filter(c => present.includes(c));
+            const extra = present.filter(c => !order.includes(c)).sort();
+            return [...known, ...extra];
+        },
+
+        inCategory(cat) {
+            return this.list.filter(t => (t.category || 'Generic') === cat);
+        },
+
+        select(t) {
+            this.sel = t;
+            this.draft = JSON.stringify(t, null, 2);
+        },
+
+        // One line summarising what a check is set to, so the table says
+        // something useful without a column per directive.
+        settingsOf(c) {
+            const bits = [];
+            if (c.port) bits.push('port ' + c.port);
+            if (c.oid) bits.push(c.oid + (c.snmp_type ? ' (' + c.snmp_type + ')' : ''));
+            if (c.snmp_low) bits.push('low ' + c.snmp_low);
+            if (c.snmp_high) bits.push('high ' + c.snmp_high);
+            if (c.rtt_threshold) bits.push(c.rtt_threshold + 'ms');
+            if (c.jitter_threshold) bits.push('±' + c.jitter_threshold + 'ms jitter');
+            if (c.rtt_samples) bits.push(c.rtt_samples + ' probes');
+            if (c.rtt_interval) bits.push(c.rtt_interval + 'ms apart');
+            if (c.pktloss_tolerance) bits.push(c.pktloss_tolerance + ' lost allowed');
+            return bits.join(' · ') || '—';
+        },
+
+        say(msg, bad) { this.notice = msg; this.noticeBad = !!bad; },
+
+        // The stored set is every custom template, so saving one means
+        // sending the others back untouched alongside it.
+        async save() {
+            let edited;
+            try {
+                edited = JSON.parse(this.draft);
+            } catch (e) {
+                this.say('That is not valid JSON: ' + e.message, true);
+                return;
+            }
+            if (!edited.id || !Array.isArray(edited.checks)) {
+                this.say('A template needs an id and a checks array.', true);
+                return;
+            }
+            edited.builtin = false;
+            const custom = this.list.filter(t => !t.builtin && t.id !== edited.id);
+            custom.push(edited);
+
+            this.busy = true;
+            try {
+                const res = await fetch('/api/templates', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(custom),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || data.error || res.statusText);
+                this.say('Saved. New devices stamped from this template use it.');
+                const id = edited.id;
+                await this.load();
+                const again = this.list.find(t => t.id === id);
+                if (again) this.select(again);
+            } catch (e) {
+                this.say(e.message, true);
+            } finally {
+                this.busy = false;
+            }
+        },
+
+        // Dropping the custom copy leaves the shipped one showing again.
+        async revert() {
+            if (!this.sel || this.sel.builtin) return;
+            if (!confirm('Drop the custom version of "' + this.sel.name + '"?\n\n' +
+                         'If sysmon ships a template with this id, that one comes back. ' +
+                         'Devices already stamped out are not touched.')) return;
+            const custom = this.list.filter(t => !t.builtin && t.id !== this.sel.id);
+            this.busy = true;
+            try {
+                const res = await fetch('/api/templates', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(custom),
+                });
+                if (!res.ok) throw new Error((await res.json().catch(()=>({}))).message || res.statusText);
+                this.say('Custom version dropped.');
+                this.sel = null;
+                await this.load();
+            } catch (e) {
+                this.say(e.message, true);
+            } finally {
+                this.busy = false;
+            }
+        },
+    };
+}
+</script>
+{{end}}

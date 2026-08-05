@@ -23,6 +23,17 @@ Future: (Unknown)
 	* ircd check - DONE (basic ircd check implemented)
 	* config authfile (file-type sysmon|passwd|htpasswd|etc)
 	* curses client fix
+	* service-level SLOs (see docs/service-slo.md for the design)
+		. a sysmon-web feature: services aggregate existing checks
+		  across sites, three states (UP/DEGRADED/DOWN), error
+		  budgets. sysmond needs no change.
+	* trap_alert refinements (trap_alert itself is DONE in v0.94)
+		. alert only on named traps:
+			trap_alert linkDown coldStart;
+			the traps are decoded now, so this is a match
+			against trap.name rather than new parsing work
+		. trap_update - let a trap set object state, not just page
+		. trap_message "..." - per-object wording for a trap page
 	* All bugs gone :)
 
 COMPLETED in v0.94 (2025):

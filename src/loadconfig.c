@@ -218,6 +218,8 @@ void free_struct_hostinfo(struct hostinfo *item_to_free)
 		FREE(item_to_free->url_text);
 	if (item_to_free->command != NULL)
 		FREE(item_to_free->command);
+	if (item_to_free->ipv4_str != NULL)
+		FREE(item_to_free->ipv4_str);
 	
 	/* This must be the last thing */
 	FREE(item_to_free);
@@ -354,6 +356,16 @@ void	hard_copy(struct hostinfo *old, struct hostinfo *new)
 	/* copy over data related to snmp based tests */
 	new->last_snmp_resptime = old->last_snmp_resptime;
 	new->system_uptime = old->system_uptime;
+	/* and what the last rtt check measured, so a config reload does
+	   not blank the latency figures the UI is showing */
+	new->rtt_last_min = old->rtt_last_min;
+	new->rtt_last_avg = old->rtt_last_avg;
+	new->rtt_last_max = old->rtt_last_max;
+	new->rtt_last_jitter = old->rtt_last_jitter;
+	new->rtt_last_replies = old->rtt_last_replies;
+	new->rtt_last_probes = old->rtt_last_probes;
+	new->pktloss_last_sent = old->pktloss_last_sent;
+	new->pktloss_last_recv = old->pktloss_last_recv;
 	if (old->lastmsgid != NULL)
 		new->lastmsgid = STRDUP(old->lastmsgid,"last msgid");
 	if (old->notes != NULL)
@@ -385,13 +397,73 @@ void copy_alerts(struct all_elements_list *old, struct all_elements_list *new)
 void update_globs_from_parser()
 {
 	set_defaults();
+
+	/*
+	 * First, before anything that derives a path from it - the pidfile,
+	 * the log, the state checkpoint, the aggregator's CA. Getting this
+	 * order wrong does not fail loudly; it silently looks in the default
+	 * directory on a box that configured a different one. (Which is
+	 * exactly what happened to the CA lookup.)
+	 */
+	confgen_set_statedir(parser_statedir);
 	if (parser_catch_snmptrap && (!ckconfigonly))
 	{
 		if (snmp_trap_fd == -1)
 		{
 			snmp_trap_fd = init_udp_socket(SNMP_TRAP_PORTNUM);
+			if (snmp_trap_fd == -1)
+			{
+				/* Port 162 is privileged. The first config read
+				 * happens while we are still root, so this only
+				 * fails when snmp-trap is switched on by a SIGHUP
+				 * reload after the privilege drop - and then it
+				 * needs a restart, not another reload. */
+				print_err(1, "could not bind UDP %d for snmp traps%s",
+					SNMP_TRAP_PORTNUM,
+					(geteuid() != 0) ?
+					  " - traps were enabled after privileges were dropped, restart sysmond to listen" :
+					  " - is another trap receiver already running?");
+			} else {
+				print_err(0, "listening for snmp traps on UDP %d",
+					SNMP_TRAP_PORTNUM);
+			}
 		}
 	}
+	if (parser_sitename != NULL)
+	{
+		if (sitename != NULL)
+			FREE(sitename);
+		sitename = STRDUP(parser_sitename, "sitename");
+	}
+	if (parser_sitedesc != NULL)
+	{
+		if (sitedesc != NULL)
+			FREE(sitedesc);
+		sitedesc = STRDUP(parser_sitedesc, "sitedesc");
+	}
+
+	if (parser_aggregator != NULL)
+	{
+		aggregator_set_target(parser_aggregator);
+	}
+	if (parser_agg_token != NULL)
+	{
+		if (aggregator_token != NULL)
+			FREE(aggregator_token);
+		aggregator_token = STRDUP(parser_agg_token, "aggregator token");
+	}
+	/* The CA that signs the aggregator's certificate, if the operator has
+	   put one in the state directory. NULL means the system trust store,
+	   which is the right answer for a publicly signed aggregator. */
+	{
+		const char *ca = sysmon_ca_file();
+
+		if (aggregator_ca != NULL)
+			FREE(aggregator_ca);
+		aggregator_ca = (ca != NULL) ?
+			STRDUP((unsigned char *)ca, "aggregator ca") : NULL;
+	}
+
 	if (parser_pmesg != NULL)
 	{
 		if (pmesg != NULL)
@@ -448,11 +520,14 @@ void update_globs_from_parser()
 			FREE(authkey);
 		authkey = STRDUP(parser_authkey,"authentication key");
 	}
-	if (parser_savestate != NULL)
 	{
+		/* Always written, always in the same place. It costs one small
+		   file at shutdown and it is how a restart finds what the last
+		   run knew. */
 		if (path_savestate != NULL)
 			FREE(path_savestate);
-		path_savestate = STRDUP(parser_savestate, "parser_savestate");
+		path_savestate = STRDUP((unsigned char *)sysmon_statefile(),
+			"savestate path");
 	}
 	if (parser_statusfile != NULL)
 	{
@@ -461,11 +536,15 @@ void update_globs_from_parser()
 		statusfilename = STRDUP(parser_statusfile,"status file name");
 		html = parser_statusfile_type;
 	}
-	if (parser_statustempdir != NULL)
 	{
+		/* The status page is built next to everything else the daemon
+		   writes and renamed into place at whatever path the operator
+		   named - which is the one path directive worth keeping, since
+		   where the page is published is the whole point of it. */
 		if (statustempdirname != NULL)
 			FREE(statustempdirname);
-		statustempdirname = STRDUP(parser_statustempdir,"status temp dir name");
+		statustempdirname = STRDUP((unsigned char *)confgen_statedir(),
+			"status temp dir name");
 	}
 	if (parser_cssfile != NULL)
 	{
@@ -477,14 +556,16 @@ void update_globs_from_parser()
 			cssfilename = NULL;
 		}
 	}
-	if (parser_logging != NULL)
+	/* "config logging file;" turns file logging on; which file is not a
+	   question any more. -3 is the sentinel for "a file, not syslog". */
+	if (parser_logging_fac != 0)
 	{
 		facility = parser_logging_fac;
 		if (facility == -3)
 		{
 			if (log_file != NULL)
 				FREE(log_file);
-			log_file = STRDUP(parser_logging,"log file name");
+			log_file = STRDUP((unsigned char *)sysmon_logfile(), "log file name");
 		}
 	}
 	if (parser_queuetime != NULL)
@@ -859,6 +940,15 @@ struct all_elements_list *loadconfig(char *cfg_path)
 
 	/* set what to parse */
 	yyin = file_to_parse;
+
+	/* Start the file set over. What the parser opens from here is what
+	   this daemon considers "the config" for hashing and for fleet
+	   management - open_new_file() adds each include as it follows it.
+	   The main file is known by its basename, so a config means the same
+	   thing whether it is being read as a seed from /etc or as the
+	   running copy from the generation directory. */
+	confset_reset();
+	confset_record(NULL, cfg_path);
 
 	parser_head = NULL;
 

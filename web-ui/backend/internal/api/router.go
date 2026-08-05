@@ -22,6 +22,7 @@ import (
 	"sysmon-web/internal/monitoring"
 	"sysmon-web/internal/push"
 	"sysmon-web/internal/settings"
+	"sysmon-web/internal/templates"
 )
 
 // Router holds the API handlers
@@ -93,8 +94,44 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
+	r.mux.HandleFunc("/api/sites", r.handleSites)
+
+	// Config distribution. Everything that changes what a box runs is
+	// admin-only and POST, so no stale tab or link prefetch can deliver a
+	// config.
+	//
+	// Reading splits in two, and the line is content, not verb. Per-site
+	// STATUS - which generation a box runs, whether it has drifted - is
+	// open to anyone who can see the UI, because that belongs on a
+	// wallboard. Config CONTENT is admin-only, because a config file
+	// holds config authkey, aggregator-token, SNMP communities and
+	// radius secrets. A GET that returns file bytes is as sensitive as
+	// /api/config itself and is gated the same way.
+	r.mux.HandleFunc("/api/config/fleet", r.handleConfigFleet)
+	r.mux.HandleFunc("/api/config/site/", auth.RequireAdmin(r.handleConfigSite))
+	r.mux.HandleFunc("/api/config/generations/", auth.RequireAdmin(r.handleConfigGenerations))
+	r.mux.HandleFunc("/api/config/adopt/", auth.RequireAdmin(r.handleConfigAdopt))
+	r.mux.HandleFunc("/api/config/stage/", auth.RequireAdmin(r.handleConfigStage))
+	r.mux.HandleFunc("/api/config/deliver/", auth.RequireAdmin(r.handleConfigDeliver))
+	r.mux.HandleFunc("/api/config/rollback/", auth.RequireAdmin(r.handleConfigRollback))
+	r.mux.HandleFunc("/api/config/revert/", auth.RequireAdmin(r.handleConfigRevert))
+	r.mux.HandleFunc("/api/settings/agents", auth.RequireAdmin(r.handleAgentTokens))
+	r.mux.HandleFunc("/api/settings/agents/revoke/", auth.RequireAdmin(r.handleAgentRevoke))
+	r.mux.HandleFunc("/api/settings/agents/ca", auth.RequireAdmin(r.handleAgentCA))
+	r.mux.HandleFunc("/api/config/rollout", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet {
+			r.handleConfigRolloutStatus(w, req)
+			return
+		}
+		auth.RequireAdmin(r.handleConfigRollout)(w, req)
+	})
 	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
 	r.mux.HandleFunc("/api/map/layout", r.handleMapLayout)
+	// GET is open because the map's "add a device" modal needs it for
+	// any logged-in user; PUT stores a custom set that becomes config,
+	// so it is gated inside the handler.
+	r.mux.HandleFunc("/api/templates", r.handleTemplates)
+	r.mux.HandleFunc("/api/templates/expand", r.handleTemplateExpand)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
 	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
 	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
@@ -156,6 +193,9 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/history.html", r.handleHistoryPage)
 	r.mux.HandleFunc("/map.html", r.handleMapPage)
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
+	r.mux.HandleFunc("/fleet.html", r.handleFleetPage)
+	r.mux.HandleFunc("/agents.html", r.handleAgentsPage)
+	r.mux.HandleFunc("/templates.html", r.handleTemplatesPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
 
@@ -424,6 +464,10 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	// ?site= narrows to one daemon, so a client watching one site never
+	// downloads the rest of the fleet.
+	site := req.URL.Query().Get("site")
+
 	// Delta mode: ?since=<rev> returns only what changed, for cheap live
 	// polling (and the basis for an SSE stream later).
 	if sinceStr := req.URL.Query().Get("since"); sinceStr != "" {
@@ -433,11 +477,18 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 			return
 		}
 		delta := r.monitoring.GetDelta(since)
+		if site != "" {
+			delta = monitoring.FilterDeltaSite(delta, site)
+		}
 		if delta.Daemon.PID == 0 {
 			delta.Daemon.PID = r.daemonPID()
 		}
 		r.sendJSON(w, delta)
 		return
+	}
+
+	if site != "" {
+		status = monitoring.FilterSite(status, site)
 	}
 
 	// sysmond's TCP protocol doesn't expose its PID; read it from the
@@ -580,8 +631,16 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 	r.sendJSON(w, alerts)
 }
 
+// handleSites lists the fleet, so a site picker can offer names rather
+// than asking someone to type one.
+func (r *Router) handleSites(w http.ResponseWriter, req *http.Request) {
+	r.sendJSON(w, map[string]interface{}{"sites": r.monitoring.Sites()})
+}
+
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {
-	traps, err := r.monitoring.GetTraps()
+	// Authenticating to sysmond is what unlocks the community string in
+	// the trap records; without it the daemon withholds that field.
+	traps, err := r.monitoring.GetTraps(r.getSysmonAuthKey())
 	if err != nil {
 		r.sendError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -624,6 +683,89 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 		// No pagination requested, return all traps (backward compatible)
 		r.sendJSON(w, traps)
 	}
+}
+
+// handleTemplates lists device templates (shipped set merged with any
+// stored customisations) and saves the custom set.
+func (r *Router) handleTemplates(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodGet:
+		var stored []templates.Template
+		if r.settings != nil {
+			if data, err := r.settings.GetTemplates(); err == nil {
+				stored, _ = templates.Decode(data)
+			}
+		}
+		r.sendJSON(w, map[string]interface{}{"templates": templates.Merge(stored)})
+
+	case http.MethodPut:
+		// Saving templates writes what later becomes sysmon.conf, so it
+		// belongs on the same side of the line as config content.
+		if req.Header.Get("X-Session-Role") != auth.RoleAdmin {
+			r.sendError(w, http.StatusForbidden, "Admin access required")
+			return
+		}
+		if r.settings == nil {
+			r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
+		if err != nil {
+			r.sendError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, err := templates.Decode(body); err != nil {
+			r.sendError(w, http.StatusBadRequest, "templates must be a JSON array: "+err.Error())
+			return
+		}
+		if err := r.settings.SetTemplates(body); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		r.sendJSON(w, map[string]string{"status": "saved"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleTemplateExpand turns a template plus device parameters into the
+// objects to add. Expansion lives on the server so the same rules apply
+// to every caller, and so it can be tested.
+func (r *Router) handleTemplateExpand(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+	var p templates.Params
+	if err := json.NewDecoder(req.Body).Decode(&p); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	var stored []templates.Template
+	if r.settings != nil {
+		if data, err := r.settings.GetTemplates(); err == nil {
+			stored, _ = templates.Decode(data)
+		}
+	}
+	var found *templates.Template
+	for _, t := range templates.Merge(stored) {
+		if t.ID == p.TemplateID {
+			tt := t
+			found = &tt
+			break
+		}
+	}
+	if found == nil {
+		r.sendError(w, http.StatusNotFound, "Unknown template: "+p.TemplateID)
+		return
+	}
+	hosts, err := templates.Expand(found, p)
+	if err != nil {
+		r.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	r.sendJSON(w, map[string]interface{}{"hosts": hosts, "count": len(hosts)})
 }
 
 // handleMapLayout stores hand-placed node positions for the dependency
@@ -828,8 +970,10 @@ func (r *Router) handleAdminDebug(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.ToggleDebug(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.ToggleDebug(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -850,8 +994,10 @@ func (r *Router) handleAdminSNMPDebug(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.ToggleSNMPDebug(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.ToggleSNMPDebug(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -872,8 +1018,10 @@ func (r *Router) handleAdminExpireDNS(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.ExpireDNS(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.ExpireDNS(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -894,8 +1042,10 @@ func (r *Router) handleAdminPrintQ(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.PrintQueue(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.PrintQueue(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -916,8 +1066,10 @@ func (r *Router) handleAdminNFD(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.GetNextFD(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.GetNextFD(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -938,8 +1090,10 @@ func (r *Router) handleAdminKillit(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authKey := r.getSysmonAuthKey()
-	response, err := r.monitoring.KillDaemon(authKey)
+	// Which box. Empty is fine on a single-box install; with a
+	// fleet the caller has to say, because these act on one daemon.
+	site := req.URL.Query().Get("site")
+	response, err := r.monitoring.KillDaemon(site)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())

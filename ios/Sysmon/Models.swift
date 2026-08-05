@@ -18,6 +18,12 @@ struct Host: Codable, Identifiable, Equatable {
     let upCount: Int64
     let timeUp: Int64?
     let timeFailed: Int64?
+    // Present only for the checks that measure something: an rtt object
+    // has rtt, a pktloss object has packetLoss, an snmp object has snmp.
+    // nil everywhere else, which is what tells the UI not to draw a row.
+    let rtt: RTTStats?
+    let packetLoss: PacketLossStats?
+    let snmp: SNMPStats?
 
     var id: String { objectName ?? hostname }
     var isPaused: Bool { paused ?? false }
@@ -42,6 +48,66 @@ struct Host: Codable, Identifiable, Equatable {
         case upCount = "up_count"
         case timeUp = "time_up"
         case timeFailed = "time_failed"
+        case rtt
+        case packetLoss = "packet_loss"
+        case snmp
+    }
+}
+
+/// What an rtt check last measured, in milliseconds.
+///
+/// `thresholdMs`/`jitterThresholdMs` are the operator's own limits,
+/// carried so a value can be judged against what they said was
+/// acceptable rather than a number picked here. Zero means unset.
+struct RTTStats: Codable, Equatable {
+    let minMs: Double
+    let avgMs: Double
+    let maxMs: Double
+    let jitterMs: Double
+    let replies: Int
+    let probes: Int
+    let thresholdMs: Int?
+    let jitterThresholdMs: Int?
+
+    /// Replies short of probes is the loss an average hides.
+    var lostProbes: Int { max(0, probes - replies) }
+
+    enum CodingKeys: String, CodingKey {
+        case minMs = "min_ms"
+        case avgMs = "avg_ms"
+        case maxMs = "max_ms"
+        case jitterMs = "jitter_ms"
+        case replies
+        case probes
+        case thresholdMs = "threshold_ms"
+        case jitterThresholdMs = "jitter_threshold_ms"
+    }
+}
+
+/// What a pktloss check last counted. `tolerance` is a packet count.
+struct PacketLossStats: Codable, Equatable {
+    let sent: Int
+    let received: Int
+    let lost: Int
+    let lossPct: Double
+    let tolerance: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sent, received, lost
+        case lossPct = "loss_pct"
+        case tolerance
+    }
+}
+
+/// What an SNMP object last reported about itself.
+struct SNMPStats: Codable, Equatable {
+    /// The device's own uptime, in TimeTicks (hundredths of a second).
+    let sysUpTimeTicks: Int64?
+    let lastResponse: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case sysUpTimeTicks = "sysuptime_ticks"
+        case lastResponse = "last_response"
     }
 }
 
