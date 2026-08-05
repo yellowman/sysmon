@@ -263,6 +263,17 @@
 #define RTT_MIN_INTERVAL_MS	10
 #define RTT_MAX_INTERVAL_MS	5000
 
+/* Default alert threshold for an rtt object that does not name one:
+   zero, meaning no latency alarm. The check still measures, records and
+   reports; it just does not have an opinion about the number until
+   someone gives it one, exactly as jitter_threshold works.
+
+   Zero used to be read as a real limit, and since the test is "average
+   over threshold" that made any measurable latency an alert - 0.05ms on
+   loopback qualified - so an rtt object with no rtt_threshold was
+   critical for as long as it ran. See service_test_rtt(). */
+#define RTT_DEFAULT_THRESHOLD_MS	0
+
 /* Packet loss monitoring constants */
 #define PKTLOSS_HISTORY_SIZE     1440  /* 24 hours @ 1 minute intervals */
 #define PKTLOSS_DEFAULT_HISTORY  24    /* Default hours to keep */

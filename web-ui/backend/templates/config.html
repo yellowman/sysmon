@@ -895,9 +895,9 @@
                                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">RTT Threshold (ms)</label>
-                                                    <input type="number" min="0" x-model.number="editingHost.rttthreshold" placeholder="100"
+                                                    <input type="number" min="0" x-model.number="editingHost.rttthreshold" placeholder="0"
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">Alert if the average RTT exceeds this</p>
+                                                    <p class="text-xs text-gray-500 mt-1">Alert if the average RTT exceeds this; 0 or blank means no latency alarm</p>
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">Jitter Threshold (ms)</label>
@@ -920,15 +920,29 @@
                                             </div>
                                         </div>
 
-                                        <!-- Packet loss: like RTT it has no per-object knobs in the
-                                             daemon; the batch and tolerance are fixed. Say so. -->
+                                        <!-- Packet loss. The batch size is the daemon's, but the
+                                             tolerance is a real per-object directive - this panel
+                                             used to say there was nothing to configure here, which
+                                             stopped being true the day pktloss_tolerance existed. -->
                                         <div x-show="editingHost.type === 'pktloss'" class="bg-gray-50 p-4 rounded-lg">
                                             <h4 class="font-semibold text-gray-700 mb-1">Packet Loss (ICMP)</h4>
-                                            <p class="text-sm text-gray-600">
+                                            <p class="text-xs text-gray-500 mb-3">
                                                 Sends a fixed batch of ICMP probes each cycle and records the
-                                                loss ratio, keeping a rolling history. There is nothing to
-                                                configure per host; it alerts on any loss.
+                                                loss ratio, keeping a rolling history. How much of that batch
+                                                may go missing before it alerts is up to you.
                                             </p>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Lost Packets Tolerated</label>
+                                                    <input type="number" min="0" x-model.number="editingHost.pktlosstolerance" placeholder="0"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">
+                                                        Probes that may go unanswered before alerting; 0 alerts on
+                                                        any loss. Radio serving subscribers loses packets in
+                                                        weather - a backhaul should not.
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
 
                                         <!-- HTTP/HTTPS fields -->
@@ -1672,6 +1686,7 @@ function unifiedConfigPage() {
                 jitterthreshold: null,
                 rttsamples: null,
                 rttinterval: null,
+                pktlosstolerance: null,
                 // HTTP/HTTPS
                 url: '',
                 urltext: '',
