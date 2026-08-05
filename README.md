@@ -356,6 +356,30 @@ JSON on the Admin page, enable the push toggle, and check the Push
 Delivery Pipeline panel - it will tell you what, if anything, is
 missing.
 
+## sysmond on its own
+
+None of the above is required. `sysmond` writes its own status page, and
+has since long before any of it existed:
+
+```
+config statusfile html "/var/www/htdocs/index.html";
+config showupalso;          # without this, only what is down is listed
+```
+
+![sysmond's own HTML status page](docs/screenshots/sysmond-status.png)
+
+The same 500-object fleet, written by the daemon itself. One file, no
+JavaScript, no CDN, no web server beyond whatever already serves that
+directory - point Apache or httpd(8) at it, or open it off a filesystem.
+Green is up, orange is down, yellow is a recent change, and the page
+refreshes itself on a meta tag. There is a `text` variant of the same
+directive for a terminal.
+
+It is worth knowing this is here. A monitoring system whose status
+depends on a second daemon being healthy has a problem the day the
+second daemon is not, and this page keeps working when sysmon-web is
+stopped, upgraded, or was never installed.
+
 ## History
 
 sysmon was written by Jared Mauch and has monitored real networks for
