@@ -289,6 +289,7 @@ struct HostRow: View {
                             .foregroundColor(Theme.faint)
                     }
                 }
+                MetricsRow(host: host)
             }
             Spacer(minLength: 8)
             Image(systemName: "chevron.right")
@@ -296,6 +297,86 @@ struct HostRow: View {
                 .foregroundColor(Theme.faint)
         }
         .card()
+    }
+}
+
+/// Latency, jitter and loss, for the checks that measure them.
+///
+/// Renders nothing for an ordinary ping or tcp object, so a list of
+/// plain hosts looks exactly as it did. A latency check exists to make
+/// numbers, and until now the apps showed only up or down for it.
+struct MetricsRow: View {
+    let host: Host
+
+    var body: some View {
+        if host.rtt != nil || host.packetLoss != nil || host.snmp != nil {
+            HStack(spacing: 10) {
+                if let r = host.rtt {
+                    Text(String(format: "%.2fms", r.avgMs))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(metricColor(r.avgMs, r.thresholdMs, warn: 150, bad: 400))
+                    Text(String(format: "±%.2fms", r.jitterMs))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(metricColor(r.jitterMs, r.jitterThresholdMs, warn: 30, bad: 100))
+                    // Probes that never came back: the loss an average hides.
+                    if r.lostProbes > 0 {
+                        Text("\(r.replies)/\(r.probes)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Theme.down)
+                    }
+                }
+                if let l = host.packetLoss {
+                    Text(String(format: "%.1f%% loss", l.lossPct))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(lossColor(l))
+                }
+                if let s = host.snmp, let ticks = s.sysUpTimeTicks, ticks > 0 {
+                    Text("up \(formatTicks(ticks))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Theme.faint)
+                }
+            }
+        }
+    }
+
+    /// How alarming is a measured value?
+    ///
+    /// The operator's own threshold decides it when there is one: at or
+    /// past it is the down colour, and the last 20% of the approach is a
+    /// warning. With no threshold there is nothing to be relative to, so
+    /// the absolutes come from what the numbers mean - 150ms is ITU-T
+    /// G.114's guidance for voice, 30ms of jitter is where call quality
+    /// suffers.
+    private func metricColor(_ value: Double, _ threshold: Int?, warn: Double, bad: Double) -> Color {
+        if let t = threshold, t > 0 {
+            if value >= Double(t) { return Theme.down }
+            if value >= Double(t) * 0.8 { return Theme.warn }
+            return Theme.faint
+        }
+        if value >= bad { return Theme.down }
+        if value >= warn { return Theme.warn }
+        return Theme.faint
+    }
+
+    /// Tolerance is a packet count, so compare like for like.
+    private func lossColor(_ l: PacketLossStats) -> Color {
+        if let tol = l.tolerance, tol > 0 {
+            if l.lost > tol { return Theme.down }
+            if l.lost == tol { return Theme.warn }
+            return Theme.faint
+        }
+        if l.lossPct >= 5 { return Theme.down }
+        if l.lossPct >= 1 { return Theme.warn }
+        return Theme.faint
+    }
+
+    /// sysUpTime is TimeTicks: hundredths of a second, which nobody reads.
+    private func formatTicks(_ ticks: Int64) -> String {
+        let secs = ticks / 100
+        let d = secs / 86400, h = (secs % 86400) / 3600, m = (secs % 3600) / 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
     }
 }
 

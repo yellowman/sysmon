@@ -26,13 +26,59 @@ data class Host(
     @SerialName("down_count") val downCount: Long = 0,
     @SerialName("up_count") val upCount: Long = 0,
     @SerialName("time_up") val timeUp: Long = 0,
-    @SerialName("time_failed") val timeFailed: Long = 0
+    @SerialName("time_failed") val timeFailed: Long = 0,
+    // Present only for the checks that measure something: an rtt object
+    // has rtt, a pktloss object has packetLoss, an snmp object has snmp.
+    // Null everywhere else, which is what tells the UI not to draw a row.
+    val rtt: RttStats? = null,
+    @SerialName("packet_loss") val packetLoss: PacketLossStats? = null,
+    val snmp: SnmpStats? = null
 ) {
     val ip: String get() = ipv4.ifEmpty { ipv6 }
     val isDown: Boolean get() = overallStatus == "CRITICAL"
     val isWarning: Boolean get() = overallStatus == "WARNING"
     val isOK: Boolean get() = overallStatus == "OK"
 }
+
+/**
+ * What an rtt check last measured, in milliseconds.
+ *
+ * threshold/jitterThreshold are the operator's own limits, carried so a
+ * value can be judged against what they said was acceptable rather than
+ * against a number picked here. Zero means unset.
+ */
+@Serializable
+data class RttStats(
+    @SerialName("min_ms") val minMs: Double = 0.0,
+    @SerialName("avg_ms") val avgMs: Double = 0.0,
+    @SerialName("max_ms") val maxMs: Double = 0.0,
+    @SerialName("jitter_ms") val jitterMs: Double = 0.0,
+    val replies: Int = 0,
+    val probes: Int = 0,
+    @SerialName("threshold_ms") val thresholdMs: Int = 0,
+    @SerialName("jitter_threshold_ms") val jitterThresholdMs: Int = 0
+) {
+    /** Replies short of probes is the loss an average hides. */
+    val lostProbes: Int get() = (probes - replies).coerceAtLeast(0)
+}
+
+/** What a pktloss check last counted. Tolerance is a packet count. */
+@Serializable
+data class PacketLossStats(
+    val sent: Int = 0,
+    val received: Int = 0,
+    val lost: Int = 0,
+    @SerialName("loss_pct") val lossPct: Double = 0.0,
+    val tolerance: Int = 0
+)
+
+/** What an SNMP object last reported about itself. */
+@Serializable
+data class SnmpStats(
+    // The device's own uptime, in TimeTicks (hundredths of a second).
+    @SerialName("sysuptime_ticks") val sysUpTimeTicks: Long = 0,
+    @SerialName("last_response") val lastResponse: Long = 0
+)
 
 @Serializable
 data class DaemonInfo(
