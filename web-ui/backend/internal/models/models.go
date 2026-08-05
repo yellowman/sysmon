@@ -290,6 +290,9 @@ type HostStatus struct {
 	// PacketLoss is what a "type pktloss" check last counted, and is
 	// nil for every other kind of object.
 	PacketLoss *PacketLossStats `json:"packet_loss,omitempty"`
+
+	// SNMP is what a "type snmp" object last reported, nil otherwise.
+	SNMP *SNMPStats `json:"snmp,omitempty"`
 }
 
 // PacketLossStats is one pktloss cycle's counts.
@@ -298,6 +301,19 @@ type PacketLossStats struct {
 	Received int     `json:"received"`
 	Lost     int     `json:"lost"`
 	LossPct  float64 `json:"loss_pct"`
+	// Tolerance is how many lost packets the operator said were
+	// acceptable before this counts as a failure.
+	Tolerance int `json:"tolerance,omitempty"`
+}
+
+// SNMPStats is what an SNMP object last reported about itself. These
+// were parsed off the wire and then discarded before ever reaching a
+// page.
+type SNMPStats struct {
+	// SysUpTime is the device's own uptime in TimeTicks (1/100s).
+	SysUpTime int64 `json:"sysuptime_ticks,omitempty"`
+	// LastResponse is when the agent last answered, unix seconds.
+	LastResponse int64 `json:"last_response,omitempty"`
 }
 
 // RTTStats is one rtt check's latency and jitter figures.
@@ -306,6 +322,10 @@ type RTTStats struct {
 	Avg    float64 `json:"avg_ms"`
 	Max    float64 `json:"max_ms"`
 	Jitter float64 `json:"jitter_ms"` // RFC 3550 delay variation
+	// The operator's own limits, so a reader can be shown when a figure
+	// is near or past what they said was acceptable. Zero means unset.
+	Threshold       int `json:"threshold_ms,omitempty"`
+	JitterThreshold int `json:"jitter_threshold_ms,omitempty"`
 	// Replies out of Probes: the loss the average is hiding. A check
 	// that got 3 of 5 back still reports an average, and the ratio is
 	// how a reader knows to distrust it.

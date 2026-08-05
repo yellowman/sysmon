@@ -377,6 +377,9 @@ func hostSignature(h *models.HostStatus) uint64 {
 	if h.PacketLoss != nil {
 		fmt.Fprintf(w, "\x03%d\x00%d", h.PacketLoss.Sent, h.PacketLoss.Received)
 	}
+	if h.SNMP != nil {
+		fmt.Fprintf(w, "\x04%d\x00%d", h.SNMP.SysUpTime, h.SNMP.LastResponse)
+	}
 	return w.Sum64()
 }
 
@@ -487,7 +490,12 @@ type XMLObjectStatus struct {
 	// What the last pktloss cycle counted.
 	PktLossLastSent int `xml:"ObjectPacketLossLastSent"`
 	PktLossLastRecv int `xml:"ObjectPacketLossLastRecv"`
-	WakeupRetries   int `xml:"ObjectWakeupRetries"`
+
+	// The operator's own limits, carried so a reader can be told when a
+	// figure is near or past what they said was acceptable. A number is
+	// only "extreme" against the threshold someone set for it.
+	RTTSamples    int `xml:"ObjectRTTSamples"`
+	WakeupRetries int `xml:"ObjectWakeupRetries"`
 
 	// Debug/diagnostic
 	TraceEnabled int `xml:"ObjectTraceEnabled"`
@@ -950,12 +958,14 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 	// batch, so probes > 0 is the whole test.
 	if xmlObj.RTTProbes > 0 {
 		host.RTT = &models.RTTStats{
-			Min:     xmlObj.RTTMin,
-			Avg:     xmlObj.RTTAvg,
-			Max:     xmlObj.RTTMax,
-			Jitter:  xmlObj.RTTJitter,
-			Replies: xmlObj.RTTReplies,
-			Probes:  xmlObj.RTTProbes,
+			Min:             xmlObj.RTTMin,
+			Avg:             xmlObj.RTTAvg,
+			Max:             xmlObj.RTTMax,
+			Jitter:          xmlObj.RTTJitter,
+			Replies:         xmlObj.RTTReplies,
+			Probes:          xmlObj.RTTProbes,
+			Threshold:       xmlObj.RTTThreshold,
+			JitterThreshold: xmlObj.JitterThreshold,
 		}
 	}
 
@@ -966,10 +976,22 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 			lost = 0
 		}
 		host.PacketLoss = &models.PacketLossStats{
-			Sent:     xmlObj.PktLossLastSent,
-			Received: xmlObj.PktLossLastRecv,
-			Lost:     lost,
-			LossPct:  100.0 * float64(lost) / float64(xmlObj.PktLossLastSent),
+			Sent:      xmlObj.PktLossLastSent,
+			Received:  xmlObj.PktLossLastRecv,
+			Lost:      lost,
+			LossPct:   100.0 * float64(lost) / float64(xmlObj.PktLossLastSent),
+			Tolerance: xmlObj.PacketLossThreshold,
+		}
+
+	}
+
+	// SNMP figures were parsed off the wire and then dropped: the
+	// device's uptime and how long it took to answer are exactly what a
+	// person checking an SNMP object wants, and neither reached the UI.
+	if xmlObj.SNMPSysUpTime > 0 || xmlObj.SNMPLastResp > 0 {
+		host.SNMP = &models.SNMPStats{
+			SysUpTime:    xmlObj.SNMPSysUpTime,
+			LastResponse: xmlObj.SNMPLastResp,
 		}
 	}
 

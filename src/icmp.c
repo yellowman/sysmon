@@ -27,6 +27,9 @@ static bool rtt_match_and_record(struct monitorent *here,
 
 int debug_icmp_replies_only = 0;
 
+/* Set when the kernel agreed to stamp arriving ICMP packets for us. */
+static int icmp_kernel_timestamps = 0;
+
 /* All the variables needed for pinging (I think) - needs to be locked */
 /* for threaded use */
 struct pingdata {
@@ -124,6 +127,32 @@ void setup_icmp_fd()
 	}
 	print_err(0, "sysmond: INFO: hold queue set to %d for icmp packets", hold);
 
+	/*
+	 * Ask the kernel to timestamp arriving packets, if this platform
+	 * can. Without it a reply is timed when the daemon gets round to
+	 * reading the socket, so a busy select() loop inflates every RTT
+	 * it measures - the daemon ends up reporting its own scheduling
+	 * delay as network latency. With it, the time comes from where the
+	 * packet was actually received.
+	 *
+	 * Entirely optional: SCM_TIMESTAMP is read per packet and falls
+	 * back to gettimeofday() when it is not there, so a platform
+	 * without either the option or the control message just keeps the
+	 * old behaviour.
+	 */
+#ifdef SO_TIMESTAMP
+	{
+		int on = 1;
+
+		if (setsockopt(glob_icmp_fd, SOL_SOCKET, SO_TIMESTAMP,
+				&on, sizeof(on)) == 0)
+			icmp_kernel_timestamps = 1;
+		else if (debug)
+			print_err(0, "icmp: SO_TIMESTAMP refused (%s); "
+				"timing replies on read instead", strerror(errno));
+	}
+#endif /* SO_TIMESTAMP */
+
 	set_nonblock(glob_icmp_fd);
 
 	return;
@@ -153,24 +182,71 @@ void	handle_icmp_responses()
 
 	while (data_waiting_read(glob_icmp_fd, 0))
 	{
-	        if ((ret = recvfrom(glob_icmp_fd, 
-			rcvd_pkt, ICMP_PACKET_SIZE, 0,
-			(struct sockaddr *)&from, &fromlen)) < 0)
+		struct msghdr msg;
+		struct iovec iov;
+		union {
+			struct cmsghdr align;   /* keeps the buffer aligned */
+			char buf[256];
+		} cmsgbuf;
+		struct cmsghdr *cmsg;
+		int stamped = 0;
+
+		memset(&msg, 0, sizeof(msg));
+		iov.iov_base = rcvd_pkt;
+		iov.iov_len = ICMP_PACKET_SIZE;
+		msg.msg_name = &from;
+		msg.msg_namelen = sizeof(from);
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_control = cmsgbuf.buf;
+		msg.msg_controllen = sizeof(cmsgbuf.buf);
+
+		if ((ret = recvmsg(glob_icmp_fd, &msg, 0)) < 0)
 		{
 			if (errno == EINTR) /* if we get interrupted */
 			{
-				print_err(1, "icmp.c: got interrupted while attempting to recvfrom");
+				print_err(1, "icmp.c: got interrupted while attempting to recvmsg");
 				/* Decrease the counter */
 				continue; /* and try again */
 			}
-			perror("icmp.c: recvfrom");
+			perror("icmp.c: recvmsg");
 			continue; /* try again */
 		}
+		fromlen = msg.msg_namelen;
 
-		/* Stamp arrival now, before any per-check work, so an RTT
-		 * reply is timed from when it landed rather than from when the
-		 * queue walk reached its check. */
-		gettimeofday(&recv_time, NULL);
+		/*
+		 * When the kernel stamped the packet, use its time: that is
+		 * when the reply actually arrived, not when this loop got
+		 * round to reading it. The difference is the daemon's own
+		 * scheduling delay, and on a busy box it is larger than the
+		 * latency being measured.
+		 */
+#ifdef SCM_TIMESTAMP
+		if (icmp_kernel_timestamps)
+		{
+			for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL;
+			     cmsg = CMSG_NXTHDR(&msg, cmsg))
+			{
+				if (cmsg->cmsg_level == SOL_SOCKET &&
+				    cmsg->cmsg_type == SCM_TIMESTAMP &&
+				    cmsg->cmsg_len >= CMSG_LEN(sizeof(struct timeval)))
+				{
+					memcpy(&recv_time, CMSG_DATA(cmsg),
+						sizeof(struct timeval));
+					stamped = 1;
+					break;
+				}
+			}
+		}
+#else
+		(void)cmsg;
+#endif /* SCM_TIMESTAMP */
+
+		/* No kernel stamp: time it now, which is the best this can
+		 * do - still before any per-check work, so a reply is not
+		 * timed from when the queue walk reached its check. */
+		if (!stamped)
+			gettimeofday(&recv_time, NULL);
 
                 /* Check the IP header */
 		rcvd_data.ip = (struct IPHDR *)rcvd_pkt;
