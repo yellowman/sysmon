@@ -120,8 +120,12 @@ sysmond **no longer listens on 1345 unless asked**. That socket was open on
 every sysmond for most of the daemon's life, unauthenticated until `AUTH`,
 on a process that ran as root; it is now opt-in with `config listen 1345`
 (or `-p`), which is what you want if you use the `sysmon(1)` client against
-a box directly. sysmon-web only dials a daemon if given `-sysmon`, which is
-how a single box on localhost is still monitored.
+a box directly.
+
+**sysmon-web never dials a daemon.** There is one direction and one
+credential: every box - including the one on localhost - dials in over TLS
+and proves itself with its own token. Nothing is configured here to point
+at a daemon, so nothing can point at the wrong one.
 
 The design is in [docs/sysmond-aggregation.md](docs/sysmond-aggregation.md);
 the shape of it:

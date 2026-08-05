@@ -183,12 +183,6 @@ func main() {
 	// Command line flags
 	socketPath := flag.String("socket", defaultSocket, "FastCGI socket path")
 	configPath := flag.String("config", "/etc/sysmon.conf", "Sysmon config file path")
-	// Empty by default: sysmon-web waits to be dialled rather than dialling
-	// out. Give an address (comma-separated for several) to poll daemons
-	// that are configured with "config listen" instead - the old
-	// arrangement, still supported, and the right one for a single box on
-	// localhost.
-	sysmonAddr := flag.String("sysmon", "", "sysmond address(es) to dial, comma-separated; empty means wait for daemons to connect")
 	auditLog := flag.String("audit", "/var/log/sysmon-web-audit.log", "Audit log path")
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
 	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")
@@ -387,7 +381,7 @@ func main() {
 	log.Printf("Templates loaded successfully from %s", finalTemplateDir)
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
-	monitoringService := monitoring.NewService(*sysmonAddr)
+	monitoringService := monitoring.NewService()
 	// CONF - sysmond's bulk object dump, and the difference between a
 	// one-round-trip poll and one round trip per host - is privileged.
 	monitoringService.SetAuthKeyProvider(func() string {

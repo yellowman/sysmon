@@ -172,7 +172,7 @@ func testRouter(t *testing.T) (http.Handler, *auth.Service, func()) {
 		filepath.Join(dir, "backups"),
 		filepath.Join(dir, "audit.log"),
 	)
-	monSvc := monitoring.NewService("")
+	monSvc := monitoring.NewService()
 
 	handler, stopPush := NewRouter(cfgSvc, monSvc, nil, nil, authSvc, settingsStore)
 

@@ -18,7 +18,7 @@ import (
 // blames: naming the site proves the routing looked for it. "missing
 // address" would mean the site half went in the bin again.
 func TestHostActionsRouteBySite(t *testing.T) {
-	s := NewService("")
+	s := NewService()
 
 	check := func(what string, err error) {
 		t.Helper()
@@ -46,7 +46,7 @@ func TestHostActionsRouteBySite(t *testing.T) {
 // An object name with no site half still has to work: a single-site
 // install never qualifies anything.
 func TestHostActionKeepsUnqualifiedNames(t *testing.T) {
-	s := NewService("")
+	s := NewService()
 	err := s.AckHost("core", "")
 	if err == nil {
 		t.Fatal("expected an error from an empty fleet")
@@ -59,7 +59,7 @@ func TestHostActionKeepsUnqualifiedNames(t *testing.T) {
 // A bulk selection crosses sites, so the results must stay lined up with
 // the request and each host must be judged by its own site's outcome.
 func TestBulkResultsStayInOrderAcrossSites(t *testing.T) {
-	s := NewService("")
+	s := NewService()
 
 	hosts := []string{"metro:core", "depot:core", "metro:edge", "", "depot:edge"}
 	results := s.BulkAckHosts(hosts, "")

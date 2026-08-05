@@ -37,13 +37,12 @@ func sanitizeCmd(s string) string {
 type daemon struct {
 	addr string
 
-	// inbound daemons dialled us: their connection is long-lived and
-	// reused every cycle rather than redialled, because a TLS handshake
-	// per second per site is waste and the box may not be reachable from
-	// here at all.
-	inbound bool
-	conn    net.Conn
-	reader  *bufio.Reader
+	// The connection the daemon dialled in on. It is long-lived and
+	// reused every cycle rather than redialled: a TLS handshake per
+	// second per site is waste, and the box is usually not reachable
+	// from here at all.
+	conn   net.Conn
+	reader *bufio.Reader
 
 	mu       sync.Mutex
 	site     string // "local" until the daemon says otherwise
@@ -96,7 +95,6 @@ type Service struct {
 	// state. A dialled-in site can join or reconnect at any moment.
 	fleetMu    sync.Mutex
 	daemons    []*daemon
-	sysmonAddr string // the primary's address, kept for error messages
 	sessionLog *SessionLogger
 
 	cacheMu sync.Mutex
@@ -289,31 +287,19 @@ func (s *Service) Generations() *settings.Store {
 	return s.generations
 }
 
-// NewService takes one or more sysmond addresses, comma-separated. One
-// address is the ordinary single-box case and behaves exactly as it always
-// has; several make this the front end for a fleet.
-func NewService(sysmonAddr string) *Service {
-	s := &Service{
-		sysmonAddr: sysmonAddr,
+// NewService creates the fleet, empty.
+//
+// sysmon-web does not dial sysmond. Every daemon dials in, proves itself
+// with its own token over TLS, and is adopted into the fleet by name -
+// so there is nothing to configure here and nothing to connect to until
+// a box arrives.
+func NewService() *Service {
+	return &Service{
 		sessionLog: NewSessionLogger(500, 100), // Keep last 500 entries, 100 errors
 		hostRev:    make(map[string]int64),
 		hostSig:    make(map[string]uint64),
 		removedAt:  make(map[string]int64),
 	}
-	for _, addr := range strings.Split(sysmonAddr, ",") {
-		addr = strings.TrimSpace(addr)
-		if addr == "" {
-			continue
-		}
-		s.daemons = append(s.daemons, &daemon{addr: addr, site: "local"})
-	}
-	// No address is a real configuration, not a mistake: sysmon-web waits
-	// to be dialled by default, and the fleet is empty until the first
-	// daemon connects and is adopted into it.
-	if len(s.daemons) > 0 {
-		s.sysmonAddr = s.daemons[0].addr
-	}
-	return s
 }
 
 // Sites reports the fleet: who is configured, what they call themselves,
@@ -336,7 +322,7 @@ func (s *Service) Sites() []models.SiteInfo {
 			Site:        d.site,
 			Description: d.siteDesc,
 			Address:     d.addr,
-			Inbound:     d.inbound,
+			Inbound:     true,
 			Reachable:   d.lastErr == "",
 			LastError:   d.lastErr,
 			LastSeen:    d.lastOK,
@@ -984,27 +970,6 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 	// sending a byte, and we verified its per-box token before answering.
 	// Asking it to AUTH would prove less, and would put the shared authkey
 	// back in the middle of an arrangement built to retire it.
-	d.mu.Lock()
-	inbound := d.inbound
-	d.mu.Unlock()
-
-	if !inbound {
-		key := s.authKey()
-		if key == "" {
-			// Worth saying out loud: without it every poll walks the
-			// objects one at a time, which is the difference between 0.1s
-			// and 36s on a large config, and the silence made that hard to
-			// notice.
-			s.sessionLog.Log("CONF", "", true,
-				"no sysmond authkey available - falling back to per-object fetch")
-			return nil, false
-		}
-		if err := authenticate(conn, reader, key); err != nil {
-			s.sessionLog.Log("AUTH", "bulk fetch unavailable", true, err.Error())
-			return nil, false
-		}
-	}
-
 	// Ask only for what moved since last time. Periodically - and on the
 	// first cycle - ask for everything anyway, so counters that tick
 	// without counting as a change do not drift.
@@ -1367,25 +1332,21 @@ func SplitQualified(name string) (site, object string) {
 	return "", name
 }
 
-// connection returns the socket to talk to this daemon on: the live one it
-// dialled in with, or a fresh dial.
-func (d *daemon) connection() (net.Conn, *bufio.Reader, bool, error) {
+// connection returns the socket this daemon dialled in on.
+//
+// There is only ever the one. A daemon that has dropped its link is not
+// reachable from here at all - it lives behind a NAT or a firewall that
+// only lets traffic out - so the answer is to say so and wait for it to
+// come back, not to try to reach it.
+func (d *daemon) connection() (net.Conn, *bufio.Reader, error) {
 	d.mu.Lock()
-	inbound, conn, reader, addr := d.inbound, d.conn, d.reader, d.addr
+	conn, reader := d.conn, d.reader
 	d.mu.Unlock()
 
-	if inbound {
-		if conn == nil {
-			return nil, nil, true, fmt.Errorf("site %s is not connected", d.site)
-		}
-		return conn, reader, true, nil
+	if conn == nil {
+		return nil, nil, fmt.Errorf("site %s is not connected", d.site)
 	}
-
-	c, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", addr, err)
-	}
-	return c, nil, false, nil
+	return conn, reader, nil
 }
 
 // dropConnection closes a dialled-in link so the daemon reconnects.
@@ -1418,59 +1379,43 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	// A daemon that dialled us keeps its connection open; one we dial gets
 	// a fresh socket per cycle. Either way what follows is the same
 	// conversation.
-	conn, reader, inbound, err := d.connection()
+	conn, reader, err := d.connection()
 	if err != nil {
 		return nil, err
 	}
 
-	if inbound {
-		// One socket, two users. A config delivery on a dialled-in
-		// daemon has to have the connection to itself - interleaving a
-		// multi-megabyte CONFIG-PUT with a status poll on the same
-		// socket would put both halves' replies in the wrong reader.
-		d.confMu.Lock()
-		defer d.confMu.Unlock()
+	// One socket, two users. A config delivery has to have the
+	// connection to itself - interleaving a multi-megabyte CONFIG-PUT
+	// with a status poll on the same socket would put both halves'
+	// replies in the wrong reader.
+	d.confMu.Lock()
+	defer d.confMu.Unlock()
 
-		// The deadline is part of owning the socket, so it is armed
-		// here, under the lock, and not before waiting for it.
-		//
-		// Setting it first cut both ways. Going out, a poll that fired
-		// while a delivery held the lock reset that delivery's 120s to
-		// 30s, and a CONFIG-PUT the daemon took longer than half a
-		// minute to validate died of a deadline somebody else set.
-		// Coming back, the delivery's own "defer SetDeadline(zero)"
-		// cleared the deadline this poll had already armed while it
-		// blocked - so the poll then ran with no deadline at all, and a
-		// wedged daemon held this goroutine, and every GetStatus caller
-		// behind it, for good.
-		conn.SetDeadline(time.Now().Add(30 * time.Second))
+	// The deadline is part of owning the socket, so it is armed here,
+	// under the lock, and not before waiting for it.
+	//
+	// Setting it first cut both ways. Going out, a poll that fired while
+	// a delivery held the lock reset that delivery's 120s to 30s, and a
+	// CONFIG-PUT the daemon took longer than half a minute to validate
+	// died of a deadline somebody else set. Coming back, the delivery's
+	// own "defer SetDeadline(zero)" cleared the deadline this poll had
+	// already armed while it blocked - so the poll then ran with no
+	// deadline at all, and a wedged daemon held this goroutine, and
+	// every GetStatus caller behind it, for good.
+	//
+	// Per-chunk, not per-fetch: a hung daemon is still caught in
+	// seconds, but a big config walking object by object is not cut off
+	// halfway. (30s was less than an 800-object walk takes.)
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
 
-		// A conversation that breaks means the link is broken: drop it
-		// and let the daemon dial back in with clean sequence numbers.
-		// Naming the connection matters - see dropConnection.
-		defer func() {
-			if err != nil {
-				d.dropConnection(conn)
-			}
-		}()
-	} else {
-		// A socket we dialled for this fetch alone: nobody else can be
-		// on it, so the deadline goes on straight away.
-		//
-		// Per-chunk, not per-fetch: a hung daemon is still caught in
-		// seconds, but a big config walking object by object is not cut
-		// off halfway. (30s was less than an 800-object walk takes, so
-		// the fetch used to time out on exactly the configs that most
-		// needed it.)
-		conn.SetDeadline(time.Now().Add(30 * time.Second))
-		defer conn.Close()
-		reader = bufio.NewReader(conn)
-
-		// Read welcome banner first
-		if err = readWelcomeBanner(reader); err != nil {
-			return nil, err
+	// A conversation that breaks means the link is broken: drop it and
+	// let the daemon dial back in with clean sequence numbers. Naming
+	// the connection matters - see dropConnection.
+	defer func() {
+		if err != nil {
+			d.dropConnection(conn)
 		}
-	}
+	}()
 
 	// Get daemon information before entering XML mode
 	daemonInfo := models.DaemonInfo{
@@ -1763,16 +1708,8 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	status.Statistics.CriticalHosts = hostsDown
 	// WarningHosts and ChecksByType/ChecksByStatus are incremented in the loop above
 
-	// Send QUIT to close connection cleanly - but only on a socket we
-	// dialled. A daemon that dialled us keeps this connection for its
-	// whole life, and QUIT would make it hang up and reconnect on every
-	// single cycle.
-	if !inbound {
-		if _, werr := conn.Write([]byte("QUIT\n")); werr != nil {
-			// Log but don't fail - connection is closing anyway
-			s.sessionLog.Log("QUIT", "", true, fmt.Sprintf("Error sending QUIT: %v", werr))
-		}
-	}
+	// No QUIT. The daemon keeps this connection for its whole life, and
+	// QUIT would make it hang up and reconnect on every single cycle.
 
 	// Log successful completion
 	s.sessionLog.Log("GetStatus", fmt.Sprintf("Complete: %d total, %d up, %d down, %d warnings",
@@ -1946,17 +1883,13 @@ func authenticate(conn net.Conn, reader *bufio.Reader, authKey string) error {
 // host, and hands the callback the bare object name to put in it.
 //
 // The site half of "site:object" used to be split off and thrown away,
-// and every one of these actions then dialled s.sysmonAddr - the first
-// configured daemon. Two ways that is wrong. In the default fleet
-// nothing is dialled at all, so sysmonAddr is empty and acking anything
-// failed with "missing address". In a mixed fleet the command went to
-// the wrong box, and if that box happened to have an object by the same
-// name - which is what happens when sites are built from one template -
-// it acked that one instead, silently and on the wrong machine.
+// and every one of these actions then dialled the first configured
+// daemon - so in a fleet the command went to the wrong box, and if that
+// box had an object by the same name (which is what happens when sites
+// are built from one template) it acted on that one instead, silently
+// and on the wrong machine.
 //
-// withDaemonConn is what knows how to reach a given site: the shared
-// socket for a daemon that dialled in, a fresh authenticated one for a
-// daemon we dial.
+// withDaemonConn is what knows how to reach a given site.
 func (s *Service) hostAction(qualified, authKey string,
 	fn func(conn net.Conn, r *bufio.Reader, object string) error) error {
 
@@ -2064,43 +1997,12 @@ func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
 	return enabled, err
 }
 
-// TestAuth tests if an auth key is valid
-func (s *Service) TestAuth(authKey string) (bool, error) {
-	if authKey == "" {
-		return false, fmt.Errorf("auth key is required")
-	}
-
-	// Connect to sysmon daemon
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner first
-	if err := readWelcomeBanner(reader); err != nil {
-		return false, err
-	}
-
-	// Try to authenticate
-	err = authenticate(conn, reader, authKey)
-	if err != nil {
-		return false, nil // Auth failed but connection worked
-	}
-
-	return true, nil // Auth succeeded
-}
-
 // GetVersion gets the sysmon daemon version
 func (s *Service) GetVersion(authKey string) (string, error) {
-	// From what the poller already recorded, not from a connection of its
-	// own. This used to dial s.sysmonAddr, which predates the fleet: it
-	// could only ever see a daemon this process dials, and daemons dial
-	// *in* by default now. On a normal install it was reaching for an
-	// address that is not set and reporting the result as a fault.
+	// From what the poller already recorded, not from a connection of
+	// its own. This used to dial a configured address, which predates
+	// the fleet: daemons dial in, so there was nothing to reach for and
+	// the result was reported as a fault.
 	//
 	// An empty answer is not an error. A sysmon-web with no boxes yet is
 	// a sysmon-web that has just been installed.
@@ -2115,282 +2017,152 @@ func (s *Service) GetVersion(authKey string) (string, error) {
 	return "", nil
 }
 
+// The daemon-wide admin commands.
+//
+// Each one names the site it is for, because "the daemon" stopped being
+// a single thing when this became a fleet front end. They used to dial
+// the configured sysmond address, which meant they did nothing at all
+// once daemons started dialling in - there was no address to dial - and
+// they were quietly broken for every default install until now.
+//
+// No authkey: the link these ride on proved both ends already.
+
+// siteOrOnly resolves an empty site to the only box in the fleet.
+//
+// Naming a site is right when there are several, and pedantic when there
+// is one. A page that never learned to send ?site= still works on a
+// single-box install, which is what most installs are.
+func (s *Service) siteOrOnly(site string) (string, error) {
+	if site != "" {
+		return site, nil
+	}
+	f := s.fleet()
+	if len(f) == 1 {
+		f[0].mu.Lock()
+		defer f[0].mu.Unlock()
+		return f[0].site, nil
+	}
+	if len(f) == 0 {
+		return "", fmt.Errorf("no daemon has connected yet")
+	}
+	return "", fmt.Errorf("%d sites are connected - say which one this is for", len(f))
+}
+
 // ToggleDebug toggles general debug logging
-func (s *Service) ToggleDebug(authKey string) (string, error) {
-	return s.sendSimpleCommand("DEBUG", authKey)
+func (s *Service) ToggleDebug(site string) (string, error) {
+	return s.sendSimpleCommand(site, "DEBUG")
 }
 
 // ToggleSNMPDebug toggles SNMP debug logging
-func (s *Service) ToggleSNMPDebug(authKey string) (string, error) {
-	return s.sendSimpleCommand("SNMPD", authKey)
+func (s *Service) ToggleSNMPDebug(site string) (string, error) {
+	return s.sendSimpleCommand(site, "SNMPD")
 }
 
-// ExpireDNS expires the DNS cache
 // ExpireDNS expires the daemon's DNS cache.
 // sysmond calls expire_dns() and sends no response.
-func (s *Service) ExpireDNS(authKey string) (string, error) {
-	return s.sendFireAndForget("EXPIREDNS", authKey)
-}
-
-// PrintQueue prints the internal queue status
-func (s *Service) PrintQueue(authKey string) (string, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	if err := readWelcomeBanner(reader); err != nil {
-		return "", err
-	}
-
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return "", err
-	}
-
-	// Send PRINTQ command
-	_, err = conn.Write([]byte("PRINTQ\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send PRINTQ command: %w", err)
-	}
-
-	// sysmond sends queue lines then closes with no terminator code,
-	// so we read until EOF or the connection deadline fires.
-	conn.SetDeadline(time.Now().Add(2 * time.Second))
-	var output strings.Builder
-	for {
-		line, err := reader.ReadString('\n')
-		if line != "" {
-			output.WriteString(line)
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	return output.String(), nil
-}
-
-// GetNextFD gets next file descriptor info
-func (s *Service) GetNextFD(authKey string) (string, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	if err := readWelcomeBanner(reader); err != nil {
-		return "", err
-	}
-
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return "", err
-	}
-
-	// Send NFD command
-	_, err = conn.Write([]byte("NFD\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send NFD command: %w", err)
-	}
-
-	// Read two-line response
-	line1, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("failed to read NFD response: %w", err)
-	}
-	line2, _ := reader.ReadString('\n')
-
-	return strings.TrimSpace(line1) + "\n" + strings.TrimSpace(line2), nil
+func (s *Service) ExpireDNS(site string) (string, error) {
+	return s.sendFireAndForget(site, "EXPIREDNS")
 }
 
 // KillDaemon gracefully shuts down the daemon.
 // sysmond sets stop_daemon=TRUE and sends no response, so we
 // send the command and return immediately.
-func (s *Service) KillDaemon(authKey string) (string, error) {
-	return s.sendFireAndForget("KILLIT", authKey)
+func (s *Service) KillDaemon(site string) (string, error) {
+	return s.sendFireAndForget(site, "KILLIT")
+}
+
+// PrintQueue prints the internal queue status.
+func (s *Service) PrintQueue(site string) (string, error) {
+	site, err := s.siteOrOnly(site)
+	if err != nil {
+		return "", err
+	}
+	var output strings.Builder
+	err = s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+		if _, err := conn.Write([]byte("PRINTQ\n")); err != nil {
+			return fmt.Errorf("failed to send PRINTQ command: %w", err)
+		}
+		// sysmond sends queue lines and then simply stops, with no
+		// terminator code to read up to. On a shared connection we
+		// cannot read to EOF - that is the poller's socket and it has
+		// to survive - so a short deadline ends the reply instead, and
+		// is restored by withDaemonConn's own deferred reset.
+		conn.SetDeadline(time.Now().Add(2 * time.Second))
+		for {
+			line, err := r.ReadString('\n')
+			if line != "" {
+				output.WriteString(line)
+			}
+			if err != nil {
+				return nil
+			}
+		}
+	})
+	if err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
+// GetNextFD gets next file descriptor info
+func (s *Service) GetNextFD(site string) (string, error) {
+	site, err := s.siteOrOnly(site)
+	if err != nil {
+		return "", err
+	}
+	var out string
+	err = s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+		if _, err := conn.Write([]byte("NFD\n")); err != nil {
+			return fmt.Errorf("failed to send NFD command: %w", err)
+		}
+		line1, err := r.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read NFD response: %w", err)
+		}
+		line2, _ := r.ReadString('\n')
+		out = strings.TrimSpace(line1) + "\n" + strings.TrimSpace(line2)
+		return nil
+	})
+	return out, err
 }
 
 // sendFireAndForget sends a command that produces no response from sysmond.
-func (s *Service) sendFireAndForget(command string, authKey string) (string, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+func (s *Service) sendFireAndForget(site, command string) (string, error) {
+	site, err := s.siteOrOnly(site)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	if err := readWelcomeBanner(reader); err != nil {
 		return "", err
 	}
-
-	if err := authenticate(conn, reader, authKey); err != nil {
+	err = s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+		if _, err := conn.Write([]byte(command + "\n")); err != nil {
+			return fmt.Errorf("failed to send %s command: %w", command, err)
+		}
+		return nil
+	})
+	if err != nil {
 		return "", err
 	}
-
-	_, err = conn.Write([]byte(command + "\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send %s command: %w", command, err)
-	}
-
-	return fmt.Sprintf("%s command sent", command), nil
+	return fmt.Sprintf("%s command sent to %s", command, site), nil
 }
 
-// sendSimpleCommand sends a command that returns a single line response
-func (s *Service) sendSimpleCommand(command string, authKey string) (string, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
+// sendSimpleCommand sends a command that returns a single line response.
+func (s *Service) sendSimpleCommand(site, command string) (string, error) {
+	site, err := s.siteOrOnly(site)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	if err := readWelcomeBanner(reader); err != nil {
 		return "", err
 	}
-
-	if err := authenticate(conn, reader, authKey); err != nil {
-		return "", err
-	}
-
-	// Send command
-	_, err = conn.Write([]byte(command + "\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send %s command: %w", command, err)
-	}
-
-	// Read response
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("failed to read %s response: %w", command, err)
-	}
-
-	response = strings.TrimSpace(response)
-
-	// Check for error response codes
-	if strings.Contains(response, "444") {
-		return "", fmt.Errorf("authentication failed - auth key required for %s command", command)
-	} else if strings.Contains(response, "403") {
-		return "", fmt.Errorf("command failed or permission denied")
-	}
-
-	// Success - return the response
-	return response, nil
-}
-
-// GetObjectsXML returns raw XML for all monitored objects
-// This returns the comprehensive XML output from enhanced send_object_xml()
-func (s *Service) GetObjectsXML() (string, error) {
-	conn, err := net.DialTimeout("tcp", s.sysmonAddr, 5*time.Second)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to sysmon at %s: %w (is sysmond running?)", s.sysmonAddr, err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-
-	// Read welcome banner
-	if err := readWelcomeBanner(reader); err != nil {
-		return "", err
-	}
-
-	// Enable XML mode
-	_, err = conn.Write([]byte("MODE xml\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send MODE xml command: %w", err)
-	}
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("failed to read MODE xml response: %w", err)
-	}
-	if !strings.Contains(response, "333") {
-		return "", fmt.Errorf("MODE xml failed: %s", response)
-	}
-
-	// Get list of ALL objects with STATAL command
-	// CRITICAL: Use STATAL (not STATO or STAT) because:
-	// - STATAL returns ALL hosts (both up and down)
-	// - STATO only returns hosts with errors (lastcheck != 0)
-	// - STATAL returns unique_name (the object identifier) like STATO
-	// - STAT returns hostname:type:port:... where hostname != unique_name
-	// - SHOWOBJ searches by unique_name, so using STAT causes 403 errors
-	_, err = conn.Write([]byte("STATAL\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to send STATAL command: %w", err)
-	}
-	s.sessionLog.Log("STATAL", "getting object list (all hosts)", false, "")
-
-	// Read object names from STATAL response
-	// STATAL returns just unique_name, one per line (like STATO but for all hosts)
-	objectNames := []string{}
-	for {
-		line, err := reader.ReadString('\n')
+	var response string
+	err = s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
+		if _, err := conn.Write([]byte(command + "\n")); err != nil {
+			return fmt.Errorf("failed to send %s command: %w", command, err)
+		}
+		line, err := r.ReadString('\n')
 		if err != nil {
-			return "", fmt.Errorf("error reading STATAL response: %w", err)
+			return fmt.Errorf("failed to read %s response: %w", command, err)
 		}
-
-		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "333") {
-			break
-		}
-
-		// STATAL returns unique_name directly (no parsing needed)
-		// This is exactly what SHOWOBJ expects
-		if line != "" {
-			objectNames = append(objectNames, line)
-		}
-	}
-
-	// Build complete XML document with all objects
-	var xmlOutput strings.Builder
-	xmlOutput.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-	xmlOutput.WriteString("<SysmonStatus>\n")
-
-	// Get XML for each object
-	for _, objName := range objectNames {
-		// Send SHOWOBJ command
-		_, err = conn.Write([]byte(fmt.Sprintf("SHOWOBJ %s\n", objName)))
-		if err != nil {
-			return "", fmt.Errorf("failed to send SHOWOBJ command: %w", err)
-		}
-
-		// Read multi-line XML response until we see </ObjectStatus>
-		for {
-			line, err := reader.ReadString('\n')
-
-			// Process line first (ReadString can return data + error)
-			xmlOutput.WriteString(line)
-
-			// Check for terminator
-			if strings.Contains(line, "</ObjectStatus>") {
-				break
-			}
-
-			// Then check error
-			if err != nil {
-				return "", fmt.Errorf("error reading SHOWOBJ response: %w", err)
-			}
-		}
-	}
-
-	xmlOutput.WriteString("</SysmonStatus>\n")
-
-	// Send QUIT to close connection cleanly (ignore error - connection closing)
-	conn.Write([]byte("QUIT\n"))
-
-	return xmlOutput.String(), nil
+		response = strings.TrimSpace(line)
+		return nil
+	})
+	return response, err
 }
 
 // GetObjectXML returns raw XML for a single monitored object
