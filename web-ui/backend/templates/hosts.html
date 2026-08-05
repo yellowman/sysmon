@@ -126,13 +126,17 @@
                          'bg-amber-50 border-amber-500': host.overall_status === 'WARNING' && !isSelected(hostKey(host)),
                          'bg-red-100 border-red-600': host.overall_status === 'CRITICAL' && !isSelected(hostKey(host)),
                          'bg-white border-gray-400': host.paused && !isSelected(hostKey(host)),
-                         'bg-white border-blue-500 ring-2 ring-blue-200': isSelected(hostKey(host))
+                         'bg-white border-blue-500 ring-2 ring-blue-200': isSelected(hostKey(host)),
+                         'opacity-60': host.stale
                      }"
                      @click="selectHost(host)">
                     <!-- Compact Header -->
                     <div class="px-2 py-1.5 pl-8">
                         <div class="flex items-center justify-between mb-1">
                             <h3 class="text-xs font-bold text-gray-900 truncate" x-text="hostKey(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></h3>
+                            <!-- Its site is not answering: what is shown is the last thing it said. -->
+                            <i x-show="host.stale" class="fas fa-plug-circle-xmark text-xs text-gray-500 flex-shrink-0"
+                               :title="'site ' + (host.site || '?') + ' is not answering - last seen ' + (host.stale_since || 'unknown')"></i>
                             <i x-show="host.paused" class="fas fa-pause text-xs text-gray-400 flex-shrink-0"></i>
                         </div>
                         <div class="flex items-center justify-between text-xs">
@@ -145,6 +149,64 @@
                                   }"
                                   x-text="getCheckSummary(host)"></span>
                         </div>
+                    </div>
+
+                    <!-- Measurements, for the checks that produce them.
+                     A latency or loss check exists to make numbers; the
+                     card showed only pass or fail, so the numbers lived
+                     in the daemon and nowhere a person could see. -->
+                        <div x-show="host.rtt || host.packet_loss || host.snmp" x-cloak
+                         class="px-2 pl-8 pb-1.5 -mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-gray-500 leading-tight">
+                        <template x-if="host.rtt">
+                            <span class="inline-flex items-center gap-1"
+                                  :title="'min ' + host.rtt.min_ms + 'ms / avg ' + host.rtt.avg_ms +
+                                          'ms / max ' + host.rtt.max_ms + 'ms over ' +
+                                          host.rtt.replies + ' of ' + host.rtt.probes + ' probes'">
+                                <i class="fas fa-stopwatch text-gray-400"></i>
+                                <span class="mono" :class="rttClass(host.rtt)"
+                                      x-text="host.rtt.avg_ms.toFixed(2) + 'ms'"></span>
+                                <span class="text-gray-400"
+                                      x-text="'(' + host.rtt.min_ms.toFixed(2) + '-' + host.rtt.max_ms.toFixed(2) + ')'"></span>
+                            </span>
+                        </template>
+                        <template x-if="host.rtt">
+                            <span class="inline-flex items-center gap-1" title="Jitter (RFC 3550 delay variation)">
+                                <i class="fas fa-wave-square text-gray-400"></i>
+                                <span class="mono" :class="jitterClass(host.rtt)"
+                                      x-text="'±' + host.rtt.jitter_ms.toFixed(2) + 'ms'"></span>
+                            </span>
+                        </template>
+                        <!-- Replies short of probes is the loss the average
+                             is hiding, so it is worth saying out loud. -->
+                        <template x-if="host.rtt && host.rtt.replies < host.rtt.probes">
+                            <span class="inline-flex items-center gap-1 text-amber-700"
+                                  :title="(host.rtt.probes - host.rtt.replies) + ' of ' + host.rtt.probes + ' probes lost'">
+                                <i class="fas fa-triangle-exclamation"></i>
+                                <span class="mono" x-text="host.rtt.replies + '/' + host.rtt.probes"></span>
+                            </span>
+                        </template>
+                        <!-- The device's own uptime, and how long its agent
+                             took to answer. Both came off the wire already
+                             and were being discarded. -->
+                        <template x-if="host.snmp && host.snmp.sysuptime_ticks">
+                            <span class="inline-flex items-center gap-1"
+                                  title="Device uptime, from sysUpTime.0">
+                                <i class="fas fa-power-off text-gray-400"></i>
+                                <span class="mono text-gray-700"
+                                      x-text="formatTicks(host.snmp.sysuptime_ticks)"></span>
+                            </span>
+                        </template>
+                        <template x-if="host.packet_loss">
+                            <span class="inline-flex items-center gap-1"
+                                  :class="host.packet_loss.lost > 0 ? 'text-amber-700' : ''"
+                                  :title="host.packet_loss.received + ' of ' + host.packet_loss.sent + ' replied'">
+                                <i class="fas fa-percent text-gray-400"></i>
+                                <span class="mono" :class="lossClass(host.packet_loss)"
+                                      x-text="host.packet_loss.loss_pct.toFixed(1) + '% loss'"></span>
+                                <span class="text-gray-400"
+                                      x-text="'(' + host.packet_loss.received + '/' + host.packet_loss.sent + ')'"></span>
+                            </span>
+                        </template>
                     </div>
                 </div>
 
@@ -229,10 +291,15 @@
                         :class="{
                             'hover:bg-gray-50': host.overall_status === 'OK',
                             'bg-amber-100 hover:bg-amber-200': host.overall_status === 'WARNING',
-                            'bg-red-100 hover:bg-red-200': host.overall_status === 'CRITICAL'
+                            'bg-red-100 hover:bg-red-200': host.overall_status === 'CRITICAL',
+                            'opacity-60 italic': host.stale
                         }"
                         @click="selectHost(host)">
-                        <td class="cel mono font-medium text-gray-900" x-text="hostKey(host)" :title="host.hostname"></td>
+                        <td class="cel mono font-medium text-gray-900">
+                            <span x-text="hostKey(host)" :title="host.hostname"></span>
+                            <i x-show="host.stale" class="fas fa-plug-circle-xmark ml-1 text-gray-500"
+                               :title="'site ' + (host.site || '?') + ' is not answering - showing its last report'"></i>
+                        </td>
                         <td class="cel text-gray-600 truncate max-w-[180px]" x-text="host.description || ''"></td>
                         <td class="cel mono" x-text="getPrimaryCheckType(host)"></td>
                         <td class="cel mono" x-text="getPrimaryCheckPort(host) || ''"></td>
@@ -328,6 +395,16 @@
         <div @click.stop class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <template x-if="selectedHost">
                 <div>
+                    <!-- Everything below is the last thing this site said before
+                         it stopped answering, not current state. Say so plainly:
+                         a green host from an hour ago is worse than no host. -->
+                    <div x-show="selectedHost.stale"
+                         class="px-6 py-2 bg-amber-100 border-b border-amber-300 text-sm text-amber-900">
+                        <i class="fas fa-plug-circle-xmark mr-1"></i>
+                        Site <span class="font-semibold" x-text="selectedHost.site || 'unknown'"></span>
+                        is not answering. This is its last report<span x-show="selectedHost.stale_since"
+                            x-text="', from ' + formatRelativeTime(selectedHost.stale_since)"></span>, not current status.
+                    </div>
                     <!-- Modal Header -->
                     <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
                         <div class="flex-1">
@@ -636,6 +713,52 @@ function hostsPage() {
                 this.sortField = field;
                 this.sortDirection = 'asc';
             }
+        },
+
+        // How alarming is a measured value?
+        //
+        // "Extreme" only means anything against a limit somebody chose,
+        // so the operator's own threshold decides it when there is one:
+        // at or past it is red, and the approach to it (80%) is amber.
+        // With no threshold configured there is nothing to be relative
+        // to, so these fall back to absolutes chosen from what the
+        // numbers mean - 150ms is the ITU-T G.114 one-way guidance for
+        // voice, 30ms of jitter is where call quality goes, and any
+        // loss at all is worth a second look.
+        metricClass(value, threshold, warnAbs, badAbs) {
+            if (threshold > 0) {
+                if (value >= threshold) return 'text-red-700 font-bold';
+                if (value >= threshold * 0.8) return 'text-amber-700 font-semibold';
+                return 'text-gray-700';
+            }
+            if (value >= badAbs) return 'text-red-700 font-bold';
+            if (value >= warnAbs) return 'text-amber-700 font-semibold';
+            return 'text-gray-700';
+        },
+
+        // sysUpTime is TimeTicks: hundredths of a second since the
+        // device booted, which is not a unit anybody reads.
+        formatTicks(ticks) {
+            const secs = Math.floor(ticks / 100);
+            const d = Math.floor(secs / 86400);
+            const h = Math.floor((secs % 86400) / 3600);
+            const m = Math.floor((secs % 3600) / 60);
+            if (d > 0) return d + 'd ' + h + 'h';
+            if (h > 0) return h + 'h ' + m + 'm';
+            return m + 'm';
+        },
+
+        rttClass(r) { return this.metricClass(r.avg_ms, r.threshold_ms, 150, 400); },
+        jitterClass(r) { return this.metricClass(r.jitter_ms, r.jitter_threshold_ms, 30, 100); },
+        lossClass(p) {
+            // Tolerance is a packet count, not a percentage, so compare
+            // like for like before falling back to percentages.
+            if (p.tolerance > 0) {
+                if (p.lost > p.tolerance) return 'text-red-700 font-bold';
+                if (p.lost === p.tolerance) return 'text-amber-700 font-semibold';
+                return 'text-gray-700';
+            }
+            return this.metricClass(p.loss_pct, 0, 1, 5);
         },
 
         getCheckSummary(host) {

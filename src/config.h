@@ -79,13 +79,9 @@
 #endif /* sgi */
 #endif /* NICEINTERFACE */
 
-#ifdef HAVE_NET_SNMP_VERSION_H
+/* SNMP is built in - sysmond speaks it itself, so there is nothing to
+   detect and no way to end up without it. */
 #define ENABLE_SNMP
-#endif /* HAVE_NET_SNMP_VERSION_H */
-
-#ifdef HAVE_UCD_SNMP_VERSION_H
-#define ENABLE_SNMP
-#endif /* HAVE_UCD_SNMP_VERSION_H */
 
 
 #define SYSM_VERS	"v0.94"
@@ -101,6 +97,8 @@
 #define DOWNCOLOR	"ff5500" /* sumthin */
 
 #define SYSMON_PORTNUM		1345
+/* Where sysmon-web listens for daemons dialling in. */
+#define SYSMON_AGG_PORTNUM	1347
 #define	MAX_ARGS		100
 #define MAX_STRLEN		32768
 
@@ -255,6 +253,27 @@
 #define SYSM_CONTACT_DOWN	1
 #define SYSM_CONTACT_UP		2
 
+/* RTT probe pacing (type rtt): ms between the probes of one check.
+   Configurable per object as "rtt_interval N;". The floor keeps the
+   knob meaning something (back-to-back probes measure one instant and
+   call it a trend); the ceiling bounds how long one check can hold a
+   queue slot, since rtt_samples * rtt_interval is the check's wall
+   time. */
+#define RTT_DEFAULT_INTERVAL_MS	100
+#define RTT_MIN_INTERVAL_MS	10
+#define RTT_MAX_INTERVAL_MS	5000
+
+/* Default alert threshold for an rtt object that does not name one:
+   zero, meaning no latency alarm. The check still measures, records and
+   reports; it just does not have an opinion about the number until
+   someone gives it one, exactly as jitter_threshold works.
+
+   Zero used to be read as a real limit, and since the test is "average
+   over threshold" that made any measurable latency an alert - 0.05ms on
+   loopback qualified - so an rtt object with no rtt_threshold was
+   critical for as long as it ran. See service_test_rtt(). */
+#define RTT_DEFAULT_THRESHOLD_MS	0
+
 /* Packet loss monitoring constants */
 #define PKTLOSS_HISTORY_SIZE     1440  /* 24 hours @ 1 minute intervals */
 #define PKTLOSS_DEFAULT_HISTORY  24    /* Default hours to keep */
@@ -286,6 +305,14 @@ struct pktloss_data {
 
 struct hostinfo {
         unsigned char *hostname; /* name of system to check */
+	unsigned char *ipv4_str; /* what hostname resolved to when this
+		object was loaded, as dotted quad, or NULL if it has no v4
+		address. The config says who to watch; this says where they
+		were. Recorded because the name is already resolved once at
+		load to decide whether the object is usable at all, and
+		throwing that answer away means anything later that has an
+		address in hand - an arriving snmp trap - has no way back to
+		the object except by resolving the whole config again. */
         unsigned int type; /* 1 = tcp, 2 = udp, 3 = ping, 4 = snmp, 5 = nntp
 		6 = smtp, 7 = imap, 8 = pop3 9 = umichX500 10 = pop2
 		11 = bootp 12 = dns 13 = www-content, 14 = radius,
@@ -295,6 +322,7 @@ struct hostinfo {
         unsigned char *message; /* message to print for outages */
         unsigned char *contact; /* e-mail contact for this */
 	unsigned char *snmp_community; /* snmp community */
+	int snmp_version; /* SNMP_VERSION_2C by default; _1 for old agents */
 	unsigned char *snmp_oid; /* OID to query - can be numerical 
 					or textual*/
 	unsigned char *snmp_oid_sec; /* used in snmp compare two values chk */
@@ -358,9 +386,35 @@ struct hostinfo {
 	unsigned int rtt_threshold;         /* Max RTT in milliseconds before alert */
 	unsigned int jitter_threshold;      /* Max jitter in milliseconds before alert */
 	unsigned int rtt_samples;           /* Number of samples for rolling average */
+	unsigned int rtt_interval;          /* ms between probes of one check */
+
+	/* What the last rtt check measured. The working state lives in
+	   struct rtt_data for the duration of a check and is freed with it,
+	   so the results are copied here to outlive it - this is what the
+	   status protocol reports and what survives a SIGHUP. */
+	double rtt_last_min;
+	double rtt_last_avg;
+	double rtt_last_max;
+	double rtt_last_jitter;
+	unsigned int rtt_last_replies;      /* replies counted */
+	unsigned int rtt_last_probes;       /* probes sent */
+
+	/* What the last pktloss cycle counted. Same reasoning as the rtt
+	   figures above: struct pktloss_data is freed when the cycle ends,
+	   so the running totals and history it holds are only reportable
+	   while a check happens to be in flight - which is almost never
+	   when someone is looking. */
+	unsigned int pktloss_last_sent;
+	unsigned int pktloss_last_recv;
 
 	/* SNMP trap alert configuration */
 	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
+
+	/* Bumped from a single global counter every time something a client
+	   would care about changes on this object - state, contacted, ack,
+	   notes. Lets CONF hand back only what moved since the caller last
+	   asked, instead of every object every second. */
+	unsigned long change_seq;
 
 	/* Wakeup/stale check configuration */
 	unsigned int max_wakeup_retries;    /* Max times to retry waking stale check (0 = unlimited) */
@@ -445,6 +499,83 @@ struct monitorent {
 	time_t last_wakeup_time;        /* When last woken up */
 	};
 
+/*
+ * A cursor over a BER buffer, shared by the trap decoder and the SNMP
+ * client. pos is always <= len; every read is bounds-checked.
+ */
+struct ber_cursor {
+	const unsigned char *buf;
+	size_t len;
+	size_t pos;
+};
+
+/*
+ * One value out of a GetResponse.
+ */
+struct snmp_value {
+	bool have_value;		/* FALSE => exception or no varbind */
+	unsigned long value;		/* integers, counters, gauges, ticks */
+	char type[16];			/* INTEGER, Counter64, ... */
+	char oid[192];			/* the varbind's OID, as returned */
+	int error_status;		/* PDU error-status, 0 = noError */
+	char exception[24];		/* noSuchObject etc, when the agent said so */
+};
+
+/*
+ * Decoded SNMP trap content (trapdecode.c).
+ *
+ * Sizes are fixed and small on purpose: this is filled from a UDP packet
+ * anybody can send, so there is nothing to allocate, nothing to free, and
+ * a hard ceiling on the work one packet can cause.
+ */
+#define TRAP_MAX_VARBIND	16	/* varbinds kept per trap */
+#define TRAP_OID_LEN		192	/* dotted OID string */
+#define TRAP_VAL_LEN		160	/* varbind value / description */
+#define TRAP_NAME_LEN		48	/* trap or varbind short name */
+#define TRAP_HISTORY_MAX	128	/* traps remembered for the web UI */
+
+struct trap_varbind {
+	char oid[TRAP_OID_LEN];
+	char name[TRAP_NAME_LEN];	/* friendly name, when we know the OID */
+	char type[16];			/* INTEGER, STRING, TimeTicks, ... */
+	char value[TRAP_VAL_LEN];
+	char note[TRAP_VAL_LEN];	/* decoded meaning, eg "down" for a 2 */
+};
+
+struct trap_content {
+	int version;			/* 0 = v1, 1 = v2c, 3 = v3 */
+	bool decoded;			/* FALSE => we could not read the packet */
+	bool alertable;			/* TRUE => this really was an SNMP trap */
+	bool inform;			/* TRUE => InformRequest, not a trap */
+	char community[64];
+	char trap_oid[TRAP_OID_LEN];	/* snmpTrapOID.0, or the v1 equivalent */
+	char enterprise[TRAP_OID_LEN];
+	char agent[IP_ADDR_STR_SIZE];	/* v1 agent-addr: the device's own idea */
+	char name[TRAP_NAME_LEN];	/* linkDown, coldStart, ... */
+	char description[TRAP_VAL_LEN];
+	char severity[16];		/* critical | warning | informational */
+	char category[24];		/* link | restart | security | ... */
+	char vendor[32];
+	char iface[64];			/* interface the trap names, if any */
+	int ifindex;			/* -1 when the trap named none */
+	int generic;			/* v1 generic trap number, -1 if n/a */
+	int specific;			/* v1 specific trap number */
+	unsigned long uptime;		/* sysUpTime in hundredths of a second */
+	int nvarbinds;
+	struct trap_varbind vb[TRAP_MAX_VARBIND];
+};
+
+struct trap_record {
+	unsigned long seq;		/* monotonic, 1-based, since daemon start */
+	char source[IP_ADDR_STR_SIZE];	/* who sent the packet */
+	time_t when;
+	int bytes;
+	char matched[OBJECT_NAME_SIZE];	/* object this source maps to, if any */
+	bool alert_enabled;		/* object had trap_alert set */
+	bool alert_sent;
+	struct trap_content content;
+};
+
 /* client status */
 struct clientstatus {
 	time_t lastactivity;
@@ -525,6 +656,9 @@ struct bootp_pkt {
 #define XML_OBJECT_MESSAGE	"ObjectMessage"
 #define XML_OBJECT_CONTACT	"ObjectContact"
 #define XML_SNMP_COMMUNITY	"ObjectSNMPCommunity"
+#define XML_SNMP_VERSION	"ObjectSNMPVersion"
+#define XML_SITE_NAME		"SiteName"
+#define XML_SITE_DESC		"SiteDescription"
 #define XML_SNMP_OID		"ObjectSNMPoid"
 #define XML_SNMP_TYPE		"ObjectSNMPType"
 #define XML_SNMP_LOW		"ObjectSNMPLowThresh"
@@ -586,10 +720,20 @@ struct bootp_pkt {
 #define XML_PAGE_MESSAGE       "ObjectPageMessage"
 #define XML_PKTLOSS_HIST_HRS   "ObjectPacketLossHistoryHours"
 #define XML_PKTLOSS_LAST_CHK   "ObjectPacketLossLastCheck"
+#define XML_PKTLOSS_LAST_SENT  "ObjectPacketLossLastSent"
+#define XML_PKTLOSS_LAST_RECV  "ObjectPacketLossLastRecv"
 #define XML_RTT_SAMPLES        "ObjectRTTSamples"
+#define XML_RTT_INTERVAL       "ObjectRTTInterval"
+#define XML_RTT_LAST_MIN       "ObjectRTTMin"
+#define XML_RTT_LAST_AVG       "ObjectRTTAvg"
+#define XML_RTT_LAST_MAX       "ObjectRTTMax"
+#define XML_RTT_LAST_JITTER    "ObjectRTTJitter"
+#define XML_RTT_LAST_REPLIES   "ObjectRTTReplies"
+#define XML_RTT_LAST_PROBES    "ObjectRTTProbes"
 #define XML_NEXT_QUEUE_TIME    "ObjectNextQueueTime"
 #define XML_TRACE_ENABLED      "ObjectTraceEnabled"
 #define XML_ACKED              "ObjectAcked"
+#define XML_CHANGE_SEQ         "ObjectChangeSeq"
 #define XML_CHECK_QUEUED_AT    "CheckQueuedAt"
 #define XML_CHECK_LAST_SERV    "CheckLastServiced"
 #define XML_CHECK_FD           "CheckFileDescriptor"
@@ -603,6 +747,37 @@ struct bootp_pkt {
 #define XML_PKTLOSS_HIST_SAMP  "PacketLossHistorySamples"
 #define XML_PKTLOSS_HISTORY    "PacketLossHistory"
 
+/* snmp trap history (TRAPS command) */
+#define XML_TRAPS		"SysmonTraps"
+#define XML_TRAP		"Trap"
+#define XML_TRAP_SOURCE		"TrapSource"
+#define XML_TRAP_TIME		"TrapTime"
+#define XML_TRAP_BYTES		"TrapBytes"
+#define XML_TRAP_VERSION	"TrapVersion"
+#define XML_TRAP_COMMUNITY	"TrapCommunity"
+#define XML_TRAP_OID		"TrapOID"
+#define XML_TRAP_ENTERPRISE	"TrapEnterprise"
+#define XML_TRAP_AGENT		"TrapAgentAddress"
+#define XML_TRAP_NAME		"TrapName"
+#define XML_TRAP_DESC		"TrapDescription"
+#define XML_TRAP_SEVERITY	"TrapSeverity"
+#define XML_TRAP_CATEGORY	"TrapCategory"
+#define XML_TRAP_VENDOR		"TrapVendor"
+#define XML_TRAP_IFACE		"TrapInterface"
+#define XML_TRAP_IFINDEX	"TrapIfIndex"
+#define XML_TRAP_UPTIME		"TrapUptime"
+#define XML_TRAP_DECODED	"TrapDecoded"
+#define XML_TRAP_MATCHED	"TrapMatchedHost"
+#define XML_TRAP_ALERT_EN	"TrapAlertEnabled"
+#define XML_TRAP_ALERT_SENT	"TrapAlertSent"
+#define XML_TRAP_VARBIND	"Varbind"
+#define XML_TRAP_VB_OID		"VarbindOID"
+#define XML_TRAP_VB_NAME	"VarbindName"
+#define XML_TRAP_VB_TYPE	"VarbindType"
+#define XML_TRAP_VB_VALUE	"VarbindValue"
+#define XML_TRAP_VB_NOTE	"VarbindNote"
+#define XML_TRAP_SEQ		"TrapSeq"
+
 
 /* misc defines for any/all external functions */
 extern char *myname; /* my called name when I startup */
@@ -611,6 +786,16 @@ extern bool mallocdebug;
 extern bool stop_daemon;
 extern char *errorsto;
 extern char *authkey;
+/* Identity of this daemon within a fleet. sitename is the key half of
+   every "site:object" a client stores and is restricted accordingly;
+   sitedesc is the label a person reads and keys nothing. */
+extern char *sitename;
+extern char *sitedesc;
+/* Aggregator link (aggregator.c). NULL host = standalone. */
+extern char *aggregator_host;
+extern int aggregator_port;
+extern char *aggregator_token;
+extern char *aggregator_ca;
 extern char *path_savestate;
 extern char *replyto;
 extern char *downcolor, *upcolor, *recentcolor;
@@ -636,6 +821,7 @@ extern int glob_icmp_fd; /* icmp.c + syswatch.c */
 extern int glob_icmpv6_fd; /* pingv6.c */
 extern int snmp_trap_fd; /* loadconfig.c + snmp.c + syswatch.c */
 extern bool paused; /* syswatch.c + srvclient.c + textfile.c */
+extern unsigned long glob_change_seq; /* lib.c - see object_changed() */
 extern int inactivetime;
 extern int numfailures;
 extern int minnumfailures; /* minimum failures before yellow status */
@@ -715,6 +901,13 @@ extern struct nei_list *parser_dep_tmp;
 extern char *parser_page;
 extern char *parser_also;
 extern char *parser_secret;
+extern char *parser_sitename;
+extern char *parser_aggregator;
+extern char *parser_agg_token;
+extern char *parser_agg_ca;
+extern char *parser_statedir;
+extern int parser_listenport;
+extern char *parser_sitedesc;
 extern bool parser_catch_snmptrap;
 extern char *parser_username;
 extern char *parser_password;
@@ -883,6 +1076,88 @@ int test_tcp(char*, int);
 /* talktcp.c */
 int sendline(int , char *);
 
+/* tlsio.c - TLS on the aggregator link only; every other descriptor looks
+   itself up, finds nothing, and behaves exactly as it always has. */
+int tls_connect(const char *, int, const char *);
+void tls_disconnect(int);
+void tls_forget(int);
+int tls_pending(int);
+int tls_read(int, void *, int);
+int tls_write(int, const void *, int);
+
+/* aggregator.c */
+void aggregator_poll(time_t);
+void aggregator_set_target(const char *);
+
+/* confgen.c - config generations.
+
+   The seed config named by -f (or CFILE) is read-only to this daemon,
+   always. A managed box keeps its running copy and its rollback copy in a
+   directory it owns - see "config generation-dir" - so nothing here ever
+   needs /etc to be writable by the user the daemon drops to.
+
+   confset_* records what the parser actually opened, which is what gets
+   hashed: a hash over a guess about which files are included would be
+   worse than none. */
+extern char configfile[]; /* the seed config file, from syswatch.c */
+
+/* A file of a config, identified by its name - the string in the include
+   directive, or the main file's basename. Never a path: nothing the far
+   end sends is ever used to build a filename. */
+struct confgen_file {
+	char *name;
+	unsigned char *data;
+	long len;
+};
+
+/* A config delivery is bounded: this is a monitoring daemon, and an
+   unbounded read on the aggregator link is a way to make it stop. */
+#define CONFGEN_MAX_PAYLOAD (8 * 1024 * 1024)
+
+void confset_reset(void);
+void confset_record(const char *, const char *);
+int confset_count(void);
+const char *confset_name(int);
+const char *confset_path(int);
+bool confgen_manageable(char *, size_t);
+
+void confgen_report(struct clientstatus *);
+void confgen_send(struct clientstatus *);
+void confgen_receive(struct clientstatus *, char *);
+void confgen_do_rollback(struct clientstatus *);
+void confgen_do_revert(struct clientstatus *);
+
+bool confgen_hash(char *, size_t);
+bool confgen_hash_files(struct confgen_file *, int, char *, size_t);
+unsigned long confgen_generation(void);
+const char *confgen_statedir(void);
+const char *confgen_active_config(void);
+bool confgen_is_managed_file(const char *);
+void confgen_set_statedir(const char *);
+void confgen_lock_statedir(void);
+
+/* Everything the daemon writes, derived from the state directory rather
+   than configured file by file. */
+const char *sysmon_pidfile(void);
+const char *sysmon_logfile(void);
+const char *sysmon_statefile(void);
+
+/* savestate.c - check state across a restart. Only the runtime fields
+   hard_copy() already carries across a SIGHUP; nothing structural and
+   nothing secret. */
+void save_state(const char *);
+void load_state(const char *);
+const char *sysmon_ca_file(void);
+void confgen_prepare(uid_t, gid_t);
+void confgen_prepare_as_root(void);
+struct passwd *sysmon_drop_user(void);
+bool confgen_apply(unsigned long, struct confgen_file *, int, char *, size_t,
+	unsigned long *);
+bool confgen_rollback(char *, size_t);
+bool confgen_revert(char *, size_t);
+char *confgen_b64encode(const unsigned char *, long);
+unsigned char *confgen_b64decode(const char *, long *);
+
 void hard_copy(struct hostinfo *old, struct hostinfo *new);
 void dump_to_file(char *, int, time_t );
 void add_line(FILE *, struct hostinfo, int, time_t);
@@ -939,8 +1214,32 @@ void stop_check_dns(struct monitorent *);
 /* snmp.c */
 void service_test_snmp(struct monitorent *);
 void start_test_snmp(struct monitorent *);
-struct graph_elements *find_object_by_ip(char *);
-void send_trap_alert(struct graph_elements *, struct in_addr);
+struct graph_elements *find_trap_source(char *);
+double rtt_ms_until_next_probe(struct monitorent *, struct timeval *);
+void send_trap_alert(struct graph_elements *, char *, struct trap_content *);
+
+/* trapdecode.c - BER reading, shared with the SNMP client */
+void snmp_ber_open(struct ber_cursor *, const unsigned char *, size_t);
+bool snmp_ber_next(struct ber_cursor *, unsigned char *, const unsigned char **, size_t *);
+long snmp_ber_int(const unsigned char *, size_t);
+unsigned long snmp_ber_uint(const unsigned char *, size_t);
+void snmp_ber_oid_str(const unsigned char *, size_t, char *, size_t);
+
+bool decode_snmp_trap(const unsigned char *, size_t, struct trap_content *);
+
+/* snmpget.c - the SNMP client sysmond polls agents with */
+#define SNMP_VERSION_1		0
+#define SNMP_VERSION_2C		1
+int snmp_build_get(unsigned char *, size_t, int, const char *, unsigned long, const char *);
+bool snmp_parse_response(const unsigned char *, size_t, unsigned long, struct snmp_value *);
+int snmp_open_query(const char *, int, int, const char *, unsigned long, const char *);
+bool snmp_read_response(int, unsigned long, struct snmp_value *);
+void trap_history_add(const char *, time_t, int, struct trap_content *,
+	const char *, bool, bool);
+int trap_history_count(void);
+unsigned long trap_history_total(void);
+unsigned long trap_history_oldest_seq(void);
+struct trap_record *trap_history_get(int);
 
 /* radius check */
 void start_check_radius(struct monitorent *, time_t);
@@ -950,12 +1249,17 @@ void md5_calc (unsigned char *, unsigned char *, unsigned int);
 
 /* srvclient.c */
 void send_object_xml(int, FILE*, struct graph_elements *);
+void send_traps(struct clientstatus *, unsigned long);
+void send_site(struct clientstatus *);
 void client_send_statechange(char *, int , int);
+int send_conf(struct clientstatus *, unsigned long);
 
 /* in lib.c */
 void *MALLOC(size_t, char *);
 void *STRDUP(char *, char *);
 void FREE(void *);
+void object_changed(struct hostinfo *);
+bool valid_sitename(const char *);
 short int name_to_type(char *);
 short int name_to_snmp_type(char *);
 void quicksort(char *, size_t, size_t, int (*)(const void *, const void *));

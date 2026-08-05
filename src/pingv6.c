@@ -190,15 +190,13 @@ void pinger_v6(struct pingv6data *localdata, struct monitorent *here)
         int ret1;
 	int serrno;
 
-	/* Use ping helper if enabled */
-	if (use_ping_helper) {
-		if (pinger_v6_via_helper(localdata, here) == 0) {
-			gettimeofday(&localdata->lastsentat, NULL);
-		}
-		return;
-	}
-
-	/* Traditional direct send (requires root/CAP_NET_RAW) */
+	/*
+	 * Build the packet first, then send it on our own socket if we
+	 * have one - see pinger_v4() for why that works after the
+	 * privilege drop, and what forking a helper per packet cost.
+	 * setup_icmpv6_fd() opens this socket in the same root window as
+	 * the v4 one.
+	 */
         icmph = (struct icmp6_hdr *)localdata->outpack;
         icmph->icmp6_type = ICMP6_ECHO_REQUEST;
         icmph->icmp6_code = 0;
@@ -212,34 +210,50 @@ void pinger_v6(struct pingv6data *localdata, struct monitorent *here)
 
 	icmph->icmp6_cksum = in_cksum(localdata->outpack, send_octets);
 
-	ret1 = sendto(glob_icmpv6_fd, localdata->outpack, send_octets, 0,
-		(struct sockaddr *)&localdata->ping_target, sizeof(struct sockaddr_in6));
+	if (glob_icmpv6_fd != -1)
+	{
+		ret1 = sendto(glob_icmpv6_fd, localdata->outpack, send_octets, 0,
+			(struct sockaddr *)&localdata->ping_target,
+			sizeof(struct sockaddr_in6));
 
-	if (debug||debug_pingv6)
-		print_err(1, "pingv6.c:sendto got %d", ret1);
+		if (debug||debug_pingv6)
+			print_err(1, "pingv6.c:sendto got %d", ret1);
 
-        serrno = errno;
+		serrno = errno;
 
-        if (ret1 < 0 || ret1 != send_octets)
-        {
-                switch(serrno)
-                {
-                        case ENETUNREACH:
-                                here->retval = SYSM_NETUNRCH;
-                                return;
-                        case EHOSTDOWN:
-                        case EHOSTUNREACH:
-                                here->retval =  SYSM_HOSTDOWN;
-                                return;
-                        default:
-                        /* A new one to me */
-                                perror("pingv6.c:pinger_v6:sendto");
-                }
-        }
-        /* Track it */
-        gettimeofday(&localdata->lastsentat, NULL);
+		if (ret1 == send_octets)
+		{
+			gettimeofday(&localdata->lastsentat, NULL);
+			return;
+		}
 
+		switch(serrno)
+		{
+			case ENETUNREACH:
+				here->retval = SYSM_NETUNRCH;
+				return;
+			case EHOSTDOWN:
+			case EHOSTUNREACH:
+				here->retval =  SYSM_HOSTDOWN;
+				return;
+			case EPERM:
+			case EACCES:
+				/* Refused after the drop: fall through to the
+				 * helper, which sends as root. */
+				break;
+			default:
+			/* A new one to me */
+				perror("pingv6.c:pinger_v6:sendto");
+				return;
+		}
+	}
 
+	/* No usable socket, or it refused us. */
+	if (use_ping_helper) {
+		if (pinger_v6_via_helper(localdata, here) == 0) {
+			gettimeofday(&localdata->lastsentat, NULL);
+		}
+	}
 }
 
 /*

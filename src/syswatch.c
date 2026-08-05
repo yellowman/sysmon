@@ -90,6 +90,9 @@ char *recentcolor = NULL;
 char *globhdr = NULL;
 char *globhdrval = NULL;
 char *authkey = NULL;
+/* Unset means "local", so a single-box install needs no config change. */
+char *sitename = NULL;
+char *sitedesc = NULL;
 char *path_savestate = NULL;
 char *statefile = NULL;
 #ifdef HAVE_LIBPTHREAD
@@ -249,7 +252,14 @@ void update_count()
 	unsigned long total = 0;
 	struct all_elements_list *here;
 	for (here = currenthead; here != NULL;here=here->next)
+	{
 		total++;
+		/* A (re)loaded object is new to every client, whatever it was
+		   called before, so stamp it as changed now. A client asking
+		   "what moved since N" after a SIGHUP gets the whole tree. */
+		if (here->value != NULL)
+			object_changed(here->value->data);
+	}
 	print_err(0, "total entries to be monitored = %d", total);
 	elements_to_monitor = total;
 	return;
@@ -420,30 +430,6 @@ void handle_stop()
 	stop_daemon = TRUE;
 }
 
-/*
- * save current state info to XML file specified by arg.  may be useful for debugging.
- */
-void save_xml_state(char *fn)
-{
-	FILE *fh;
-	struct all_elements_list *here;
-
-	fh = fopen(fn, "w");
-	if (fh == NULL)
-	{
-		print_err(1, "unable to save_xml_state error with fopen of %s", fn);
-		return;
-	}
-	here=currenthead;
-	while (here != NULL)
-	{
-		send_object_xml(-1, fh, here->value);
-		here=here->next;
-	}
-
-	fclose(fh);
-}
-
 /* 
  * Stop the daemon, free memory that is currently allocated
  * and other fun stuff like that, such that we are not
@@ -460,7 +446,8 @@ void stop_it(time_t now)
 	if (html != -1)
 		dump_to_file(statusfilename, html, now);
 	if (path_savestate != NULL)
-		save_xml_state(path_savestate);
+		save_state(path_savestate);
+
 
 	/* timeout old clients */
 	inactivetime = 0;
@@ -490,7 +477,7 @@ void stop_it(time_t now)
 	free_tree(currenthead);
 
 	/* Attempt to nuke the pidfile */
-	unlink(parser_pidfile);
+	unlink(sysmon_pidfile());
 
 	exit(0);
 }
@@ -994,7 +981,7 @@ void needssleep(time_t now_t)
 		FD_SET(glob_icmpv6_fd, &rd);
 	}
 
-	/* Check: 
+	/* Check:
 	   checkent->next_queuetime for diff to now */
         for (here=queuehead;here!= NULL;here=here->next)
 	{
@@ -1005,6 +992,41 @@ void needssleep(time_t now_t)
 /*	printf("mincalctime = %d\n", mincalctime); */
 	local_timeout.tv_sec = mincalctime;
 	local_timeout.tv_usec = 0;
+
+	/*
+	 * An rtt check paces its probes in milliseconds, which is finer
+	 * than this timeout's usual whole seconds. Ask each one when it
+	 * next needs to send and shorten the sleep to suit, or the probe
+	 * schedule is silently rounded up to however often we happen to
+	 * wake and a five-sample check stretches over ten seconds.
+	 */
+	if (!disable_icmp)
+	{
+		double soonest = -1.0;
+
+		for (here = queuehead; here != NULL; here = here->next)
+		{
+			double due = rtt_ms_until_next_probe(here, &now_timeval);
+
+			if (due < 0.0)
+				continue;
+			if (soonest < 0.0 || due < soonest)
+				soonest = due;
+		}
+
+		if (soonest >= 0.0)
+		{
+			double budget = local_timeout.tv_sec * 1000.0 +
+				local_timeout.tv_usec / 1000.0;
+
+			if (soonest < budget)
+			{
+				local_timeout.tv_sec = (time_t)(soonest / 1000.0);
+				local_timeout.tv_usec = (suseconds_t)
+					((soonest - local_timeout.tv_sec * 1000.0) * 1000.0);
+			}
+		}
+	}
 
 	/* Watch the fd_sets accordingly */
 	select(maxfd+1, &rd, &wr, &except, &local_timeout);
@@ -1300,6 +1322,7 @@ void handle_retval(struct monitorent *handle_this, time_t now)
 	{
 		/* XXX */
 		client_send_statechange(handle_this->unique_name, handle_this->checkent->lastcheck, handle_this->retval);
+		object_changed(handle_this->checkent);
 	}
 
 	/* Do necessary post-check status stuff */
@@ -1675,14 +1698,10 @@ void write_pid_file()
 	 * missing pid). Non-root runs simply get a perror if the path isn't
 	 * writable.
 	 */
-	if (parser_pidfile == NULL || parser_pidfile[0] == '\0')
-	{
-		return;
-	}
-	fh = fopen(parser_pidfile, "w");
+	fh = fopen(sysmon_pidfile(), "w");
 	if (fh == NULL)
 	{
-		perror("write_pid_file:fopen");
+		perror(sysmon_pidfile());
 		return;
 	}
 	fprintf(fh, "%d\n", mypid);
@@ -1708,6 +1727,50 @@ void write_pid_file()
  * basically disable icmp totally, and reject those parts
  * of config file
  */
+/*
+ * The user this daemon drops to, or NULL if it is not running as root and
+ * so will not drop at all. Looked up in one place because two callers need
+ * it: the state directory is created and handed over before the drop, and
+ * the drop itself happens after.
+ */
+struct passwd *sysmon_drop_user(void)
+{
+	struct passwd *pw;
+
+	pw = getpwnam("nobody");
+	if (pw == NULL)
+		pw = getpwnam("daemon");
+	return pw;
+}
+
+/*
+ * Create the state directory and give it to the user we are about to
+ * become. Separate from revoke_root_if_necessary() because the pidfile
+ * lives in that directory and is written before the drop.
+ */
+void confgen_prepare_as_root(void)
+{
+	struct passwd *pw;
+
+	if (geteuid() != 0)
+	{
+		/* Not root: nothing to hand over, and the directory is either
+		   already ours or about to fail loudly when we write it. */
+		confgen_prepare(getuid(), getgid());
+		return;
+	}
+
+	pw = sysmon_drop_user();
+	if (pw == NULL)
+	{
+		print_err(1, "WARNING: neither 'nobody' nor 'daemon' exists; "
+			"leaving %s owned by root", confgen_statedir());
+		confgen_prepare(0, 0);
+		return;
+	}
+	confgen_prepare(pw->pw_uid, pw->pw_gid);
+}
+
 void revoke_root_if_necessary()
 {
 	uid_t current_uid;
@@ -1747,20 +1810,14 @@ void revoke_root_if_necessary()
 		/* Continue to drop privileges below */
 	}
 
-	/* Look up the 'nobody' user */
-	pw = getpwnam(drop_user);
+	pw = sysmon_drop_user();
 	if (pw == NULL)
 	{
-		/* Try 'daemon' as fallback */
-		drop_user = "daemon";
-		pw = getpwnam(drop_user);
-
-		if (pw == NULL)
-		{
-			print_err(1, "WARNING: Cannot drop root privileges - user '%s' not found", drop_user);
-			return;
-		}
+		print_err(1, "WARNING: Cannot drop root privileges - neither "
+			"'nobody' nor 'daemon' exists");
+		return;
 	}
+	drop_user = pw->pw_name;
 
 	if (debug)
 	{
@@ -1813,6 +1870,33 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 #endif /* HAVE_LIBPTHREAD */
 
 	setup_client_listen(listenport);
+
+	/*
+	 * Say plainly how - or whether - anything can talk to this daemon.
+	 *
+	 * The client socket used to be unconditional, and for most of this
+	 * daemon's life it was an unauthenticated port opened by a process
+	 * running as root. It is off unless asked for now, which means a box
+	 * with neither a listener nor an aggregator monitors and pages
+	 * perfectly well but cannot be looked at - a reasonable thing to want
+	 * and a very easy thing to do by accident, so it gets said out loud.
+	 */
+	if (listenport > 0)
+	{
+		print_err(1, "listening for sysmon clients on TCP %d", listenport);
+	}
+	else if (aggregator_host != NULL)
+	{
+		print_err(0, "no client socket; reporting to sysmon-web at %s:%d",
+			aggregator_host, aggregator_port);
+	}
+	else
+	{
+		print_err(1, "WARNING: no client socket and no aggregator - this daemon "
+			"will monitor and page, but nothing can query it. Set "
+			"\"config aggregator\" to report to a sysmon-web, or "
+			"\"config listen 1345\" (or -p) for the sysmon client.");
+	}
 	if (!disable_icmp)
 	{
 		setup_icmp_fd();
@@ -1820,8 +1904,13 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		setup_icmpv6_fd();
 #endif /* HAVE_IPv6 */
 	}
-	/* Write the pidfile while still root — after the privilege drop the
-	 * typical /var/run location is no longer writable. */
+	/*
+	 * The state directory holds the pidfile now, so it has to exist
+	 * before the pidfile is written - and both have to happen while we
+	 * are still root, because after the drop neither /var/db nor the
+	 * directory's ownership is ours to arrange.
+	 */
+	confgen_prepare_as_root();
 	write_pid_file();
 	revoke_root_if_necessary();
 
@@ -1867,6 +1956,11 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		}
 #endif /* HAVE_IPv6 */
 
+		/* Keep the aggregator link up, if one is configured. Cheap
+		   when it already is, and never load-bearing: monitoring
+		   carries on regardless of whether sysmon-web is reachable. */
+		aggregator_poll(now_t);
+
 		service_checks(now_t); /* do checks that are ready for us */
 
 		needssleep(now_t);     /* if we need a sleep, do it here */
@@ -1910,7 +2004,12 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			{
 				print_err(0, "calling sync_after_sighup");
 			}
-			hupdata = sync_after_sighup(currenthead, configfile);
+			/* Which config is live can change between reloads: a
+			   delivery swaps the current generation, a rollback swaps
+			   it back, and a revert drops it and returns to the seed.
+			   Ask rather than remember. */
+			hupdata = sync_after_sighup(currenthead,
+				(char *)confgen_active_config());
 
 			currenthead = hupdata;
 			/* Must do this to avoid qsort having out of bounds issues
@@ -2045,7 +2144,7 @@ void signal_ourselves(int oursignal)
 	FILE *fh;
 	char buffer[256];
 
-	fh = fopen(parser_pidfile, "r");
+	fh = fopen(sysmon_pidfile(), "r");
 	if (fh == NULL)
 	{
 		perror("signal_ourselves:fopen");
@@ -2104,7 +2203,13 @@ void do_tree_periodic(time_t now)
 int main(int argc, char **argv)
 {
 	int pid = 0; /* pid of child */
-	int listenport = SYSMON_PORTNUM; /* (default) port to listen on */
+	/*
+	 * -1 means "nobody has said". The client socket is opt-in: a -p on
+	 * the command line or "config listen" in the config turns it on, and
+	 * without either the daemon never binds anything. See the comment on
+	 * the listen directive in parser.l for why.
+	 */
+	int listenport = -1;
 	char myhostname[80]; /* my hostname */
 	struct rlimit thislimit; /* used for resetting fd limits */
 	struct timeval tv;
@@ -2187,15 +2292,53 @@ int main(int argc, char **argv)
 	}
 	badconfig = FALSE;
 
-#ifdef ENABLE_SNMP
-	/* Initalize SNMP */
-	init_snmp("sysmond");
-#endif /* ENABLE_SNMP */
 
 
-	/* Parse the configuration */
+	/*
+	 * Two parses, and only when this box is managed.
+	 *
+	 * The first is the seed - /etc/sysmon.conf, or whatever -f named.
+	 * It is read for one reason beyond being the fallback: it is where
+	 * "config generation-dir" lives, and that has to be known before
+	 * anything can look for a managed copy. The setting is locked
+	 * immediately afterwards, so a delivered config cannot move the
+	 * directory the daemon is currently running out of. (On a box with
+	 * real filesystem permissions it could not take effect anyway - the
+	 * daemon owns one directory and no others.)
+	 *
+	 * The second parse, if there is a managed generation, is the config
+	 * this daemon actually runs.
+	 */
 	currenthead = loadconfig(configfile);
 	update_globs_from_parser();
+	confgen_lock_statedir();
+
+	/*
+	 * Command line wins over config: -p is somebody at a terminal saying
+	 * what they want right now, and it is also how the config gets
+	 * overridden when the config is the thing being debugged.
+	 */
+	if (listenport < 0)
+		listenport = (parser_listenport >= 0) ? parser_listenport : 0;
+
+	{
+		const char *active = confgen_active_config();
+
+		if (strcmp(active, configfile) != 0)
+		{
+			print_err(1, "running managed generation %lu from %s",
+				confgen_generation(), confgen_statedir());
+			free_tree(currenthead);
+			currenthead = loadconfig((char *)active);
+			update_globs_from_parser();
+		}
+		else
+		{
+			print_err(0, "running %s; generations would be kept in %s",
+				configfile, confgen_statedir());
+		}
+	}
+
 	if (max_numnei > maxqueued && (!quiet))
 	{
 		print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",
@@ -2239,6 +2382,19 @@ int main(int argc, char **argv)
 		print_err(1, "main: currenthead == NULL - nothing to monitor, exiting");
 		exit(1);
 	}
+
+	/*
+	 * Put back what the last run knew: how long each host had been down,
+	 * how many consecutive failures it was at, and whether anyone had
+	 * already been paged about it. Without this a daemon restarted during
+	 * an outage pages again for something it has already reported.
+	 *
+	 * After the config is loaded and before the first check, so the
+	 * restored counts are what the first check compares against - and
+	 * only at startup, because a SIGHUP reload already carries all of it
+	 * across in hard_copy().
+	 */
+	load_state(path_savestate);
 
 	/* if we're syslogging stuff, log a bootup message in syslog
 	 */

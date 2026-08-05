@@ -10,11 +10,25 @@ extern unsigned short int use_ping_helper;  /* From syswatch.c */
 /* Forward declarations */
 static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *here);
 
+/* Set once if the kernel refuses a send on our post-drop raw socket, so
+ * the complaint is logged a single time rather than per packet. */
+static int helper_required = 0;
+
+/* Defined near the RTT code; called from handle_icmp_responses so that
+ * the one reader of the raw socket also feeds RTT checks. Returns TRUE
+ * if this reply belonged to the given RTT check and was recorded. */
+static bool rtt_match_and_record(struct monitorent *here,
+	unsigned short echo_id, unsigned short echo_seq,
+	struct in_addr from_addr, struct timeval *recv_time);
+
 #define A(bit)          icmp_temp.rcvd_tbl[(bit)>>3]  /*identify byte in array*/
 #define B(bit)          (1 << ((bit) & 0x07))   /* identify bit in byte */
 #define CLR(bit)        (A(bit) &= (~B(bit)))  /* do something... */
 
 int debug_icmp_replies_only = 0;
+
+/* Set when the kernel agreed to stamp arriving ICMP packets for us. */
+static int icmp_kernel_timestamps = 0;
 
 /* All the variables needed for pinging (I think) - needs to be locked */
 /* for threaded use */
@@ -113,6 +127,32 @@ void setup_icmp_fd()
 	}
 	print_err(0, "sysmond: INFO: hold queue set to %d for icmp packets", hold);
 
+	/*
+	 * Ask the kernel to timestamp arriving packets, if this platform
+	 * can. Without it a reply is timed when the daemon gets round to
+	 * reading the socket, so a busy select() loop inflates every RTT
+	 * it measures - the daemon ends up reporting its own scheduling
+	 * delay as network latency. With it, the time comes from where the
+	 * packet was actually received.
+	 *
+	 * Entirely optional: SCM_TIMESTAMP is read per packet and falls
+	 * back to gettimeofday() when it is not there, so a platform
+	 * without either the option or the control message just keeps the
+	 * old behaviour.
+	 */
+#ifdef SO_TIMESTAMP
+	{
+		int on = 1;
+
+		if (setsockopt(glob_icmp_fd, SOL_SOCKET, SO_TIMESTAMP,
+				&on, sizeof(on)) == 0)
+			icmp_kernel_timestamps = 1;
+		else if (debug)
+			print_err(0, "icmp: SO_TIMESTAMP refused (%s); "
+				"timing replies on read instead", strerror(errno));
+	}
+#endif /* SO_TIMESTAMP */
+
 	set_nonblock(glob_icmp_fd);
 
 	return;
@@ -128,6 +168,7 @@ void	handle_icmp_responses()
 	struct pingdata *localstruct = NULL;
 	struct pingdata rcvd_data;
 	struct sockaddr_in from;
+	struct timeval recv_time;
 	char rcvd_pkt[ICMP_PACKET_SIZE];
 	int ret;
 	int fromlen;
@@ -141,19 +182,72 @@ void	handle_icmp_responses()
 
 	while (data_waiting_read(glob_icmp_fd, 0))
 	{
-	        if ((ret = recvfrom(glob_icmp_fd, 
-			rcvd_pkt, ICMP_PACKET_SIZE, 0,
-			(struct sockaddr *)&from, &fromlen)) < 0)
+		struct msghdr msg;
+		struct iovec iov;
+		union {
+			struct cmsghdr align;   /* keeps the buffer aligned */
+			char buf[256];
+		} cmsgbuf;
+		struct cmsghdr *cmsg;
+		int stamped = 0;
+
+		memset(&msg, 0, sizeof(msg));
+		iov.iov_base = rcvd_pkt;
+		iov.iov_len = ICMP_PACKET_SIZE;
+		msg.msg_name = &from;
+		msg.msg_namelen = sizeof(from);
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_control = cmsgbuf.buf;
+		msg.msg_controllen = sizeof(cmsgbuf.buf);
+
+		if ((ret = recvmsg(glob_icmp_fd, &msg, 0)) < 0)
 		{
 			if (errno == EINTR) /* if we get interrupted */
 			{
-				print_err(1, "icmp.c: got interrupted while attempting to recvfrom");
+				print_err(1, "icmp.c: got interrupted while attempting to recvmsg");
 				/* Decrease the counter */
 				continue; /* and try again */
 			}
-			perror("icmp.c: recvfrom");
+			perror("icmp.c: recvmsg");
 			continue; /* try again */
 		}
+		fromlen = msg.msg_namelen;
+
+		/*
+		 * When the kernel stamped the packet, use its time: that is
+		 * when the reply actually arrived, not when this loop got
+		 * round to reading it. The difference is the daemon's own
+		 * scheduling delay, and on a busy box it is larger than the
+		 * latency being measured.
+		 */
+#ifdef SCM_TIMESTAMP
+		if (icmp_kernel_timestamps)
+		{
+			for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL;
+			     cmsg = CMSG_NXTHDR(&msg, cmsg))
+			{
+				if (cmsg->cmsg_level == SOL_SOCKET &&
+				    cmsg->cmsg_type == SCM_TIMESTAMP &&
+				    cmsg->cmsg_len >= CMSG_LEN(sizeof(struct timeval)))
+				{
+					memcpy(&recv_time, CMSG_DATA(cmsg),
+						sizeof(struct timeval));
+					stamped = 1;
+					break;
+				}
+			}
+		}
+#else
+		(void)cmsg;
+#endif /* SCM_TIMESTAMP */
+
+		/* No kernel stamp: time it now, which is the best this can
+		 * do - still before any per-check work, so a reply is not
+		 * timed from when the queue walk reached its check. */
+		if (!stamped)
+			gettimeofday(&recv_time, NULL);
+
                 /* Check the IP header */
 		rcvd_data.ip = (struct IPHDR *)rcvd_pkt;
 		rcvd_data.hlen = (rcvd_data.ip->IHL & 0x0f) << 2;
@@ -167,9 +261,59 @@ void	handle_icmp_responses()
 
 		/* determine if it was ours */
 
-		/* Walk the queue to find active checks that are ping/icmp type */
+		/* Walk the queue to find the check this reply belongs to.
+		 *
+		 * Both ping and rtt checks live on this one raw socket, and
+		 * this is its only reader. An rtt check used to read the socket
+		 * itself, from service_test_rtt - but this function is called
+		 * every main-loop pass and drains the socket dry, so it was
+		 * consuming rtt replies and, matching only ping checks,
+		 * throwing them away. The rtt check then always timed out.
+		 * Feeding rtt from here, where the packet actually arrives, is
+		 * the fix. */
 		for (here = queuehead; here != NULL; here = here->next)
 		{
+			if (here->checkent->type == SYSM_TYPE_PING_LATENCY)
+			{
+				if (rtt_match_and_record(here,
+					rcvd_data.icp->ICMP_ECHO_ID,
+					rcvd_data.icp->ICMP_SEQ,
+					from.sin_addr, &recv_time))
+					break; /* a reply belongs to one check */
+				continue;
+			}
+			if (here->checkent->type == SYSM_TYPE_PKTLOSS)
+			{
+				/* A pktloss check counts replies; the ratio is
+				 * the measurement. Same ownership test as every
+				 * other path: ident AND source address. */
+				struct pktloss_data *pkt = here->monitordata;
+
+				if (pkt == NULL || pkt->ping == NULL ||
+				    pkt->ping->to == NULL)
+					continue;
+				if (rcvd_data.icp->ICMP_ECHO_ID == pkt->ping->ident &&
+				    from.sin_addr.s_addr ==
+				      pkt->ping->to->sin_addr.s_addr)
+				{
+					/* Never count more replies than probes.
+					 * The rtt path indexes by sequence and so
+					 * ignores a duplicate outright; this one
+					 * matches on ident and source alone, so a
+					 * duplicated or reflected reply used to be
+					 * a second arrival. That drove nreceived
+					 * past packetsent, and "lost = sent - rcvd"
+					 * is unsigned: one duplicate turned zero
+					 * loss into four billion lost, which alerts
+					 * as PKTLOSS_EXCEED while the web UI - which
+					 * clamps - shows 0%. */
+					if (pkt->ping->nreceived <
+					    pkt->ping->packetsent)
+						pkt->ping->nreceived++;
+					break; /* a reply belongs to one check */
+				}
+				continue;
+			}
 			if (here->checkent->type != SYSM_TYPE_PING)
 			{
 				continue;
@@ -455,37 +599,76 @@ void	pinger_v4(struct pingdata *localdata, struct monitorent *here)
 	/* compute ICMP checksum here */
 	localdata->icp->ICMP_CHECKSUM = in_cksum((u_short *)localdata->icp, send_octets);
 
-	/* Use ping helper if enabled */
+	/*
+	 * Send on our own socket whenever we have one, even though we are
+	 * no longer root.
+	 *
+	 * A raw socket's privilege is checked when it is created, not on
+	 * each send, and setup_icmp_fd() opens ours while sysmond is still
+	 * root - before revoke_root_if_necessary() drops. The descriptor
+	 * outlives the drop and keeps working, which is exactly how the
+	 * RECEIVE side has always worked post-drop.
+	 *
+	 * This used to fork and exec the setuid helper for every single
+	 * echo request, and then block in waitpid until it exited: ~1.6ms
+	 * of stalled event loop per packet, in a daemon with one select()
+	 * loop and nothing else to do meanwhile. On a fleet of 800 that is
+	 * over a second of blocked monitoring per sweep, and seven times
+	 * that when hosts are down and every check sends its full batch -
+	 * precisely when the daemon can least afford to stall.
+	 *
+	 * The helper is not gone: it stays as the fallback for a platform
+	 * that really does refuse to send after a privilege drop. We find
+	 * that out from the send itself rather than assuming it, and only
+	 * pay for a fork when the cheap path has actually been refused.
+	 */
+	if (glob_icmp_fd != -1) {
+		sendtoret = sendto(glob_icmp_fd, (char *)localdata->outpack,
+			send_octets, 0, &localdata->ping_target,
+			sizeof(struct sockaddr));
+		serrno = errno;
+
+		if (sendtoret == send_octets) {
+			gettimeofday(&localdata->lastsentat, NULL);
+			return;
+		}
+
+		switch (serrno)
+		{
+			case ENETUNREACH:
+				here->retval = SYSM_NETUNRCH;
+				return;
+			case EHOSTDOWN:
+			case EHOSTUNREACH:
+				here->retval = SYSM_HOSTDOWN;
+				return;
+			case EPERM:
+			case EACCES:
+				/* This kernel does not let a dropped process
+				 * send on the socket it opened as root. Say so
+				 * once, then use the helper from here on. */
+				if (use_ping_helper && !helper_required) {
+					helper_required = 1;
+					print_err(1, "icmp: cannot send on the raw "
+						"socket after dropping privileges "
+						"(%s) - using %s for every packet",
+						strerror(serrno), PING_HELPER_PATH);
+				}
+				break;
+			default:
+				/* A new one to me */
+				perror("icmp.c:pinger_v4:sendto");
+				return;
+		}
+	}
+
+	/* No usable socket, or it refused us: the helper sends as root. */
 	if (use_ping_helper) {
 		if (pinger_v4_via_helper(localdata, here) == 0) {
 			gettimeofday(&localdata->lastsentat, NULL);
 		}
 		return;
 	}
-
-	/* send the packet directly (traditional method) */
-	sendtoret = sendto(glob_icmp_fd, (char *)localdata->outpack,
-		send_octets, 0, &localdata->ping_target, sizeof(struct sockaddr));
-	serrno = errno;
-
-	if (sendtoret < 0 || sendtoret != send_octets)  
-	{
-	        switch(serrno)
-	        {
-	                case ENETUNREACH:
-	                        here->retval = SYSM_NETUNRCH;
-				return;
-	                case EHOSTDOWN:
-	                case EHOSTUNREACH:
-	                        here->retval =  SYSM_HOSTDOWN;
-				return;
-			default:
-			/* A new one to me */
-				perror("icmp.c:pinger_v4:sendto");
-		}
-	}
-	/* Track it */
-	gettimeofday(&localdata->lastsentat, NULL);
 }
 
 /*
@@ -901,10 +1084,23 @@ void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
 		/* Record this cycle's results */
 		sent = localstruct->packetsent;
 		rcvd = localstruct->nreceived;
-		lost = sent - rcvd;
+		/* Belt as well as braces: these are unsigned, and a count of
+		   replies above the count of probes would not underflow to a
+		   small number, it would underflow to a huge one. */
+		lost = (rcvd >= sent) ? 0 : sent - rcvd;
 
 		time(&now);
 		pktloss_add_sample(pktdata, now, sent, rcvd);
+
+		/* Keep this cycle's counts on the object. pktdata is freed a
+		   few lines below, so anything left in it is unreportable
+		   the moment the check ends. */
+		here->checkent->pktloss_last_sent = sent;
+		here->checkent->pktloss_last_recv = rcvd;
+
+		/* A new loss figure is a change worth sending, even when the
+		   verdict is unchanged - see rtt_finish. */
+		object_changed(here->checkent);
 
 		if (debug || here->checkent->trace) {
 			print_err(0, "pktloss: cycle complete - %u/%u lost (%.1f%%)",
@@ -948,8 +1144,15 @@ void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
 		return;
 	}
 
-	/* Send more pings if needed */
-	if ((localstruct->nreceived < here->checkent->min_pings) &&
+	/* Send the rest of the batch. The batch IS the measurement - loss
+	 * is judged from send_pings probes - so every probe goes out no
+	 * matter how many replies are already in. The old condition kept
+	 * sending only while replies were MISSING (nreceived < min_pings),
+	 * which terminates on a lossy host and never on a healthy one: the
+	 * first reply satisfied min_pings at packetsent=1, the completion
+	 * branch needs packetsent >= send_pings, and the check sat wedged
+	 * between the two forever - on precisely the hosts that answer. */
+	if ((localstruct->packetsent < here->checkent->send_pings) &&
 	    (mydifftime(localstruct->lastsentat, here->lastserv) >= 1)) {
 
 		pinger_v4(localstruct, here);
@@ -1010,11 +1213,33 @@ void stop_test_pktloss(struct monitorent *here)
  * Features:
  * - ICMP-based RTT measurement
  * - RFC 3550 jitter calculation
- * - Rolling average over N samples
+ * - Mean RTT over the rtt_samples probes of one check
  * - Per-host thresholds
  */
 
-/* RTT tracking structure */
+/* Upper bound on rtt_samples, so the per-probe tables below are a fixed
+ * size. A latency figure is an average over a handful of probes; asking
+ * for hundreds says the config means something else. */
+#define RTT_MAX_SAMPLES		64
+
+/* Spacing between probes is per object ("rtt_interval N;" in ms,
+ * default RTT_DEFAULT_INTERVAL_MS). Sending them back to back would
+ * measure one instant and call it a trend; spacing them means the
+ * samples cover a window and the jitter between them is the target's,
+ * not our scheduler's. */
+
+/* How long to keep waiting after the last probe for stragglers. */
+#define RTT_GRACE_MS		1000.0
+
+/*
+ * RTT tracking structure.
+ *
+ * One of these lives for exactly one check: start_test_rtt() allocates
+ * it, stop_test_rtt() frees it. That lifetime is what makes the plain
+ * sum/count below correct rather than lazy - the counters only ever
+ * cover this check's rtt_samples probes, so there is no window to slide
+ * and no history to keep between checks.
+ */
 struct rtt_data {
 	struct pingdata *ping;              /* Reuse existing ICMP infrastructure */
 
@@ -1022,7 +1247,7 @@ struct rtt_data {
 	double rtt_current;                 /* Current RTT in milliseconds */
 	double rtt_min;                     /* Minimum RTT seen */
 	double rtt_max;                     /* Maximum RTT seen */
-	double rtt_avg;                     /* Rolling average RTT */
+	double rtt_avg;                     /* Mean of this check's samples */
 	double rtt_sum;                     /* Sum for averaging */
 	unsigned int rtt_count;             /* Number of RTT samples collected */
 
@@ -1030,8 +1255,29 @@ struct rtt_data {
 	double jitter_current;              /* Current jitter in milliseconds */
 	double rtt_previous;                /* Previous RTT for jitter calculation */
 
-	/* Timing */
-	struct timeval last_send_time;      /* When we sent last packet */
+	/*
+	 * When each probe went out, indexed by its ICMP sequence number
+	 * minus one, and whether that sequence has been answered.
+	 *
+	 * Probes used to be strictly serial - send one, wait for its
+	 * reply, send the next - with a single last_send_time for the one
+	 * in flight. That made a lost packet fatal: nothing would be sent
+	 * again, because the next send waited on a reply that was never
+	 * coming, and the check sat there until the 30s timeout and threw
+	 * away every sample it had already collected. One dropped packet
+	 * turned a latency measurement into an outage.
+	 *
+	 * Probes now go out on a fixed schedule with several in flight, so
+	 * a reply has to say which probe it answers. It does: the sequence
+	 * number we set in pinger_v4 comes back in the echo reply, and it
+	 * is what indexes these. That also makes the RTT exact under
+	 * reordering, and lets a duplicate be ignored rather than counted
+	 * against a stale send time.
+	 */
+	struct timeval sent_at[RTT_MAX_SAMPLES];
+	bool answered[RTT_MAX_SAMPLES];
+	unsigned int probes;                /* how many we have sent */
+	struct timeval last_send_time;      /* when the newest probe went out */
 };
 
 /*
@@ -1171,8 +1417,11 @@ void start_test_rtt(struct monitorent *here)
 			here->checkent->rtt_samples);
 	}
 
-	/* Record send time before sending */
-	gettimeofday(&rttdata->last_send_time, NULL);
+	/* First probe is sequence 1, so it is sent_at[0]. Stamp before the
+	 * send, so the recorded time cannot be later than the reply. */
+	gettimeofday(&rttdata->sent_at[0], NULL);
+	rttdata->last_send_time = rttdata->sent_at[0];
+	rttdata->probes = 1;
 
 	/* Send initial ping using existing pinger_v4 function */
 	pinger_v4(localstruct, here);
@@ -1191,174 +1440,285 @@ void start_test_rtt(struct monitorent *here)
  * Checks for ICMP replies, calculates RTT and jitter, and determines
  * if thresholds are exceeded.
  */
+/*
+ * rtt_match_and_record - is this echo reply ours, and if so, time it
+ *
+ * Called from handle_icmp_responses (the single reader of the raw ICMP
+ * socket) for each SYSM_TYPE_PING_LATENCY check. The ident+source match
+ * is the same ownership test the ping path uses, and for the same reason
+ * - a 16-bit ident alone is not proof, so the reply's source must be the
+ * address this check is probing. recv_time is when the packet landed.
+ *
+ * Sends nothing and decides nothing: it records one sample. Whether that
+ * was the last sample, and whether to send the next probe, is the state
+ * machine in service_test_rtt, run on the next queue walk.
+ */
+static bool rtt_match_and_record(struct monitorent *here,
+	unsigned short echo_id, unsigned short echo_seq,
+	struct in_addr from_addr, struct timeval *recv_time)
+{
+	struct rtt_data *rttdata;
+	struct pingdata *ping;
+	double rtt_ms;
+	unsigned int idx;
+
+	if (here == NULL || here->monitordata == NULL)
+		return FALSE;
+
+	rttdata = (struct rtt_data *)here->monitordata;
+	ping = rttdata->ping;
+	if (ping == NULL || ping->to == NULL)
+		return FALSE;
+
+	if (echo_id != ping->ident ||
+	    from_addr.s_addr != ping->to->sin_addr.s_addr)
+		return FALSE;
+
+	/* Which probe is this the answer to? pinger_v4 numbers them from
+	 * one, so the table index is one less. A sequence we never sent is
+	 * not ours, whatever else matches. */
+	if (echo_seq == 0 || echo_seq > rttdata->probes ||
+	    echo_seq > RTT_MAX_SAMPLES)
+		return FALSE;
+	idx = echo_seq - 1;
+
+	/* Already counted: a duplicate reply is not a second sample, and
+	 * timing it against anything would be inventing data. */
+	if (rttdata->answered[idx])
+		return TRUE;
+	rttdata->answered[idx] = TRUE;
+
+	rtt_ms = calculate_rtt_ms(&rttdata->sent_at[idx], recv_time);
+
+	rttdata->rtt_current = rtt_ms;
+	if (rtt_ms < rttdata->rtt_min)
+		rttdata->rtt_min = rtt_ms;
+	if (rtt_ms > rttdata->rtt_max)
+		rttdata->rtt_max = rtt_ms;
+	rttdata->rtt_sum += rtt_ms;
+	rttdata->rtt_count++;
+	rttdata->rtt_avg = rttdata->rtt_sum / rttdata->rtt_count;
+
+	/* Jitter needs a previous sample to differ from. */
+	if (rttdata->rtt_count > 1)
+		update_jitter(rttdata, rtt_ms);
+	rttdata->rtt_previous = rtt_ms;
+
+	ping->nreceived++;
+
+	if (debug || here->checkent->trace)
+		print_err(here->checkent->trace,
+			"RTT sample #%u for %s: %.2fms (avg=%.2fms jitter=%.2fms)",
+			rttdata->rtt_count, here->checkent->hostname, rtt_ms,
+			rttdata->rtt_avg, rttdata->jitter_current);
+
+	return TRUE;
+}
+
+/* The object's probe spacing, defended: parse-time validation bounds
+ * it, but an object built by any path that skipped that (savestate,
+ * future callers) falls back to the default rather than to zero. */
+static double rtt_interval_ms(struct monitorent *here)
+{
+	unsigned int iv = here->checkent->rtt_interval;
+
+	if (iv < RTT_MIN_INTERVAL_MS || iv > RTT_MAX_INTERVAL_MS)
+		return (double)RTT_DEFAULT_INTERVAL_MS;
+	return (double)iv;
+}
+
+/*
+ * rtt_ms_until_next_probe - how long until this check must send again
+ *
+ * The main loop sleeps in select() for up to two seconds and is woken
+ * early only by traffic. An rtt check's probe schedule is finer than
+ * that, and the thing that would wake the loop - the reply to the last
+ * probe - has already arrived by the time the next one is due. So the
+ * loop has to be told, or the schedule silently degrades to one probe
+ * per wakeup and a five-sample check takes ten seconds.
+ *
+ * Returns milliseconds until the next probe is due (0 if it is due
+ * now), or -1 for a check with nothing left to send.
+ */
+double rtt_ms_until_next_probe(struct monitorent *here, struct timeval *now)
+{
+	struct rtt_data *rttdata;
+	unsigned int want;
+	double since;
+
+	if (here == NULL || here->monitordata == NULL ||
+	    here->checkent == NULL ||
+	    here->checkent->type != SYSM_TYPE_PING_LATENCY)
+		return -1.0;
+
+	rttdata = (struct rtt_data *)here->monitordata;
+
+	want = here->checkent->rtt_samples;
+	if (want > RTT_MAX_SAMPLES)
+		want = RTT_MAX_SAMPLES;
+	if (want == 0)
+		want = 1;
+
+	if (rttdata->probes >= want)
+		return -1.0; /* all sent; waiting on replies, which wake us */
+
+	since = calculate_rtt_ms(&rttdata->last_send_time, now);
+	if (since >= rtt_interval_ms(here))
+		return 0.0;
+	return rtt_interval_ms(here) - since;
+}
+
+/*
+ * rtt_finish - free an rtt check's state and record its verdict.
+ */
+static void rtt_finish(struct monitorent *here, struct rtt_data *rttdata, int retval)
+{
+	here->retval = retval;
+
+	/* Keep what was measured. rttdata dies here, so anything not
+	   copied onto the object is gone - which is why these numbers used
+	   to exist only in a debug log line and nothing could report them.
+	   A check that got no replies leaves the previous figures alone
+	   rather than overwriting them with zeroes; "the last time we
+	   could measure, it was 12ms" is more use than a row of noughts. */
+	if (here->checkent != NULL && rttdata->rtt_count > 0) {
+		here->checkent->rtt_last_min = rttdata->rtt_min;
+		here->checkent->rtt_last_avg = rttdata->rtt_avg;
+		here->checkent->rtt_last_max = rttdata->rtt_max;
+		here->checkent->rtt_last_jitter = rttdata->jitter_current;
+		here->checkent->rtt_last_replies = rttdata->rtt_count;
+		here->checkent->rtt_last_probes = rttdata->probes;
+	} else if (here->checkent != NULL) {
+		/* Silence is still a fact worth reporting: probes went out
+		   and none came back. */
+		here->checkent->rtt_last_replies = 0;
+		here->checkent->rtt_last_probes = rttdata->probes;
+	}
+
+	/*
+	 * New numbers are a change, even when the verdict is the same.
+	 *
+	 * CONF is incremental - it sends objects whose change_seq has
+	 * moved - so without this an rtt check that stays up reports its
+	 * first measurement and then never another. The figures on the
+	 * page would freeze while the daemon went on measuring, which is
+	 * worse than showing nothing.
+	 */
+	if (here->checkent != NULL)
+		object_changed(here->checkent);
+
+	if (rttdata->ping != NULL) {
+		FREE(rttdata->ping->packet);
+		FREE(rttdata->ping);
+	}
+	FREE(rttdata);
+	here->monitordata = NULL;
+}
+
+/*
+ * service_test_rtt - drive one rtt check's probe/evaluate cycle.
+ *
+ * No longer reads the socket: handle_icmp_responses records the samples
+ * (see rtt_match_and_record). This runs on every queue walk and does
+ * three things - finish when enough samples are in, send the next probe
+ * once the outstanding one has been answered, and time the whole thing
+ * out. Probes are serial: one in flight at a time, so last_send_time is
+ * unambiguous and a single reply per probe is expected.
+ */
 void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 {
 	struct rtt_data *rttdata;
 	struct pingdata *ping;
-	struct timeval recv_time;
-	struct sockaddr_in from;
-	socklen_t fromlen;
-	char recv_buf[512];
-	int recv_len;
-	struct ip *ip_hdr;
-	struct ICMPHDR *icmp_hdr;
-	int ip_hdr_len;
-	double rtt_ms;
-	double elapsed_since_send;
+	unsigned int want;
+	double since_send;
 
-	if (here == NULL || here->monitordata == NULL) {
+	if (here == NULL || here->monitordata == NULL)
 		return;
-	}
 
 	rttdata = (struct rtt_data *)here->monitordata;
 	ping = rttdata->ping;
 
-	/* Check for ICMP reply */
-	fromlen = sizeof(from);
-	recv_len = recvfrom(glob_icmp_fd, recv_buf, sizeof(recv_buf), MSG_DONTWAIT,
-	                    (struct sockaddr *)&from, &fromlen);
+	want = here->checkent->rtt_samples;
+	if (want > RTT_MAX_SAMPLES)
+		want = RTT_MAX_SAMPLES;
+	if (want == 0)
+		want = 1;
 
-	if (recv_len < 0) {
-		/* Distinguish between "no data yet" (EAGAIN) and actual errors */
-		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			print_err(1, "service_test_rtt: recvfrom error for %s: %s",
-			          here->checkent->hostname, strerror(errno));
-			/* Continue to timeout check - this may be transient */
-		}
-		/* EAGAIN/EWOULDBLOCK is normal for non-blocking socket - fall through to timeout check */
-		goto timeout_check;
+	since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
+
+	/* Still probes to send, and the spacing has elapsed: send the next
+	 * one. This does not wait for the previous reply - probes are a
+	 * schedule, not a chain, so a packet that never comes back costs
+	 * one sample rather than the whole check. */
+	if (rttdata->probes < want && since_send >= rtt_interval_ms(here)) {
+		gettimeofday(&rttdata->sent_at[rttdata->probes], NULL);
+		rttdata->last_send_time = rttdata->sent_at[rttdata->probes];
+		rttdata->probes++;
+		pinger_v4(ping, here);
+		gettimeofday(&ping->lastsentat, NULL);
+		return;
 	}
 
-	if (recv_len > 0) {
-		/* Record receive time immediately */
-		gettimeofday(&recv_time, NULL);
+	/* Done when every probe is answered, or when the last one has been
+	 * out long enough that anything still missing is lost. */
+	if (rttdata->probes >= want &&
+	    (rttdata->rtt_count >= want || since_send >= RTT_GRACE_MS)) {
+		int retval;
 
-		/* Validate minimum packet size for IP header */
-		if (recv_len < sizeof(struct ip)) {
-			if (debug) {
-				print_err(1, "service_test_rtt: Received packet too small for IP header (%d bytes)", recv_len);
-			}
-			goto timeout_check;
+		/* Nothing came back at all: this is not a slow host, it is a
+		 * silent one, and that is the ping verdict rather than a
+		 * latency one. */
+		if (rttdata->rtt_count == 0) {
+			print_err(1, "RTT test for %s: no reply to %u probes",
+				here->checkent->hostname, rttdata->probes);
+			rtt_finish(here, rttdata, SYSM_TIMEDOUT);
+			return;
 		}
 
-		/* Parse IP header */
-		ip_hdr = (struct ip *)recv_buf;
-		ip_hdr_len = ip_hdr->ip_hl << 2;
-
-		/* Validate IP header length */
-		if (ip_hdr_len < 20 || ip_hdr_len > recv_len) {
-			if (debug) {
-				print_err(1, "service_test_rtt: Invalid IP header length (%d), recv_len=%d", ip_hdr_len, recv_len);
-			}
-			goto timeout_check;
+		/* RTT is checked before jitter, so a link that is both slow
+		 * and jittery reports "RTT too high".
+		 *
+		 * A threshold of zero means "do not alert on latency", the
+		 * same as jitter_threshold. It has to: the test is "average
+		 * over threshold", so treating zero as a real limit made any
+		 * measurable latency an alert - 0.05ms on loopback qualified -
+		 * and the object was critical for as long as it ran. Such an
+		 * object now measures, records and reports without alerting,
+		 * until someone sets a limit for it to fail. */
+		if (here->checkent->rtt_threshold > 0 &&
+		    rttdata->rtt_avg > here->checkent->rtt_threshold) {
+			retval = SYSM_RTT_HIGH;
+			if (debug)
+				print_err(1, "RTT threshold exceeded for %s: avg=%.2fms (threshold=%ums)",
+					here->checkent->hostname, rttdata->rtt_avg,
+					here->checkent->rtt_threshold);
+		} else if (here->checkent->jitter_threshold > 0 &&
+		           rttdata->jitter_current > here->checkent->jitter_threshold) {
+			retval = SYSM_JITTER_HIGH;
+			if (debug)
+				print_err(1, "Jitter threshold exceeded for %s: jitter=%.2fms (threshold=%ums)",
+					here->checkent->hostname, rttdata->jitter_current,
+					here->checkent->jitter_threshold);
+		} else {
+			retval = SYSM_OK;
 		}
 
-		/* Validate enough space for ICMP header */
-		if (recv_len < ip_hdr_len + (int)sizeof(struct ICMPHDR)) {
-			if (debug) {
-				print_err(1, "service_test_rtt: Packet too small for ICMP header (recv_len=%d, ip_hdr_len=%d)",
-					recv_len, ip_hdr_len);
-			}
-			goto timeout_check;
-		}
+		if (debug)
+			print_err(1, "RTT test complete for %s: %u/%u replies min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
+				here->checkent->hostname, rttdata->rtt_count,
+				rttdata->probes, rttdata->rtt_min, rttdata->rtt_avg,
+				rttdata->rtt_max, rttdata->jitter_current);
 
-		/* Parse ICMP header */
-		icmp_hdr = (struct ICMPHDR *)(recv_buf + ip_hdr_len);
-
-		/* Check if this is our ICMP echo reply - ident AND source
-		 * address, since the raw socket sees every echo reply on the
-		 * machine (see handle_icmp_responses). */
-		if (icmp_hdr->ICMP_TYPE == ICMP_ECHOREPLY &&
-		    icmp_hdr->ICMP_ECHO_ID == ping->ident &&
-		    ping->to != NULL &&
-		    from.sin_addr.s_addr == ping->to->sin_addr.s_addr) {
-
-			/* Calculate RTT */
-			rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, &recv_time);
-
-			/* Update RTT statistics */
-			rttdata->rtt_current = rtt_ms;
-			if (rtt_ms < rttdata->rtt_min) {
-				rttdata->rtt_min = rtt_ms;
-			}
-			if (rtt_ms > rttdata->rtt_max) {
-				rttdata->rtt_max = rtt_ms;
-			}
-			rttdata->rtt_sum += rtt_ms;
-			rttdata->rtt_count++;
-			rttdata->rtt_avg = rttdata->rtt_sum / rttdata->rtt_count;
-
-			ping->nreceived++;
-
-			/* Update jitter (if we have previous RTT) */
-			if (rttdata->rtt_count > 1) {
-				update_jitter(rttdata, rtt_ms);
-			}
-			rttdata->rtt_previous = rtt_ms;
-
-			if (debug) {
-				print_err(1, "RTT sample #%u: %.2fms (avg=%.2fms, jitter=%.2fms)",
-					rttdata->rtt_count, rtt_ms, rttdata->rtt_avg,
-					rttdata->jitter_current);
-			}
-
-			/* Check if we have enough samples */
-			if (rttdata->rtt_count >= here->checkent->rtt_samples) {
-				/* Threshold checking */
-				if (rttdata->rtt_avg > here->checkent->rtt_threshold) {
-					here->retval = SYSM_RTT_HIGH;
-
-					if (debug) {
-						print_err(1, "RTT threshold exceeded for %s: avg=%.2fms (threshold=%ums)",
-							here->checkent->hostname, rttdata->rtt_avg,
-							here->checkent->rtt_threshold);
-					}
-				} else if (here->checkent->jitter_threshold > 0 &&
-				           rttdata->jitter_current > here->checkent->jitter_threshold) {
-					here->retval = SYSM_JITTER_HIGH;
-
-					if (debug) {
-						print_err(1, "Jitter threshold exceeded for %s: jitter=%.2fms (threshold=%ums)",
-							here->checkent->hostname, rttdata->jitter_current,
-							here->checkent->jitter_threshold);
-					}
-				} else {
-					here->retval = SYSM_OK;
-				}
-
-				/* Log final statistics */
-				if (debug) {
-					print_err(1, "RTT test complete for %s: min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
-						here->checkent->hostname, rttdata->rtt_min, rttdata->rtt_avg,
-						rttdata->rtt_max, rttdata->jitter_current);
-				}
-
-				/* Cleanup */
-				FREE(ping->packet);
-				FREE(ping);
-				FREE(rttdata);
-				here->monitordata = NULL;
-				return;
-			}
-
-			/* Send another packet using pinger_v4 */
-			gettimeofday(&rttdata->last_send_time, NULL);
-			pinger_v4(ping, here);
-			gettimeofday(&ping->lastsentat, NULL);
-		}
+		rtt_finish(here, rttdata, retval);
+		return;
 	}
 
-timeout_check:
-	/* Check for timeout (30 seconds) */
-	elapsed_since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
-	if (elapsed_since_send > 30000.0) {
+	/* Backstop: a check that has somehow neither finished nor sent for
+	 * far longer than its own schedule allows is wedged, not slow. */
+	if (since_send > 30000.0) {
 		print_err(1, "RTT test timeout for %s after %.0fms",
-			here->checkent->hostname, elapsed_since_send);
-		here->retval = SYSM_TIMEDOUT;
-		FREE(ping->packet);
-		FREE(ping);
-		FREE(rttdata);
-		here->monitordata = NULL;
+			here->checkent->hostname, since_send);
+		rtt_finish(here, rttdata, SYSM_TIMEDOUT);
 	}
 }
 

@@ -59,7 +59,11 @@
                             <div class="text-xs text-gray-400" x-text="formatTime(ev.timestamp)"></div>
                         </td>
                         <td class="px-4 py-3">
-                            <div class="text-sm font-medium text-gray-900 mono" x-text="ev.object_name || ev.hostname"></div>
+                            <div class="text-sm font-medium text-gray-900 mono">
+                                <span x-text="hostLabel(ev)"></span>
+                                <span x-show="hostSite(ev)" class="ml-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-xs"
+                                      x-text="hostSite(ev)"></span>
+                            </div>
                             <div class="text-xs text-gray-400" x-text="ev.description || ev.hostname"></div>
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap">

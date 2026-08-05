@@ -1,0 +1,291 @@
+{{template "base" .}}
+
+{{define "title"}}Fleet{{end}}
+
+{{define "content"}}
+<div x-data="fleetPage()" x-init="init()">
+    <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
+        <div>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Fleet Configuration</h1>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide">
+                What each monitoring box is running, and what it should be
+            </p>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-500">Watch window</label>
+            <input type="number" x-model.number="watchSeconds" min="0" step="30"
+                   class="w-20 px-2 py-1 border border-gray-200 rounded text-sm">
+            <span class="text-xs text-gray-400">s</span>
+            <button @click="startRollout()" :disabled="!selected.length || busy"
+                    class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-40">
+                <i class="fas fa-rocket mr-1"></i>Roll out
+                <span x-show="selected.length" x-text="'(' + selected.length + ')'"></span>
+            </button>
+            <button @click="load()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
+                <i class="fas fa-rotate"></i>
+            </button>
+        </div>
+    </div>
+
+    <div x-show="notice" x-cloak
+         class="mb-3 text-sm rounded p-3"
+         :class="noticeBad ? 'bg-red-50 border border-red-200 text-red-900' : 'bg-emerald-50 border border-emerald-200 text-emerald-900'">
+        <div x-text="notice"></div>
+        <!-- The daemon's own parser, verbatim. Whoever has to fix this
+             needs the words their daemon used, not a paraphrase. -->
+        <template x-if="complaints.length">
+            <pre class="mt-2 text-xs bg-white/60 rounded p-2 overflow-x-auto" x-text="complaints.join('\n')"></pre>
+        </template>
+    </div>
+
+    <div class="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                <tr>
+                    <th class="px-3 py-2 w-8"></th>
+                    <th class="px-3 py-2 text-left">Site</th>
+                    <th class="px-3 py-2 text-left">State</th>
+                    <th class="px-3 py-2 text-right">Running</th>
+                    <th class="px-3 py-2 text-right">Desired</th>
+                    <th class="px-3 py-2 text-left">Hash</th>
+                    <th class="px-3 py-2 text-left">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="s in sites" :key="s.site">
+                    <tr class="border-t border-gray-100">
+                        <td class="px-3 py-2">
+                            <input type="checkbox" :value="s.site" x-model="selected"
+                                   :disabled="s.state !== 'pending'"
+                                   class="h-4 w-4 rounded border-gray-300">
+                        </td>
+                        <td class="px-3 py-2">
+                            <div class="font-medium mono" x-text="s.site"></div>
+                            <div class="text-xs text-gray-400" x-text="s.description || ''"></div>
+                        </td>
+                        <td class="px-3 py-2">
+                            <span class="px-1.5 py-0.5 rounded text-[11px] font-medium"
+                                  :class="stateClass(s.state)" x-text="s.state"></span>
+                            <div class="text-[11px] text-gray-400 mt-0.5" x-text="s.last_error || ''"></div>
+                            <div class="text-[11px] text-gray-500 mt-0.5" x-text="s.last_delivery || ''"></div>
+                            <!-- The daemon's own reason its config cannot be
+                                 managed. Shown here rather than at delivery
+                                 time, which is far too late to find out. -->
+                            <div x-show="s.unmanageable" class="text-[11px] text-amber-700 mt-0.5"
+                                 x-text="'cannot be managed: ' + s.unmanageable"></div>
+                        </td>
+                        <td class="px-3 py-2 text-right mono" x-text="s.running_generation"></td>
+                        <td class="px-3 py-2 text-right mono" x-text="s.desired_generation || '-'"></td>
+                        <td class="px-3 py-2 mono text-xs text-gray-500"
+                            :title="s.running_hash" x-text="(s.running_hash || '').slice(0, 12)"></td>
+                        <td class="px-3 py-2 whitespace-nowrap">
+                            <button x-show="!s.adopted" @click="adopt(s.site)" :disabled="busy"
+                                    class="px-2 py-1 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700 disabled:opacity-40">
+                                Adopt
+                            </button>
+                            <button x-show="s.state === 'pending'" @click="deliver(s.site)" :disabled="busy"
+                                    class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-40">
+                                Deliver
+                            </button>
+                            <!-- Never resolved automatically. The person at
+                                 the console usually had a reason, so adopting
+                                 what they did is the first thing offered. -->
+                            <template x-if="s.state === 'locally-modified'">
+                                <span>
+                                    <button @click="adopt(s.site)" :disabled="busy"
+                                            class="px-2 py-1 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700 disabled:opacity-40">
+                                        Adopt local
+                                    </button>
+                                    <button @click="deliver(s.site)" :disabled="busy"
+                                            class="px-2 py-1 bg-amber-600 text-white text-xs rounded hover:bg-amber-700 disabled:opacity-40">
+                                        Overwrite
+                                    </button>
+                                </span>
+                            </template>
+                            <button x-show="s.adopted && s.running_generation > 0" @click="rollback(s.site)" :disabled="busy"
+                                    class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40">
+                                Roll back
+                            </button>
+                            <!-- The way out. A box that has been adopted is
+                                 running a copy in its own state directory;
+                                 this puts it back on the config an operator
+                                 wrote, which was never touched. -->
+                            <button x-show="s.running_generation > 0" @click="revert(s.site)" :disabled="busy"
+                                    class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40"
+                                    title="stop managing this box - it goes back to its own /etc config">
+                                Unmanage
+                            </button>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!sites.length">
+                    <td colspan="7" class="px-3 py-8 text-center text-gray-400 text-sm">
+                        No daemons have connected yet. sysmond dials out; give each box
+                        <span class="mono">config aggregator</span>, a token from the admin
+                        page, and the certificate this process logged at startup.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Rollouts -->
+    <div x-show="rollouts.length" x-cloak class="mt-6">
+        <h2 class="text-sm font-bold text-gray-900 mb-2">Rollouts</h2>
+        <template x-for="r in rollouts" :key="r.id">
+            <div class="bg-white rounded-lg border border-gray-200 mb-3 p-3">
+                <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
+                    <span class="mono" x-text="r.id"></span>
+                    <span>
+                        watch <span x-text="r.watch_seconds"></span>s,
+                        tolerance <span x-text="Math.round(r.object_tolerance * 100)"></span>%
+                    </span>
+                </div>
+                <div x-show="r.halted" class="text-xs text-red-700 mb-2" x-text="'halted - ' + r.halted"></div>
+                <table class="w-full text-xs">
+                    <tbody>
+                        <template x-for="rs in r.sites" :key="r.id + rs.site">
+                            <tr class="border-t border-gray-100">
+                                <td class="py-1 mono" x-text="rs.site"></td>
+                                <td class="py-1">
+                                    <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                          :class="rolloutClass(rs.state)" x-text="rs.state"></span>
+                                </td>
+                                <td class="py-1 text-right mono" x-text="'gen ' + rs.generation"></td>
+                                <td class="py-1 text-right mono"
+                                    x-text="rs.objects ? rs.objects + '/' + rs.expected_objects + ' objects' : ''"></td>
+                                <td class="py-1 text-gray-500" x-text="rs.detail || ''"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+function fleetPage() {
+    return {
+        sites: [],
+        rollouts: [],
+        selected: [],
+        watchSeconds: 120,
+        busy: false,
+        notice: '',
+        noticeBad: false,
+        complaints: [],
+        timer: null,
+
+        init() {
+            this.load();
+            // Fast enough that a hand edit on a box shows up while the
+            // person who made it is still at the console.
+            this.timer = setInterval(() => this.load(), 5000);
+        },
+
+        async load() {
+            try {
+                const r = await apiCall('/api/config/fleet');
+                this.sites = r.sites || [];
+                const ro = await apiCall('/api/config/rollout');
+                this.rollouts = ro.rollouts || [];
+            } catch (e) { /* the page is still readable without a refresh */ }
+        },
+
+        stateClass(s) {
+            return {
+                'in-sync': 'bg-emerald-100 text-emerald-800',
+                'pending': 'bg-blue-100 text-blue-800',
+                'locally-modified': 'bg-amber-100 text-amber-800',
+                'rejected': 'bg-red-100 text-red-800',
+                'unmanaged': 'bg-gray-100 text-gray-600',
+                'unknown': 'bg-gray-200 text-gray-700',
+            }[s] || 'bg-gray-100 text-gray-600';
+        },
+
+        rolloutClass(s) {
+            return {
+                'ok': 'bg-emerald-100 text-emerald-800',
+                'watching': 'bg-blue-100 text-blue-800',
+                'delivered': 'bg-blue-100 text-blue-800',
+                'pending': 'bg-gray-100 text-gray-600',
+                'skipped': 'bg-gray-100 text-gray-600',
+                'failed': 'bg-red-100 text-red-800',
+                'rolled-back': 'bg-amber-100 text-amber-800',
+            }[s] || 'bg-gray-100 text-gray-600';
+        },
+
+        say(msg, bad, complaints) {
+            this.notice = msg;
+            this.noticeBad = !!bad;
+            this.complaints = complaints || [];
+        },
+
+        async post(url, body) {
+            this.busy = true;
+            try {
+                const r = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: body ? JSON.stringify(body) : undefined,
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    throw Object.assign(new Error(data.error || data.message || r.statusText),
+                                        {complaints: (data.result && data.result.complaints) || []});
+                }
+                return data;
+            } finally {
+                this.busy = false;
+                this.load();
+            }
+        },
+
+        async adopt(site) {
+            try {
+                const d = await this.post('/api/config/adopt/' + encodeURIComponent(site));
+                this.say(site + ': adopted as generation ' + d.generation, false);
+            } catch (e) { this.say(site + ': ' + e.message, true, e.complaints); }
+        },
+
+        async deliver(site) {
+            try {
+                const d = await this.post('/api/config/deliver/' + encodeURIComponent(site));
+                this.say(site + ': generation ' + d.running_generation +
+                         ' accepted (' + d.objects + ' objects)' + (d.warning ? ' - ' + d.warning : ''),
+                         !!d.warning);
+            } catch (e) { this.say(site + ': ' + e.message, true, e.complaints); }
+        },
+
+        async rollback(site) {
+            if (!confirm('Roll ' + site + ' back to its previous config?')) return;
+            try {
+                const d = await this.post('/api/config/rollback/' + encodeURIComponent(site));
+                this.say(site + ': rolled back to generation ' + d.running_generation, false);
+            } catch (e) { this.say(site + ': ' + e.message, true, e.complaints); }
+        },
+
+        async revert(site) {
+            if (!confirm('Stop managing ' + site + '?\n\nIt goes back to the config on the box itself. ' +
+                         'The generations delivered to it are kept, but nothing more is sent.')) return;
+            try {
+                await this.post('/api/config/revert/' + encodeURIComponent(site));
+                this.say(site + ': unmanaged - running its own config again', false);
+            } catch (e) { this.say(site + ': ' + e.message, true, e.complaints); }
+        },
+
+        async startRollout() {
+            try {
+                await this.post('/api/config/rollout', {
+                    sites: this.selected,
+                    watch_seconds: this.watchSeconds,
+                });
+                this.say('rollout started - one box at a time, each watched before the next', false);
+                this.selected = [];
+            } catch (e) { this.say(e.message, true, e.complaints); }
+        },
+    };
+}
+</script>
+{{end}}

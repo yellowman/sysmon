@@ -2,6 +2,50 @@
 
 #include "config.h"
 
+/*
+ * Every object carries the value this had when it last changed in a way a
+ * client would notice. A client remembers the highest it has seen and asks
+ * for "everything above that", so a quiet network costs one round trip and
+ * an empty answer instead of a full dump of every object every poll.
+ *
+ * Monotonic within one run only: it restarts at zero when the daemon does,
+ * and a client that sees the daemon's current value go backwards knows to
+ * resync from scratch.
+ */
+unsigned long glob_change_seq = 0;
+
+/*
+ * A sitename becomes the part before the colon in every qualified object
+ * name a client stores, logs and routes on. Restrict it to what can pass
+ * through all of that untouched: no colon (which would make the split
+ * ambiguous), no whitespace or quotes (which would need escaping in every
+ * log line, key and URL path).
+ */
+bool valid_sitename(const char *name)
+{
+	const char *c;
+
+	if (name == NULL || *name == '\0')
+		return FALSE;
+
+	for (c = name; *c != '\0'; c++)
+	{
+		if (*c >= 'a' && *c <= 'z') continue;
+		if (*c >= 'A' && *c <= 'Z') continue;
+		if (*c >= '0' && *c <= '9') continue;
+		if (*c == '-' || *c == '_') continue;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+void object_changed(struct hostinfo *svc)
+{
+	if (svc == NULL)
+		return;
+	svc->change_seq = ++glob_change_seq;
+}
+
 extern int facility;
 extern bool mallocdebug;
 #ifndef HAVE_SNPRINTF
@@ -541,20 +585,25 @@ short int name_to_type(char *sent_type)
                                 return SYSM_TYPE_WWW;
                         if (strcmp(type, "ssh") == 0)
                                 return SYSM_TYPE_SSHD;
+			/* "rtt" is three characters: it belongs here, by the
+			 * length this switch dispatches on. It sat in case 4
+			 * for its whole life, which no 3-character string ever
+			 * reaches, so "type rtt" was refused as invalid and the
+			 * RTT/jitter check could never be configured at all. */
+			if (strcmp(type, "rtt") == 0 && (!disable_icmp))
+				return SYSM_TYPE_PING_LATENCY;
 			break;
 		case 4:
 			if (strcmp(type, "imap") == 0)
 				return SYSM_TYPE_IMAP;
 			if (strcmp(type, "http") == 0)
 				return SYSM_TYPE_WWW;
-			if ((strcmp(type, "ping") == 0 || strcmp(type, "pingv4") == 0) && (!disable_icmp))
+			if (strcmp(type, "ping") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PING;
                         if (strcmp(type, "ping6") == 0 && (!disable_icmp))
                                 return SYSM_TYPE_PINGv6;
                         if (strcmp(type, "icmp6") == 0 && (!disable_icmp))
                                 return SYSM_TYPE_PINGv6;
-			if (strcmp(type, "rtt") == 0 && (!disable_icmp))
-				return SYSM_TYPE_PING_LATENCY;
 #ifdef ENABLE_SNMP
 			if (strcmp(type, "snmp") == 0)
 				return SYSM_TYPE_SNMP;
@@ -573,9 +622,12 @@ short int name_to_type(char *sent_type)
 		case 5:
                         if (strcmp(type, "bootp") == 0)
                                 return SYSM_TYPE_BOOTP;
-			break;
+			/* This sat below the break, where nothing runs, so
+			 * "type https" was refused for as long as the check
+			 * has existed. */
                         if (strcmp(type, "https") == 0)
                                 return SYSM_TYPE_HTTPS;
+			break;
 		case 6:
                         if (strcmp(type, "radius") == 0)
                                 return SYSM_TYPE_RADIUS;
@@ -583,8 +635,18 @@ short int name_to_type(char *sent_type)
                                 return SYSM_TYPE_SYSM;
 			if (strcmp(type, "pingv6") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PINGv6;
+			/* Six characters, so it belongs here - it was written
+			 * into case 4 next to "ping", where no 6-character
+			 * string ever arrives, and the alias never worked. */
+			if (strcmp(type, "pingv4") == 0 && (!disable_icmp))
+				return SYSM_TYPE_PING;
 			break;
-		case 8:
+		case 7:
+			/* "pktloss" is seven characters; it was filed under
+			 * case 8, and there was no case 7 at all, so the type
+			 * was refused at parse. The receive side had the same
+			 * drained-socket bug as rtt, hidden behind this - see
+			 * handle_icmp_responses. */
 			if (strcmp(type, "pktloss") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PKTLOSS;
 			break;
@@ -642,6 +704,12 @@ char *type_to_name(int type)
 			return "pingv6";
 		case SYSM_TYPE_PKTLOSS:
 			return "pktloss";
+		/* Missing here, an rtt object reported its type as "ERROR" -
+		 * in the web UI, the sysmon client and the status page - and
+		 * this is also the name the reverse lookup has to match, so
+		 * it has to be the word the config uses. */
+		case SYSM_TYPE_PING_LATENCY:
+			return "rtt";
 		default:
 			return "ERROR";
 	}
@@ -724,6 +792,13 @@ void	syslogmsg(char *message, time_t now)
 	}
 	if (facility == -3)
 	{
+		/* "log to a file" and "no file named yet" is a window, not a
+		   state: facility is set as the config line is read and the
+		   path a moment later. Passing NULL to fopen() is undefined -
+		   glibc happens to return EFAULT, which is why this only ever
+		   showed up under valgrind rather than as a crash. */
+		if (log_file == NULL)
+			return;
 		fh = fopen(log_file, "a+");
 		if (fh != NULL)
 		{

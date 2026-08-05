@@ -95,26 +95,30 @@ func (s *Service) UpdateConfig(update *models.ConfigUpdate, user, ip string) (*m
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// 4. Generate new config content
-	newContent, err := Generate(&update.Config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate config: %w", err)
-	}
-
 	// 5. Backup current config
 	if err := s.backupConfig(update.Comment); err != nil {
 		return nil, fmt.Errorf("backup failed: %w", err)
 	}
 
-	// 6. Write new config atomically (temp + rename)
-	tempPath := s.configPath + ".tmp"
-	if err := os.WriteFile(tempPath, []byte(newContent), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	// 6. Edit the config in place rather than regenerating it.
+	//
+	// Regenerating would rewrite the whole file from the parsed model,
+	// which does not carry comments and has no notion of includes - so a
+	// save flattened every included object into the main file and dropped
+	// the include directives. Splicing replaces only the bytes of the
+	// objects that actually changed; an object nobody touched, and every
+	// comment, is left exactly as the operator wrote it.
+	doc, err := LoadDocument(s.configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config for editing: %w", err)
 	}
-
-	if err := os.Rename(tempPath, s.configPath); err != nil {
-		os.Remove(tempPath)
-		return nil, fmt.Errorf("failed to rename temp file: %w", err)
+	added, changed, removed := doc.Apply(&update.Config)
+	if err := doc.Save(); err != nil {
+		return nil, fmt.Errorf("failed to write config: %w", err)
+	}
+	if added+changed+removed > 0 {
+		s.logAudit("config_objects", user, ip,
+			fmt.Sprintf("%d added, %d changed, %d removed", added, changed, removed))
 	}
 
 	// 7. Log audit entry

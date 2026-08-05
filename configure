@@ -653,6 +653,7 @@ SNMP
 IPV6
 PROGS
 SSL
+TLS
 LEX
 SENDMAIL
 INSTALL_DATA
@@ -4666,286 +4667,60 @@ LIBS_SAVE="$LIBS"
 
 LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
-       for ac_header in net-snmp/version.h
+       for ac_header in openssl/ssl.h
 do :
-  ac_fn_c_check_header_compile "$LINENO" "net-snmp/version.h" "ac_cv_header_net_snmp_version_h" "$ac_includes_default
-#include <net-snmp/net-snmp-config.h>"
-if test "x$ac_cv_header_net_snmp_version_h" = xyes
+  ac_fn_c_check_header_compile "$LINENO" "openssl/ssl.h" "ac_cv_header_openssl_ssl_h" "$ac_includes_default"
+if test "x$ac_cv_header_openssl_ssl_h" = xyes
 then :
-  printf "%s\n" "#define HAVE_NET_SNMP_VERSION_H 1" >>confdefs.h
- IS_NET_SNMP="yes"
+  printf "%s\n" "#define HAVE_OPENSSL_SSL_H 1" >>confdefs.h
+ HAVE_SSL_H="yes"
 fi
 
 done
-if test "$IS_NET_SNMP" = "yes"; then
-        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for snmp_open in -lsnmp" >&5
-printf %s "checking for snmp_open in -lsnmp... " >&6; }
-if test ${ac_cv_lib_snmp_snmp_open+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lsnmp  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+if test "$HAVE_SSL_H" = "yes"; then
+					SAVE_LIBS="$LIBS"
+	LIBS="$LIBS -lssl -lcrypto"
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for a usable OpenSSL 1.1.1 / LibreSSL API" >&5
+printf %s "checking for a usable OpenSSL 1.1.1 / LibreSSL API... " >&6; }
+	cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char snmp_open ();
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 int
 main (void)
 {
-return snmp_open ();
+SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+SSL *s; X509_VERIFY_PARAM *p;
+SSL_CTX_set_min_proto_version(c, TLS1_2_VERSION);
+s = SSL_new(c); p = SSL_get0_param(s);
+X509_VERIFY_PARAM_set1_host(p, "x", 0);
   ;
   return 0;
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"
 then :
-  ac_cv_lib_snmp_snmp_open=yes
+  HAVE_SSL_LIB="yes"
 else $as_nop
-  ac_cv_lib_snmp_snmp_open=no
+  HAVE_SSL_LIB="no"
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam \
     conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $HAVE_SSL_LIB" >&5
+printf "%s\n" "$HAVE_SSL_LIB" >&6; }
+	LIBS="$SAVE_LIBS"
 fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_snmp_snmp_open" >&5
-printf "%s\n" "$ac_cv_lib_snmp_snmp_open" >&6; }
-if test "x$ac_cv_lib_snmp_snmp_open" = xyes
-then :
-  USABLE_SNMP="yes"
-fi
-
-        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for NetSnmpVersionInfo in -lsnmp" >&5
-printf %s "checking for NetSnmpVersionInfo in -lsnmp... " >&6; }
-if test ${ac_cv_lib_snmp_NetSnmpVersionInfo+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lsnmp  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char NetSnmpVersionInfo ();
-int
-main (void)
-{
-return NetSnmpVersionInfo ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_snmp_NetSnmpVersionInfo=yes
-else $as_nop
-  ac_cv_lib_snmp_NetSnmpVersionInfo=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_snmp_NetSnmpVersionInfo" >&5
-printf "%s\n" "$ac_cv_lib_snmp_NetSnmpVersionInfo" >&6; }
-if test "x$ac_cv_lib_snmp_NetSnmpVersionInfo" = xyes
-then :
-  USABLE_SNMP="yes"
-fi
-
-        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for snmp_open in -lnetsnmp" >&5
-printf %s "checking for snmp_open in -lnetsnmp... " >&6; }
-if test ${ac_cv_lib_netsnmp_snmp_open+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lnetsnmp  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char snmp_open ();
-int
-main (void)
-{
-return snmp_open ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_netsnmp_snmp_open=yes
-else $as_nop
-  ac_cv_lib_netsnmp_snmp_open=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_netsnmp_snmp_open" >&5
-printf "%s\n" "$ac_cv_lib_netsnmp_snmp_open" >&6; }
-if test "x$ac_cv_lib_netsnmp_snmp_open" = xyes
-then :
-  USABLE_NET_SNMP="yes"
-fi
-
+if test "$HAVE_SSL_LIB" = "yes"; then
+	TLS="-DHAVE_TLS"
+			TLS_LIBS="-lssl -lcrypto"
 else
-	       for ac_header in ucd-snmp/version.h
-do :
-  ac_fn_c_check_header_compile "$LINENO" "ucd-snmp/version.h" "ac_cv_header_ucd_snmp_version_h" "$ac_includes_default"
-if test "x$ac_cv_header_ucd_snmp_version_h" = xyes
-then :
-  printf "%s\n" "#define HAVE_UCD_SNMP_VERSION_H 1" >>confdefs.h
- IS_UCD_SNMP="yes"
-fi
-
-done
-	if test "$IS_UCD_SNMP" = "yes"; then
-       		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for snmp_open in -lsnmp" >&5
-printf %s "checking for snmp_open in -lsnmp... " >&6; }
-if test ${ac_cv_lib_snmp_snmp_open+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lsnmp  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char snmp_open ();
-int
-main (void)
-{
-return snmp_open ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_snmp_snmp_open=yes
-else $as_nop
-  ac_cv_lib_snmp_snmp_open=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_snmp_snmp_open" >&5
-printf "%s\n" "$ac_cv_lib_snmp_snmp_open" >&6; }
-if test "x$ac_cv_lib_snmp_snmp_open" = xyes
-then :
-  USABLE_SNMP="yes"
-fi
-
-        	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for NetSnmpVersionInfo in -lsnmp" >&5
-printf %s "checking for NetSnmpVersionInfo in -lsnmp... " >&6; }
-if test ${ac_cv_lib_snmp_NetSnmpVersionInfo+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lsnmp  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char NetSnmpVersionInfo ();
-int
-main (void)
-{
-return NetSnmpVersionInfo ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_snmp_NetSnmpVersionInfo=yes
-else $as_nop
-  ac_cv_lib_snmp_NetSnmpVersionInfo=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_snmp_NetSnmpVersionInfo" >&5
-printf "%s\n" "$ac_cv_lib_snmp_NetSnmpVersionInfo" >&6; }
-if test "x$ac_cv_lib_snmp_NetSnmpVersionInfo" = xyes
-then :
-  USABLE_SNMP="yes"
-fi
-
-        	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for snmp_open in -lnetsnmp" >&5
-printf %s "checking for snmp_open in -lnetsnmp... " >&6; }
-if test ${ac_cv_lib_netsnmp_snmp_open+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lnetsnmp  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char snmp_open ();
-int
-main (void)
-{
-return snmp_open ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_netsnmp_snmp_open=yes
-else $as_nop
-  ac_cv_lib_netsnmp_snmp_open=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_netsnmp_snmp_open" >&5
-printf "%s\n" "$ac_cv_lib_netsnmp_snmp_open" >&6; }
-if test "x$ac_cv_lib_netsnmp_snmp_open" = xyes
-then :
-  USABLE_NET_SNMP="yes"
-fi
-
-	fi
-fi
-
-LIBS="$LIBS_SAVE"
-
-if test "$USABLE_SNMP" = "yes"; then
-       SNMP="-DENABLE_SNMP"
-	LIBS="$LIBS -lsnmp"
-fi
-if test "$USABLE_NET_SNMP" = "yes"; then
-       SNMP="-DENABLE_SNMP"
-       LIBS="$LIBS -lnetsnmp"
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: no usable OpenSSL/LibreSSL - sysmond will refuse to dial an aggregator" >&5
+printf "%s\n" "$as_me: WARNING: no usable OpenSSL/LibreSSL - sysmond will refuse to dial an aggregator" >&2;}
 fi
 
 
-LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
+LIBS="$LIBS_SAVE $TLS_LIBS"
+
 
 if test "$SENDMAIL" = no; then
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: without sendmail there is no support for alert messages" >&5

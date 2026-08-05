@@ -109,6 +109,15 @@ int	send_stat(struct clientstatus *client, char *buff)
 	if (retval == -1)
 	{
 		print_err(0, "unable to send message to client");
+		/*
+		 * tls_disconnect(), not a bare -1: dead_client_cleanup() frees
+		 * this struct, so a descriptor dropped here is a descriptor
+		 * nothing can ever close. On the aggregator link that also
+		 * strands the SSL*, which is tracked by descriptor number - and
+		 * the next connect() is very likely handed that same number.
+		 * One leak per flap, against a 1024 limit.
+		 */
+		tls_disconnect(client->filedes);
 		client->filedes = -1;
 		return -1;
 	}
@@ -116,10 +125,25 @@ int	send_stat(struct clientstatus *client, char *buff)
 	return 0;
 }
 
-int	send_conf(struct clientstatus *client)
+/*
+ * CONF [since]
+ *
+ * Every object's status XML. With a sequence number, only the objects
+ * whose change_seq is above it - which on a quiet network is none of
+ * them, and the whole exchange is two lines.
+ *
+ * The terminator carries the daemon's current sequence and how many
+ * objects were sent: "333 <seq> <sent>". A client remembers <seq> and
+ * passes it back next time; if it ever comes back lower than what the
+ * client holds, the daemon restarted and the client resyncs from zero.
+ */
+int	send_conf(struct clientstatus *client, unsigned long since)
 {
 
 	struct all_elements_list *here;
+	char buffer[TEMPBUF_SIZE];
+	unsigned long sent = 0;
+	unsigned long total = 0;
 
 	here = currenthead;
 
@@ -132,12 +156,35 @@ int	send_conf(struct clientstatus *client)
 	/* send xml */
 	while (here != NULL)
 	{
-		send_object_xml(client->filedes, NULL, here->value);
+		if (here->value != NULL && here->value->data != NULL &&
+		    here->value->data->change_seq > since)
+		{
+			send_object_xml(client->filedes, NULL, here->value);
+			sent++;
+		}
 		here=here->next;
 	}
 
+	/*
+	 * The terminator carries the total object count as well.
+	 *
+	 * An incremental CONF can say what changed but has no way to say what
+	 * is gone: a deleted object simply stops being sent, and a client
+	 * merging into a cache would keep it forever. The count is what lets
+	 * the far end notice - if it holds a different number than the daemon
+	 * has, its cache is wrong and it asks for everything.
+	 */
+	{
+		struct all_elements_list *walk;
+
+		for (walk = currenthead; walk != NULL; walk = walk->next)
+			total++;
+	}
+
 	/* done printing config */
-	if (sendline(client->filedes, "333") == -1)
+	snprintf(buffer, sizeof(buffer), "333 %lu %lu %lu",
+		glob_change_seq, sent, total);
+	if (sendline(client->filedes, buffer) == -1)
 	{
 		print_err(0, "unable to send message to client");
 		return -1;
@@ -173,6 +220,8 @@ int do_send_xml(int fd, FILE *fh, char *buff)
 	}
 }
 
+static char *xml_escape(const char *in, char *out, size_t outlen);
+
 /*
  * send_object_xml - send an object described as obj
  * to either FILE or file(can be socket).  do FILE = null
@@ -181,6 +230,22 @@ int do_send_xml(int fd, FILE *fh, char *buff)
 void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 {
 	char buffer[TEMPBUF_SIZE];
+
+	/*
+	 * Every text field goes through xml_escape() on the way out. An
+	 * object's URL, notes, message and contact are operator-written or
+	 * come back off the wire, and one bare "&" - the kind an ordinary
+	 * query string has - makes a document the reader rejects. sysmon-web
+	 * then skips that object, so the host simply vanishes from the
+	 * dashboard with nothing said. The trap path has escaped for this
+	 * reason from the start; objects were missed.
+	 *
+	 * esc is sized so an escaped value plus the longest tag name, twice,
+	 * still fits in buffer. That matters: truncating inside an entity
+	 * would produce exactly the broken document being avoided here.
+	 * xml_escape() itself stops on an entity boundary.
+	 */
+	char esc[TEMPBUF_SIZE - 128];
 
 	/* Macro to check send errors and abort XML generation if write fails */
 	#define SEND_OR_ABORT(fd, fh, buf) \
@@ -192,38 +257,49 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	snprintf(buffer, sizeof(buffer), "<%s>", XML_OBJECT_STATUS);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT, obj->unique_name , XML_OBJECT);
+	snprintf(buffer, sizeof(buffer), "<%s>%lu</%s>", XML_CHANGE_SEQ,
+		obj->data->change_seq, XML_CHANGE_SEQ);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HOSTNAME, obj->data->hostname ,XML_HOSTNAME);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT,
+			xml_escape(obj->unique_name, esc, sizeof(esc)), XML_OBJECT);
+	SEND_OR_ABORT(fd, fh, buffer);
+
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HOSTNAME,
+			xml_escape(obj->data->hostname, esc, sizeof(esc)), XML_HOSTNAME);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_PORT, obj->data->port, XML_OBJECT_PORT);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_TYPE, type_to_name(obj->data->type), XML_OBJECT_TYPE);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_TYPE,
+			xml_escape(type_to_name(obj->data->type), esc, sizeof(esc)), XML_OBJECT_TYPE);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_MESSAGE, obj->data->message, XML_OBJECT_MESSAGE);
+	snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_MESSAGE,
+			xml_escape(obj->data->message, esc, sizeof(esc)), XML_OBJECT_MESSAGE);
 	SEND_OR_ABORT(fd, fh, buffer);
 
 	if (obj->data->contact != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_CONTACT, obj->data->contact, XML_OBJECT_CONTACT);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_CONTACT,
+			xml_escape(obj->data->contact, esc, sizeof(esc)), XML_OBJECT_CONTACT);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	/* XML_OBJ_GROUP */
         if (obj->data->group != NULL)
         {
-                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_GROUP, obj->data->group, XML_OBJECT_GROUP);
+                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_GROUP,
+			xml_escape(obj->data->group, esc, sizeof(esc)), XML_OBJECT_GROUP);
                 SEND_OR_ABORT(fd, fh, buffer);
         }
 
         /* XML_OBJ_NOTES */
         if (obj->data->notes != NULL)
         {
-                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_NOTES, obj->data->notes, XML_OBJECT_NOTES);
+                snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJECT_NOTES,
+			xml_escape(obj->data->notes, esc, sizeof(esc)), XML_OBJECT_NOTES);
                 SEND_OR_ABORT(fd, fh, buffer);
         }
 
@@ -231,15 +307,21 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	{
 		if (obj->data->snmp_community != NULL)
 		{
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY, obj->data->snmp_community ,XML_SNMP_COMMUNITY);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY,
+			xml_escape(obj->data->snmp_community, esc, sizeof(esc)), XML_SNMP_COMMUNITY);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_VERSION,
+			xml_escape(obj->data->snmp_version == SNMP_VERSION_1 ? "1" : "2c", esc, sizeof(esc)), XML_SNMP_VERSION);
+		SEND_OR_ABORT(fd, fh, buffer);
 		if (obj->data->snmp_oid != NULL)
 		{
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID, obj->data->snmp_oid, XML_SNMP_OID);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID,
+			xml_escape(obj->data->snmp_oid, esc, sizeof(esc)), XML_SNMP_OID);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_TYPE, snmp_type_to_name(obj->data->snmp_test_type), XML_SNMP_TYPE);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_TYPE,
+			xml_escape(snmp_type_to_name(obj->data->snmp_test_type), esc, sizeof(esc)), XML_SNMP_TYPE);
 		SEND_OR_ABORT(fd, fh, buffer);
 
 		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_SNMP_LOW, obj->data->snmp_low, XML_SNMP_LOW);
@@ -269,62 +351,72 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	if (obj->data->username != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER, obj->data->username , XML_AUTH_USER);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER,
+			xml_escape(obj->data->username, esc, sizeof(esc)), XML_AUTH_USER);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->password != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD, obj->data->password, XML_AUTH_PASSWD);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD,
+			xml_escape(obj->data->password, esc, sizeof(esc)), XML_AUTH_PASSWD);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->hdr != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER, obj->data->hdr, XML_HEADER);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER,
+			xml_escape(obj->data->hdr, esc, sizeof(esc)), XML_HEADER);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->hdrval != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL, obj->data->hdrval, XML_HEADER_VAL);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL,
+			xml_escape(obj->data->hdrval, esc, sizeof(esc)), XML_HEADER_VAL);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
 	if (obj->data->secret != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET, obj->data->secret, XML_RADIUS_SECRET);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET,
+			xml_escape(obj->data->secret, esc, sizeof(esc)), XML_RADIUS_SECRET);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->lastmsgid != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_MESSAGE_ID, obj->data->lastmsgid, XML_MESSAGE_ID);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_MESSAGE_ID,
+			xml_escape(obj->data->lastmsgid, esc, sizeof(esc)), XML_MESSAGE_ID);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->unique_id != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_UNIQUE_ID, obj->data->unique_id, XML_UNIQUE_ID);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_UNIQUE_ID,
+			xml_escape(obj->data->unique_id, esc, sizeof(esc)), XML_UNIQUE_ID);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->url != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL, obj->data->url, XML_OBJ_URL);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL,
+			xml_escape(obj->data->url, esc, sizeof(esc)), XML_OBJ_URL);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
 	if (obj->data->url_text != NULL)
 	{
 		/* BUG FIX: Use url_text instead of url */
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT, obj->data->url_text, XML_OBJ_URL_TEXT);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT,
+			xml_escape(obj->data->url_text, esc, sizeof(esc)), XML_OBJ_URL_TEXT);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
 	if (obj->data->command != NULL)
 	{
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC, obj->data->command, XML_OBJ_EXEC);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC,
+			xml_escape(obj->data->command, esc, sizeof(esc)), XML_OBJ_EXEC);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -419,18 +511,18 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	/* SNMP Extended Configuration */
 	if (obj->data->type == SYSM_TYPE_SNMP) {
 		if (obj->data->snmp_oid_sec != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_SNMP_OID_SEC, obj->data->snmp_oid_sec, XML_SNMP_OID_SEC);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_OID_SEC,
+			xml_escape(obj->data->snmp_oid_sec, esc, sizeof(esc)), XML_SNMP_OID_SEC);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_up_msg != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_SNMP_UP_MSG, obj->data->snmp_up_msg, XML_SNMP_UP_MSG);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_UP_MSG,
+			xml_escape(obj->data->snmp_up_msg, esc, sizeof(esc)), XML_SNMP_UP_MSG);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 		if (obj->data->snmp_down_msg != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_SNMP_DOWN_MSG, obj->data->snmp_down_msg, XML_SNMP_DOWN_MSG);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_DOWN_MSG,
+			xml_escape(obj->data->snmp_down_msg, esc, sizeof(esc)), XML_SNMP_DOWN_MSG);
 			SEND_OR_ABORT(fd, fh, buffer);
 		}
 	}
@@ -438,8 +530,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	/* DNS Configuration */
 	if (obj->data->type == SYSM_TYPE_DNS) {
 		if (obj->data->dns_query != NULL) {
-			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-				XML_DNS_QUERY, obj->data->dns_query, XML_DNS_QUERY);
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_DNS_QUERY,
+			xml_escape(obj->data->dns_query, esc, sizeof(esc)), XML_DNS_QUERY);
 			SEND_OR_ABORT(fd, fh, buffer);
 
 			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>",
@@ -454,8 +546,8 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	/* Per-Object Custom Page Message */
 	if (obj->data->pmesg != NULL) {
-		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>",
-			XML_PAGE_MESSAGE, obj->data->pmesg, XML_PAGE_MESSAGE);
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_PAGE_MESSAGE,
+			xml_escape(obj->data->pmesg, esc, sizeof(esc)), XML_PAGE_MESSAGE);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -474,10 +566,75 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
+	/* What the last packet-loss cycle counted, from the object rather
+	   than from the in-flight check state - the latter exists only
+	   while a check is running, which is almost never when a person is
+	   looking at the page. */
+	if (obj->data->pktloss_last_sent > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_PKTLOSS_LAST_SENT, obj->data->pktloss_last_sent,
+			XML_PKTLOSS_LAST_SENT);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_PKTLOSS_LAST_RECV, obj->data->pktloss_last_recv,
+			XML_PKTLOSS_LAST_RECV);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
+
 	/* RTT Samples Configuration */
 	if (obj->data->rtt_samples > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
 			XML_RTT_SAMPLES, obj->data->rtt_samples, XML_RTT_SAMPLES);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
+
+	if (obj->data->rtt_interval > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_INTERVAL, obj->data->rtt_interval, XML_RTT_INTERVAL);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
+
+	/*
+	 * What the last rtt check actually measured.
+	 *
+	 * These used to go no further than a debug log line, so a check
+	 * whose entire purpose is producing numbers reported nothing but
+	 * pass or fail. Sent only when there is something to send: probes
+	 * of zero means this object has never run one.
+	 *
+	 * Two decimal places is the useful precision here - sub-10us
+	 * differences on an ICMP round trip are noise, and the reader is a
+	 * person looking at a card.
+	 */
+	if (obj->data->rtt_last_probes > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_MIN, obj->data->rtt_last_min, XML_RTT_LAST_MIN);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_AVG, obj->data->rtt_last_avg, XML_RTT_LAST_AVG);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_MAX, obj->data->rtt_last_max, XML_RTT_LAST_MAX);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_JITTER, obj->data->rtt_last_jitter,
+			XML_RTT_LAST_JITTER);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		/* Replies against probes is how many of the batch came back -
+		   the loss the average is hiding. */
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_LAST_REPLIES, obj->data->rtt_last_replies,
+			XML_RTT_LAST_REPLIES);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_LAST_PROBES, obj->data->rtt_last_probes,
+			XML_RTT_LAST_PROBES);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
@@ -708,6 +865,7 @@ void do_ack(struct clientstatus *client, char *buff)
                 return;
         } else {
                 found_obj->data->acked = TRUE;
+                object_changed(found_obj->data);
 		sendline(client->filedes, "333 object updated");
         }
         return;
@@ -761,6 +919,7 @@ int     do_upd(struct clientstatus *client, char *buff)
 			FREE(found_obj->data->notes);
 		}
 		found_obj->data->notes = strdup(buff+x+1);
+		object_changed(found_obj->data);
 		sendline(client->filedes, "333 object updated");
 		} else {
 			sendline(client->filedes, "403 update error");
@@ -838,12 +997,338 @@ void do_client_http(struct clientstatus *client, char *request)
 	print_err(1, "do_client_http: url = %s", url1+1);
 }
 
+/*
+ * Escape text for XML. Everything in a trap record came off the wire from
+ * whoever felt like sending a UDP packet to port 162, so none of it may be
+ * pasted into a document unescaped. Truncates rather than overflowing.
+ */
+static char *xml_escape(const char *in, char *out, size_t outlen)
+{
+	size_t used = 0;
+	const char *rep;
+	size_t rlen;
+
+	if (outlen == 0)
+		return out;
+	out[0] = '\0';
+	if (in == NULL)
+		return out;
+
+	for (; *in != '\0'; in++)
+	{
+		switch (*in)
+		{
+			case '&':  rep = "&amp;";  break;
+			case '<':  rep = "&lt;";   break;
+			case '>':  rep = "&gt;";   break;
+			case '"':  rep = "&quot;"; break;
+			case '\'': rep = "&apos;"; break;
+			default:   rep = NULL;     break;
+		}
+
+		if (rep != NULL)
+		{
+			rlen = strlen(rep);
+			if (used + rlen >= outlen)
+				break;
+			memcpy(out + used, rep, rlen);
+			used += rlen;
+		} else {
+			/* Control characters have no business in XML. */
+			if ((unsigned char)*in < 0x20)
+				continue;
+			if (used + 1 >= outlen)
+				break;
+			out[used++] = *in;
+		}
+	}
+	out[used] = '\0';
+	return out;
+}
+
+/*
+ * TRAPS [since]
+ *
+ * Hand back the recent SNMP traps sysmond has caught, decoded. With a
+ * sequence number, only the traps newer than it - so a client polling
+ * every second normally transfers nothing at all, and neither side
+ * spends anything re-sending or re-parsing what the caller already has.
+ *
+ * The terminator is "333 <current> <oldest-held> <sent>": the client
+ * remembers <current>, and compares <oldest-held> against what it asked
+ * for to know whether the ring overwrote traps it never saw. In XML mode
+ * this is the full record - identity, severity, the interface it named and
+ * every varbind - which is what the web UI renders. In plain mode it is one
+ * summary line per trap for a human on a telnet session.
+ */
+void send_traps(struct clientstatus *client, unsigned long since)
+{
+	char buffer[LARGE_TEMPBUF_SIZE];
+	char esc[TRAP_OID_LEN * 6 + 8];
+	struct trap_record *r;
+	int i, v;
+	unsigned long sent = 0;
+
+	/* tls_disconnect() before dropping the descriptor: see send_stat(). */
+	#define TRAP_SEND(buf) \
+		if (sendline(client->filedes, buf) == -1) { \
+			tls_disconnect(client->filedes); \
+			client->filedes = -1; \
+			return; \
+		}
+
+	if (!client->xml)
+	{
+		for (i = 0; (r = trap_history_get(i)) != NULL; i++)
+		{
+			if (r->seq <= since)
+				break;	/* newest first: the rest are older still */
+			snprintf(buffer, sizeof(buffer), "%ld:%s:%s:%s:%s:%s",
+				(long)r->when, r->source, r->content.name,
+				r->content.severity,
+				r->matched[0] != '\0' ? r->matched : "-",
+				r->content.description);
+			TRAP_SEND(buffer);
+		}
+		snprintf(buffer, sizeof(buffer), "333 %lu %lu %d",
+			trap_history_total(), trap_history_oldest_seq(),
+			trap_history_count());
+		TRAP_SEND(buffer);
+		return;
+	}
+
+	snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAPS);
+	TRAP_SEND(buffer);
+
+	for (i = 0; (r = trap_history_get(i)) != NULL; i++)
+	{
+		struct trap_content *c = &r->content;
+
+		if (r->seq <= since)
+			break;	/* newest first: the rest are older still */
+
+		sent++;
+
+		snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAP);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%lu</%s>", XML_TRAP_SEQ,
+			r->seq, XML_TRAP_SEQ);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_SOURCE,
+			xml_escape(r->source, esc, sizeof(esc)), XML_TRAP_SOURCE);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%ld</%s>", XML_TRAP_TIME,
+			(long)r->when, XML_TRAP_TIME);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_BYTES,
+			r->bytes, XML_TRAP_BYTES);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VERSION,
+			c->version == 0 ? "v1" : (c->version == 1 ? "v2c" :
+			(c->version == 3 ? "v3" : "unknown")), XML_TRAP_VERSION);
+		TRAP_SEND(buffer);
+
+		/* The community is a credential. Only an authenticated client
+		   has any business seeing which one a device is using. */
+		if (client->authlvl > 0 && c->community[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_COMMUNITY,
+				xml_escape(c->community, esc, sizeof(esc)), XML_TRAP_COMMUNITY);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_NAME,
+			xml_escape(c->name, esc, sizeof(esc)), XML_TRAP_NAME);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_DESC,
+			xml_escape(c->description, esc, sizeof(esc)), XML_TRAP_DESC);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_SEVERITY,
+			xml_escape(c->severity, esc, sizeof(esc)), XML_TRAP_SEVERITY);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_CATEGORY,
+			xml_escape(c->category, esc, sizeof(esc)), XML_TRAP_CATEGORY);
+		TRAP_SEND(buffer);
+
+		if (c->trap_oid[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_OID,
+				xml_escape(c->trap_oid, esc, sizeof(esc)), XML_TRAP_OID);
+			TRAP_SEND(buffer);
+		}
+		if (c->enterprise[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_ENTERPRISE,
+				xml_escape(c->enterprise, esc, sizeof(esc)), XML_TRAP_ENTERPRISE);
+			TRAP_SEND(buffer);
+		}
+		if (c->agent[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_AGENT,
+				xml_escape(c->agent, esc, sizeof(esc)), XML_TRAP_AGENT);
+			TRAP_SEND(buffer);
+		}
+		if (c->vendor[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VENDOR,
+				xml_escape(c->vendor, esc, sizeof(esc)), XML_TRAP_VENDOR);
+			TRAP_SEND(buffer);
+		}
+		if (c->iface[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_IFACE,
+				xml_escape(c->iface, esc, sizeof(esc)), XML_TRAP_IFACE);
+			TRAP_SEND(buffer);
+		}
+		if (c->ifindex >= 0)
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_IFINDEX,
+				c->ifindex, XML_TRAP_IFINDEX);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "<%s>%lu</%s>", XML_TRAP_UPTIME,
+			c->uptime, XML_TRAP_UPTIME);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_DECODED,
+			c->decoded ? 1 : 0, XML_TRAP_DECODED);
+		TRAP_SEND(buffer);
+
+		if (r->matched[0] != '\0')
+		{
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_MATCHED,
+				xml_escape(r->matched, esc, sizeof(esc)), XML_TRAP_MATCHED);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT_EN,
+			r->alert_enabled ? 1 : 0, XML_TRAP_ALERT_EN);
+		TRAP_SEND(buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_TRAP_ALERT_SENT,
+			r->alert_sent ? 1 : 0, XML_TRAP_ALERT_SENT);
+		TRAP_SEND(buffer);
+
+		for (v = 0; v < c->nvarbinds && v < TRAP_MAX_VARBIND; v++)
+		{
+			struct trap_varbind *b = &c->vb[v];
+
+			snprintf(buffer, sizeof(buffer), "<%s>", XML_TRAP_VARBIND);
+			TRAP_SEND(buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_OID,
+				xml_escape(b->oid, esc, sizeof(esc)), XML_TRAP_VB_OID);
+			TRAP_SEND(buffer);
+
+			if (b->name[0] != '\0')
+			{
+				snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_NAME,
+					xml_escape(b->name, esc, sizeof(esc)), XML_TRAP_VB_NAME);
+				TRAP_SEND(buffer);
+			}
+
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_TYPE,
+				xml_escape(b->type, esc, sizeof(esc)), XML_TRAP_VB_TYPE);
+			TRAP_SEND(buffer);
+
+			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_VALUE,
+				xml_escape(b->value, esc, sizeof(esc)), XML_TRAP_VB_VALUE);
+			TRAP_SEND(buffer);
+
+			if (b->note[0] != '\0')
+			{
+				snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_TRAP_VB_NOTE,
+					xml_escape(b->note, esc, sizeof(esc)), XML_TRAP_VB_NOTE);
+				TRAP_SEND(buffer);
+			}
+
+			snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAP_VARBIND);
+			TRAP_SEND(buffer);
+		}
+
+		snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAP);
+		TRAP_SEND(buffer);
+	}
+
+	snprintf(buffer, sizeof(buffer), "</%s>", XML_TRAPS);
+	TRAP_SEND(buffer);
+
+	snprintf(buffer, sizeof(buffer), "333 %lu %lu %lu",
+		trap_history_total(), trap_history_oldest_seq(), sent);
+	TRAP_SEND(buffer);
+
+	#undef TRAP_SEND
+}
+
+/*
+ * SITE
+ *
+ * Who this daemon is. The name is the key half of every "site:object" a
+ * client stores; the description is the label a person reads. An
+ * unconfigured daemon answers "local" so a single-box install needs no
+ * config change and no special case in the client.
+ */
+void send_site(struct clientstatus *client)
+{
+	char buffer[TEMPBUF_SIZE];
+
+	if (client->xml)
+	{
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SITE_NAME,
+			sitename != NULL ? sitename : "local", XML_SITE_NAME);
+		if (sendline(client->filedes, buffer) == -1)
+			return;
+		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SITE_DESC,
+			sitedesc != NULL ? sitedesc : "", XML_SITE_DESC);
+		if (sendline(client->filedes, buffer) == -1)
+			return;
+		sendline(client->filedes, "333 site");
+		return;
+	}
+
+	snprintf(buffer, sizeof(buffer), "333 %s %s",
+		sitename != NULL ? sitename : "local",
+		sitedesc != NULL ? sitedesc : "");
+	sendline(client->filedes, buffer);
+}
+
 void send_uptime(struct clientstatus *client, time_t now_t)
 {
 	char buffer[256];
 
 	snprintf(buffer, sizeof(buffer), "Uptime = %s", str_difftime_sec(boottime, now_t));
 	sendline(client->filedes, buffer);
+}
+
+/*
+ * Read the optional "since this sequence" argument of CONF/TRAPS.
+ * Anything unparseable means 0, which is a full dump - the safe answer.
+ */
+static unsigned long parse_since(char *arg)
+{
+	char *end = NULL;
+	unsigned long v;
+
+	if (arg == NULL)
+		return 0;
+	while (*arg == ' ' || *arg == '\t')
+		arg++;
+	if (*arg == '\0')
+		return 0;
+
+	v = strtoul(arg, &end, 10);
+	if (end == arg)
+		return 0;
+	return v;
 }
 
 /* CLIENT managment code */
@@ -884,8 +1369,18 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	{
 		/* Send a quit message to far side */
 		sendline(here->filedes, "333 Good Bye, please come again");
-		/* Disallow any further communication */
-		close(here->filedes);
+		/*
+		 * Disallow any further communication.
+		 *
+		 * tls_disconnect() rather than close(): this client may be the
+		 * aggregator link, and the SSL* is tracked by descriptor number.
+		 * Closing the fd without dropping the SSL* leaves a stale entry
+		 * behind, and the next accept() or connect() will very likely be
+		 * handed that same number - at which point a plain socket would
+		 * quietly be written through a dead TLS session. On a plain
+		 * client this is exactly close().
+		 */
+		tls_disconnect(here->filedes);
 		here->filedes = -1;
 	}
         else if (strncmp(buff, "SNMPD", 5) == 0 && (here->authlvl >1))
@@ -908,9 +1403,45 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 		sendline(here->filedes, "Toggled debugging");
 		print_err(0, "Toggled debugging at client request");
 	}
+	/*
+	 * Config generations. CONFIG-GEN is the cheap one a poller asks every
+	 * cycle; the rest change what this box runs, so all four want the
+	 * authkey - a config carries community strings and contact addresses
+	 * on the way out, and decides what gets monitored on the way in.
+	 *
+	 * The longer command names are tested first: "CONFIG-GEN" would
+	 * otherwise never be reached through a prefix match on "CONFIG-G".
+	 */
+	else if (strncmp(buff, "CONFIG-ROLLBACK", 15) == 0 && (here->authlvl > 1))
+	{
+		confgen_do_rollback(here);
+	}
+	else if (strncmp(buff, "CONFIG-REVERT", 13) == 0 && (here->authlvl > 1))
+	{
+		confgen_do_revert(here);
+	}
+	else if (strncmp(buff, "CONFIG-PUT ", 11) == 0 && (here->authlvl > 1))
+	{
+		confgen_receive(here, buff + 11);
+	}
+	else if (strncmp(buff, "CONFIG-GEN", 10) == 0 && (here->authlvl > 1))
+	{
+		confgen_report(here);
+	}
+	else if (strncmp(buff, "CONFIG-GET", 10) == 0 && (here->authlvl > 1))
+	{
+		confgen_send(here);
+	}
+	else if (strncmp(buff, "CONFIG-", 7) == 0)
+	{
+		/* Recognised but not permitted: say which, rather than letting it
+		   fall through to "unknown request" and look like an old daemon
+		   that has never heard of config management. */
+		sendline(here->filedes, "403 - config management needs the authkey");
+	}
 	else if (strncmp(buff, "CONF", 4) == 0)
 	{
-		send_conf(here);
+		send_conf(here, parse_since(buff + 4));
 	}
 	else if (strncmp(buff, "EXPIREDNS", 9) == 0 && (here->authlvl >1))
 	{
@@ -940,6 +1471,14 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	{
 		srv_client_do_trace(here, buff);
 	}
+	else if (strncmp(buff, "SITE", 4) == 0)
+	{
+		send_site(here);
+	}
+	else if (strncmp(buff, "TRAPS", 5) == 0)
+	{
+		send_traps(here, parse_since(buff + 5));
+	}
 	else if (strncmp(buff, "AUTH", 4) == 0)
 	{
 		do_auth(here, buff);
@@ -961,7 +1500,7 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 		if (sendline(here->filedes, "444 - Unk")  == -1)
 		{
 			print_err(0, "error sending message to client");
-			close(here->filedes);
+			tls_disconnect(here->filedes);
 			here->filedes = -1;
 		}
 		/* Log the unknown request */
@@ -1011,9 +1550,14 @@ void timeout_clients()
 		if ((now - here->lastactivity) > inactivetime )
 		{
 			sendline(here->filedes, "444 - Timed out");
+			/*
+			 * tls_disconnect(), not close(): see the QUIT handler.
+			 * A timed-out aggregator link that only had its fd closed
+			 * would leave its SSL* tracked against a number the next
+			 * connection is about to be given.
+			 */
 			if (here->filedes != -1)
-				if (close(here->filedes) == -1)
-					perror("waah! closing stuff\n");
+				tls_disconnect(here->filedes);
 			here->filedes = -1;
 		}
 }
@@ -1176,7 +1720,7 @@ void	check_for_new_clients()
 void	service_clients()
 {
 	struct clientstatus *here;
-	char throwmeout[TEMPBUF_SIZE], buff[1024];
+	char buff[1024];
 	struct timeval tv;
 	fd_set rd,wr,except;
 	time_t now_t;
@@ -1211,8 +1755,23 @@ void	service_clients()
 				continue;
 			if (FD_ISSET(here->filedes, &rd))
 			{
+				/*
+				 * One line, one command. There used to be a second
+				 * getline_tcp() here throwing a line away, to swallow the
+				 * LF left over from a CRLF - which getline_tcp already
+				 * skips on its own, as leading whitespace, at the start of
+				 * the next read.
+				 *
+				 * It was not harmless. Whenever a client sent a command
+				 * and its payload in one segment - or simply pipelined two
+				 * commands - the discarded line was the client's next
+				 * line, not a stray LF. CONFIG-PUT made that visible
+				 * (the daemon ate the first line of the delivery and then
+				 * blocked waiting for bytes that had already arrived), but
+				 * any pipelining client was silently losing every second
+				 * command before that.
+				 */
 				getline_tcp(here->filedes, buff);
-				getline_tcp(here->filedes, throwmeout);
 				do_service(here, buff, now_t);
 				here->lastactivity = now_t;
 			}
@@ -1233,12 +1792,6 @@ void	client_poll()
 
 	in_client_poll = TRUE;
 
-        if (clienthead->filedes == -1)
-	{
-	        /* do nothing */
-                return;
-	}
-
         local_timeout.tv_sec = 0;
         local_timeout.tv_usec = 0;
 
@@ -1246,8 +1799,22 @@ void	client_poll()
         FD_ZERO(&except);
         FD_ZERO(&rd);
 
-	/* check for new clients */
-	check_for_new_clients();
+	/*
+	 * There may be no listening socket at all - that is the default now,
+	 * and a daemon that only dials out to a sysmon-web never has one. Its
+	 * connections still live in this list and still have to be serviced,
+	 * so it is the accept path that gets skipped, not the whole function.
+	 *
+	 * (This used to return early when there was no listener, and did it
+	 * *after* setting in_client_poll, so the flag stayed set and no client
+	 * was ever polled again. Nothing reached it while the daemon always
+	 * listened.)
+	 */
+	if (clienthead->filedes != -1)
+	{
+		/* check for new clients */
+		check_for_new_clients();
+	}
 
 	/* process old clients new data */
 	service_clients();
@@ -1257,6 +1824,12 @@ void	client_poll()
 
 	/* free dead client memory */
 	dead_client_cleanup();
+
+	if (clienthead->filedes == -1)
+	{
+		in_client_poll = FALSE;
+		return;
+	}
 
 	for (here = clienthead; here != NULL; here = here->next)
 		if (here->filedes != -1)

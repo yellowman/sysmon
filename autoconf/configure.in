@@ -354,40 +354,51 @@ LIBS_SAVE="$LIBS"
 
 LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
-dnl net-snmp/version.h uses the NETSNMP_IMPORT macro, which is only
-dnl defined once net-snmp-config.h has been included. Checking it on its
-dnl own fails to compile on every modern net-snmp, so SNMP support was
-dnl silently dropped from the build - a daemon that then rejects every
-dnl "type snmp" object at config load. Include the config header first.
-AC_CHECK_HEADERS(net-snmp/version.h,IS_NET_SNMP="yes",,
-[#include <net-snmp/net-snmp-config.h>])
-if test "$IS_NET_SNMP" = "yes"; then
-        AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
-        AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")
-        AC_CHECK_LIB(netsnmp,snmp_open,USABLE_NET_SNMP="yes")
+dnl TLS for the aggregator link (sysmond dialling out to sysmon-web).
+dnl Targets the OpenSSL 1.1.1 / LibreSSL API deliberately - that is what
+dnl OpenBSD ships and what long-lived Linux installs have - so the probe
+dnl is for SSL_CTX_set_min_proto_version, which is the 1.1.0 floor this
+dnl code needs. Without it sysmond still builds; it just refuses to dial
+dnl an aggregator rather than doing it in the clear.
+AC_CHECK_HEADERS(openssl/ssl.h,HAVE_SSL_H="yes")
+if test "$HAVE_SSL_H" = "yes"; then
+	dnl Probe by compiling and linking, not by looking for a symbol:
+	dnl SSL_CTX_set_min_proto_version and SSL_get0_param are macros over
+	dnl SSL_CTX_ctrl in 1.1.0+, so AC_CHECK_LIB would never find them and
+	dnl would silently disable TLS on exactly the versions we target.
+	SAVE_LIBS="$LIBS"
+	LIBS="$LIBS -lssl -lcrypto"
+	AC_MSG_CHECKING([for a usable OpenSSL 1.1.1 / LibreSSL API])
+	AC_TRY_LINK([#include <openssl/ssl.h>
+#include <openssl/x509v3.h>],
+[SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+SSL *s; X509_VERIFY_PARAM *p;
+SSL_CTX_set_min_proto_version(c, TLS1_2_VERSION);
+s = SSL_new(c); p = SSL_get0_param(s);
+X509_VERIFY_PARAM_set1_host(p, "x", 0);],
+	HAVE_SSL_LIB="yes", HAVE_SSL_LIB="no")
+	AC_MSG_RESULT($HAVE_SSL_LIB)
+	LIBS="$SAVE_LIBS"
+fi
+if test "$HAVE_SSL_LIB" = "yes"; then
+	TLS="-DHAVE_TLS"
+	dnl Held aside rather than appended here: the SNMP section below
+	dnl restores LIBS from LIBS_SAVE, which would drop it again.
+	TLS_LIBS="-lssl -lcrypto"
 else
-	AC_CHECK_HEADERS(ucd-snmp/version.h,IS_UCD_SNMP="yes")
-	if test "$IS_UCD_SNMP" = "yes"; then
-       		AC_CHECK_LIB(snmp,snmp_open,USABLE_SNMP="yes")
-        	AC_CHECK_LIB(snmp,NetSnmpVersionInfo,USABLE_SNMP="yes")
-        	AC_CHECK_LIB(netsnmp,snmp_open,USABLE_NET_SNMP="yes")
-	fi
+	AC_MSG_WARN([no usable OpenSSL/LibreSSL - sysmond will refuse to dial an aggregator])
 fi
+AC_SUBST(TLS)
 
-LIBS="$LIBS_SAVE"
+dnl SNMP needs no library. sysmond speaks v1/v2c GET itself (src/snmp.c)
+dnl and decodes traps itself (src/trapdecode.c), which is the whole of the
+dnl protocol it ever used - so there is no net-snmp to find, no header
+dnl test to get subtly wrong, and no way to end up with a daemon that
+dnl silently rejects every "type snmp" object because a probe failed.
+dnl TLS_LIBS is appended here rather than where it is discovered, because
+dnl this restore would otherwise drop it.
+LIBS="$LIBS_SAVE $TLS_LIBS"
 
-if test "$USABLE_SNMP" = "yes"; then
-       SNMP="-DENABLE_SNMP"
-	LIBS="$LIBS -lsnmp"
-fi
-if test "$USABLE_NET_SNMP" = "yes"; then
-       SNMP="-DENABLE_SNMP"
-       LIBS="$LIBS -lnetsnmp"
-fi
-
-
-dnl ssl libs need to come after netsnmp in linkpath
-LIBS="$LIBS $SSL_LIBS $CRYPTO_LIBS"
 
 dnl some checks
 if test "$SENDMAIL" = no; then

@@ -112,12 +112,96 @@ func parseWithIncludes(content []byte, baseDir string, depth int) (*models.Confi
 	return config, nil
 }
 
+// splitStatements puts each statement on its own line.
+//
+// This parser reads a line at a time, so it only ever understood an
+// object written across several lines. sysmond does not care: its lexer
+// reads tokens, and "object x { ip "1.2.3.4"; type ping; };" on one
+// line is a perfectly ordinary config. Faced with that, this parser
+// took the object's name, dropped every field on the line with it, and
+// never saw a closing brace on a line of its own - so the object was
+// never finished and never added. A config sysmond runs happily showed
+// up in the web editor as no hosts at all.
+//
+// Rather than teach every branch below about mid-line statements, the
+// content is normalised first: a newline after each ";", "{" and "}".
+// Extra blank lines are already skipped, so configs that were parsing
+// before come through unchanged.
+//
+// Two things must not be split on:
+//
+//   - Quoted strings. desc "restart; then check" is one value, and a
+//     newline in the middle of it makes two lines of nonsense.
+//   - Comments. "#" starts one anywhere, and ";" starts one when it is
+//     the first thing on a line - which is why a bare ";" cannot simply
+//     be treated as a terminator. Comments are copied through to the
+//     end of their line untouched.
+func splitStatements(content []byte) []byte {
+	out := make([]byte, 0, len(content)+len(content)/8)
+
+	inQuote := false   // inside "..."
+	inComment := false // to end of line
+	blank := true      // only whitespace on this line so far
+
+	for i := 0; i < len(content); i++ {
+		c := content[i]
+
+		if c == '\n' {
+			out = append(out, c)
+			inQuote, inComment, blank = false, false, true
+			continue
+		}
+
+		if inComment {
+			out = append(out, c)
+			continue
+		}
+
+		if inQuote {
+			out = append(out, c)
+			if c == '"' {
+				inQuote = false
+			}
+			continue
+		}
+
+		switch c {
+		case '"':
+			inQuote = true
+			out = append(out, c)
+			blank = false
+		case '#':
+			inComment = true
+			out = append(out, c)
+			blank = false
+		case ';':
+			// A leading ';' is a comment marker, not a terminator.
+			if blank {
+				inComment = true
+				out = append(out, c)
+			} else {
+				out = append(out, c, '\n')
+				blank = true
+			}
+		case '{', '}':
+			out = append(out, c, '\n')
+			blank = true
+		case ' ', '\t', '\r':
+			out = append(out, c)
+		default:
+			out = append(out, c)
+			blank = false
+		}
+	}
+
+	return out
+}
+
 // Parse parses sysmon.conf format
 func Parse(content []byte) (*models.Config, error) {
 	config := &models.Config{
 		Global: models.GlobalSettings{
 			ClientPort:    1345, // sysmon default TCP port (SYSMON_PORTNUM)
-			SNMPTrapPort:  162,  // SNMP trap default
 			CheckInterval: 300,  // 5 minutes default
 		},
 		Hosts:    []models.Host{},
@@ -125,7 +209,7 @@ func Parse(content []byte) (*models.Config, error) {
 		Spawns:   []models.SpawnCommand{},
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(content))
+	scanner := bufio.NewScanner(bytes.NewReader(splitStatements(content)))
 	var currentHost *models.Host
 	var inObject bool
 	var inSpawns bool
@@ -531,6 +615,8 @@ func Parse(content []byte) (*models.Config, error) {
 				currentHost.SNMPUpMsg = extractQuoted(strings.TrimPrefix(line, "snmp-upmsg "))
 			} else if strings.HasPrefix(line, "snmp-downmsg ") {
 				currentHost.SNMPDownMsg = extractQuoted(strings.TrimPrefix(line, "snmp-downmsg "))
+			} else if strings.HasPrefix(line, "snmp-version ") {
+				currentHost.SNMPVersion = extractQuoted(strings.TrimPrefix(line, "snmp-version "))
 			} else if strings.HasPrefix(line, "snmp-type ") {
 				currentHost.SNMPType = extractQuoted(strings.TrimPrefix(line, "snmp-type "))
 			} else if strings.HasPrefix(line, "snmp-high ") {
@@ -591,8 +677,15 @@ func Parse(content []byte) (*models.Config, error) {
 				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "rtt_samples "))); err == nil {
 					currentHost.RTTSamples = val
 				}
-			} else if strings.HasPrefix(line, "pkt_loss_tolerance ") {
-				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pkt_loss_tolerance "))); err == nil {
+			} else if strings.HasPrefix(line, "rtt_interval ") {
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "rtt_interval "))); err == nil {
+					currentHost.RTTInterval = val
+				}
+			} else if strings.HasPrefix(line, "pktloss_tolerance ") {
+				// The directive is "pktloss_tolerance", one word - this
+				// looked for "pkt_loss_tolerance" and so never matched
+				// anything the daemon would accept.
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pktloss_tolerance "))); err == nil {
 					currentHost.PktLossTolerance = val
 				}
 			} else if strings.HasPrefix(line, "pkt_loss_history_hours ") {
