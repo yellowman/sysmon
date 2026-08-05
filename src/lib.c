@@ -622,11 +622,36 @@ short int name_to_type(char *sent_type)
 		case 5:
                         if (strcmp(type, "bootp") == 0)
                                 return SYSM_TYPE_BOOTP;
-			/* This sat below the break, where nothing runs, so
-			 * "type https" was refused for as long as the check
-			 * has existed. */
-                        if (strcmp(type, "https") == 0)
-                                return SYSM_TYPE_HTTPS;
+			/*
+			 * "https" is deliberately absent, and this comment is
+			 * here so nobody adds it back for a third time.
+			 *
+			 * The type has a constant, a stop_ function, both
+			 * halves of a dispatch in syswatch.c and prototypes in
+			 * config.h - and no implementation. start_test_https()
+			 * and service_test_https() are declared and never
+			 * defined anywhere in the tree. The dispatch compiles
+			 * only because it is wrapped in #ifdef HAVE_SSL, which
+			 * configure assigns to a shell variable it then never
+			 * substitutes into a Makefile, so it has never been
+			 * defined in any build. Remove the guard and the link
+			 * fails; that is the honest measure of how finished
+			 * this is.
+			 *
+			 * This line did sit below the break for years, dead,
+			 * and was moved above it in the belief that a working
+			 * check was being switched back on. It was not. What
+			 * that produced was worse than the refusal: the object
+			 * parsed, queued, and hit the "invalid event type" arm
+			 * of service_this() on every pass, forever, monitoring
+			 * nothing while looking configured.
+			 *
+			 * Until the check is written, refusing the type at
+			 * parse time is the truthful answer - the operator gets
+			 * an error on the line they wrote instead of an object
+			 * that silently never runs. For "is the TLS port
+			 * answering", "type tcp; port 443;" works today.
+			 */
 			break;
 		case 6:
                         if (strcmp(type, "radius") == 0)
