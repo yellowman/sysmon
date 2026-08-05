@@ -314,8 +314,7 @@ point of the whole arrangement:
 
 - **The alternative was worse.** Writing the delivered config back over
   `/etc/sysmon.conf` means `/etc` has to be writable by the user sysmond
-  drops to. That is a bad trade to ask an operator to make in exchange for
-  remote config, and it is not one they have to make now.
+  drops to.
 - **A wiped state directory is survivable.** The box comes back on the
   config an operator wrote, not on nothing and not on half of something.
 - **There is a way out.** `CONFIG-REVERT` - "Unmanage" in the UI - drops
