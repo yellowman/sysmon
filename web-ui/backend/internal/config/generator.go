@@ -291,6 +291,9 @@ func GenerateHost(host models.Host) string {
 	if host.RTTSamples > 0 {
 		sb.WriteString(fmt.Sprintf("\trtt_samples %d;\n", host.RTTSamples))
 	}
+	if host.RTTInterval > 0 {
+		sb.WriteString(fmt.Sprintf("\trtt_interval %d;\n", host.RTTInterval))
+	}
 
 	// SNMP settings
 	if host.SNMPCommunity != "" {
