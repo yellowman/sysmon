@@ -214,9 +214,6 @@ tracks. Specifically:
 - no 3.0-only surface: no providers, no `EVP_MAC`, no
   `SSL_CTX_set_ciphersuites` (TLS 1.3-only and absent from older LibreSSL)
 
-Anything outside that set is a portability bug waiting for the first
-OpenBSD deployment.
-
 **Fallback.** The existing inbound listener stays. A single-box install
 where sysmon-web dials `localhost:1345` keeps working exactly as it does
 now; dial-out is what a `config aggregator "…";` directive turns on.
