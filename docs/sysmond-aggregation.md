@@ -42,12 +42,8 @@ installs are unaffected.
 The separator is `:` because it cannot appear in a sysmon object name and
 reads naturally in an alert: `bend-noc:awbreyswitch`.
 
-**`sitename` is `[A-Za-z0-9_-]+` and nothing else.** A colon in it would
-make `metro:west:corerouter` ambiguous to every split in the codebase, so
-it is rejected at config load with a plain error and the daemon refuses to
-start rather than reporting under a name that cannot be parsed back. The
-same rule keeps whitespace and quotes out, which would otherwise have to be
-escaped in every log line, key and API path.
+`sitename` is `[A-Za-z0-9_-]+` and nothing else, rejected at config load
+if it isn't.
 
 This identity is the key for:
 
