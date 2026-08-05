@@ -9,6 +9,15 @@ small C daemon (`sysmond`) that has been watching networks since the
 now with a live web dashboard, native Android and iOS apps, push
 notifications, and CI that builds everything on every push.
 
+![The sysmon-web dashboard](docs/screenshots/dashboard.png)
+
+Every screenshot on this page is one running system: `examples/sysmon.conf.fleet`,
+a 500-object wireless ISP built entirely out of shipped device templates -
+fourteen towers with their sectors, backhauls, switches and battery
+plants, a PON plant, core and transit, and the environmental gear
+underneath it. Two towers are on reserved address ranges that answer
+nothing, which is where the red comes from.
+
 ## What's in the box
 
 | Component | Language | What it does |
@@ -72,6 +81,37 @@ notifications, and CI that builds everything on every push.
 - API metrics, session/error logs, user management with roles
 - Runs as FastCGI behind nginx or OpenBSD httpd(8), or standalone with
   `-listen` for development; drops privileges after binding
+
+#### Hosts
+
+![Host cards showing latency, jitter and packet loss](docs/screenshots/hosts.png)
+
+One tower, every object on it. A latency check exists to produce
+numbers, so the card carries them: mean round trip with its min-max
+range, RFC 3550 jitter, the loss ratio from the packet-loss check, and
+the device's own uptime from the SNMP reboot watch. Figures are coloured
+against the threshold *you* set for that object rather than a number
+picked here - the backhaul in red is at 64ms against the 20ms its
+template asked for.
+
+#### Dependency map
+
+![The dependency map with a tower outage](docs/screenshots/map.png)
+
+The config as a graph, coloured live. When a tower router stops
+answering, everything behind it goes with it - which is the point of
+declaring the dependency: sysmond pages you about the router, not about
+the forty things behind it.
+
+#### Push administration
+
+![Push subscribers and the delivery pipeline panel](docs/screenshots/admin-push.png)
+
+Which phones are on the pager, when each last checked in, and a Test
+button per device. The Push Delivery Pipeline panel above it names the
+exact broken link when notifications are not flowing - here, honestly,
+that no FCM or APNs credentials have been uploaded, so nothing is being
+sent no matter how many devices are subscribed.
 
 ### Mobile apps (Android + iOS)
 - Live host list and alerts driven by the delta protocol - a shared
@@ -283,6 +323,13 @@ Three things to know:
 cp examples/sysmon.conf.dist /usr/local/etc/sysmon.conf   # then edit
 src/sysmond -f /usr/local/etc/sysmon.conf
 ```
+
+`examples/` also has `sysmon.conf.full`, which shows every directive, and
+`sysmon.conf.fleet` - the 500-object wireless ISP in the screenshots
+above. The fleet file is addressed entirely on loopback, so
+`src/sysmond -t -f examples/sysmon.conf.fleet` validates it and running
+it gives you something to look at while you find your way around the web
+UI.
 
 ### Web UI
 ```sh
