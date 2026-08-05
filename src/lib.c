@@ -598,7 +598,7 @@ short int name_to_type(char *sent_type)
 				return SYSM_TYPE_IMAP;
 			if (strcmp(type, "http") == 0)
 				return SYSM_TYPE_WWW;
-			if ((strcmp(type, "ping") == 0 || strcmp(type, "pingv4") == 0) && (!disable_icmp))
+			if (strcmp(type, "ping") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PING;
                         if (strcmp(type, "ping6") == 0 && (!disable_icmp))
                                 return SYSM_TYPE_PINGv6;
@@ -622,9 +622,12 @@ short int name_to_type(char *sent_type)
 		case 5:
                         if (strcmp(type, "bootp") == 0)
                                 return SYSM_TYPE_BOOTP;
-			break;
+			/* This sat below the break, where nothing runs, so
+			 * "type https" was refused for as long as the check
+			 * has existed. */
                         if (strcmp(type, "https") == 0)
                                 return SYSM_TYPE_HTTPS;
+			break;
 		case 6:
                         if (strcmp(type, "radius") == 0)
                                 return SYSM_TYPE_RADIUS;
@@ -632,8 +635,18 @@ short int name_to_type(char *sent_type)
                                 return SYSM_TYPE_SYSM;
 			if (strcmp(type, "pingv6") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PINGv6;
+			/* Six characters, so it belongs here - it was written
+			 * into case 4 next to "ping", where no 6-character
+			 * string ever arrives, and the alias never worked. */
+			if (strcmp(type, "pingv4") == 0 && (!disable_icmp))
+				return SYSM_TYPE_PING;
 			break;
-		case 8:
+		case 7:
+			/* "pktloss" is seven characters; it was filed under
+			 * case 8, and there was no case 7 at all, so the type
+			 * was refused at parse. The receive side had the same
+			 * drained-socket bug as rtt, hidden behind this - see
+			 * handle_icmp_responses. */
 			if (strcmp(type, "pktloss") == 0 && (!disable_icmp))
 				return SYSM_TYPE_PKTLOSS;
 			break;
