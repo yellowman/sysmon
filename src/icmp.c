@@ -10,6 +10,13 @@ extern unsigned short int use_ping_helper;  /* From syswatch.c */
 /* Forward declarations */
 static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *here);
 
+/* Defined near the RTT code; called from handle_icmp_responses so that
+ * the one reader of the raw socket also feeds RTT checks. Returns TRUE
+ * if this reply belonged to the given RTT check and was recorded. */
+static bool rtt_match_and_record(struct monitorent *here,
+	unsigned short echo_id, struct in_addr from_addr,
+	struct timeval *recv_time);
+
 #define A(bit)          icmp_temp.rcvd_tbl[(bit)>>3]  /*identify byte in array*/
 #define B(bit)          (1 << ((bit) & 0x07))   /* identify bit in byte */
 #define CLR(bit)        (A(bit) &= (~B(bit)))  /* do something... */
@@ -128,6 +135,7 @@ void	handle_icmp_responses()
 	struct pingdata *localstruct = NULL;
 	struct pingdata rcvd_data;
 	struct sockaddr_in from;
+	struct timeval recv_time;
 	char rcvd_pkt[ICMP_PACKET_SIZE];
 	int ret;
 	int fromlen;
@@ -154,6 +162,12 @@ void	handle_icmp_responses()
 			perror("icmp.c: recvfrom");
 			continue; /* try again */
 		}
+
+		/* Stamp arrival now, before any per-check work, so an RTT
+		 * reply is timed from when it landed rather than from when the
+		 * queue walk reached its check. */
+		gettimeofday(&recv_time, NULL);
+
                 /* Check the IP header */
 		rcvd_data.ip = (struct IPHDR *)rcvd_pkt;
 		rcvd_data.hlen = (rcvd_data.ip->IHL & 0x0f) << 2;
@@ -167,9 +181,26 @@ void	handle_icmp_responses()
 
 		/* determine if it was ours */
 
-		/* Walk the queue to find active checks that are ping/icmp type */
+		/* Walk the queue to find the check this reply belongs to.
+		 *
+		 * Both ping and rtt checks live on this one raw socket, and
+		 * this is its only reader. An rtt check used to read the socket
+		 * itself, from service_test_rtt - but this function is called
+		 * every main-loop pass and drains the socket dry, so it was
+		 * consuming rtt replies and, matching only ping checks,
+		 * throwing them away. The rtt check then always timed out.
+		 * Feeding rtt from here, where the packet actually arrives, is
+		 * the fix. */
 		for (here = queuehead; here != NULL; here = here->next)
 		{
+			if (here->checkent->type == SYSM_TYPE_PING_LATENCY)
+			{
+				if (rtt_match_and_record(here,
+					rcvd_data.icp->ICMP_ECHO_ID,
+					from.sin_addr, &recv_time))
+					break; /* a reply belongs to one check */
+				continue;
+			}
 			if (here->checkent->type != SYSM_TYPE_PING)
 			{
 				continue;
@@ -1199,174 +1230,150 @@ void start_test_rtt(struct monitorent *here)
  * Checks for ICMP replies, calculates RTT and jitter, and determines
  * if thresholds are exceeded.
  */
+/*
+ * rtt_match_and_record - is this echo reply ours, and if so, time it
+ *
+ * Called from handle_icmp_responses (the single reader of the raw ICMP
+ * socket) for each SYSM_TYPE_PING_LATENCY check. The ident+source match
+ * is the same ownership test the ping path uses, and for the same reason
+ * - a 16-bit ident alone is not proof, so the reply's source must be the
+ * address this check is probing. recv_time is when the packet landed.
+ *
+ * Sends nothing and decides nothing: it records one sample. Whether that
+ * was the last sample, and whether to send the next probe, is the state
+ * machine in service_test_rtt, run on the next queue walk.
+ */
+static bool rtt_match_and_record(struct monitorent *here,
+	unsigned short echo_id, struct in_addr from_addr,
+	struct timeval *recv_time)
+{
+	struct rtt_data *rttdata;
+	struct pingdata *ping;
+	double rtt_ms;
+
+	if (here == NULL || here->monitordata == NULL)
+		return FALSE;
+
+	rttdata = (struct rtt_data *)here->monitordata;
+	ping = rttdata->ping;
+	if (ping == NULL || ping->to == NULL)
+		return FALSE;
+
+	if (echo_id != ping->ident ||
+	    from_addr.s_addr != ping->to->sin_addr.s_addr)
+		return FALSE;
+
+	rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, recv_time);
+
+	rttdata->rtt_current = rtt_ms;
+	if (rtt_ms < rttdata->rtt_min)
+		rttdata->rtt_min = rtt_ms;
+	if (rtt_ms > rttdata->rtt_max)
+		rttdata->rtt_max = rtt_ms;
+	rttdata->rtt_sum += rtt_ms;
+	rttdata->rtt_count++;
+	rttdata->rtt_avg = rttdata->rtt_sum / rttdata->rtt_count;
+
+	/* Jitter needs a previous sample to differ from. */
+	if (rttdata->rtt_count > 1)
+		update_jitter(rttdata, rtt_ms);
+	rttdata->rtt_previous = rtt_ms;
+
+	ping->nreceived++;
+
+	if (debug || here->checkent->trace)
+		print_err(here->checkent->trace,
+			"RTT sample #%u for %s: %.2fms (avg=%.2fms jitter=%.2fms)",
+			rttdata->rtt_count, here->checkent->hostname, rtt_ms,
+			rttdata->rtt_avg, rttdata->jitter_current);
+
+	return TRUE;
+}
+
+/*
+ * rtt_finish - free an rtt check's state and record its verdict.
+ */
+static void rtt_finish(struct monitorent *here, struct rtt_data *rttdata, int retval)
+{
+	here->retval = retval;
+	if (rttdata->ping != NULL) {
+		FREE(rttdata->ping->packet);
+		FREE(rttdata->ping);
+	}
+	FREE(rttdata);
+	here->monitordata = NULL;
+}
+
+/*
+ * service_test_rtt - drive one rtt check's probe/evaluate cycle.
+ *
+ * No longer reads the socket: handle_icmp_responses records the samples
+ * (see rtt_match_and_record). This runs on every queue walk and does
+ * three things - finish when enough samples are in, send the next probe
+ * once the outstanding one has been answered, and time the whole thing
+ * out. Probes are serial: one in flight at a time, so last_send_time is
+ * unambiguous and a single reply per probe is expected.
+ */
 void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 {
 	struct rtt_data *rttdata;
 	struct pingdata *ping;
-	struct timeval recv_time;
-	struct sockaddr_in from;
-	socklen_t fromlen;
-	char recv_buf[512];
-	int recv_len;
-	struct ip *ip_hdr;
-	struct ICMPHDR *icmp_hdr;
-	int ip_hdr_len;
-	double rtt_ms;
 	double elapsed_since_send;
 
-	if (here == NULL || here->monitordata == NULL) {
+	if (here == NULL || here->monitordata == NULL)
 		return;
-	}
 
 	rttdata = (struct rtt_data *)here->monitordata;
 	ping = rttdata->ping;
 
-	/* Check for ICMP reply */
-	fromlen = sizeof(from);
-	recv_len = recvfrom(glob_icmp_fd, recv_buf, sizeof(recv_buf), MSG_DONTWAIT,
-	                    (struct sockaddr *)&from, &fromlen);
+	/* Enough samples: decide and finish. RTT is checked before jitter,
+	 * so a link that is both slow and jittery reports "RTT too high". */
+	if (rttdata->rtt_count >= here->checkent->rtt_samples) {
+		int retval;
 
-	if (recv_len < 0) {
-		/* Distinguish between "no data yet" (EAGAIN) and actual errors */
-		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			print_err(1, "service_test_rtt: recvfrom error for %s: %s",
-			          here->checkent->hostname, strerror(errno));
-			/* Continue to timeout check - this may be transient */
+		if (rttdata->rtt_avg > here->checkent->rtt_threshold) {
+			retval = SYSM_RTT_HIGH;
+			if (debug)
+				print_err(1, "RTT threshold exceeded for %s: avg=%.2fms (threshold=%ums)",
+					here->checkent->hostname, rttdata->rtt_avg,
+					here->checkent->rtt_threshold);
+		} else if (here->checkent->jitter_threshold > 0 &&
+		           rttdata->jitter_current > here->checkent->jitter_threshold) {
+			retval = SYSM_JITTER_HIGH;
+			if (debug)
+				print_err(1, "Jitter threshold exceeded for %s: jitter=%.2fms (threshold=%ums)",
+					here->checkent->hostname, rttdata->jitter_current,
+					here->checkent->jitter_threshold);
+		} else {
+			retval = SYSM_OK;
 		}
-		/* EAGAIN/EWOULDBLOCK is normal for non-blocking socket - fall through to timeout check */
-		goto timeout_check;
+
+		if (debug)
+			print_err(1, "RTT test complete for %s: min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
+				here->checkent->hostname, rttdata->rtt_min, rttdata->rtt_avg,
+				rttdata->rtt_max, rttdata->jitter_current);
+
+		rtt_finish(here, rttdata, retval);
+		return;
 	}
 
-	if (recv_len > 0) {
-		/* Record receive time immediately */
-		gettimeofday(&recv_time, NULL);
-
-		/* Validate minimum packet size for IP header */
-		if (recv_len < sizeof(struct ip)) {
-			if (debug) {
-				print_err(1, "service_test_rtt: Received packet too small for IP header (%d bytes)", recv_len);
-			}
-			goto timeout_check;
-		}
-
-		/* Parse IP header */
-		ip_hdr = (struct ip *)recv_buf;
-		ip_hdr_len = ip_hdr->ip_hl << 2;
-
-		/* Validate IP header length */
-		if (ip_hdr_len < 20 || ip_hdr_len > recv_len) {
-			if (debug) {
-				print_err(1, "service_test_rtt: Invalid IP header length (%d), recv_len=%d", ip_hdr_len, recv_len);
-			}
-			goto timeout_check;
-		}
-
-		/* Validate enough space for ICMP header */
-		if (recv_len < ip_hdr_len + (int)sizeof(struct ICMPHDR)) {
-			if (debug) {
-				print_err(1, "service_test_rtt: Packet too small for ICMP header (recv_len=%d, ip_hdr_len=%d)",
-					recv_len, ip_hdr_len);
-			}
-			goto timeout_check;
-		}
-
-		/* Parse ICMP header */
-		icmp_hdr = (struct ICMPHDR *)(recv_buf + ip_hdr_len);
-
-		/* Check if this is our ICMP echo reply - ident AND source
-		 * address, since the raw socket sees every echo reply on the
-		 * machine (see handle_icmp_responses). */
-		if (icmp_hdr->ICMP_TYPE == ICMP_ECHOREPLY &&
-		    icmp_hdr->ICMP_ECHO_ID == ping->ident &&
-		    ping->to != NULL &&
-		    from.sin_addr.s_addr == ping->to->sin_addr.s_addr) {
-
-			/* Calculate RTT */
-			rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, &recv_time);
-
-			/* Update RTT statistics */
-			rttdata->rtt_current = rtt_ms;
-			if (rtt_ms < rttdata->rtt_min) {
-				rttdata->rtt_min = rtt_ms;
-			}
-			if (rtt_ms > rttdata->rtt_max) {
-				rttdata->rtt_max = rtt_ms;
-			}
-			rttdata->rtt_sum += rtt_ms;
-			rttdata->rtt_count++;
-			rttdata->rtt_avg = rttdata->rtt_sum / rttdata->rtt_count;
-
-			ping->nreceived++;
-
-			/* Update jitter (if we have previous RTT) */
-			if (rttdata->rtt_count > 1) {
-				update_jitter(rttdata, rtt_ms);
-			}
-			rttdata->rtt_previous = rtt_ms;
-
-			if (debug) {
-				print_err(1, "RTT sample #%u: %.2fms (avg=%.2fms, jitter=%.2fms)",
-					rttdata->rtt_count, rtt_ms, rttdata->rtt_avg,
-					rttdata->jitter_current);
-			}
-
-			/* Check if we have enough samples */
-			if (rttdata->rtt_count >= here->checkent->rtt_samples) {
-				/* Threshold checking */
-				if (rttdata->rtt_avg > here->checkent->rtt_threshold) {
-					here->retval = SYSM_RTT_HIGH;
-
-					if (debug) {
-						print_err(1, "RTT threshold exceeded for %s: avg=%.2fms (threshold=%ums)",
-							here->checkent->hostname, rttdata->rtt_avg,
-							here->checkent->rtt_threshold);
-					}
-				} else if (here->checkent->jitter_threshold > 0 &&
-				           rttdata->jitter_current > here->checkent->jitter_threshold) {
-					here->retval = SYSM_JITTER_HIGH;
-
-					if (debug) {
-						print_err(1, "Jitter threshold exceeded for %s: jitter=%.2fms (threshold=%ums)",
-							here->checkent->hostname, rttdata->jitter_current,
-							here->checkent->jitter_threshold);
-					}
-				} else {
-					here->retval = SYSM_OK;
-				}
-
-				/* Log final statistics */
-				if (debug) {
-					print_err(1, "RTT test complete for %s: min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
-						here->checkent->hostname, rttdata->rtt_min, rttdata->rtt_avg,
-						rttdata->rtt_max, rttdata->jitter_current);
-				}
-
-				/* Cleanup */
-				FREE(ping->packet);
-				FREE(ping);
-				FREE(rttdata);
-				here->monitordata = NULL;
-				return;
-			}
-
-			/* Send another packet using pinger_v4 */
-			gettimeofday(&rttdata->last_send_time, NULL);
-			pinger_v4(ping, here);
-			gettimeofday(&ping->lastsentat, NULL);
-		}
+	/* The outstanding probe has been answered (every probe sent has a
+	 * reply) and more samples are needed: send the next one. Serial by
+	 * design - one probe in flight keeps last_send_time meaning exactly
+	 * one thing. */
+	if (ping->nreceived >= ping->packetsent) {
+		gettimeofday(&rttdata->last_send_time, NULL);
+		pinger_v4(ping, here);
+		gettimeofday(&ping->lastsentat, NULL);
 	}
 
-timeout_check:
-	/* Check for timeout (30 seconds) */
+	/* No reply to the outstanding probe within 30s: the host is not
+	 * answering, which is a down verdict like any other. */
 	elapsed_since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
 	if (elapsed_since_send > 30000.0) {
 		print_err(1, "RTT test timeout for %s after %.0fms",
 			here->checkent->hostname, elapsed_since_send);
-		here->retval = SYSM_TIMEDOUT;
-		FREE(ping->packet);
-		FREE(ping);
-		FREE(rttdata);
-		here->monitordata = NULL;
+		rtt_finish(here, rttdata, SYSM_TIMEDOUT);
 	}
 }
 
