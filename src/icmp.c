@@ -201,6 +201,25 @@ void	handle_icmp_responses()
 					break; /* a reply belongs to one check */
 				continue;
 			}
+			if (here->checkent->type == SYSM_TYPE_PKTLOSS)
+			{
+				/* A pktloss check counts replies; the ratio is
+				 * the measurement. Same ownership test as every
+				 * other path: ident AND source address. */
+				struct pktloss_data *pkt = here->monitordata;
+
+				if (pkt == NULL || pkt->ping == NULL ||
+				    pkt->ping->to == NULL)
+					continue;
+				if (rcvd_data.icp->ICMP_ECHO_ID == pkt->ping->ident &&
+				    from.sin_addr.s_addr ==
+				      pkt->ping->to->sin_addr.s_addr)
+				{
+					pkt->ping->nreceived++;
+					break; /* a reply belongs to one check */
+				}
+				continue;
+			}
 			if (here->checkent->type != SYSM_TYPE_PING)
 			{
 				continue;
@@ -979,8 +998,15 @@ void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
 		return;
 	}
 
-	/* Send more pings if needed */
-	if ((localstruct->nreceived < here->checkent->min_pings) &&
+	/* Send the rest of the batch. The batch IS the measurement - loss
+	 * is judged from send_pings probes - so every probe goes out no
+	 * matter how many replies are already in. The old condition kept
+	 * sending only while replies were MISSING (nreceived < min_pings),
+	 * which terminates on a lossy host and never on a healthy one: the
+	 * first reply satisfied min_pings at packetsent=1, the completion
+	 * branch needs packetsent >= send_pings, and the check sat wedged
+	 * between the two forever - on precisely the hosts that answer. */
+	if ((localstruct->packetsent < here->checkent->send_pings) &&
 	    (mydifftime(localstruct->lastsentat, here->lastserv) >= 1)) {
 
 		pinger_v4(localstruct, here);
