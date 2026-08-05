@@ -10,6 +10,10 @@ extern unsigned short int use_ping_helper;  /* From syswatch.c */
 /* Forward declarations */
 static int pinger_v4_via_helper(struct pingdata *localdata, struct monitorent *here);
 
+/* Set once if the kernel refuses a send on our post-drop raw socket, so
+ * the complaint is logged a single time rather than per packet. */
+static int helper_required = 0;
+
 /* Defined near the RTT code; called from handle_icmp_responses so that
  * the one reader of the raw socket also feeds RTT checks. Returns TRUE
  * if this reply belonged to the given RTT check and was recorded. */
@@ -505,37 +509,76 @@ void	pinger_v4(struct pingdata *localdata, struct monitorent *here)
 	/* compute ICMP checksum here */
 	localdata->icp->ICMP_CHECKSUM = in_cksum((u_short *)localdata->icp, send_octets);
 
-	/* Use ping helper if enabled */
+	/*
+	 * Send on our own socket whenever we have one, even though we are
+	 * no longer root.
+	 *
+	 * A raw socket's privilege is checked when it is created, not on
+	 * each send, and setup_icmp_fd() opens ours while sysmond is still
+	 * root - before revoke_root_if_necessary() drops. The descriptor
+	 * outlives the drop and keeps working, which is exactly how the
+	 * RECEIVE side has always worked post-drop.
+	 *
+	 * This used to fork and exec the setuid helper for every single
+	 * echo request, and then block in waitpid until it exited: ~1.6ms
+	 * of stalled event loop per packet, in a daemon with one select()
+	 * loop and nothing else to do meanwhile. On a fleet of 800 that is
+	 * over a second of blocked monitoring per sweep, and seven times
+	 * that when hosts are down and every check sends its full batch -
+	 * precisely when the daemon can least afford to stall.
+	 *
+	 * The helper is not gone: it stays as the fallback for a platform
+	 * that really does refuse to send after a privilege drop. We find
+	 * that out from the send itself rather than assuming it, and only
+	 * pay for a fork when the cheap path has actually been refused.
+	 */
+	if (glob_icmp_fd != -1) {
+		sendtoret = sendto(glob_icmp_fd, (char *)localdata->outpack,
+			send_octets, 0, &localdata->ping_target,
+			sizeof(struct sockaddr));
+		serrno = errno;
+
+		if (sendtoret == send_octets) {
+			gettimeofday(&localdata->lastsentat, NULL);
+			return;
+		}
+
+		switch (serrno)
+		{
+			case ENETUNREACH:
+				here->retval = SYSM_NETUNRCH;
+				return;
+			case EHOSTDOWN:
+			case EHOSTUNREACH:
+				here->retval = SYSM_HOSTDOWN;
+				return;
+			case EPERM:
+			case EACCES:
+				/* This kernel does not let a dropped process
+				 * send on the socket it opened as root. Say so
+				 * once, then use the helper from here on. */
+				if (use_ping_helper && !helper_required) {
+					helper_required = 1;
+					print_err(1, "icmp: cannot send on the raw "
+						"socket after dropping privileges "
+						"(%s) - using %s for every packet",
+						strerror(serrno), PING_HELPER_PATH);
+				}
+				break;
+			default:
+				/* A new one to me */
+				perror("icmp.c:pinger_v4:sendto");
+				return;
+		}
+	}
+
+	/* No usable socket, or it refused us: the helper sends as root. */
 	if (use_ping_helper) {
 		if (pinger_v4_via_helper(localdata, here) == 0) {
 			gettimeofday(&localdata->lastsentat, NULL);
 		}
 		return;
 	}
-
-	/* send the packet directly (traditional method) */
-	sendtoret = sendto(glob_icmp_fd, (char *)localdata->outpack,
-		send_octets, 0, &localdata->ping_target, sizeof(struct sockaddr));
-	serrno = errno;
-
-	if (sendtoret < 0 || sendtoret != send_octets)  
-	{
-	        switch(serrno)
-	        {
-	                case ENETUNREACH:
-	                        here->retval = SYSM_NETUNRCH;
-				return;
-	                case EHOSTDOWN:
-	                case EHOSTUNREACH:
-	                        here->retval =  SYSM_HOSTDOWN;
-				return;
-			default:
-			/* A new one to me */
-				perror("icmp.c:pinger_v4:sendto");
-		}
-	}
-	/* Track it */
-	gettimeofday(&localdata->lastsentat, NULL);
 }
 
 /*
