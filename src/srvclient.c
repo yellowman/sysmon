@@ -566,6 +566,22 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
+	/* What the last packet-loss cycle counted, from the object rather
+	   than from the in-flight check state - the latter exists only
+	   while a check is running, which is almost never when a person is
+	   looking at the page. */
+	if (obj->data->pktloss_last_sent > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_PKTLOSS_LAST_SENT, obj->data->pktloss_last_sent,
+			XML_PKTLOSS_LAST_SENT);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_PKTLOSS_LAST_RECV, obj->data->pktloss_last_recv,
+			XML_PKTLOSS_LAST_RECV);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
+
 	/* RTT Samples Configuration */
 	if (obj->data->rtt_samples > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
@@ -576,6 +592,49 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	if (obj->data->rtt_interval > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
 			XML_RTT_INTERVAL, obj->data->rtt_interval, XML_RTT_INTERVAL);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
+
+	/*
+	 * What the last rtt check actually measured.
+	 *
+	 * These used to go no further than a debug log line, so a check
+	 * whose entire purpose is producing numbers reported nothing but
+	 * pass or fail. Sent only when there is something to send: probes
+	 * of zero means this object has never run one.
+	 *
+	 * Two decimal places is the useful precision here - sub-10us
+	 * differences on an ICMP round trip are noise, and the reader is a
+	 * person looking at a card.
+	 */
+	if (obj->data->rtt_last_probes > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_MIN, obj->data->rtt_last_min, XML_RTT_LAST_MIN);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_AVG, obj->data->rtt_last_avg, XML_RTT_LAST_AVG);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_MAX, obj->data->rtt_last_max, XML_RTT_LAST_MAX);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%.2f</%s>",
+			XML_RTT_LAST_JITTER, obj->data->rtt_last_jitter,
+			XML_RTT_LAST_JITTER);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		/* Replies against probes is how many of the batch came back -
+		   the loss the average is hiding. */
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_LAST_REPLIES, obj->data->rtt_last_replies,
+			XML_RTT_LAST_REPLIES);
+		SEND_OR_ABORT(fd, fh, buffer);
+
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_LAST_PROBES, obj->data->rtt_last_probes,
+			XML_RTT_LAST_PROBES);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 

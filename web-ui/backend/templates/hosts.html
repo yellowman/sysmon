@@ -150,6 +150,54 @@
                                   x-text="getCheckSummary(host)"></span>
                         </div>
                     </div>
+
+                    <!-- Measurements, for the checks that produce them.
+                     A latency or loss check exists to make numbers; the
+                     card showed only pass or fail, so the numbers lived
+                     in the daemon and nowhere a person could see. -->
+                    <div x-show="host.rtt || host.packet_loss" x-cloak
+                         class="px-2 pl-8 pb-1.5 -mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-gray-500 leading-tight">
+                        <template x-if="host.rtt">
+                            <span class="inline-flex items-center gap-1"
+                                  :title="'min ' + host.rtt.min_ms + 'ms / avg ' + host.rtt.avg_ms +
+                                          'ms / max ' + host.rtt.max_ms + 'ms over ' +
+                                          host.rtt.replies + ' of ' + host.rtt.probes + ' probes'">
+                                <i class="fas fa-stopwatch text-gray-400"></i>
+                                <span class="mono font-medium text-gray-700"
+                                      x-text="host.rtt.avg_ms.toFixed(2) + 'ms'"></span>
+                                <span class="text-gray-400"
+                                      x-text="'(' + host.rtt.min_ms.toFixed(2) + '-' + host.rtt.max_ms.toFixed(2) + ')'"></span>
+                            </span>
+                        </template>
+                        <template x-if="host.rtt">
+                            <span class="inline-flex items-center gap-1" title="Jitter (RFC 3550 delay variation)">
+                                <i class="fas fa-wave-square text-gray-400"></i>
+                                <span class="mono font-medium text-gray-700"
+                                      x-text="'±' + host.rtt.jitter_ms.toFixed(2) + 'ms'"></span>
+                            </span>
+                        </template>
+                        <!-- Replies short of probes is the loss the average
+                             is hiding, so it is worth saying out loud. -->
+                        <template x-if="host.rtt && host.rtt.replies < host.rtt.probes">
+                            <span class="inline-flex items-center gap-1 text-amber-700"
+                                  :title="(host.rtt.probes - host.rtt.replies) + ' of ' + host.rtt.probes + ' probes lost'">
+                                <i class="fas fa-triangle-exclamation"></i>
+                                <span class="mono" x-text="host.rtt.replies + '/' + host.rtt.probes"></span>
+                            </span>
+                        </template>
+                        <template x-if="host.packet_loss">
+                            <span class="inline-flex items-center gap-1"
+                                  :class="host.packet_loss.lost > 0 ? 'text-amber-700' : ''"
+                                  :title="host.packet_loss.received + ' of ' + host.packet_loss.sent + ' replied'">
+                                <i class="fas fa-percent text-gray-400"></i>
+                                <span class="mono font-medium"
+                                      :class="host.packet_loss.lost > 0 ? 'text-amber-800' : 'text-gray-700'"
+                                      x-text="host.packet_loss.loss_pct.toFixed(1) + '% loss'"></span>
+                                <span class="text-gray-400"
+                                      x-text="'(' + host.packet_loss.received + '/' + host.packet_loss.sent + ')'"></span>
+                            </span>
+                        </template>
+                    </div>
                 </div>
 
                 <!-- Hover Tooltip -->

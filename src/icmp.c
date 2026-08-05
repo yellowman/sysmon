@@ -1000,6 +1000,16 @@ void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
 		time(&now);
 		pktloss_add_sample(pktdata, now, sent, rcvd);
 
+		/* Keep this cycle's counts on the object. pktdata is freed a
+		   few lines below, so anything left in it is unreportable
+		   the moment the check ends. */
+		here->checkent->pktloss_last_sent = sent;
+		here->checkent->pktloss_last_recv = rcvd;
+
+		/* A new loss figure is a change worth sending, even when the
+		   verdict is unchanged - see rtt_finish. */
+		object_changed(here->checkent);
+
 		if (debug || here->checkent->trace) {
 			print_err(0, "pktloss: cycle complete - %u/%u lost (%.1f%%)",
 			          lost, sent, (100.0 * lost) / sent);
@@ -1472,6 +1482,39 @@ double rtt_ms_until_next_probe(struct monitorent *here, struct timeval *now)
 static void rtt_finish(struct monitorent *here, struct rtt_data *rttdata, int retval)
 {
 	here->retval = retval;
+
+	/* Keep what was measured. rttdata dies here, so anything not
+	   copied onto the object is gone - which is why these numbers used
+	   to exist only in a debug log line and nothing could report them.
+	   A check that got no replies leaves the previous figures alone
+	   rather than overwriting them with zeroes; "the last time we
+	   could measure, it was 12ms" is more use than a row of noughts. */
+	if (here->checkent != NULL && rttdata->rtt_count > 0) {
+		here->checkent->rtt_last_min = rttdata->rtt_min;
+		here->checkent->rtt_last_avg = rttdata->rtt_avg;
+		here->checkent->rtt_last_max = rttdata->rtt_max;
+		here->checkent->rtt_last_jitter = rttdata->jitter_current;
+		here->checkent->rtt_last_replies = rttdata->rtt_count;
+		here->checkent->rtt_last_probes = rttdata->probes;
+	} else if (here->checkent != NULL) {
+		/* Silence is still a fact worth reporting: probes went out
+		   and none came back. */
+		here->checkent->rtt_last_replies = 0;
+		here->checkent->rtt_last_probes = rttdata->probes;
+	}
+
+	/*
+	 * New numbers are a change, even when the verdict is the same.
+	 *
+	 * CONF is incremental - it sends objects whose change_seq has
+	 * moved - so without this an rtt check that stays up reports its
+	 * first measurement and then never another. The figures on the
+	 * page would freeze while the daemon went on measuring, which is
+	 * worse than showing nothing.
+	 */
+	if (here->checkent != NULL)
+		object_changed(here->checkent);
+
 	if (rttdata->ping != NULL) {
 		FREE(rttdata->ping->packet);
 		FREE(rttdata->ping);
