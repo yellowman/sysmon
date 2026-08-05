@@ -472,7 +472,9 @@ type XMLObjectStatus struct {
 	ExecCmd           string `xml:"ObjectExecCmd"`
 	PageMessage       string `xml:"ObjectPageMessage"`
 
-	// Thresholds
+	// Thresholds - the operator's own limits, carried so a reader can be
+	// told when a figure is near or past what they said was acceptable.
+	// A number is only "extreme" against a limit somebody chose.
 	PacketLossThreshold int `xml:"ObjectPacketLossThreshold"`
 	RTTThreshold        int `xml:"ObjectRTTThreshold"`
 	JitterThreshold     int `xml:"ObjectJitterThreshold"`
@@ -491,10 +493,6 @@ type XMLObjectStatus struct {
 	PktLossLastSent int `xml:"ObjectPacketLossLastSent"`
 	PktLossLastRecv int `xml:"ObjectPacketLossLastRecv"`
 
-	// The operator's own limits, carried so a reader can be told when a
-	// figure is near or past what they said was acceptable. A number is
-	// only "extreme" against the threshold someone set for it.
-	RTTSamples    int `xml:"ObjectRTTSamples"`
 	WakeupRetries int `xml:"ObjectWakeupRetries"`
 
 	// Debug/diagnostic

@@ -421,6 +421,14 @@ config\ logging\ file{WS}*;       {
   /* Log to a file rather than syslog. Which file is not a question any
      more - it is sysmond.log in the state directory. */
   parser_logging_fac = -3;
+  /* Only the facility, not the path. Which file this is depends on the
+     state directory, and "config statedir" is usually further down the
+     file - opening one here would name it from whatever the default was
+     at line 2 and write the log somewhere the operator did not ask for.
+     loadconfig() sets log_file once the whole file has been read, when
+     the answer is settled. Until then syslogmsg() sees no path and says
+     nothing; parse-time messages still reach stderr, which is where
+     someone running "sysmond -t" is looking anyway. */
   if (not_started_yet == TRUE)
 	facility = -3;
 
@@ -450,9 +458,16 @@ config\ logging\ file\ [^;]+{WS}*;       {
 	"Write \"config logging file;\".",
 	current_parsing_filename, line_no, parser_pos1);
 
+  /* Deprecated spelling, same effect as the bare form above - and it
+     takes the same path, which is the whole fix here. It used to call
+     use_logging_now(), whose -3 branch read parser_logging: a syslog
+     facility name that nothing sets on this route, so it was NULL, so
+     this line segfaulted sysmond at startup. The crash was on the exact
+     directive every pre-statedir install has, while printing the notice
+     telling the operator to change it. */
   parser_logging_fac = -3;
   if (not_started_yet == TRUE)
-	use_logging_now();
+	facility = -3;
 }
 
 config\ logging\ syslog\ [^;]+{WS}*;       {
@@ -3906,6 +3921,25 @@ void cleanup_after_parser()
 }
 
 
+/*
+ * Start logging to the syslog facility the config just named, rather
+ * than waiting for the parse to finish - what print_err() has to say
+ * about a config file is said while that file is being read.
+ *
+ * The -3 branch is file logging, and it is not reached from here any
+ * more: both "config logging file" rules set the facility themselves,
+ * because the file's name depends on a state directory the parse has
+ * probably not seen yet. It is kept correct rather than deleted, since
+ * the branch is one line and a wrong one is a crash.
+ *
+ * A wrong one was a crash. It read parser_logging, which holds a SYSLOG
+ * FACILITY NAME set by the "config logging syslog" rule; nothing wrote
+ * it on the file route, so it was NULL and this was STRDUP(NULL). The
+ * caller that got here with -3 was "config logging file "path";" - the
+ * exact directive every pre-statedir install has - so sysmond
+ * segfaulted at startup while printing the notice telling the operator
+ * to change it. The upgrade path was the crash path.
+ */
 void use_logging_now()
 {
 	facility = parser_logging_fac;
@@ -3913,7 +3947,7 @@ void use_logging_now()
 	{
 		if (log_file != NULL)
 			FREE(log_file);
-		log_file = STRDUP(parser_logging,"log file name");
+		log_file = STRDUP((char *)sysmon_logfile(), "log file name");
 	}
 }
 
