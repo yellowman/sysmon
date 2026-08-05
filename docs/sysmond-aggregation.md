@@ -1,7 +1,6 @@
 # Aggregating many sysmonds behind one sysmon-web
 
-Status: design, agreed. Implementation is phased; see **Phasing** at the end
-for what is built and what is not.
+Status: design, agreed.
 
 Today sysmon-web manages exactly one sysmond: it dials `localhost:1345`,
 and it reads and writes that daemon's `sysmon.conf` as a local file. This
@@ -384,11 +383,10 @@ rather than letting it be discovered at delivery time, and the fleet page
 shows the reason.
 
 Such a box is still monitored, aggregated, alerted on and shown like any
-other - only its config stays read-only in the UI. That is a real limit on
-what phase 5 covers, and the honest options for widening it are: keep the
-whole config in one file, use bare filenames beside the main config, or
-manage only the main file and treat absolutely-included fragments as
-read-only members of the hash. Not yet decided.
+other - only its config stays read-only in the UI. The options for widening
+that are: keep the whole config in one file, use bare filenames beside the
+main config, or manage only the main file and treat absolutely-included
+fragments as read-only members of the hash. Not yet decided.
 
 ### Where a box reports is not editable from here
 
@@ -496,39 +494,3 @@ site receives them. They aggregate with the same namespacing.
 
 **Acks and notes** must be routed to the owning daemon, which the namespace
 makes trivial: split on `:`, look up the box.
-
----
-
-## Phasing
-
-| phase | work | risk |
-|---|---|---|
-| 1 | Splice-based editing: comments and includes preserved | low - fixes a live bug |
-| 2 | Object identity / site namespacing | low - expensive to defer |
-| 3 | Multi-box read-only aggregation | low - most of the value |
-| 4 | Dial-out, TLS, per-box tokens; retire the shared authkey | medium |
-| 5 | Config distribution: generations, validation, conflict states, canary | medium |
-| — | Field-level config DB per box | rejected; see below |
-
-**Order matters.** Distributing a config format that cannot round-trip
-losslessly, keyed on names that are not unique, is how a management tool
-causes a fleet-wide outage. 1 and 2 are prerequisites, not polish.
-
-### Rejected: a config database on each sysmond
-
-The proposal was to tokenise `sysmon.conf` into a local database on each
-box, have sysmon-web query or replace that, and run a process that rewrites
-`sysmon.conf` when the database changes.
-
-It is rejected because it adds a third representation of the config (flex
-lexer, Go parser, schema) and a fourth moving part (the rewriter); creates
-a race between the rewriter and the daemon's own reads; embeds a database
-engine in a small C daemon we have just finished removing a dependency
-from; and makes `sysmon.conf` a derived artifact while operators can still
-edit it by hand - which recreates the two-master problem it was meant to
-solve.
-
-Whole-file replacement with local validation achieves the same goal with a
-hash comparison instead of a merge algorithm, and fails safe. If field-level
-queries ever turn out to matter, this decision can be revisited with
-evidence.
