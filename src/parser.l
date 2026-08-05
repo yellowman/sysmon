@@ -45,6 +45,12 @@ bool parser_catch_snmptrap = FALSE;
 bool parser_trap_alert = FALSE;
 char *parser_rtt_threshold = NULL;
 int parser_i_rtt_threshold = 0;
+/* pktloss_tolerance: how many lost packets a cycle may have before it
+   alerts. The daemon has always had the field and compared against it -
+   it simply had no directive, so it was stuck on its default of 0
+   (alert on any loss) and no config could say otherwise. */
+char *parser_pktloss_tolerance = NULL;
+int parser_i_pktloss_tolerance = -1;
 char *parser_jitter_threshold = NULL;
 int parser_i_jitter_threshold = 0;
 char *parser_rtt_samples = NULL;
@@ -669,6 +675,10 @@ object[^\{]+{WS}+\{	{
   parser_snmp_octets = FALSE;
   parser_trap_alert = FALSE;
   parser_snmp_version = SNMP_VERSION_2C;
+  /* -1 means "this object did not say", so the default stands. Reset
+     per object or one object's tolerance would silently apply to every
+     object after it. */
+  parser_i_pktloss_tolerance = -1;
   for (temp_int=6;strlen(yytext)> temp_int;temp_int++)
   {
 	if (!isspace(yytext[temp_int]))
@@ -1844,6 +1854,46 @@ port\ [^;]+;          {
   }
   if (debug)
     print_err(0, "port : %s/%d ", parser_port, parser_i_port);
+
+}
+
+pktloss_tolerance\ [^;]+;      {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: pktloss_tolerance specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_pktloss_tolerance != NULL)
+  {
+        FREE(parser_pktloss_tolerance);
+  }
+  parser_pktloss_tolerance = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_pktloss_tolerance");
+
+  strncpy( parser_pktloss_tolerance, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_pktloss_tolerance[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_pktloss_tolerance = atol(parser_pktloss_tolerance);
+  if (parser_i_pktloss_tolerance < 0)
+  {
+	print_err(1, "Invalid pktloss_tolerance (must be >= 0) in %s line %d",
+		current_parsing_filename, line_no);
+	parser_i_pktloss_tolerance = 0;
+  }
+  if (debug)
+    print_err(0, "pktloss_tolerance : %s/%d ", parser_pktloss_tolerance, parser_i_pktloss_tolerance);
 
 }
 
@@ -3422,7 +3472,10 @@ void add_object()
 		if (parser_i_type == SYSM_TYPE_PKTLOSS)
 		{
 			/* Initialize packet loss defaults */
-			new_ele->value->data->pktloss_tolerance = 0;  /* Alert on any loss by default */
+			/* Alert on any loss unless the object said otherwise. */
+			new_ele->value->data->pktloss_tolerance =
+				(parser_i_pktloss_tolerance >= 0) ?
+					(unsigned int)parser_i_pktloss_tolerance : 0;
 			new_ele->value->data->pktloss_history_hours = PKTLOSS_DEFAULT_HISTORY;
 			new_ele->value->data->pktloss_last_check = 0;
 		}

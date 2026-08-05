@@ -294,6 +294,12 @@ func GenerateHost(host models.Host) string {
 	if host.RTTInterval > 0 {
 		sb.WriteString(fmt.Sprintf("\trtt_interval %d;\n", host.RTTInterval))
 	}
+	// A real directive now: the daemon always compared against this
+	// field but had no way to be told a value, so it was stuck on its
+	// "alert on any loss" default.
+	if host.PktLossTolerance > 0 {
+		sb.WriteString(fmt.Sprintf("\tpktloss_tolerance %d;\n", host.PktLossTolerance))
+	}
 
 	// SNMP settings
 	if host.SNMPCommunity != "" {

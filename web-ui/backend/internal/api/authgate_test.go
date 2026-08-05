@@ -46,6 +46,11 @@ var adminOnly = []struct{ method, path string }{
 	{"POST", "/api/config/revert/metro"},
 	{"POST", "/api/config/rollout"},
 
+	// A template becomes objects in sysmon.conf, so storing one is on
+	// the same side of the line as config content. Reading is not: the
+	// map's add-a-device modal needs the list for any logged-in user.
+	{"PUT", "/api/templates"},
+
 	// A token is a credential and the CA names the server.
 	{"GET", "/api/settings/agents"},
 	{"POST", "/api/settings/agents"},
@@ -61,6 +66,7 @@ var openToAnyone = []struct{ method, path string }{
 	{"GET", "/api/config/rollout"},
 	{"GET", "/api/monitoring/status"},
 	{"GET", "/api/sites"},
+	{"GET", "/api/templates"},
 }
 
 func TestConfigContentIsAdminOnly(t *testing.T) {

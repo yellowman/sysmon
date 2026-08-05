@@ -37,6 +37,18 @@ type Check struct {
 	SNMPExact  int64  `json:"snmp_exact,omitempty"`
 	SNMPOctets bool   `json:"snmp_octets,omitempty"`
 
+	// RTT / latency specifics (type "rtt"). A backhaul or a wireless
+	// link is exactly the thing whose latency and jitter you want an
+	// alarm on, so a template for one can now ship those thresholds
+	// rather than leaving every operator to type them per device.
+	RTTThreshold    int `json:"rtt_threshold,omitempty"`    // ms, avg over threshold alerts
+	JitterThreshold int `json:"jitter_threshold,omitempty"` // ms, 0 disables the jitter test
+	RTTSamples      int `json:"rtt_samples,omitempty"`      // probes per check
+	RTTInterval     int `json:"rtt_interval,omitempty"`     // ms between probes
+
+	// Packet loss (type "pktloss").
+	PktLossTolerance int `json:"pktloss_tolerance,omitempty"` // lost packets allowed before alerting
+
 	// DependsOnDevice ties this check to the device's own object rather
 	// than to the device's parent, so a voltage alarm doesn't page when
 	// the whole unit is unreachable - the ping already said that.
@@ -111,7 +123,8 @@ func Expand(t *Template, p Params) ([]models.Host, error) {
 		} else if p.Parent != "" {
 			h.Dependencies = p.Parent
 		}
-		if c.Type == "snmp" {
+		switch c.Type {
+		case "snmp":
 			h.SNMPType = c.SNMPType
 			h.SNMPOID = c.OID
 			h.SNMPOIDSec = c.OIDSec
@@ -121,6 +134,13 @@ func Expand(t *Template, p Params) ([]models.Host, error) {
 			h.SNMPExact = c.SNMPExact
 			h.SNMPOctets = c.SNMPOctets
 			h.SNMPCommunity = p.Community
+		case "rtt":
+			h.RTTThreshold = c.RTTThreshold
+			h.JitterThreshold = c.JitterThreshold
+			h.RTTSamples = c.RTTSamples
+			h.RTTInterval = c.RTTInterval
+		case "pktloss":
+			h.PktLossTolerance = c.PktLossTolerance
 		}
 		out = append(out, h)
 	}
@@ -159,36 +179,63 @@ func Builtins() []Template {
 		},
 		{
 			ID: "ubnt-ap", Name: "Ubiquiti AP (Rocket / Prism / LTU)", Vendor: "Ubiquiti", Builtin: true,
-			Description: "Ping plus a reboot watch. Add a signal-strength check per link where it matters.",
+			Description: "Subscriber-facing AP: reachability, packet loss and a reboot watch. " +
+				"Add a signal-strength check per link where it matters.",
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
+				{Suffix: "-loss", Type: "pktloss", PktLossTolerance: 2,
+					Desc: "{name} packet loss to subscribers", DependsOnDevice: true},
 				{Suffix: "-uptime", Type: "snmp", SNMPType: "reboot",
 					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} reboot watch", DependsOnDevice: true},
 			},
 		},
 		{
 			ID: "ubnt-wave", Name: "Ubiquiti Wave AP (60GHz)", Vendor: "Ubiquiti", Builtin: true,
-			Description: "60GHz links are weather-sensitive; watch reachability and restarts closely.",
+			Description: "60GHz is weather-sensitive and fades before it drops, so loss and " +
+				"jitter are watched as well as reachability - rain fade shows up there first.",
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
+				{Suffix: "-loss", Type: "pktloss", PktLossTolerance: 1,
+					Desc: "{name} packet loss - rain fade shows here first",
+					DependsOnDevice: true},
+				{Suffix: "-rtt", Type: "rtt", RTTThreshold: 30, JitterThreshold: 10,
+					RTTSamples: 5, RTTInterval: 100,
+					Desc: "{name} latency above 30ms or jitter above 10ms",
+					DependsOnDevice: true},
 				{Suffix: "-uptime", Type: "snmp", SNMPType: "reboot",
 					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} reboot watch", DependsOnDevice: true},
 			},
 		},
 		{
 			ID: "siklu-ptp", Name: "Siklu PTP radio (EH-8010 / EH-5500)", Vendor: "Siklu", Builtin: true,
-			Description: "Backhaul radio: reachability and a reboot watch on each end.",
+			Description: "Backhaul radio: reachability, link quality and a reboot watch. " +
+				"A backhaul that is up but slow is still a broken backhaul, so latency " +
+				"and jitter are watched rather than left to be noticed by customers.",
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
+				{Suffix: "-rtt", Type: "rtt", RTTThreshold: 20, JitterThreshold: 5,
+					RTTSamples: 5, RTTInterval: 100,
+					Desc: "{name} link latency above 20ms or jitter above 5ms",
+					DependsOnDevice: true},
+				{Suffix: "-loss", Type: "pktloss", PktLossTolerance: 1,
+					Desc: "{name} packet loss on the backhaul", DependsOnDevice: true},
 				{Suffix: "-uptime", Type: "snmp", SNMPType: "reboot",
 					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} reboot watch", DependsOnDevice: true},
 			},
 		},
 		{
 			ID: "cambium-ptp", Name: "Cambium PTP (820S / AF)", Vendor: "Cambium", Builtin: true,
-			Description: "Licensed backhaul: reachability plus reboot watch.",
+			Description: "Licensed backhaul: reachability, link quality and a reboot watch. " +
+				"Licensed spectrum degrades before it fails, which is what the latency " +
+				"and loss checks are for.",
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
+				{Suffix: "-rtt", Type: "rtt", RTTThreshold: 20, JitterThreshold: 5,
+					RTTSamples: 5, RTTInterval: 100,
+					Desc: "{name} link latency above 20ms or jitter above 5ms",
+					DependsOnDevice: true},
+				{Suffix: "-loss", Type: "pktloss", PktLossTolerance: 1,
+					Desc: "{name} packet loss on the backhaul", DependsOnDevice: true},
 				{Suffix: "-uptime", Type: "snmp", SNMPType: "reboot",
 					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} reboot watch", DependsOnDevice: true},
 			},
@@ -199,6 +246,30 @@ func Builtins() []Template {
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
 				{Suffix: "-http", Type: "http", Port: 80, Desc: "{name} web service", DependsOnDevice: true},
+			},
+		},
+		{
+			ID: "server-https", Name: "Server (ping + HTTPS)", Builtin: true,
+			Description: "A TLS site: reachability plus the page itself over 443.",
+			Checks: []Check{
+				{Suffix: "", Type: "ping", Desc: "{desc}"},
+				{Suffix: "-https", Type: "https", Port: 443,
+					Desc: "{name} TLS web service", DependsOnDevice: true},
+			},
+		},
+		{
+			ID: "link-quality", Name: "Link quality probe (latency + jitter + loss)", Builtin: true,
+			Description: "For a path you care about rather than a box you own - a transit " +
+				"provider's gateway, a peering address, the far end of a tunnel. No SNMP, " +
+				"so it works against anything that answers a ping.",
+			Checks: []Check{
+				{Suffix: "", Type: "ping", Desc: "{desc}"},
+				{Suffix: "-rtt", Type: "rtt", RTTThreshold: 150, JitterThreshold: 30,
+					RTTSamples: 5, RTTInterval: 100,
+					Desc: "{name} latency above 150ms or jitter above 30ms (ITU-T G.114 for voice)",
+					DependsOnDevice: true},
+				{Suffix: "-loss", Type: "pktloss", PktLossTolerance: 1,
+					Desc: "{name} packet loss", DependsOnDevice: true},
 			},
 		},
 		{

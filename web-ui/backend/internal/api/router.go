@@ -127,6 +127,9 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	})
 	r.mux.HandleFunc("/api/monitoring/history", r.handleMonitoringHistory)
 	r.mux.HandleFunc("/api/map/layout", r.handleMapLayout)
+	// GET is open because the map's "add a device" modal needs it for
+	// any logged-in user; PUT stores a custom set that becomes config,
+	// so it is gated inside the handler.
 	r.mux.HandleFunc("/api/templates", r.handleTemplates)
 	r.mux.HandleFunc("/api/templates/expand", r.handleTemplateExpand)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
@@ -192,6 +195,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/config.html", r.handleConfigPage)
 	r.mux.HandleFunc("/fleet.html", r.handleFleetPage)
 	r.mux.HandleFunc("/agents.html", r.handleAgentsPage)
+	r.mux.HandleFunc("/templates.html", r.handleTemplatesPage)
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
 
@@ -695,6 +699,12 @@ func (r *Router) handleTemplates(w http.ResponseWriter, req *http.Request) {
 		r.sendJSON(w, map[string]interface{}{"templates": templates.Merge(stored)})
 
 	case http.MethodPut:
+		// Saving templates writes what later becomes sysmon.conf, so it
+		// belongs on the same side of the line as config content.
+		if req.Header.Get("X-Session-Role") != auth.RoleAdmin {
+			r.sendError(w, http.StatusForbidden, "Admin access required")
+			return
+		}
 		if r.settings == nil {
 			r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
 			return
