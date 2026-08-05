@@ -18,8 +18,8 @@ static int helper_required = 0;
  * the one reader of the raw socket also feeds RTT checks. Returns TRUE
  * if this reply belonged to the given RTT check and was recorded. */
 static bool rtt_match_and_record(struct monitorent *here,
-	unsigned short echo_id, struct in_addr from_addr,
-	struct timeval *recv_time);
+	unsigned short echo_id, unsigned short echo_seq,
+	struct in_addr from_addr, struct timeval *recv_time);
 
 #define A(bit)          icmp_temp.rcvd_tbl[(bit)>>3]  /*identify byte in array*/
 #define B(bit)          (1 << ((bit) & 0x07))   /* identify bit in byte */
@@ -201,6 +201,7 @@ void	handle_icmp_responses()
 			{
 				if (rtt_match_and_record(here,
 					rcvd_data.icp->ICMP_ECHO_ID,
+					rcvd_data.icp->ICMP_SEQ,
 					from.sin_addr, &recv_time))
 					break; /* a reply belongs to one check */
 				continue;
@@ -1114,6 +1115,22 @@ void stop_test_pktloss(struct monitorent *here)
  * - Per-host thresholds
  */
 
+/* Upper bound on rtt_samples, so the per-probe tables below are a fixed
+ * size. A latency figure is an average over a handful of probes; asking
+ * for hundreds says the config means something else. */
+#define RTT_MAX_SAMPLES		64
+
+/* Spacing between probes, in milliseconds. Sending them back to back
+ * measures one instant and calls it a trend; spacing them means the
+ * samples cover a window and the jitter between them is the target's,
+ * not our scheduler's. ping(8) uses one second and is built for a human
+ * watching; a monitoring check wants its answer sooner than five
+ * seconds, so this is shorter. */
+#define RTT_PROBE_INTERVAL_MS	100.0
+
+/* How long to keep waiting after the last probe for stragglers. */
+#define RTT_GRACE_MS		1000.0
+
 /*
  * RTT tracking structure.
  *
@@ -1138,8 +1155,29 @@ struct rtt_data {
 	double jitter_current;              /* Current jitter in milliseconds */
 	double rtt_previous;                /* Previous RTT for jitter calculation */
 
-	/* Timing */
-	struct timeval last_send_time;      /* When we sent last packet */
+	/*
+	 * When each probe went out, indexed by its ICMP sequence number
+	 * minus one, and whether that sequence has been answered.
+	 *
+	 * Probes used to be strictly serial - send one, wait for its
+	 * reply, send the next - with a single last_send_time for the one
+	 * in flight. That made a lost packet fatal: nothing would be sent
+	 * again, because the next send waited on a reply that was never
+	 * coming, and the check sat there until the 30s timeout and threw
+	 * away every sample it had already collected. One dropped packet
+	 * turned a latency measurement into an outage.
+	 *
+	 * Probes now go out on a fixed schedule with several in flight, so
+	 * a reply has to say which probe it answers. It does: the sequence
+	 * number we set in pinger_v4 comes back in the echo reply, and it
+	 * is what indexes these. That also makes the RTT exact under
+	 * reordering, and lets a duplicate be ignored rather than counted
+	 * against a stale send time.
+	 */
+	struct timeval sent_at[RTT_MAX_SAMPLES];
+	bool answered[RTT_MAX_SAMPLES];
+	unsigned int probes;                /* how many we have sent */
+	struct timeval last_send_time;      /* when the newest probe went out */
 };
 
 /*
@@ -1279,8 +1317,11 @@ void start_test_rtt(struct monitorent *here)
 			here->checkent->rtt_samples);
 	}
 
-	/* Record send time before sending */
-	gettimeofday(&rttdata->last_send_time, NULL);
+	/* First probe is sequence 1, so it is sent_at[0]. Stamp before the
+	 * send, so the recorded time cannot be later than the reply. */
+	gettimeofday(&rttdata->sent_at[0], NULL);
+	rttdata->last_send_time = rttdata->sent_at[0];
+	rttdata->probes = 1;
 
 	/* Send initial ping using existing pinger_v4 function */
 	pinger_v4(localstruct, here);
@@ -1313,12 +1354,13 @@ void start_test_rtt(struct monitorent *here)
  * machine in service_test_rtt, run on the next queue walk.
  */
 static bool rtt_match_and_record(struct monitorent *here,
-	unsigned short echo_id, struct in_addr from_addr,
-	struct timeval *recv_time)
+	unsigned short echo_id, unsigned short echo_seq,
+	struct in_addr from_addr, struct timeval *recv_time)
 {
 	struct rtt_data *rttdata;
 	struct pingdata *ping;
 	double rtt_ms;
+	unsigned int idx;
 
 	if (here == NULL || here->monitordata == NULL)
 		return FALSE;
@@ -1332,7 +1374,21 @@ static bool rtt_match_and_record(struct monitorent *here,
 	    from_addr.s_addr != ping->to->sin_addr.s_addr)
 		return FALSE;
 
-	rtt_ms = calculate_rtt_ms(&rttdata->last_send_time, recv_time);
+	/* Which probe is this the answer to? pinger_v4 numbers them from
+	 * one, so the table index is one less. A sequence we never sent is
+	 * not ours, whatever else matches. */
+	if (echo_seq == 0 || echo_seq > rttdata->probes ||
+	    echo_seq > RTT_MAX_SAMPLES)
+		return FALSE;
+	idx = echo_seq - 1;
+
+	/* Already counted: a duplicate reply is not a second sample, and
+	 * timing it against anything would be inventing data. */
+	if (rttdata->answered[idx])
+		return TRUE;
+	rttdata->answered[idx] = TRUE;
+
+	rtt_ms = calculate_rtt_ms(&rttdata->sent_at[idx], recv_time);
 
 	rttdata->rtt_current = rtt_ms;
 	if (rtt_ms < rttdata->rtt_min)
@@ -1357,6 +1413,47 @@ static bool rtt_match_and_record(struct monitorent *here,
 			rttdata->rtt_avg, rttdata->jitter_current);
 
 	return TRUE;
+}
+
+/*
+ * rtt_ms_until_next_probe - how long until this check must send again
+ *
+ * The main loop sleeps in select() for up to two seconds and is woken
+ * early only by traffic. An rtt check's probe schedule is finer than
+ * that, and the thing that would wake the loop - the reply to the last
+ * probe - has already arrived by the time the next one is due. So the
+ * loop has to be told, or the schedule silently degrades to one probe
+ * per wakeup and a five-sample check takes ten seconds.
+ *
+ * Returns milliseconds until the next probe is due (0 if it is due
+ * now), or -1 for a check with nothing left to send.
+ */
+double rtt_ms_until_next_probe(struct monitorent *here, struct timeval *now)
+{
+	struct rtt_data *rttdata;
+	unsigned int want;
+	double since;
+
+	if (here == NULL || here->monitordata == NULL ||
+	    here->checkent == NULL ||
+	    here->checkent->type != SYSM_TYPE_PING_LATENCY)
+		return -1.0;
+
+	rttdata = (struct rtt_data *)here->monitordata;
+
+	want = here->checkent->rtt_samples;
+	if (want > RTT_MAX_SAMPLES)
+		want = RTT_MAX_SAMPLES;
+	if (want == 0)
+		want = 1;
+
+	if (rttdata->probes >= want)
+		return -1.0; /* all sent; waiting on replies, which wake us */
+
+	since = calculate_rtt_ms(&rttdata->last_send_time, now);
+	if (since >= RTT_PROBE_INTERVAL_MS)
+		return 0.0;
+	return RTT_PROBE_INTERVAL_MS - since;
 }
 
 /*
@@ -1387,7 +1484,8 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 {
 	struct rtt_data *rttdata;
 	struct pingdata *ping;
-	double elapsed_since_send;
+	unsigned int want;
+	double since_send;
 
 	if (here == NULL || here->monitordata == NULL)
 		return;
@@ -1395,11 +1493,45 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 	rttdata = (struct rtt_data *)here->monitordata;
 	ping = rttdata->ping;
 
-	/* Enough samples: decide and finish. RTT is checked before jitter,
-	 * so a link that is both slow and jittery reports "RTT too high". */
-	if (rttdata->rtt_count >= here->checkent->rtt_samples) {
+	want = here->checkent->rtt_samples;
+	if (want > RTT_MAX_SAMPLES)
+		want = RTT_MAX_SAMPLES;
+	if (want == 0)
+		want = 1;
+
+	since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
+
+	/* Still probes to send, and the spacing has elapsed: send the next
+	 * one. This does not wait for the previous reply - probes are a
+	 * schedule, not a chain, so a packet that never comes back costs
+	 * one sample rather than the whole check. */
+	if (rttdata->probes < want && since_send >= RTT_PROBE_INTERVAL_MS) {
+		gettimeofday(&rttdata->sent_at[rttdata->probes], NULL);
+		rttdata->last_send_time = rttdata->sent_at[rttdata->probes];
+		rttdata->probes++;
+		pinger_v4(ping, here);
+		gettimeofday(&ping->lastsentat, NULL);
+		return;
+	}
+
+	/* Done when every probe is answered, or when the last one has been
+	 * out long enough that anything still missing is lost. */
+	if (rttdata->probes >= want &&
+	    (rttdata->rtt_count >= want || since_send >= RTT_GRACE_MS)) {
 		int retval;
 
+		/* Nothing came back at all: this is not a slow host, it is a
+		 * silent one, and that is the ping verdict rather than a
+		 * latency one. */
+		if (rttdata->rtt_count == 0) {
+			print_err(1, "RTT test for %s: no reply to %u probes",
+				here->checkent->hostname, rttdata->probes);
+			rtt_finish(here, rttdata, SYSM_TIMEDOUT);
+			return;
+		}
+
+		/* RTT is checked before jitter, so a link that is both slow
+		 * and jittery reports "RTT too high". */
 		if (rttdata->rtt_avg > here->checkent->rtt_threshold) {
 			retval = SYSM_RTT_HIGH;
 			if (debug)
@@ -1418,30 +1550,20 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		}
 
 		if (debug)
-			print_err(1, "RTT test complete for %s: min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
-				here->checkent->hostname, rttdata->rtt_min, rttdata->rtt_avg,
+			print_err(1, "RTT test complete for %s: %u/%u replies min=%.2fms avg=%.2fms max=%.2fms jitter=%.2fms",
+				here->checkent->hostname, rttdata->rtt_count,
+				rttdata->probes, rttdata->rtt_min, rttdata->rtt_avg,
 				rttdata->rtt_max, rttdata->jitter_current);
 
 		rtt_finish(here, rttdata, retval);
 		return;
 	}
 
-	/* The outstanding probe has been answered (every probe sent has a
-	 * reply) and more samples are needed: send the next one. Serial by
-	 * design - one probe in flight keeps last_send_time meaning exactly
-	 * one thing. */
-	if (ping->nreceived >= ping->packetsent) {
-		gettimeofday(&rttdata->last_send_time, NULL);
-		pinger_v4(ping, here);
-		gettimeofday(&ping->lastsentat, NULL);
-	}
-
-	/* No reply to the outstanding probe within 30s: the host is not
-	 * answering, which is a down verdict like any other. */
-	elapsed_since_send = calculate_rtt_ms(&rttdata->last_send_time, now_timeval);
-	if (elapsed_since_send > 30000.0) {
+	/* Backstop: a check that has somehow neither finished nor sent for
+	 * far longer than its own schedule allows is wedged, not slow. */
+	if (since_send > 30000.0) {
 		print_err(1, "RTT test timeout for %s after %.0fms",
-			here->checkent->hostname, elapsed_since_send);
+			here->checkent->hostname, since_send);
 		rtt_finish(here, rttdata, SYSM_TIMEDOUT);
 	}
 }
