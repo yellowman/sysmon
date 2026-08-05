@@ -360,7 +360,19 @@ this value, an alert is triggered.
 
 .SS jitter_threshold
 Jitter threshold in milliseconds.  If RTT variation exceeds this
-value, an alert is triggered.
+value, an alert is triggered.  A value of 0 disables the jitter test.
+
+.SS rtt_samples
+How many probes one rtt check sends.  The check's verdict is the mean
+RTT and RFC 3550 jitter over these probes.  Default 5.
+
+.SS rtt_interval
+Milliseconds between the probes of one rtt check (10-5000, default
+100).  Probes are sent on this schedule with several in flight, so one
+lost packet costs one sample, not the check.  rtt_samples times
+rtt_interval is roughly how long each check takes; slower spacing
+samples a wider window, which is usually what jitter measurement
+wants.
 
 .SS SNMP Object Options
 

@@ -253,6 +253,16 @@
 #define SYSM_CONTACT_DOWN	1
 #define SYSM_CONTACT_UP		2
 
+/* RTT probe pacing (type rtt): ms between the probes of one check.
+   Configurable per object as "rtt_interval N;". The floor keeps the
+   knob meaning something (back-to-back probes measure one instant and
+   call it a trend); the ceiling bounds how long one check can hold a
+   queue slot, since rtt_samples * rtt_interval is the check's wall
+   time. */
+#define RTT_DEFAULT_INTERVAL_MS	100
+#define RTT_MIN_INTERVAL_MS	10
+#define RTT_MAX_INTERVAL_MS	5000
+
 /* Packet loss monitoring constants */
 #define PKTLOSS_HISTORY_SIZE     1440  /* 24 hours @ 1 minute intervals */
 #define PKTLOSS_DEFAULT_HISTORY  24    /* Default hours to keep */
@@ -365,6 +375,7 @@ struct hostinfo {
 	unsigned int rtt_threshold;         /* Max RTT in milliseconds before alert */
 	unsigned int jitter_threshold;      /* Max jitter in milliseconds before alert */
 	unsigned int rtt_samples;           /* Number of samples for rolling average */
+	unsigned int rtt_interval;          /* ms between probes of one check */
 
 	/* SNMP trap alert configuration */
 	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
@@ -680,6 +691,7 @@ struct bootp_pkt {
 #define XML_PKTLOSS_HIST_HRS   "ObjectPacketLossHistoryHours"
 #define XML_PKTLOSS_LAST_CHK   "ObjectPacketLossLastCheck"
 #define XML_RTT_SAMPLES        "ObjectRTTSamples"
+#define XML_RTT_INTERVAL       "ObjectRTTInterval"
 #define XML_NEXT_QUEUE_TIME    "ObjectNextQueueTime"
 #define XML_TRACE_ENABLED      "ObjectTraceEnabled"
 #define XML_ACKED              "ObjectAcked"

@@ -49,6 +49,8 @@ char *parser_jitter_threshold = NULL;
 int parser_i_jitter_threshold = 0;
 char *parser_rtt_samples = NULL;
 int parser_i_rtt_samples = 5;  /* Default: 5 samples */
+char *parser_rtt_interval = NULL;
+int parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
 char *parser_sender = NULL;
 char *parser_subject = NULL;
 char *parser_upcolor = NULL;
@@ -1953,6 +1955,52 @@ rtt_samples\ [^;]+;          {
 
 }
 
+rtt_interval\ [^;]+;         {
+  if (parser_name == NULL)
+	print_err(1, "WARNING: rtt_interval specified when not inside an object at line %d", line_no);
+  fixup_lineno();
+
+  parser_pos1 = strchr( yytext, ' ' );
+  if (parser_pos1 == NULL)
+  {
+	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+  parser_pos1=parser_pos1+1;
+  parser_pos2 = strchr( parser_pos1, ';' );
+  if (parser_pos2 == NULL)
+  {
+	print_err(1, "missing semicolon on line %d in %s", line_no, current_parsing_filename);
+	break;
+  }
+
+  if (parser_rtt_interval != NULL)
+  {
+        FREE(parser_rtt_interval);
+  }
+  parser_rtt_interval = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_rtt_interval");
+
+  strncpy( parser_rtt_interval, parser_pos1, parser_pos2 - parser_pos1 );
+  parser_rtt_interval[ parser_pos2 - parser_pos1 ] = '\0';
+
+  parser_i_rtt_interval = atol(parser_rtt_interval);
+  /* Spacing the probes is the point of the knob, so refuse a value that
+     removes the spacing. The ceiling keeps one check from occupying a
+     queue slot for minutes: rtt_samples * rtt_interval is how long the
+     check takes, and the queue is finite. */
+  if (parser_i_rtt_interval < RTT_MIN_INTERVAL_MS ||
+      parser_i_rtt_interval > RTT_MAX_INTERVAL_MS)
+  {
+	print_err(1, "Invalid rtt_interval (must be %d-%d ms) in %s line %d",
+		RTT_MIN_INTERVAL_MS, RTT_MAX_INTERVAL_MS,
+		current_parsing_filename, line_no);
+	parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
+  }
+  if (debug)
+    print_err(0, "rtt_interval : %s/%d ", parser_rtt_interval, parser_i_rtt_interval);
+
+}
+
 desc\ [^;]+;          {
   if (parser_name == NULL)
         print_err(1, "WARNING: description specified when not inside an object at line %d", line_no);
@@ -3268,6 +3316,7 @@ void add_object()
 		new_ele->value->data->rtt_threshold = parser_i_rtt_threshold;
 		new_ele->value->data->jitter_threshold = parser_i_jitter_threshold;
 		new_ele->value->data->rtt_samples = parser_i_rtt_samples;
+		new_ele->value->data->rtt_interval = parser_i_rtt_interval;
 		new_ele->value->data->max_wakeup_retries = 0;  /* 0 = use DEFAULT_MAX_WAKEUP_RETRIES */
 		new_ele->value->data->contact_when = parser_when;
 		new_ele->value->data->unique_id = gen_unique_id();
@@ -3760,6 +3809,8 @@ void initalize_parser()
 	parser_i_jitter_threshold = 0;
 	parser_rtt_samples = NULL;
 	parser_i_rtt_samples = 5;  /* Default: 5 samples */
+	parser_rtt_interval = NULL;
+	parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
 	parser_html_refresh = 60;
 	parser_snmp_type = NULL;
 	parser_snmp_version = SNMP_VERSION_2C;
