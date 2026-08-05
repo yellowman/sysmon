@@ -681,8 +681,11 @@ func Parse(content []byte) (*models.Config, error) {
 				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "rtt_interval "))); err == nil {
 					currentHost.RTTInterval = val
 				}
-			} else if strings.HasPrefix(line, "pkt_loss_tolerance ") {
-				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pkt_loss_tolerance "))); err == nil {
+			} else if strings.HasPrefix(line, "pktloss_tolerance ") {
+				// The directive is "pktloss_tolerance", one word - this
+				// looked for "pkt_loss_tolerance" and so never matched
+				// anything the daemon would accept.
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pktloss_tolerance "))); err == nil {
 					currentHost.PktLossTolerance = val
 				}
 			} else if strings.HasPrefix(line, "pkt_loss_history_hours ") {
