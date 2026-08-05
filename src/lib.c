@@ -704,6 +704,12 @@ char *type_to_name(int type)
 			return "pingv6";
 		case SYSM_TYPE_PKTLOSS:
 			return "pktloss";
+		/* Missing here, an rtt object reported its type as "ERROR" -
+		 * in the web UI, the sysmon client and the status page - and
+		 * this is also the name the reverse lookup has to match, so
+		 * it has to be the word the config uses. */
+		case SYSM_TYPE_PING_LATENCY:
+			return "rtt";
 		default:
 			return "ERROR";
 	}

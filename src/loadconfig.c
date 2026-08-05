@@ -356,6 +356,16 @@ void	hard_copy(struct hostinfo *old, struct hostinfo *new)
 	/* copy over data related to snmp based tests */
 	new->last_snmp_resptime = old->last_snmp_resptime;
 	new->system_uptime = old->system_uptime;
+	/* and what the last rtt check measured, so a config reload does
+	   not blank the latency figures the UI is showing */
+	new->rtt_last_min = old->rtt_last_min;
+	new->rtt_last_avg = old->rtt_last_avg;
+	new->rtt_last_max = old->rtt_last_max;
+	new->rtt_last_jitter = old->rtt_last_jitter;
+	new->rtt_last_replies = old->rtt_last_replies;
+	new->rtt_last_probes = old->rtt_last_probes;
+	new->pktloss_last_sent = old->pktloss_last_sent;
+	new->pktloss_last_recv = old->pktloss_last_recv;
 	if (old->lastmsgid != NULL)
 		new->lastmsgid = STRDUP(old->lastmsgid,"last msgid");
 	if (old->notes != NULL)

@@ -363,6 +363,20 @@ func hostSignature(h *models.HostStatus) uint64 {
 		c := &h.Checks[i]
 		fmt.Fprintf(w, "\x01%s\x00%d\x00%s\x00%s", c.Type, c.Port, c.Status, c.StatusMessage)
 	}
+	// Latency belongs in the signature, or a delta client would see the
+	// first reading and never another: an rtt host that stays up has an
+	// otherwise unchanging signature, so the numbers on its card would
+	// freeze while the daemon kept measuring. Rounded to the two
+	// decimals actually displayed, so noise below what anyone can read
+	// does not bill a resend for every host every cycle.
+	if h.RTT != nil {
+		fmt.Fprintf(w, "\x02%.2f\x00%.2f\x00%.2f\x00%.2f\x00%d\x00%d",
+			h.RTT.Min, h.RTT.Avg, h.RTT.Max, h.RTT.Jitter,
+			h.RTT.Replies, h.RTT.Probes)
+	}
+	if h.PacketLoss != nil {
+		fmt.Fprintf(w, "\x03%d\x00%d", h.PacketLoss.Sent, h.PacketLoss.Received)
+	}
 	return w.Sum64()
 }
 
@@ -459,7 +473,21 @@ type XMLObjectStatus struct {
 	PacketLossThreshold int `xml:"ObjectPacketLossThreshold"`
 	RTTThreshold        int `xml:"ObjectRTTThreshold"`
 	JitterThreshold     int `xml:"ObjectJitterThreshold"`
-	WakeupRetries       int `xml:"ObjectWakeupRetries"`
+
+	// What the last rtt check measured. Probes is the tell that this
+	// object is an rtt check that has actually run: the daemon omits
+	// the whole group otherwise.
+	RTTMin     float64 `xml:"ObjectRTTMin"`
+	RTTAvg     float64 `xml:"ObjectRTTAvg"`
+	RTTMax     float64 `xml:"ObjectRTTMax"`
+	RTTJitter  float64 `xml:"ObjectRTTJitter"`
+	RTTReplies int     `xml:"ObjectRTTReplies"`
+	RTTProbes  int     `xml:"ObjectRTTProbes"`
+
+	// What the last pktloss cycle counted.
+	PktLossLastSent int `xml:"ObjectPacketLossLastSent"`
+	PktLossLastRecv int `xml:"ObjectPacketLossLastRecv"`
+	WakeupRetries   int `xml:"ObjectWakeupRetries"`
 
 	// Debug/diagnostic
 	TraceEnabled int `xml:"ObjectTraceEnabled"`
@@ -914,6 +942,34 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 			// Down and already alerted - CRITICAL (red)
 			host.OverallStatus = "CRITICAL"
 			host.StatusColor = "red"
+		}
+	}
+
+	// Latency figures, for the objects that have them. The daemon sends
+	// this group only for an rtt check that has completed at least one
+	// batch, so probes > 0 is the whole test.
+	if xmlObj.RTTProbes > 0 {
+		host.RTT = &models.RTTStats{
+			Min:     xmlObj.RTTMin,
+			Avg:     xmlObj.RTTAvg,
+			Max:     xmlObj.RTTMax,
+			Jitter:  xmlObj.RTTJitter,
+			Replies: xmlObj.RTTReplies,
+			Probes:  xmlObj.RTTProbes,
+		}
+	}
+
+	// Packet loss, likewise only for the objects that measure it.
+	if xmlObj.PktLossLastSent > 0 {
+		lost := xmlObj.PktLossLastSent - xmlObj.PktLossLastRecv
+		if lost < 0 {
+			lost = 0
+		}
+		host.PacketLoss = &models.PacketLossStats{
+			Sent:     xmlObj.PktLossLastSent,
+			Received: xmlObj.PktLossLastRecv,
+			Lost:     lost,
+			LossPct:  100.0 * float64(lost) / float64(xmlObj.PktLossLastSent),
 		}
 	}
 

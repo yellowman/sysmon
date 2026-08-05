@@ -280,6 +280,37 @@ type HostStatus struct {
 	// alert list and then reappear minutes later.
 	Stale      bool       `json:"stale,omitempty"`
 	StaleSince *time.Time `json:"stale_since,omitempty"`
+
+	// RTT is what a "type rtt" check last measured, in milliseconds,
+	// and is nil for every other kind of object. A pointer rather than
+	// a zero value: 0.00ms is a real reading on loopback, so "no
+	// measurement" and "very fast" have to be distinguishable.
+	RTT *RTTStats `json:"rtt,omitempty"`
+
+	// PacketLoss is what a "type pktloss" check last counted, and is
+	// nil for every other kind of object.
+	PacketLoss *PacketLossStats `json:"packet_loss,omitempty"`
+}
+
+// PacketLossStats is one pktloss cycle's counts.
+type PacketLossStats struct {
+	Sent     int     `json:"sent"`
+	Received int     `json:"received"`
+	Lost     int     `json:"lost"`
+	LossPct  float64 `json:"loss_pct"`
+}
+
+// RTTStats is one rtt check's latency and jitter figures.
+type RTTStats struct {
+	Min    float64 `json:"min_ms"`
+	Avg    float64 `json:"avg_ms"`
+	Max    float64 `json:"max_ms"`
+	Jitter float64 `json:"jitter_ms"` // RFC 3550 delay variation
+	// Replies out of Probes: the loss the average is hiding. A check
+	// that got 3 of 5 back still reports an average, and the ratio is
+	// how a reader knows to distrust it.
+	Replies int `json:"replies"`
+	Probes  int `json:"probes"`
 }
 
 // CheckResult represents a check result

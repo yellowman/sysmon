@@ -377,6 +377,25 @@ struct hostinfo {
 	unsigned int rtt_samples;           /* Number of samples for rolling average */
 	unsigned int rtt_interval;          /* ms between probes of one check */
 
+	/* What the last rtt check measured. The working state lives in
+	   struct rtt_data for the duration of a check and is freed with it,
+	   so the results are copied here to outlive it - this is what the
+	   status protocol reports and what survives a SIGHUP. */
+	double rtt_last_min;
+	double rtt_last_avg;
+	double rtt_last_max;
+	double rtt_last_jitter;
+	unsigned int rtt_last_replies;      /* replies counted */
+	unsigned int rtt_last_probes;       /* probes sent */
+
+	/* What the last pktloss cycle counted. Same reasoning as the rtt
+	   figures above: struct pktloss_data is freed when the cycle ends,
+	   so the running totals and history it holds are only reportable
+	   while a check happens to be in flight - which is almost never
+	   when someone is looking. */
+	unsigned int pktloss_last_sent;
+	unsigned int pktloss_last_recv;
+
 	/* SNMP trap alert configuration */
 	bool trap_alert; /* If true, send alert when SNMP trap received from this IP */
 
@@ -690,8 +709,16 @@ struct bootp_pkt {
 #define XML_PAGE_MESSAGE       "ObjectPageMessage"
 #define XML_PKTLOSS_HIST_HRS   "ObjectPacketLossHistoryHours"
 #define XML_PKTLOSS_LAST_CHK   "ObjectPacketLossLastCheck"
+#define XML_PKTLOSS_LAST_SENT  "ObjectPacketLossLastSent"
+#define XML_PKTLOSS_LAST_RECV  "ObjectPacketLossLastRecv"
 #define XML_RTT_SAMPLES        "ObjectRTTSamples"
 #define XML_RTT_INTERVAL       "ObjectRTTInterval"
+#define XML_RTT_LAST_MIN       "ObjectRTTMin"
+#define XML_RTT_LAST_AVG       "ObjectRTTAvg"
+#define XML_RTT_LAST_MAX       "ObjectRTTMax"
+#define XML_RTT_LAST_JITTER    "ObjectRTTJitter"
+#define XML_RTT_LAST_REPLIES   "ObjectRTTReplies"
+#define XML_RTT_LAST_PROBES    "ObjectRTTProbes"
 #define XML_NEXT_QUEUE_TIME    "ObjectNextQueueTime"
 #define XML_TRACE_ENABLED      "ObjectTraceEnabled"
 #define XML_ACKED              "ObjectAcked"
