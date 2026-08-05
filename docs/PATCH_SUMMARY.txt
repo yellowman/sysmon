@@ -32,7 +32,7 @@ Line 78: Hostname parsing from network data
 Lines 147, 288: Time string handling
   - Original vulnerability: strcpy(nfo, ctime(&t)+4) - fragile pointer arithmetic
   - Fix: Replaced with strftime(nfo, sizeof(nfo), "%b %d %H:%M:%S %Y", localtime(&t))
-  - Impact: More robust and safer time formatting
+  - Impact: bounded-length time formatting
 
 Lines 319, 324, 327: Server name from environment/argv
   - Original vulnerability: strcpy(server, argv[1]) and strcpy(server, temp) - no bounds checking

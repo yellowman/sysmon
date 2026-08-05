@@ -99,9 +99,8 @@ template asked for.
 ![The dependency map with a tower outage](docs/screenshots/map.png)
 
 The config as a graph, coloured live. When a tower router stops
-answering, everything behind it goes with it - which is the point of
-declaring the dependency: sysmond pages you about the router, not about
-the forty things behind it.
+answering, everything behind it goes with it, and sysmond pages you about
+the router rather than the forty things behind it.
 
 #### Push administration
 
@@ -201,9 +200,9 @@ the shape of it:
   created for it at startup while still root, and loads
   that instead. The seed file stays exactly as the operator wrote it, is
   what the box falls back to if that directory is emptied, and is what
-  "Unmanage" returns it to. The alternative - writing `/etc` from a
-  daemon that has dropped privileges - is a bad trade to ask for in
-  exchange for remote config. Files are named rather than located: a
+  "Unmanage" returns it to. The alternative would be writing `/etc` from
+  a daemon that has dropped privileges. Files are named rather than
+  located: a
   delivery carries plain filenames, and the daemon decides where they go,
   so nothing an aggregator sends is ever used to build a path.
 - **Rollouts are canaried.** A generation goes to one box first, and
@@ -375,10 +374,8 @@ Green is up, orange is down, yellow is a recent change, and the page
 refreshes itself on a meta tag. There is a `text` variant of the same
 directive for a terminal.
 
-It is worth knowing this is here. A monitoring system whose status
-depends on a second daemon being healthy has a problem the day the
-second daemon is not, and this page keeps working when sysmon-web is
-stopped, upgraded, or was never installed.
+The page keeps working when sysmon-web is stopped, upgraded, or was
+never installed.
 
 ## History
 

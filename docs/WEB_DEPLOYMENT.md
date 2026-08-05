@@ -63,7 +63,7 @@ to, it **refuses to run** rather than silently stay root. Create a
 If `sysmon-web` is started by something that has **already** dropped
 privileges (the systemd unit runs as `www-data`), it detects it isn't
 root and skips all of the above — the socket is simply created owned by
-that user, which is exactly what you want.
+that user.
 
 > The socket is mode `0660` (owner+group read/write, world none), so only
 > the web server's user/group can connect. A `502` with

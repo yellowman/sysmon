@@ -1,7 +1,6 @@
 # Aggregating many sysmonds behind one sysmon-web
 
-Status: design, agreed. Implementation is phased; see **Phasing** at the end
-for what is built and what is not.
+Status: design, agreed.
 
 Today sysmon-web manages exactly one sysmond: it dials `localhost:1345`,
 and it reads and writes that daemon's `sysmon.conf` as a local file. This
@@ -10,9 +9,8 @@ decisions taken along the way.
 
 The guiding constraint, which every decision below serves:
 
-> **sysmond must outlive its management plane.** A monitoring daemon whose
-> monitoring stops because a web UI is down, unreachable, or wrong is worse
-> than no aggregation at all.
+> **sysmond must outlive its management plane.** No web UI being down,
+> unreachable or wrong may stop a daemon from monitoring and paging.
 
 ---
 
@@ -42,12 +40,8 @@ installs are unaffected.
 The separator is `:` because it cannot appear in a sysmon object name and
 reads naturally in an alert: `bend-noc:awbreyswitch`.
 
-**`sitename` is `[A-Za-z0-9_-]+` and nothing else.** A colon in it would
-make `metro:west:corerouter` ambiguous to every split in the codebase, so
-it is rejected at config load with a plain error and the daemon refuses to
-start rather than reporting under a name that cannot be parsed back. The
-same rule keeps whitespace and quotes out, which would otherwise have to be
-escaped in every log line, key and API path.
+`sitename` is `[A-Za-z0-9_-]+` and nothing else, rejected at config load
+if it isn't.
 
 This identity is the key for:
 
@@ -140,8 +134,8 @@ Dropping them looks tempting and is wrong twice over:
 
 - **It lies about the fleet.** The hosts do not disappear from a map, an
   alert list and a history because they are fine; they disappear because
-  nobody is watching them. That is the one thing the operator needs to see,
-  and deleting the rows is the one presentation that hides it.
+  nobody is watching them - and a row that is gone looks identical
+  either way.
 - **It churns the delta.** Hosts absent from a snapshot are reported
   *removed*. Every client deletes them, and on recovery every one is
   re-added - a revision bump per host in each direction, fleet-wide, for a
@@ -218,9 +212,6 @@ tracks. Specifically:
 - no 3.0-only surface: no providers, no `EVP_MAC`, no
   `SSL_CTX_set_ciphersuites` (TLS 1.3-only and absent from older LibreSSL)
 
-Anything outside that set is a portability bug waiting for the first
-OpenBSD deployment.
-
 **Fallback.** The existing inbound listener stays. A single-box install
 where sysmon-web dials `localhost:1345` keeps working exactly as it does
 now; dial-out is what a `config aggregator "…";` directive turns on.
@@ -254,11 +245,8 @@ still paging people. What it refuses:
 - a `root` naming an object nobody defined - which parses perfectly and
   quietly makes every object unreachable from the root
 
-It also reports the object count, which is what the canary compares
-against. That division is deliberate, and it is the honest one: sysmond's
-lexer is permissive by design and ignores what it does not recognise, so
-"it parsed" is a weak claim. The strong claims are made by watching what
-the box does next.
+It also reports the object count, which the canary compares against the
+count the box was running before the delivery.
 
 The order on the box is: write into a *new* generation directory, validate
 there, then swap a symlink. Nothing that is running is touched until that
@@ -281,9 +269,8 @@ addresses on the way out, and decides what gets monitored on the way in.
 connection the poller already has open - which is what makes "somebody
 edited this box" visible in seconds rather than whenever someone looks.
 
-Paths and contents are base64 on the wire, so a config containing anything
-at all survives the trip unchanged. That is not a nicety: the hash is over
-the original bytes, so "survives unchanged" is the entire mechanism.
+Paths and contents are base64 on the wire. The hash is over the decoded
+bytes.
 
 ### The seed config is never written
 
@@ -310,19 +297,17 @@ daemon could write. One directory removes all five conflicts at once, and
 leaves an operator with one path to get right instead of five. The
 directives are still parsed, and warn that they are no longer used.
 
-`config statusfile` keeps its path, deliberately: it names a *published
-output*, and where the page is published is the whole point of it. It is
-still built in the state directory and renamed into place, so a web server
-never sees a half-written page.
+`config statusfile` keeps its path: it names a *published output*, and
+where it is published is a local decision about a web server's document
+root. It is still built in the state directory and renamed into place, so
+a web server never sees a half-written page.
 
 The daemon loads `<gendir>/current/<main>` when it exists and the seed
-otherwise. Three things follow from that "otherwise", and they are the
-point of the whole arrangement:
+otherwise. Three things follow from that "otherwise":
 
 - **The alternative was worse.** Writing the delivered config back over
   `/etc/sysmon.conf` means `/etc` has to be writable by the user sysmond
-  drops to. That is a bad trade to ask an operator to make in exchange for
-  remote config, and it is not one they have to make now.
+  drops to.
 - **A wiped state directory is survivable.** The box comes back on the
   config an operator wrote, not on nothing and not on half of something.
 - **There is a way out.** `CONFIG-REVERT` - "Unmanage" in the UI - drops
@@ -345,11 +330,11 @@ identically as a seed in `/etc` and as the running copy in a generation
 directory; without that, adopting a box and delivering its own bytes
 straight back would read as a change forever.
 
-The consequence is a constraint worth stating: a config whose `include`
-names a path (`include "/etc/sysmon.d/hosts.conf"`) cannot be managed,
-because copying it into one directory would change what it points at. The
-daemon says so in its `CONFIG-GEN` reply, and the fleet page shows it -
-finding out at delivery time would be far too late.
+The consequence: a config whose `include` names a path
+(`include "/etc/sysmon.d/hosts.conf"`) cannot be managed, because copying
+it into one directory would change what it points at. The daemon says so
+in its `CONFIG-GEN` reply and the fleet page shows it, rather than the
+delivery failing.
 
 ### Write includes as absolute paths
 
@@ -392,11 +377,10 @@ rather than letting it be discovered at delivery time, and the fleet page
 shows the reason.
 
 Such a box is still monitored, aggregated, alerted on and shown like any
-other - only its config stays read-only in the UI. That is a real limit on
-what phase 5 covers, and the honest options for widening it are: keep the
-whole config in one file, use bare filenames beside the main config, or
-manage only the main file and treat absolutely-included fragments as
-read-only members of the hash. Not yet decided.
+other - only its config stays read-only in the UI. The options for widening
+that are: keep the whole config in one file, use bare filenames beside the
+main config, or manage only the main file and treat absolutely-included
+fragments as read-only members of the hash. Not yet decided.
 
 ### Where a box reports is not editable from here
 
@@ -408,7 +392,7 @@ sysmond keeps the ability to be moved - a box behind NAT may one day need
 to point somewhere else - so this is a limit in the management plane, not
 in the daemon. It is a limit because moving a box also needs the
 certificate for its new destination, and this side has no way to put that
-on the box. Half a move costs the box.
+on the box.
 
 The failure is quiet, which is why this is refused rather than warned
 about. The delivery succeeds and the reply comes back on the old
@@ -418,8 +402,9 @@ repair is a drive to the console.
 
 Removing the directive is in fact survivable today - the seed still
 carries it, the seed is parsed first at every start, and the value is not
-cleared when a config omits it - but it is refused too, because "safe by
-accident" is not a property to build on.
+cleared when a config omits it - but it is refused too, since that
+survival is a side effect of the load order rather than anything the
+editor checks.
 
 Change it in the seed config, on the box, where the certificate can be put
 in place at the same time.
@@ -453,8 +438,7 @@ is tiny: `config …;`, `object NAME { … };`, `#` comments, `include`.
 
 The rejected alternative - attaching comments to the node that follows them,
 as YAML libraries do - is lossy at the edges (trailing comments, comments
-in odd positions) and forces a canonical reformat of the whole file, which
-operators reasonably hate.
+in odd positions) and forces a canonical reformat of the whole file.
 
 ---
 
@@ -504,39 +488,3 @@ site receives them. They aggregate with the same namespacing.
 
 **Acks and notes** must be routed to the owning daemon, which the namespace
 makes trivial: split on `:`, look up the box.
-
----
-
-## Phasing
-
-| phase | work | risk |
-|---|---|---|
-| 1 | Splice-based editing: comments and includes preserved | low - fixes a live bug |
-| 2 | Object identity / site namespacing | low - expensive to defer |
-| 3 | Multi-box read-only aggregation | low - most of the value |
-| 4 | Dial-out, TLS, per-box tokens; retire the shared authkey | medium |
-| 5 | Config distribution: generations, validation, conflict states, canary | medium |
-| — | Field-level config DB per box | rejected; see below |
-
-**Order matters.** Distributing a config format that cannot round-trip
-losslessly, keyed on names that are not unique, is how a management tool
-causes a fleet-wide outage. 1 and 2 are prerequisites, not polish.
-
-### Rejected: a config database on each sysmond
-
-The proposal was to tokenise `sysmon.conf` into a local database on each
-box, have sysmon-web query or replace that, and run a process that rewrites
-`sysmon.conf` when the database changes.
-
-It is rejected because it adds a third representation of the config (flex
-lexer, Go parser, schema) and a fourth moving part (the rewriter); creates
-a race between the rewriter and the daemon's own reads; embeds a database
-engine in a small C daemon we have just finished removing a dependency
-from; and makes `sysmon.conf` a derived artifact while operators can still
-edit it by hand - which recreates the two-master problem it was meant to
-solve.
-
-Whole-file replacement with local validation achieves the same goal with a
-hash comparison instead of a merge algorithm, and fails safe. If field-level
-queries ever turn out to matter, this decision can be revisited with
-evidence.
