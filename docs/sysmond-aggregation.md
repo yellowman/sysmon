@@ -245,11 +245,8 @@ still paging people. What it refuses:
 - a `root` naming an object nobody defined - which parses perfectly and
   quietly makes every object unreachable from the root
 
-It also reports the object count, which is what the canary compares
-against. The two are separate because sysmond's lexer is permissive by
-design and ignores what it does not recognise: a config can parse and
-still monitor less than the one it replaced, which only the object count
-and the canary will catch.
+It also reports the object count, which the canary compares against the
+count the box was running before the delivery.
 
 The order on the box is: write into a *new* generation directory, validate
 there, then swap a symlink. Nothing that is running is touched until that
@@ -272,10 +269,8 @@ addresses on the way out, and decides what gets monitored on the way in.
 connection the poller already has open - which is what makes "somebody
 edited this box" visible in seconds rather than whenever someone looks.
 
-Paths and contents are base64 on the wire, so a config containing anything
-at all survives the trip unchanged. The hash is over the original bytes,
-so a transport that altered them would break the comparison the whole
-scheme rests on.
+Paths and contents are base64 on the wire. The hash is over the decoded
+bytes.
 
 ### The seed config is never written
 
