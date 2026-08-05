@@ -77,19 +77,17 @@ already owns its thresholds (`rtt_threshold`, `snmp-high`, ...), and a
 number that lives in two places drifts. If a service needs a different
 threshold than the object has, that is a second object.
 
-## State, decided
+## State
 
-The old design left its core rule as an open question (weighted scores
-vs. boolean logic). Decided here:
+State is boolean:
 
-- **Boolean logic decides state.** DOWN when any critical component is
-  failing. DEGRADED when all critical components are fine but any
-  non-critical one is failing. UP otherwise. Deterministic and
-  explainable in one sentence.
-- **No weights.** A weighted health score that does not drive state is
-  decoration; one that does drive state puts a threshold on an arithmetic
-  result, which is harder to predict from the config than a boolean. If a
-  component matters enough to weight up, mark it critical.
+- **DOWN** when any critical component is failing.
+- **DEGRADED** when every critical component is fine and any non-critical
+  one is failing.
+- **UP** otherwise.
+
+There are no weights and no health score. If a component matters enough
+to weight up, mark it critical.
 
 **A component is "failing" when its check fails, not when it has
 paged.** The web UI's WARNING/CRITICAL split is paging bookkeeping -
