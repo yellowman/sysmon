@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sysmon.app.Host
+import com.sysmon.app.PacketLossStats
 import com.sysmon.app.Stats
 import com.sysmon.app.formatUptime
 import com.sysmon.app.ui.theme.MonoLarge
@@ -406,8 +407,116 @@ fun HostRow(host: Host, onClick: (() -> Unit)? = null) {
                         )
                     }
                 }
+                MetricsRow(host)
             }
         }
+    }
+}
+
+/**
+ * Latency, jitter and loss, for the checks that measure them.
+ *
+ * Draws nothing at all for an ordinary ping or tcp object, so a list of
+ * plain hosts looks exactly as it did. A latency check exists to make
+ * numbers, and until now the apps showed only up or down for it.
+ */
+@Composable
+private fun MetricsRow(host: Host) {
+    val rtt = host.rtt
+    val loss = host.packetLoss
+    val snmp = host.snmp
+    if (rtt == null && loss == null && snmp == null) return
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = 2.dp)
+    ) {
+        if (rtt != null) {
+            Text(
+                text = "%.2fms".format(rtt.avgMs),
+                style = MonoSmall,
+                fontWeight = FontWeight.Medium,
+                color = metricColor(rtt.avgMs, rtt.thresholdMs, 150.0, 400.0)
+            )
+            Text(
+                text = "±%.2fms".format(rtt.jitterMs),
+                style = MonoSmall,
+                color = metricColor(rtt.jitterMs, rtt.jitterThresholdMs, 30.0, 100.0)
+            )
+            // Probes that never came back: the loss the average hides.
+            if (rtt.lostProbes > 0) {
+                Text(
+                    text = "${rtt.replies}/${rtt.probes}",
+                    style = MonoSmall,
+                    color = downColor()
+                )
+            }
+        }
+        if (loss != null) {
+            Text(
+                text = "%.1f%% loss".format(loss.lossPct),
+                style = MonoSmall,
+                fontWeight = FontWeight.Medium,
+                color = lossColor(loss)
+            )
+        }
+        if (snmp != null && snmp.sysUpTimeTicks > 0) {
+            Text(
+                text = "up ${formatTicks(snmp.sysUpTimeTicks)}",
+                style = MonoSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * How alarming is a measured value?
+ *
+ * The operator's own threshold decides it when there is one: at or past
+ * it is the down colour, and the last 20% of the approach is a warning.
+ * With no threshold there is nothing to be relative to, so the absolute
+ * fallbacks come from what the numbers mean - 150ms is ITU-T G.114's
+ * guidance for voice, 30ms of jitter is where call quality suffers.
+ */
+@Composable
+private fun metricColor(value: Double, threshold: Int, warnAbs: Double, badAbs: Double): Color {
+    if (threshold > 0) {
+        return when {
+            value >= threshold -> downColor()
+            value >= threshold * 0.8 -> warnColor()
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    }
+    return when {
+        value >= badAbs -> downColor()
+        value >= warnAbs -> warnColor()
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
+
+/** Tolerance is a packet count, so compare like for like. */
+@Composable
+private fun lossColor(loss: PacketLossStats): Color = when {
+    loss.tolerance > 0 && loss.lost > loss.tolerance -> downColor()
+    loss.tolerance > 0 && loss.lost == loss.tolerance -> warnColor()
+    loss.tolerance > 0 -> MaterialTheme.colorScheme.onSurfaceVariant
+    loss.lossPct >= 5.0 -> downColor()
+    loss.lossPct >= 1.0 -> warnColor()
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** sysUpTime is TimeTicks: hundredths of a second, which nobody reads. */
+private fun formatTicks(ticks: Long): String {
+    val secs = ticks / 100
+    val d = secs / 86400
+    val h = (secs % 86400) / 3600
+    val m = (secs % 3600) / 60
+    return when {
+        d > 0 -> "${d}d ${h}h"
+        h > 0 -> "${h}h ${m}m"
+        else -> "${m}m"
     }
 }
 
