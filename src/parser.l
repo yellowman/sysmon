@@ -44,7 +44,7 @@ bool parser_snmp_octets = FALSE;
 bool parser_catch_snmptrap = FALSE;
 bool parser_trap_alert = FALSE;
 char *parser_rtt_threshold = NULL;
-int parser_i_rtt_threshold = 0;
+int parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
 /* pktloss_tolerance: how many lost packets a cycle may have before it
    alerts. The daemon has always had the field and compared against it -
    it simply had no directive, so it was stuck on its default of 0
@@ -679,6 +679,22 @@ object[^\{]+{WS}+\{	{
      per object or one object's tolerance would silently apply to every
      object after it. */
   parser_i_pktloss_tolerance = -1;
+  /*
+   * And the same for every rtt knob, for exactly the same reason.
+   *
+   * These are file-scope and were reset only by initalize_parser(),
+   * which runs once per config load - so a value set on one object was
+   * still sitting there when the next object closed, and got written
+   * into it. Measured: two rtt objects, the first with
+   * "rtt_interval 900", the second with none. The second probed at
+   * 900ms too, and swapping their order in the file swapped which one
+   * got the default. A per-object directive that depends on file order
+   * is not a per-object directive.
+   */
+  parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
+  parser_i_jitter_threshold = 0;
+  parser_i_rtt_samples = 5;
+  parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
   for (temp_int=6;strlen(yytext)> temp_int;temp_int++)
   {
 	if (!isspace(yytext[temp_int]))
@@ -1926,6 +1942,12 @@ rtt_threshold\ [^;]+;          {
   parser_rtt_threshold[ parser_pos2 - parser_pos1 ] = '\0';
 
   parser_i_rtt_threshold = atol(parser_rtt_threshold);
+  if (parser_i_rtt_threshold < 0)
+  {
+	print_err(1, "Invalid rtt_threshold (must be >= 0) in %s line %d",
+		current_parsing_filename, line_no);
+	parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
+  }
   if (debug)
     print_err(0, "rtt_threshold : %s/%d ", parser_rtt_threshold, parser_i_rtt_threshold);
 
@@ -3857,7 +3879,7 @@ void initalize_parser()
 	parser_catch_snmptrap = 0;
 	parser_trap_alert = FALSE;
 	parser_rtt_threshold = NULL;
-	parser_i_rtt_threshold = 0;
+	parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
 	parser_jitter_threshold = NULL;
 	parser_i_jitter_threshold = 0;
 	parser_rtt_samples = NULL;

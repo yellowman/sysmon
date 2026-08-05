@@ -296,7 +296,20 @@ void	handle_icmp_responses()
 				    from.sin_addr.s_addr ==
 				      pkt->ping->to->sin_addr.s_addr)
 				{
-					pkt->ping->nreceived++;
+					/* Never count more replies than probes.
+					 * The rtt path indexes by sequence and so
+					 * ignores a duplicate outright; this one
+					 * matches on ident and source alone, so a
+					 * duplicated or reflected reply used to be
+					 * a second arrival. That drove nreceived
+					 * past packetsent, and "lost = sent - rcvd"
+					 * is unsigned: one duplicate turned zero
+					 * loss into four billion lost, which alerts
+					 * as PKTLOSS_EXCEED while the web UI - which
+					 * clamps - shows 0%. */
+					if (pkt->ping->nreceived <
+					    pkt->ping->packetsent)
+						pkt->ping->nreceived++;
 					break; /* a reply belongs to one check */
 				}
 				continue;
@@ -1071,7 +1084,10 @@ void service_test_pktloss(struct monitorent *here, struct timeval *now_timeval)
 		/* Record this cycle's results */
 		sent = localstruct->packetsent;
 		rcvd = localstruct->nreceived;
-		lost = sent - rcvd;
+		/* Belt as well as braces: these are unsigned, and a count of
+		   replies above the count of probes would not underflow to a
+		   small number, it would underflow to a huge one. */
+		lost = (rcvd >= sent) ? 0 : sent - rcvd;
 
 		time(&now);
 		pktloss_add_sample(pktdata, now, sent, rcvd);
@@ -1660,8 +1676,17 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 		}
 
 		/* RTT is checked before jitter, so a link that is both slow
-		 * and jittery reports "RTT too high". */
-		if (rttdata->rtt_avg > here->checkent->rtt_threshold) {
+		 * and jittery reports "RTT too high".
+		 *
+		 * A threshold of zero means "do not alert on latency", the
+		 * same as jitter_threshold. It has to: the test is "average
+		 * over threshold", so treating zero as a real limit made any
+		 * measurable latency an alert - 0.05ms on loopback qualified -
+		 * and the object was critical for as long as it ran. Such an
+		 * object now measures, records and reports without alerting,
+		 * until someone sets a limit for it to fail. */
+		if (here->checkent->rtt_threshold > 0 &&
+		    rttdata->rtt_avg > here->checkent->rtt_threshold) {
 			retval = SYSM_RTT_HIGH;
 			if (debug)
 				print_err(1, "RTT threshold exceeded for %s: avg=%.2fms (threshold=%ums)",

@@ -356,7 +356,10 @@ load.
 
 .SS rtt_threshold
 Round-trip time threshold in milliseconds.  If average RTT exceeds
-this value, an alert is triggered.
+this value, an alert is triggered.  Default 0, which means no latency
+alarm - the same as jitter_threshold, and the same reading.  An rtt
+object with neither threshold set still measures, records and reports
+its figures; it just alerts only when nothing answers at all.
 
 .SS jitter_threshold
 Jitter threshold in milliseconds.  If RTT variation exceeds this
@@ -373,6 +376,17 @@ lost packet costs one sample, not the check.  rtt_samples times
 rtt_interval is roughly how long each check takes; slower spacing
 samples a wider window, which is usually what jitter measurement
 wants.
+
+.SS pktloss_tolerance
+How many of a pktloss check's probes may go unanswered before it
+alerts.  Default 0, which alerts on any loss at all.  Subscriber-facing
+radio usually wants a small allowance here, since it will lose packets
+in weather; a backhaul or a core link usually does not.
+
+.PP
+All four rtt directives and pktloss_tolerance are per object: an object
+that does not name one gets the default, not the value from whatever
+object came before it in the file.
 
 .SS SNMP Object Options
 
