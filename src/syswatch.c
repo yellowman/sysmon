@@ -981,7 +981,7 @@ void needssleep(time_t now_t)
 		FD_SET(glob_icmpv6_fd, &rd);
 	}
 
-	/* Check: 
+	/* Check:
 	   checkent->next_queuetime for diff to now */
         for (here=queuehead;here!= NULL;here=here->next)
 	{
@@ -992,6 +992,41 @@ void needssleep(time_t now_t)
 /*	printf("mincalctime = %d\n", mincalctime); */
 	local_timeout.tv_sec = mincalctime;
 	local_timeout.tv_usec = 0;
+
+	/*
+	 * An rtt check paces its probes in milliseconds, which is finer
+	 * than this timeout's usual whole seconds. Ask each one when it
+	 * next needs to send and shorten the sleep to suit, or the probe
+	 * schedule is silently rounded up to however often we happen to
+	 * wake and a five-sample check stretches over ten seconds.
+	 */
+	if (!disable_icmp)
+	{
+		double soonest = -1.0;
+
+		for (here = queuehead; here != NULL; here = here->next)
+		{
+			double due = rtt_ms_until_next_probe(here, &now_timeval);
+
+			if (due < 0.0)
+				continue;
+			if (soonest < 0.0 || due < soonest)
+				soonest = due;
+		}
+
+		if (soonest >= 0.0)
+		{
+			double budget = local_timeout.tv_sec * 1000.0 +
+				local_timeout.tv_usec / 1000.0;
+
+			if (soonest < budget)
+			{
+				local_timeout.tv_sec = (time_t)(soonest / 1000.0);
+				local_timeout.tv_usec = (suseconds_t)
+					((soonest - local_timeout.tv_sec * 1000.0) * 1000.0);
+			}
+		}
+	}
 
 	/* Watch the fd_sets accordingly */
 	select(maxfd+1, &rd, &wr, &except, &local_timeout);
