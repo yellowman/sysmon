@@ -508,13 +508,23 @@ func Builtins() []Template {
 			},
 		},
 		{
-			ID: "server-https", Name: "Server (ping + HTTPS)",
+			ID: "server-tls", Name: "Server (ping + TLS port)",
 			Category: CatCore, Builtin: true,
-			Description: "A TLS site: reachability plus the page itself over 443.",
+			// Deliberately a port check, not a page check. sysmond has
+			// a "https" type in name only - a constant, a dispatch and
+			// two prototypes with no implementation behind them - so an
+			// object of that type parses and then never runs. A tcp
+			// check on 443 is smaller than what it replaces and it is
+			// true: the listener is up and completing handshakes with
+			// something, or it is not.
+			Description: "A TLS site: reachability plus something listening on 443. " +
+				"For the content of the page, use the HTTP template - it looks for " +
+				"text in the response, which is the part that catches a working " +
+				"server serving an error.",
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
-				{Suffix: "-https", Type: "https", Port: 443, URL: "https://{ip}/",
-					Desc: "{name} TLS web service", DependsOnDevice: true},
+				{Suffix: "-tls", Type: "tcp", Port: 443,
+					Desc: "{name} TLS port 443", DependsOnDevice: true},
 			},
 		},
 		{
