@@ -1214,6 +1214,10 @@ void service_this(struct monitorent *here, struct timeval *now_timeval, time_t n
 				break;
 			case SYSM_TYPE_RADIUS: service_check_radius(here, now_t);
 				break;
+/* Never compiled: HAVE_SSL is not defined by any build, and
+   service_test_https() has no definition anywhere in the tree, so
+   enabling this arm fails to link. The type is refused at parse
+   time for that reason - see name_to_type() in lib.c. */
 #ifdef HAVE_SSL
 			case SYSM_TYPE_HTTPS: service_test_https(here);
 				break;
@@ -1278,6 +1282,7 @@ void service_this(struct monitorent *here, struct timeval *now_timeval, time_t n
 				break;
 			case SYSM_TYPE_RADIUS: start_check_radius(here, now_t);
 				break;
+/* Likewise unimplemented; see the note on the service arm. */
 #ifdef HAVE_SSL
 			case SYSM_TYPE_HTTPS: start_test_https(here);
 				break;

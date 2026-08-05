@@ -189,15 +189,10 @@ status file.
 .fi
 
 .SS statustempdir
-The ``config statustempdir'' directive specifies a directory where
-sysmond should write temporary status files before renaming them to
-their final location.  This is useful when sysmond has dropped
-privileges, as it allows the daemon to write to a directory owned by the
-unprivileged user.
-
-.nf
-  config statustempdir "/var/run/sysmon";
-.fi
+No longer used, and warned about if present.  The status page is built
+in the state directory and renamed into place from there, which is a
+directory sysmond already owns after dropping privileges, so there is
+nothing left for this to configure.  Delete the line.
 
 .SS cssfile
 The ``config cssfile'' directive specifies a CSS file URL to use for

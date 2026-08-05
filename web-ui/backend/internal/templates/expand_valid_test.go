@@ -26,7 +26,8 @@ func TestEveryBuiltinExpandsCompletely(t *testing.T) {
 	required := map[string][]string{
 		"dns":   {"dns_query"},
 		"http":  {"url", "url_text"},
-		"https": {"url"},
+		// "https" is not in this table because sysmond has no https check;
+		// see the note on the server-tls template.
 		"snmp":  {"oid"},
 		"imap":  {"username", "password"},
 		"pop3":  {"username", "password"},

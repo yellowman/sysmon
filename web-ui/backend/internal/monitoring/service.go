@@ -986,10 +986,20 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 	// SNMP figures were parsed off the wire and then dropped: the
 	// device's uptime and how long it took to answer are exactly what a
 	// person checking an SNMP object wants, and neither reached the UI.
-	if xmlObj.SNMPSysUpTime > 0 || xmlObj.SNMPLastResp > 0 {
+	//
+	// ObjectSNMPObjectSysUpTime is only an uptime on a "reboot" check.
+	// The daemon's field is named system_uptime but every other check
+	// type stashes its own last reading in it - see the "stash last snmp
+	// value" lines in snmp.c - so a board-temperature check puts 38 in
+	// there, and reading that as TimeTicks renders a device that has
+	// been up for 37 days as "up 0m". Only the check that actually asks
+	// for sysUpTime gets to claim the number is one.
+	if xmlObj.SNMPLastResp > 0 || (xmlObj.SNMPSysUpTime > 0 && xmlObj.SNMPType == "reboot") {
 		host.SNMP = &models.SNMPStats{
-			SysUpTime:    xmlObj.SNMPSysUpTime,
 			LastResponse: xmlObj.SNMPLastResp,
+		}
+		if xmlObj.SNMPType == "reboot" {
+			host.SNMP.SysUpTime = xmlObj.SNMPSysUpTime
 		}
 	}
 

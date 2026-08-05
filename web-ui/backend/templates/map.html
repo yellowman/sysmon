@@ -632,15 +632,37 @@ function mapPage() {
             this.$nextTick(() => this.fit());
         },
 
+        // Index status under every name a node might be known by.
+        //
+        // The nodes on this map come from the config file, so their ids
+        // are bare object names - "core-rtr-1". The status API returns
+        // object_name, which is site-qualified once a daemon has a
+        // sitename - "wisp:core-rtr-1". Indexing only the qualified form
+        // meant every lookup missed and every node on the map drew grey,
+        // on exactly the deployments that have a sitename, which is all
+        // of them once a daemon reports through the agent link. The map
+        // said nothing about the network while looking like it did.
+        //
+        // Both keys are stored. Where two sites use the same local name
+        // the bare key is ambiguous, so the worse status wins it: a map
+        // that over-reports a problem sends someone to look, and one
+        // that under-reports it does not.
         async loadStatus() {
             try {
                 const r = await apiCall('/api/monitoring/status');
+                const rank = { CRITICAL: 3, WARNING: 2, OK: 1 };
                 const m = {}, st = {};
-                (r.hosts || []).forEach(h => {
-                    const k = h.object_name || h.hostname;
-                    m[k] = h.overall_status;
+                const put = (k, h) => {
+                    if (!k) return;
+                    if (!(k in m) || (rank[h.overall_status] || 0) > (rank[m[k]] || 0))
+                        m[k] = h.overall_status;
                     // Its site is not answering, so this colour is a memory.
                     if (h.stale) st[k] = true;
+                };
+                (r.hosts || []).forEach(h => {
+                    put(h.object_name, h);
+                    put(h.local_name, h);
+                    if (!h.object_name && !h.local_name) put(h.hostname, h);
                 });
                 this.statuses = m;
                 this.staleHosts = st;
