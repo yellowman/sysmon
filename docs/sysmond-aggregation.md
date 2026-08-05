@@ -9,9 +9,8 @@ decisions taken along the way.
 
 The guiding constraint, which every decision below serves:
 
-> **sysmond must outlive its management plane.** A monitoring daemon whose
-> monitoring stops because a web UI is down, unreachable, or wrong is worse
-> than no aggregation at all.
+> **sysmond must outlive its management plane.** No web UI being down,
+> unreachable or wrong may stop a daemon from monitoring and paging.
 
 ---
 
@@ -135,8 +134,8 @@ Dropping them looks tempting and is wrong twice over:
 
 - **It lies about the fleet.** The hosts do not disappear from a map, an
   alert list and a history because they are fine; they disappear because
-  nobody is watching them. That is the one thing the operator needs to see,
-  and deleting the rows is the one presentation that hides it.
+  nobody is watching them - and a row that is gone looks identical
+  either way.
 - **It churns the delta.** Hosts absent from a snapshot are reported
   *removed*. Every client deletes them, and on recovery every one is
   re-added - a revision bump per host in each direction, fleet-wide, for a
@@ -247,10 +246,10 @@ still paging people. What it refuses:
   quietly makes every object unreachable from the root
 
 It also reports the object count, which is what the canary compares
-against. That division is deliberate, and it is the honest one: sysmond's
-lexer is permissive by design and ignores what it does not recognise, so
-"it parsed" is a weak claim. The strong claims are made by watching what
-the box does next.
+against. The two are separate because sysmond's lexer is permissive by
+design and ignores what it does not recognise: a config can parse and
+still monitor less than the one it replaced, which only the object count
+and the canary will catch.
 
 The order on the box is: write into a *new* generation directory, validate
 there, then swap a symlink. Nothing that is running is touched until that
@@ -274,8 +273,9 @@ connection the poller already has open - which is what makes "somebody
 edited this box" visible in seconds rather than whenever someone looks.
 
 Paths and contents are base64 on the wire, so a config containing anything
-at all survives the trip unchanged. That is not a nicety: the hash is over
-the original bytes, so "survives unchanged" is the entire mechanism.
+at all survives the trip unchanged. The hash is over the original bytes,
+so a transport that altered them would break the comparison the whole
+scheme rests on.
 
 ### The seed config is never written
 
@@ -302,14 +302,13 @@ daemon could write. One directory removes all five conflicts at once, and
 leaves an operator with one path to get right instead of five. The
 directives are still parsed, and warn that they are no longer used.
 
-`config statusfile` keeps its path, deliberately: it names a *published
-output*, and where the page is published is the whole point of it. It is
-still built in the state directory and renamed into place, so a web server
-never sees a half-written page.
+`config statusfile` keeps its path: it names a *published output*, and
+where it is published is a local decision about a web server's document
+root. It is still built in the state directory and renamed into place, so
+a web server never sees a half-written page.
 
 The daemon loads `<gendir>/current/<main>` when it exists and the seed
-otherwise. Three things follow from that "otherwise", and they are the
-point of the whole arrangement:
+otherwise. Three things follow from that "otherwise":
 
 - **The alternative was worse.** Writing the delivered config back over
   `/etc/sysmon.conf` means `/etc` has to be writable by the user sysmond
@@ -336,11 +335,11 @@ identically as a seed in `/etc` and as the running copy in a generation
 directory; without that, adopting a box and delivering its own bytes
 straight back would read as a change forever.
 
-The consequence is a constraint worth stating: a config whose `include`
-names a path (`include "/etc/sysmon.d/hosts.conf"`) cannot be managed,
-because copying it into one directory would change what it points at. The
-daemon says so in its `CONFIG-GEN` reply, and the fleet page shows it -
-finding out at delivery time would be far too late.
+The consequence: a config whose `include` names a path
+(`include "/etc/sysmon.d/hosts.conf"`) cannot be managed, because copying
+it into one directory would change what it points at. The daemon says so
+in its `CONFIG-GEN` reply and the fleet page shows it, rather than the
+delivery failing.
 
 ### Write includes as absolute paths
 
@@ -398,7 +397,7 @@ sysmond keeps the ability to be moved - a box behind NAT may one day need
 to point somewhere else - so this is a limit in the management plane, not
 in the daemon. It is a limit because moving a box also needs the
 certificate for its new destination, and this side has no way to put that
-on the box. Half a move costs the box.
+on the box.
 
 The failure is quiet, which is why this is refused rather than warned
 about. The delivery succeeds and the reply comes back on the old
@@ -408,8 +407,9 @@ repair is a drive to the console.
 
 Removing the directive is in fact survivable today - the seed still
 carries it, the seed is parsed first at every start, and the value is not
-cleared when a config omits it - but it is refused too, because "safe by
-accident" is not a property to build on.
+cleared when a config omits it - but it is refused too, since that
+survival is a side effect of the load order rather than anything the
+editor checks.
 
 Change it in the seed config, on the box, where the certificate can be put
 in place at the same time.
@@ -443,8 +443,7 @@ is tiny: `config …;`, `object NAME { … };`, `#` comments, `include`.
 
 The rejected alternative - attaching comments to the node that follows them,
 as YAML libraries do - is lossy at the edges (trailing comments, comments
-in odd positions) and forces a canonical reformat of the whole file, which
-operators reasonably hate.
+in odd positions) and forces a canonical reformat of the whole file.
 
 ---
 

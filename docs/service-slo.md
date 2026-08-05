@@ -85,11 +85,11 @@ vs. boolean logic). Decided here:
 - **Boolean logic decides state.** DOWN when any critical component is
   failing. DEGRADED when all critical components are fine but any
   non-critical one is failing. UP otherwise. Deterministic and
-  explainable in one sentence, which is what a state that pages people
-  must be.
+  explainable in one sentence.
 - **No weights.** A weighted health score that does not drive state is
-  decoration; one that does drive state is a rule nobody can recite at
-  3am. If a component matters enough to weight up, mark it critical.
+  decoration; one that does drive state puts a threshold on an arithmetic
+  result, which is harder to predict from the config than a boolean. If a
+  component matters enough to weight up, mark it critical.
 
 **A component is "failing" when its check fails, not when it has
 paged.** The web UI's WARNING/CRITICAL split is paging bookkeeping -
@@ -100,9 +100,9 @@ is the check result, so WARNING and CRITICAL both count as failing.
 its hosts are marked `Stale`, and sysmon-web knows nothing about them.
 Unknown time is excluded from the availability calculation - the budget
 does not burn on blindness - and is reported separately as measurement
-coverage ("99.95% available, 97% measured"). Silently counting unknown
-as up would flatter the number; counting it as down would page on every
-network blip between sites. Naming it is the honest option.
+coverage ("99.95% available, 97% measured"). Counting unknown as up
+would overstate the number; counting it as down would page on every
+network blip between sites.
 
 **A component that names no known object** (deleted, renamed, site
 unadopted) shows as a configuration error on the service, counts as
