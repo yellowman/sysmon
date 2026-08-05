@@ -1120,13 +1120,11 @@ void stop_test_pktloss(struct monitorent *here)
  * for hundreds says the config means something else. */
 #define RTT_MAX_SAMPLES		64
 
-/* Spacing between probes, in milliseconds. Sending them back to back
- * measures one instant and calls it a trend; spacing them means the
+/* Spacing between probes is per object ("rtt_interval N;" in ms,
+ * default RTT_DEFAULT_INTERVAL_MS). Sending them back to back would
+ * measure one instant and call it a trend; spacing them means the
  * samples cover a window and the jitter between them is the target's,
- * not our scheduler's. ping(8) uses one second and is built for a human
- * watching; a monitoring check wants its answer sooner than five
- * seconds, so this is shorter. */
-#define RTT_PROBE_INTERVAL_MS	100.0
+ * not our scheduler's. */
 
 /* How long to keep waiting after the last probe for stragglers. */
 #define RTT_GRACE_MS		1000.0
@@ -1415,6 +1413,18 @@ static bool rtt_match_and_record(struct monitorent *here,
 	return TRUE;
 }
 
+/* The object's probe spacing, defended: parse-time validation bounds
+ * it, but an object built by any path that skipped that (savestate,
+ * future callers) falls back to the default rather than to zero. */
+static double rtt_interval_ms(struct monitorent *here)
+{
+	unsigned int iv = here->checkent->rtt_interval;
+
+	if (iv < RTT_MIN_INTERVAL_MS || iv > RTT_MAX_INTERVAL_MS)
+		return (double)RTT_DEFAULT_INTERVAL_MS;
+	return (double)iv;
+}
+
 /*
  * rtt_ms_until_next_probe - how long until this check must send again
  *
@@ -1451,9 +1461,9 @@ double rtt_ms_until_next_probe(struct monitorent *here, struct timeval *now)
 		return -1.0; /* all sent; waiting on replies, which wake us */
 
 	since = calculate_rtt_ms(&rttdata->last_send_time, now);
-	if (since >= RTT_PROBE_INTERVAL_MS)
+	if (since >= rtt_interval_ms(here))
 		return 0.0;
-	return RTT_PROBE_INTERVAL_MS - since;
+	return rtt_interval_ms(here) - since;
 }
 
 /*
@@ -1505,7 +1515,7 @@ void service_test_rtt(struct monitorent *here, struct timeval *now_timeval)
 	 * one. This does not wait for the previous reply - probes are a
 	 * schedule, not a chain, so a packet that never comes back costs
 	 * one sample rather than the whole check. */
-	if (rttdata->probes < want && since_send >= RTT_PROBE_INTERVAL_MS) {
+	if (rttdata->probes < want && since_send >= rtt_interval_ms(here)) {
 		gettimeofday(&rttdata->sent_at[rttdata->probes], NULL);
 		rttdata->last_send_time = rttdata->sent_at[rttdata->probes];
 		rttdata->probes++;

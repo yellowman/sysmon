@@ -573,6 +573,12 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
+	if (obj->data->rtt_interval > 0) {
+		snprintf(buffer, sizeof(buffer), "<%s>%u</%s>",
+			XML_RTT_INTERVAL, obj->data->rtt_interval, XML_RTT_INTERVAL);
+		SEND_OR_ABORT(fd, fh, buffer);
+	}
+
 	/* Next Scheduled Queue Time */
 	if (obj->data->next_queuetime > 0) {
 		snprintf(buffer, sizeof(buffer), "<%s>%lld</%s>",
