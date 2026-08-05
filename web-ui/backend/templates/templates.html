@@ -28,20 +28,29 @@
             <div class="px-3 py-2 border-b border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                 <span x-text="list.length + ' templates'"></span>
             </div>
-            <div class="max-h-[32rem] overflow-y-auto">
-                <template x-for="t in list" :key="t.id">
-                    <button @click="select(t)"
-                            class="w-full text-left px-3 py-2 border-b border-gray-50 hover:bg-gray-50"
-                            :class="sel && sel.id === t.id ? 'bg-gray-50' : ''">
-                        <div class="flex items-center justify-between gap-2">
-                            <span class="text-sm font-medium text-gray-900" x-text="t.name"></span>
-                            <!-- A shipped template can be retuned; the edit is
-                                 stored over the top and keeps the same id. -->
-                            <span x-show="!t.builtin"
-                                  class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">custom</span>
-                        </div>
-                        <div class="text-[11px] text-gray-500" x-text="(t.vendor ? t.vendor + ' · ' : '') + t.checks.length + ' checks'"></div>
-                    </button>
+            <!-- Grouped, because a fleet has more device types than fit
+                 in one readable column and "which of these is a tower
+                 thing" is the first question anyone asks of the list. -->
+            <div class="max-h-[36rem] overflow-y-auto">
+                <template x-for="cat in categories()" :key="cat">
+                    <div>
+                        <div class="px-3 py-1 bg-gray-50 border-y border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+                             x-text="cat"></div>
+                        <template x-for="t in inCategory(cat)" :key="t.id">
+                            <button @click="select(t)"
+                                    class="w-full text-left px-3 py-2 border-b border-gray-50 hover:bg-gray-50"
+                                    :class="sel && sel.id === t.id ? 'bg-gray-50' : ''">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-sm font-medium text-gray-900" x-text="t.name"></span>
+                                    <!-- A shipped template can be retuned; the edit
+                                         is stored over the top, same id. -->
+                                    <span x-show="!t.builtin"
+                                          class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">custom</span>
+                                </div>
+                                <div class="text-[11px] text-gray-500" x-text="(t.vendor ? t.vendor + ' · ' : '') + t.checks.length + ' checks'"></div>
+                            </button>
+                        </template>
+                    </div>
                 </template>
             </div>
         </div>
@@ -140,6 +149,23 @@ function templatesPage() {
                 this.list = r.templates || [];
                 if (this.list.length && !this.sel) this.select(this.list[0]);
             } catch (e) { this.say(e.message, true); }
+        },
+
+        // Categories in a deliberate order - the network from the outside
+        // in, then the plant that powers it - rather than alphabetically,
+        // which would put "Core" before "Tower" for no reason anyone
+        // reading the list cares about.
+        categories() {
+            const order = ['Tower / radio', 'Fiber / PON',
+                           'Core / transit / servers', 'Facilities / power', 'Generic'];
+            const present = [...new Set(this.list.map(t => t.category || 'Generic'))];
+            const known = order.filter(c => present.includes(c));
+            const extra = present.filter(c => !order.includes(c)).sort();
+            return [...known, ...extra];
+        },
+
+        inCategory(cat) {
+            return this.list.filter(t => (t.category || 'Generic') === cat);
         },
 
         select(t) {
