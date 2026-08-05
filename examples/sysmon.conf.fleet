@@ -1,0 +1,4894 @@
+# A worked example: one wireless ISP's fleet, 500 objects.
+#
+# Every object here was stamped out of a shipped device template - tower
+# routers, PTP backhauls, PTMP sectors, subscriber radios, a PON plant,
+# core and transit, and the power and environmental gear underneath all
+# of it. This is what the Templates page produces when you point it at a
+# real network, and it is the config behind the screenshots in the
+# README.
+#
+# The addresses are loopback so the file can be run as-is on one machine
+# for a look around. Two towers - cedar-gap and birch-summit - are on
+# reserved documentation ranges that answer nothing, which is what puts
+# the outage on the map.
+#
+# It is an example, not a starting point for your network: change the
+# addresses, the contact, and the thresholds that matter to you.
+
+root = "core-rtr-1";
+
+
+# A worked example: one WISP's fleet, 500 objects, every one of them
+# stamped out of a shipped device template.
+config sitename "wisp";
+config sitedesc "Example Wireless - production fleet";
+config logging file;
+config queuetime 45;
+config maxqueued 120;
+config dnsexpire 7200;
+config numfailures 2;
+
+
+
+
+
+
+object core-rtr-1 {
+	ip "127.10.0.1";
+	type ping;
+	desc "Core router, Datacenter A";
+	contact "noc@example.net";
+};
+
+object core-rtr-1-rtt {
+	ip "127.10.0.1";
+	type rtt;
+	desc "core-rtr-1 core latency above 10ms or jitter above 3ms";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+	rtt_threshold 10;
+	jitter_threshold 3;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object core-rtr-1-loss {
+	ip "127.10.0.1";
+	type pktloss;
+	desc "core-rtr-1 any packet loss in the core";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object core-rtr-1-cpu {
+	ip "127.10.0.1";
+	type snmp;
+	desc "core-rtr-1 CPU above 80%";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "80";
+};
+
+object core-rtr-1-uptime {
+	ip "127.10.0.1";
+	type snmp;
+	desc "core-rtr-1 reboot watch";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object core-rtr-2 {
+	ip "127.10.0.2";
+	type ping;
+	desc "Core router, Datacenter B";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object core-rtr-2-rtt {
+	ip "127.10.0.2";
+	type rtt;
+	desc "core-rtr-2 core latency above 10ms or jitter above 3ms";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+	rtt_threshold 10;
+	jitter_threshold 3;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object core-rtr-2-loss {
+	ip "127.10.0.2";
+	type pktloss;
+	desc "core-rtr-2 any packet loss in the core";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object core-rtr-2-cpu {
+	ip "127.10.0.2";
+	type snmp;
+	desc "core-rtr-2 CPU above 80%";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "80";
+};
+
+object core-rtr-2-uptime {
+	ip "127.10.0.2";
+	type snmp;
+	desc "core-rtr-2 reboot watch";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object transit-hurricane {
+	ip "127.10.0.11";
+	type ping;
+	desc "Hurricane Electric gateway";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object transit-hurricane-rtt {
+	ip "127.10.0.11";
+	type rtt;
+	desc "transit-hurricane transit latency above 40ms or jitter above 10ms";
+	contact "noc@example.net";
+	dep "transit-hurricane";
+	rtt_threshold 40;
+	jitter_threshold 10;
+	rtt_samples 10;
+	rtt_interval 100;
+};
+
+object transit-hurricane-loss {
+	ip "127.10.0.11";
+	type pktloss;
+	desc "transit-hurricane packet loss towards transit";
+	contact "noc@example.net";
+	dep "transit-hurricane";
+	pktloss_tolerance 1;
+};
+
+object transit-cogent {
+	ip "127.10.0.12";
+	type ping;
+	desc "Cogent gateway";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object transit-cogent-rtt {
+	ip "127.10.0.12";
+	type rtt;
+	desc "transit-cogent transit latency above 40ms or jitter above 10ms";
+	contact "noc@example.net";
+	dep "transit-cogent";
+	rtt_threshold 40;
+	jitter_threshold 10;
+	rtt_samples 10;
+	rtt_interval 100;
+};
+
+object transit-cogent-loss {
+	ip "127.10.0.12";
+	type pktloss;
+	desc "transit-cogent packet loss towards transit";
+	contact "noc@example.net";
+	dep "transit-cogent";
+	pktloss_tolerance 1;
+};
+
+object edge-mx-1 {
+	ip "127.10.0.21";
+	type ping;
+	desc "MX204 edge";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object edge-mx-1-uptime {
+	ip "127.10.0.21";
+	type snmp;
+	desc "edge-mx-1 reboot watch";
+	contact "noc@example.net";
+	dep "edge-mx-1";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object edge-mx-2 {
+	ip "127.10.0.22";
+	type ping;
+	desc "MX204 edge";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object edge-mx-2-uptime {
+	ip "127.10.0.22";
+	type snmp;
+	desc "edge-mx-2 reboot watch";
+	contact "noc@example.net";
+	dep "edge-mx-2";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object ns1 {
+	ip "127.10.1.1";
+	type ping;
+	desc "Recursive resolver, primary";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object ns1-dns {
+	ip "127.10.1.1";
+	type dns;
+	desc "ns1 DNS resolution - change dns_query to a name you care about";
+	contact "noc@example.net";
+	dep "ns1";
+	dns-query "example.net";
+};
+
+object ns2 {
+	ip "127.10.1.2";
+	type ping;
+	desc "Recursive resolver, secondary";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object ns2-dns {
+	ip "127.10.1.2";
+	type dns;
+	desc "ns2 DNS resolution - change dns_query to a name you care about";
+	contact "noc@example.net";
+	dep "ns2";
+	dns-query "example.net";
+};
+
+object www {
+	ip "127.10.1.11";
+	type ping;
+	desc "Customer portal";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object www-http {
+	ip "127.10.1.11";
+	type http;
+	port 80;
+	desc "www web service - set url_text to text only a working page has";
+	contact "noc@example.net";
+	dep "www";
+	url "http://127.10.1.11/";
+	urltext "html";
+};
+
+object portal {
+	ip "127.10.1.12";
+	type ping;
+	desc "Billing portal (TLS)";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object portal-tls {
+	ip "127.10.1.12";
+	type tcp;
+	port 443;
+	desc "portal TLS port 443";
+	contact "noc@example.net";
+	dep "portal";
+};
+
+object mx {
+	ip "127.10.1.13";
+	type ping;
+	desc "Mail exchanger";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object mx-smtp {
+	ip "127.10.1.13";
+	type smtp;
+	port 25;
+	desc "mx SMTP";
+	contact "noc@example.net";
+	dep "mx";
+};
+
+object vm-host-1 {
+	ip "127.10.1.21";
+	type ping;
+	desc "KVM host, rack 3";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object vm-host-1-ssh {
+	ip "127.10.1.21";
+	type ssh;
+	port 22;
+	desc "vm-host-1 sshd";
+	contact "noc@example.net";
+	dep "vm-host-1";
+};
+
+object vm-host-1-cpu {
+	ip "127.10.1.21";
+	type snmp;
+	desc "vm-host-1 CPU above 90%";
+	contact "noc@example.net";
+	dep "vm-host-1";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "90";
+};
+
+object vm-host-2 {
+	ip "127.10.1.22";
+	type ping;
+	desc "KVM host, rack 4";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object vm-host-2-ssh {
+	ip "127.10.1.22";
+	type ssh;
+	port 22;
+	desc "vm-host-2 sshd";
+	contact "noc@example.net";
+	dep "vm-host-2";
+};
+
+object vm-host-2-cpu {
+	ip "127.10.1.22";
+	type snmp;
+	desc "vm-host-2 CPU above 90%";
+	contact "noc@example.net";
+	dep "vm-host-2";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "90";
+};
+
+object dc-a-env {
+	ip "127.10.2.1";
+	type ping;
+	desc "Datacenter A temperature and humidity";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object dc-a-env-temp {
+	ip "127.10.2.1";
+	type snmp;
+	desc "dc-a-env shelter temperature above 35C";
+	contact "noc@example.net";
+	dep "dc-a-env";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "35";
+};
+
+object dc-a-env-humidity {
+	ip "127.10.2.1";
+	type snmp;
+	desc "dc-a-env humidity above 80%";
+	contact "noc@example.net";
+	dep "dc-a-env";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "80";
+};
+
+object dc-a-env-door {
+	ip "127.10.2.1";
+	type snmp;
+	desc "dc-a-env door open";
+	contact "noc@example.net";
+	dep "dc-a-env";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "exact";
+	snmp-exact "1";
+};
+
+object dc-a-gen {
+	ip "127.10.2.2";
+	type ping;
+	desc "Standby generator, Datacenter A";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object dc-a-gen-running {
+	ip "127.10.2.2";
+	type snmp;
+	desc "dc-a-gen generator running - site is on backup power";
+	contact "noc@example.net";
+	dep "dc-a-gen";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "exact";
+	snmp-exact "1";
+};
+
+object dc-a-gen-fuel {
+	ip "127.10.2.2";
+	type snmp;
+	desc "dc-a-gen fuel below 25%";
+	contact "noc@example.net";
+	dep "dc-a-gen";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "25";
+};
+
+object dc-a-ups {
+	ip "127.10.2.3";
+	type ping;
+	desc "APC Symmetra, Datacenter A";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object dc-a-ups-runtime {
+	ip "127.10.2.3";
+	type snmp;
+	desc "dc-a-ups under 15 minutes of battery left";
+	contact "noc@example.net";
+	dep "dc-a-ups";
+	community "public";
+	oid ".1.3.6.1.2.1.33.1.2.3.0";
+	snmp-type "low";
+	snmp-low "15";
+};
+
+object dc-a-ups-onbattery {
+	ip "127.10.2.3";
+	type snmp;
+	desc "dc-a-ups running on battery";
+	contact "noc@example.net";
+	dep "dc-a-ups";
+	community "public";
+	oid ".1.3.6.1.2.1.33.1.2.1.0";
+	snmp-type "exact";
+	snmp-exact "2";
+};
+
+object eagle-ridge-rtr {
+	ip "127.20.1.1";
+	type ping;
+	desc "Tower router, eagle-ridge";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object eagle-ridge-rtr-rtt {
+	ip "127.20.1.1";
+	type rtt;
+	desc "eagle-ridge-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object eagle-ridge-rtr-loss {
+	ip "127.20.1.1";
+	type pktloss;
+	desc "eagle-ridge-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+	pktloss_tolerance 1;
+};
+
+object eagle-ridge-rtr-cpu {
+	ip "127.20.1.1";
+	type snmp;
+	desc "eagle-ridge-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object eagle-ridge-rtr-uptime {
+	ip "127.20.1.1";
+	type snmp;
+	desc "eagle-ridge-rtr reboot watch";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object eagle-ridge-ups {
+	ip "127.20.1.2";
+	type ping;
+	desc "Battery plant, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-ups-volt {
+	ip "127.20.1.2";
+	type snmp;
+	desc "eagle-ridge-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "eagle-ridge-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object eagle-ridge-sw {
+	ip "127.20.1.3";
+	type ping;
+	desc "Tower switch, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-sw-volt {
+	ip "127.20.1.3";
+	type snmp;
+	desc "eagle-ridge-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "eagle-ridge-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object eagle-ridge-sw-temp {
+	ip "127.20.1.3";
+	type snmp;
+	desc "eagle-ridge-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "eagle-ridge-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object eagle-ridge-bh {
+	ip "127.20.1.4";
+	type ping;
+	desc "60GHz backhaul from eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-bh-rtt {
+	ip "127.20.1.4";
+	type rtt;
+	desc "eagle-ridge-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "eagle-ridge-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object eagle-ridge-bh-loss {
+	ip "127.20.1.4";
+	type pktloss;
+	desc "eagle-ridge-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "eagle-ridge-bh";
+	pktloss_tolerance 1;
+};
+
+object eagle-ridge-bh-uptime {
+	ip "127.20.1.4";
+	type snmp;
+	desc "eagle-ridge-bh reboot watch";
+	contact "noc@example.net";
+	dep "eagle-ridge-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object eagle-ridge-sec-n {
+	ip "127.20.1.10";
+	type ping;
+	desc "N sector, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-sec-n-loss {
+	ip "127.20.1.10";
+	type pktloss;
+	desc "eagle-ridge-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-n";
+	pktloss_tolerance 3;
+};
+
+object eagle-ridge-sec-n-rtt {
+	ip "127.20.1.10";
+	type rtt;
+	desc "eagle-ridge-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0001 {
+	ip "127.30.1.1";
+	type ping;
+	desc "Subscriber 0001, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-n";
+};
+
+object eagle-ridge-sec-e {
+	ip "127.20.1.11";
+	type ping;
+	desc "E sector, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-sec-e-loss {
+	ip "127.20.1.11";
+	type pktloss;
+	desc "eagle-ridge-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-e";
+	pktloss_tolerance 3;
+};
+
+object eagle-ridge-sec-e-rtt {
+	ip "127.20.1.11";
+	type rtt;
+	desc "eagle-ridge-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0002 {
+	ip "127.30.1.11";
+	type ping;
+	desc "Subscriber 0002, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-e";
+};
+
+object eagle-ridge-sec-s {
+	ip "127.20.1.12";
+	type ping;
+	desc "S sector, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-sec-s-loss {
+	ip "127.20.1.12";
+	type pktloss;
+	desc "eagle-ridge-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-s";
+	pktloss_tolerance 3;
+};
+
+object eagle-ridge-sec-s-rtt {
+	ip "127.20.1.12";
+	type rtt;
+	desc "eagle-ridge-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0003 {
+	ip "127.30.1.21";
+	type ping;
+	desc "Subscriber 0003, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-s";
+};
+
+object eagle-ridge-sec-w {
+	ip "127.20.1.13";
+	type ping;
+	desc "W sector, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-sec-w-loss {
+	ip "127.20.1.13";
+	type pktloss;
+	desc "eagle-ridge-sec-w sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-w";
+	pktloss_tolerance 3;
+};
+
+object eagle-ridge-sec-w-rtt {
+	ip "127.20.1.13";
+	type rtt;
+	desc "eagle-ridge-sec-w sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-w";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0004 {
+	ip "127.30.1.31";
+	type ping;
+	desc "Subscriber 0004, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-w";
+};
+
+object eagle-ridge-ap {
+	ip "127.20.1.20";
+	type ping;
+	desc "2.4GHz fill-in AP, eagle-ridge";
+	contact "noc@example.net";
+	dep "eagle-ridge-rtr";
+};
+
+object eagle-ridge-ap-loss {
+	ip "127.20.1.20";
+	type pktloss;
+	desc "eagle-ridge-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "eagle-ridge-ap";
+	pktloss_tolerance 3;
+};
+
+object eagle-ridge-ap-uptime {
+	ip "127.20.1.20";
+	type snmp;
+	desc "eagle-ridge-ap reboot watch";
+	contact "noc@example.net";
+	dep "eagle-ridge-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object mill-creek-rtr {
+	ip "127.20.2.1";
+	type ping;
+	desc "Tower router, mill-creek";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object mill-creek-rtr-rtt {
+	ip "127.20.2.1";
+	type rtt;
+	desc "mill-creek-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object mill-creek-rtr-loss {
+	ip "127.20.2.1";
+	type pktloss;
+	desc "mill-creek-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+	pktloss_tolerance 1;
+};
+
+object mill-creek-rtr-cpu {
+	ip "127.20.2.1";
+	type snmp;
+	desc "mill-creek-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object mill-creek-rtr-uptime {
+	ip "127.20.2.1";
+	type snmp;
+	desc "mill-creek-rtr reboot watch";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object mill-creek-ups {
+	ip "127.20.2.2";
+	type ping;
+	desc "Battery plant, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-ups-volt {
+	ip "127.20.2.2";
+	type snmp;
+	desc "mill-creek-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "mill-creek-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object mill-creek-sw {
+	ip "127.20.2.3";
+	type ping;
+	desc "Tower switch (PoE), mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-sw-volt {
+	ip "127.20.2.3";
+	type snmp;
+	desc "mill-creek-sw input voltage below 46V - check the plant";
+	contact "noc@example.net";
+	dep "mill-creek-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "46";
+};
+
+object mill-creek-sw-temp {
+	ip "127.20.2.3";
+	type snmp;
+	desc "mill-creek-sw switch temperature above 65C";
+	contact "noc@example.net";
+	dep "mill-creek-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "65";
+};
+
+object mill-creek-bh {
+	ip "127.20.2.4";
+	type ping;
+	desc "PTP 550 backhaul from mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-bh-rtt {
+	ip "127.20.2.4";
+	type rtt;
+	desc "mill-creek-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "mill-creek-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object mill-creek-bh-loss {
+	ip "127.20.2.4";
+	type pktloss;
+	desc "mill-creek-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "mill-creek-bh";
+	pktloss_tolerance 1;
+};
+
+object mill-creek-bh-uptime {
+	ip "127.20.2.4";
+	type snmp;
+	desc "mill-creek-bh reboot watch";
+	contact "noc@example.net";
+	dep "mill-creek-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object mill-creek-sec-n {
+	ip "127.20.2.10";
+	type ping;
+	desc "N sector, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-sec-n-loss {
+	ip "127.20.2.10";
+	type pktloss;
+	desc "mill-creek-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "mill-creek-sec-n";
+	pktloss_tolerance 3;
+};
+
+object mill-creek-sec-n-rtt {
+	ip "127.20.2.10";
+	type rtt;
+	desc "mill-creek-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "mill-creek-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0005 {
+	ip "127.30.2.1";
+	type ping;
+	desc "Subscriber 0005, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-sec-n";
+};
+
+object mill-creek-sec-e {
+	ip "127.20.2.11";
+	type ping;
+	desc "E sector, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-sec-e-loss {
+	ip "127.20.2.11";
+	type pktloss;
+	desc "mill-creek-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "mill-creek-sec-e";
+	pktloss_tolerance 3;
+};
+
+object mill-creek-sec-e-rtt {
+	ip "127.20.2.11";
+	type rtt;
+	desc "mill-creek-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "mill-creek-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0006 {
+	ip "127.30.2.11";
+	type ping;
+	desc "Subscriber 0006, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-sec-e";
+};
+
+object mill-creek-sec-s {
+	ip "127.20.2.12";
+	type ping;
+	desc "S sector, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-sec-s-loss {
+	ip "127.20.2.12";
+	type pktloss;
+	desc "mill-creek-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "mill-creek-sec-s";
+	pktloss_tolerance 3;
+};
+
+object mill-creek-sec-s-rtt {
+	ip "127.20.2.12";
+	type rtt;
+	desc "mill-creek-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "mill-creek-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0007 {
+	ip "127.30.2.21";
+	type ping;
+	desc "Subscriber 0007, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-sec-s";
+};
+
+object mill-creek-ap {
+	ip "127.20.2.20";
+	type ping;
+	desc "2.4GHz fill-in AP, mill-creek";
+	contact "noc@example.net";
+	dep "mill-creek-rtr";
+};
+
+object mill-creek-ap-loss {
+	ip "127.20.2.20";
+	type pktloss;
+	desc "mill-creek-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "mill-creek-ap";
+	pktloss_tolerance 3;
+};
+
+object mill-creek-ap-uptime {
+	ip "127.20.2.20";
+	type snmp;
+	desc "mill-creek-ap reboot watch";
+	contact "noc@example.net";
+	dep "mill-creek-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object north-bluff-rtr {
+	ip "127.20.3.1";
+	type ping;
+	desc "Tower router, north-bluff";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object north-bluff-rtr-rtt {
+	ip "127.20.3.1";
+	type rtt;
+	desc "north-bluff-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object north-bluff-rtr-loss {
+	ip "127.20.3.1";
+	type pktloss;
+	desc "north-bluff-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+	pktloss_tolerance 1;
+};
+
+object north-bluff-rtr-cpu {
+	ip "127.20.3.1";
+	type snmp;
+	desc "north-bluff-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object north-bluff-rtr-uptime {
+	ip "127.20.3.1";
+	type snmp;
+	desc "north-bluff-rtr reboot watch";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object north-bluff-ups {
+	ip "127.20.3.2";
+	type ping;
+	desc "Battery plant, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-ups-volt {
+	ip "127.20.3.2";
+	type snmp;
+	desc "north-bluff-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "north-bluff-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object north-bluff-sw {
+	ip "127.20.3.3";
+	type ping;
+	desc "Tower switch, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-sw-volt {
+	ip "127.20.3.3";
+	type snmp;
+	desc "north-bluff-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "north-bluff-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object north-bluff-sw-temp {
+	ip "127.20.3.3";
+	type snmp;
+	desc "north-bluff-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "north-bluff-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object north-bluff-bh {
+	ip "127.20.3.4";
+	type ping;
+	desc "Wave AP backhaul from north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-bh-loss {
+	ip "127.20.3.4";
+	type pktloss;
+	desc "north-bluff-bh packet loss - rain fade shows here first";
+	contact "noc@example.net";
+	dep "north-bluff-bh";
+	pktloss_tolerance 1;
+};
+
+object north-bluff-bh-rtt {
+	ip "127.20.3.4";
+	type rtt;
+	desc "north-bluff-bh latency above 30ms or jitter above 10ms";
+	contact "noc@example.net";
+	dep "north-bluff-bh";
+	rtt_threshold 30;
+	jitter_threshold 10;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object north-bluff-bh-uptime {
+	ip "127.20.3.4";
+	type snmp;
+	desc "north-bluff-bh reboot watch";
+	contact "noc@example.net";
+	dep "north-bluff-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object north-bluff-sec-n {
+	ip "127.20.3.10";
+	type ping;
+	desc "N sector, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-sec-n-loss {
+	ip "127.20.3.10";
+	type pktloss;
+	desc "north-bluff-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "north-bluff-sec-n";
+	pktloss_tolerance 3;
+};
+
+object north-bluff-sec-n-rtt {
+	ip "127.20.3.10";
+	type rtt;
+	desc "north-bluff-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "north-bluff-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0008 {
+	ip "127.30.3.1";
+	type ping;
+	desc "Subscriber 0008, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-sec-n";
+};
+
+object north-bluff-sec-e {
+	ip "127.20.3.11";
+	type ping;
+	desc "E sector, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-sec-e-loss {
+	ip "127.20.3.11";
+	type pktloss;
+	desc "north-bluff-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "north-bluff-sec-e";
+	pktloss_tolerance 3;
+};
+
+object north-bluff-sec-e-rtt {
+	ip "127.20.3.11";
+	type rtt;
+	desc "north-bluff-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "north-bluff-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0009 {
+	ip "127.30.3.11";
+	type ping;
+	desc "Subscriber 0009, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-sec-e";
+};
+
+object north-bluff-sec-s {
+	ip "127.20.3.12";
+	type ping;
+	desc "S sector, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-sec-s-loss {
+	ip "127.20.3.12";
+	type pktloss;
+	desc "north-bluff-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "north-bluff-sec-s";
+	pktloss_tolerance 3;
+};
+
+object north-bluff-sec-s-rtt {
+	ip "127.20.3.12";
+	type rtt;
+	desc "north-bluff-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "north-bluff-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0010 {
+	ip "127.30.3.21";
+	type ping;
+	desc "Subscriber 0010, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-sec-s";
+};
+
+object north-bluff-ap {
+	ip "127.20.3.20";
+	type ping;
+	desc "2.4GHz fill-in AP, north-bluff";
+	contact "noc@example.net";
+	dep "north-bluff-rtr";
+};
+
+object north-bluff-ap-loss {
+	ip "127.20.3.20";
+	type pktloss;
+	desc "north-bluff-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "north-bluff-ap";
+	pktloss_tolerance 3;
+};
+
+object north-bluff-ap-uptime {
+	ip "127.20.3.20";
+	type snmp;
+	desc "north-bluff-ap reboot watch";
+	contact "noc@example.net";
+	dep "north-bluff-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object sandhill-rtr {
+	ip "127.20.4.1";
+	type ping;
+	desc "Tower router, sandhill";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object sandhill-rtr-rtt {
+	ip "127.20.4.1";
+	type rtt;
+	desc "sandhill-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object sandhill-rtr-loss {
+	ip "127.20.4.1";
+	type pktloss;
+	desc "sandhill-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+	pktloss_tolerance 1;
+};
+
+object sandhill-rtr-cpu {
+	ip "127.20.4.1";
+	type snmp;
+	desc "sandhill-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object sandhill-rtr-uptime {
+	ip "127.20.4.1";
+	type snmp;
+	desc "sandhill-rtr reboot watch";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object sandhill-ups {
+	ip "127.20.4.2";
+	type ping;
+	desc "Battery plant, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-ups-volt {
+	ip "127.20.4.2";
+	type snmp;
+	desc "sandhill-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "sandhill-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object sandhill-sw {
+	ip "127.20.4.3";
+	type ping;
+	desc "Tower switch (PoE), sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-sw-volt {
+	ip "127.20.4.3";
+	type snmp;
+	desc "sandhill-sw input voltage below 46V - check the plant";
+	contact "noc@example.net";
+	dep "sandhill-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "46";
+};
+
+object sandhill-sw-temp {
+	ip "127.20.4.3";
+	type snmp;
+	desc "sandhill-sw switch temperature above 65C";
+	contact "noc@example.net";
+	dep "sandhill-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "65";
+};
+
+object sandhill-bh {
+	ip "127.20.4.4";
+	type ping;
+	desc "60GHz backhaul from sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-bh-rtt {
+	ip "127.20.4.4";
+	type rtt;
+	desc "sandhill-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "sandhill-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object sandhill-bh-loss {
+	ip "127.20.4.4";
+	type pktloss;
+	desc "sandhill-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "sandhill-bh";
+	pktloss_tolerance 1;
+};
+
+object sandhill-bh-uptime {
+	ip "127.20.4.4";
+	type snmp;
+	desc "sandhill-bh reboot watch";
+	contact "noc@example.net";
+	dep "sandhill-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object sandhill-sec-n {
+	ip "127.20.4.10";
+	type ping;
+	desc "N sector, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-sec-n-loss {
+	ip "127.20.4.10";
+	type pktloss;
+	desc "sandhill-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "sandhill-sec-n";
+	pktloss_tolerance 3;
+};
+
+object sandhill-sec-n-rtt {
+	ip "127.20.4.10";
+	type rtt;
+	desc "sandhill-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "sandhill-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0011 {
+	ip "127.30.4.1";
+	type ping;
+	desc "Subscriber 0011, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-sec-n";
+};
+
+object sandhill-sec-e {
+	ip "127.20.4.11";
+	type ping;
+	desc "E sector, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-sec-e-loss {
+	ip "127.20.4.11";
+	type pktloss;
+	desc "sandhill-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "sandhill-sec-e";
+	pktloss_tolerance 3;
+};
+
+object sandhill-sec-e-rtt {
+	ip "127.20.4.11";
+	type rtt;
+	desc "sandhill-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "sandhill-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0012 {
+	ip "127.30.4.11";
+	type ping;
+	desc "Subscriber 0012, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-sec-e";
+};
+
+object sandhill-sec-s {
+	ip "127.20.4.12";
+	type ping;
+	desc "S sector, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-sec-s-loss {
+	ip "127.20.4.12";
+	type pktloss;
+	desc "sandhill-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "sandhill-sec-s";
+	pktloss_tolerance 3;
+};
+
+object sandhill-sec-s-rtt {
+	ip "127.20.4.12";
+	type rtt;
+	desc "sandhill-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "sandhill-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0013 {
+	ip "127.30.4.21";
+	type ping;
+	desc "Subscriber 0013, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-sec-s";
+};
+
+object sandhill-ap {
+	ip "127.20.4.20";
+	type ping;
+	desc "2.4GHz fill-in AP, sandhill";
+	contact "noc@example.net";
+	dep "sandhill-rtr";
+};
+
+object sandhill-ap-loss {
+	ip "127.20.4.20";
+	type pktloss;
+	desc "sandhill-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "sandhill-ap";
+	pktloss_tolerance 3;
+};
+
+object sandhill-ap-uptime {
+	ip "127.20.4.20";
+	type snmp;
+	desc "sandhill-ap reboot watch";
+	contact "noc@example.net";
+	dep "sandhill-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object cedar-gap-rtr {
+	ip "198.51.100.1";
+	type ping;
+	desc "Tower router, cedar-gap";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object cedar-gap-rtr-rtt {
+	ip "198.51.100.1";
+	type rtt;
+	desc "cedar-gap-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object cedar-gap-rtr-loss {
+	ip "198.51.100.1";
+	type pktloss;
+	desc "cedar-gap-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+	pktloss_tolerance 1;
+};
+
+object cedar-gap-rtr-cpu {
+	ip "198.51.100.1";
+	type snmp;
+	desc "cedar-gap-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object cedar-gap-rtr-uptime {
+	ip "198.51.100.1";
+	type snmp;
+	desc "cedar-gap-rtr reboot watch";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object cedar-gap-ups {
+	ip "198.51.100.2";
+	type ping;
+	desc "Battery plant, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-ups-volt {
+	ip "198.51.100.2";
+	type snmp;
+	desc "cedar-gap-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "cedar-gap-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object cedar-gap-sw {
+	ip "198.51.100.3";
+	type ping;
+	desc "Tower switch, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-sw-volt {
+	ip "198.51.100.3";
+	type snmp;
+	desc "cedar-gap-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "cedar-gap-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object cedar-gap-sw-temp {
+	ip "198.51.100.3";
+	type snmp;
+	desc "cedar-gap-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "cedar-gap-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object cedar-gap-bh {
+	ip "198.51.100.4";
+	type ping;
+	desc "PTP 550 backhaul from cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-bh-rtt {
+	ip "198.51.100.4";
+	type rtt;
+	desc "cedar-gap-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "cedar-gap-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object cedar-gap-bh-loss {
+	ip "198.51.100.4";
+	type pktloss;
+	desc "cedar-gap-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "cedar-gap-bh";
+	pktloss_tolerance 1;
+};
+
+object cedar-gap-bh-uptime {
+	ip "198.51.100.4";
+	type snmp;
+	desc "cedar-gap-bh reboot watch";
+	contact "noc@example.net";
+	dep "cedar-gap-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object cedar-gap-sec-n {
+	ip "198.51.100.10";
+	type ping;
+	desc "N sector, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-sec-n-loss {
+	ip "198.51.100.10";
+	type pktloss;
+	desc "cedar-gap-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-n";
+	pktloss_tolerance 3;
+};
+
+object cedar-gap-sec-n-rtt {
+	ip "198.51.100.10";
+	type rtt;
+	desc "cedar-gap-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0014 {
+	ip "198.51.100.100";
+	type ping;
+	desc "Subscriber 0014, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-n";
+};
+
+object cedar-gap-sec-e {
+	ip "198.51.100.11";
+	type ping;
+	desc "E sector, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-sec-e-loss {
+	ip "198.51.100.11";
+	type pktloss;
+	desc "cedar-gap-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-e";
+	pktloss_tolerance 3;
+};
+
+object cedar-gap-sec-e-rtt {
+	ip "198.51.100.11";
+	type rtt;
+	desc "cedar-gap-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0015 {
+	ip "198.51.100.103";
+	type ping;
+	desc "Subscriber 0015, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-e";
+};
+
+object cedar-gap-sec-s {
+	ip "198.51.100.12";
+	type ping;
+	desc "S sector, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-sec-s-loss {
+	ip "198.51.100.12";
+	type pktloss;
+	desc "cedar-gap-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-s";
+	pktloss_tolerance 3;
+};
+
+object cedar-gap-sec-s-rtt {
+	ip "198.51.100.12";
+	type rtt;
+	desc "cedar-gap-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0016 {
+	ip "198.51.100.106";
+	type ping;
+	desc "Subscriber 0016, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-s";
+};
+
+object cedar-gap-sec-w {
+	ip "198.51.100.13";
+	type ping;
+	desc "W sector, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-sec-w-loss {
+	ip "198.51.100.13";
+	type pktloss;
+	desc "cedar-gap-sec-w sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-w";
+	pktloss_tolerance 3;
+};
+
+object cedar-gap-sec-w-rtt {
+	ip "198.51.100.13";
+	type rtt;
+	desc "cedar-gap-sec-w sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-w";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0017 {
+	ip "198.51.100.109";
+	type ping;
+	desc "Subscriber 0017, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-sec-w";
+};
+
+object cedar-gap-ap {
+	ip "198.51.100.20";
+	type ping;
+	desc "2.4GHz fill-in AP, cedar-gap";
+	contact "noc@example.net";
+	dep "cedar-gap-rtr";
+};
+
+object cedar-gap-ap-loss {
+	ip "198.51.100.20";
+	type pktloss;
+	desc "cedar-gap-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "cedar-gap-ap";
+	pktloss_tolerance 3;
+};
+
+object cedar-gap-ap-uptime {
+	ip "198.51.100.20";
+	type snmp;
+	desc "cedar-gap-ap reboot watch";
+	contact "noc@example.net";
+	dep "cedar-gap-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object lone-pine-rtr {
+	ip "127.20.6.1";
+	type ping;
+	desc "Tower router, lone-pine";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object lone-pine-rtr-rtt {
+	ip "127.20.6.1";
+	type rtt;
+	desc "lone-pine-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object lone-pine-rtr-loss {
+	ip "127.20.6.1";
+	type pktloss;
+	desc "lone-pine-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+	pktloss_tolerance 1;
+};
+
+object lone-pine-rtr-cpu {
+	ip "127.20.6.1";
+	type snmp;
+	desc "lone-pine-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object lone-pine-rtr-uptime {
+	ip "127.20.6.1";
+	type snmp;
+	desc "lone-pine-rtr reboot watch";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object lone-pine-ups {
+	ip "127.20.6.2";
+	type ping;
+	desc "Battery plant, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-ups-volt {
+	ip "127.20.6.2";
+	type snmp;
+	desc "lone-pine-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "lone-pine-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object lone-pine-sw {
+	ip "127.20.6.3";
+	type ping;
+	desc "Tower switch (PoE), lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-sw-volt {
+	ip "127.20.6.3";
+	type snmp;
+	desc "lone-pine-sw input voltage below 46V - check the plant";
+	contact "noc@example.net";
+	dep "lone-pine-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "46";
+};
+
+object lone-pine-sw-temp {
+	ip "127.20.6.3";
+	type snmp;
+	desc "lone-pine-sw switch temperature above 65C";
+	contact "noc@example.net";
+	dep "lone-pine-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "65";
+};
+
+object lone-pine-bh {
+	ip "127.20.6.4";
+	type ping;
+	desc "Wave AP backhaul from lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-bh-loss {
+	ip "127.20.6.4";
+	type pktloss;
+	desc "lone-pine-bh packet loss - rain fade shows here first";
+	contact "noc@example.net";
+	dep "lone-pine-bh";
+	pktloss_tolerance 1;
+};
+
+object lone-pine-bh-rtt {
+	ip "127.20.6.4";
+	type rtt;
+	desc "lone-pine-bh latency above 30ms or jitter above 10ms";
+	contact "noc@example.net";
+	dep "lone-pine-bh";
+	rtt_threshold 30;
+	jitter_threshold 10;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object lone-pine-bh-uptime {
+	ip "127.20.6.4";
+	type snmp;
+	desc "lone-pine-bh reboot watch";
+	contact "noc@example.net";
+	dep "lone-pine-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object lone-pine-sec-n {
+	ip "127.20.6.10";
+	type ping;
+	desc "N sector, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-sec-n-loss {
+	ip "127.20.6.10";
+	type pktloss;
+	desc "lone-pine-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "lone-pine-sec-n";
+	pktloss_tolerance 3;
+};
+
+object lone-pine-sec-n-rtt {
+	ip "127.20.6.10";
+	type rtt;
+	desc "lone-pine-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "lone-pine-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0018 {
+	ip "127.30.6.1";
+	type ping;
+	desc "Subscriber 0018, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-sec-n";
+};
+
+object lone-pine-sec-e {
+	ip "127.20.6.11";
+	type ping;
+	desc "E sector, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-sec-e-loss {
+	ip "127.20.6.11";
+	type pktloss;
+	desc "lone-pine-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "lone-pine-sec-e";
+	pktloss_tolerance 3;
+};
+
+object lone-pine-sec-e-rtt {
+	ip "127.20.6.11";
+	type rtt;
+	desc "lone-pine-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "lone-pine-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0019 {
+	ip "127.30.6.11";
+	type ping;
+	desc "Subscriber 0019, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-sec-e";
+};
+
+object lone-pine-sec-s {
+	ip "127.20.6.12";
+	type ping;
+	desc "S sector, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-sec-s-loss {
+	ip "127.20.6.12";
+	type pktloss;
+	desc "lone-pine-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "lone-pine-sec-s";
+	pktloss_tolerance 3;
+};
+
+object lone-pine-sec-s-rtt {
+	ip "127.20.6.12";
+	type rtt;
+	desc "lone-pine-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "lone-pine-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0020 {
+	ip "127.30.6.21";
+	type ping;
+	desc "Subscriber 0020, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-sec-s";
+};
+
+object lone-pine-ap {
+	ip "127.20.6.20";
+	type ping;
+	desc "2.4GHz fill-in AP, lone-pine";
+	contact "noc@example.net";
+	dep "lone-pine-rtr";
+};
+
+object lone-pine-ap-loss {
+	ip "127.20.6.20";
+	type pktloss;
+	desc "lone-pine-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "lone-pine-ap";
+	pktloss_tolerance 3;
+};
+
+object lone-pine-ap-uptime {
+	ip "127.20.6.20";
+	type snmp;
+	desc "lone-pine-ap reboot watch";
+	contact "noc@example.net";
+	dep "lone-pine-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object quarry-hill-rtr {
+	ip "127.20.7.1";
+	type ping;
+	desc "Tower router, quarry-hill";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object quarry-hill-rtr-rtt {
+	ip "127.20.7.1";
+	type rtt;
+	desc "quarry-hill-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object quarry-hill-rtr-loss {
+	ip "127.20.7.1";
+	type pktloss;
+	desc "quarry-hill-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+	pktloss_tolerance 1;
+};
+
+object quarry-hill-rtr-cpu {
+	ip "127.20.7.1";
+	type snmp;
+	desc "quarry-hill-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object quarry-hill-rtr-uptime {
+	ip "127.20.7.1";
+	type snmp;
+	desc "quarry-hill-rtr reboot watch";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object quarry-hill-ups {
+	ip "127.20.7.2";
+	type ping;
+	desc "Battery plant, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-ups-volt {
+	ip "127.20.7.2";
+	type snmp;
+	desc "quarry-hill-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "quarry-hill-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object quarry-hill-sw {
+	ip "127.20.7.3";
+	type ping;
+	desc "Tower switch, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-sw-volt {
+	ip "127.20.7.3";
+	type snmp;
+	desc "quarry-hill-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "quarry-hill-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object quarry-hill-sw-temp {
+	ip "127.20.7.3";
+	type snmp;
+	desc "quarry-hill-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "quarry-hill-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object quarry-hill-bh {
+	ip "127.20.7.4";
+	type ping;
+	desc "60GHz backhaul from quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-bh-rtt {
+	ip "127.20.7.4";
+	type rtt;
+	desc "quarry-hill-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "quarry-hill-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object quarry-hill-bh-loss {
+	ip "127.20.7.4";
+	type pktloss;
+	desc "quarry-hill-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "quarry-hill-bh";
+	pktloss_tolerance 1;
+};
+
+object quarry-hill-bh-uptime {
+	ip "127.20.7.4";
+	type snmp;
+	desc "quarry-hill-bh reboot watch";
+	contact "noc@example.net";
+	dep "quarry-hill-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object quarry-hill-sec-n {
+	ip "127.20.7.10";
+	type ping;
+	desc "N sector, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-sec-n-loss {
+	ip "127.20.7.10";
+	type pktloss;
+	desc "quarry-hill-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-n";
+	pktloss_tolerance 3;
+};
+
+object quarry-hill-sec-n-rtt {
+	ip "127.20.7.10";
+	type rtt;
+	desc "quarry-hill-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0021 {
+	ip "127.30.7.1";
+	type ping;
+	desc "Subscriber 0021, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-n";
+};
+
+object quarry-hill-sec-e {
+	ip "127.20.7.11";
+	type ping;
+	desc "E sector, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-sec-e-loss {
+	ip "127.20.7.11";
+	type pktloss;
+	desc "quarry-hill-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-e";
+	pktloss_tolerance 3;
+};
+
+object quarry-hill-sec-e-rtt {
+	ip "127.20.7.11";
+	type rtt;
+	desc "quarry-hill-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0022 {
+	ip "127.30.7.11";
+	type ping;
+	desc "Subscriber 0022, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-e";
+};
+
+object quarry-hill-sec-s {
+	ip "127.20.7.12";
+	type ping;
+	desc "S sector, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-sec-s-loss {
+	ip "127.20.7.12";
+	type pktloss;
+	desc "quarry-hill-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-s";
+	pktloss_tolerance 3;
+};
+
+object quarry-hill-sec-s-rtt {
+	ip "127.20.7.12";
+	type rtt;
+	desc "quarry-hill-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0023 {
+	ip "127.30.7.21";
+	type ping;
+	desc "Subscriber 0023, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-sec-s";
+};
+
+object quarry-hill-ap {
+	ip "127.20.7.20";
+	type ping;
+	desc "2.4GHz fill-in AP, quarry-hill";
+	contact "noc@example.net";
+	dep "quarry-hill-rtr";
+};
+
+object quarry-hill-ap-loss {
+	ip "127.20.7.20";
+	type pktloss;
+	desc "quarry-hill-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "quarry-hill-ap";
+	pktloss_tolerance 3;
+};
+
+object quarry-hill-ap-uptime {
+	ip "127.20.7.20";
+	type snmp;
+	desc "quarry-hill-ap reboot watch";
+	contact "noc@example.net";
+	dep "quarry-hill-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object fox-hollow-rtr {
+	ip "127.20.8.1";
+	type ping;
+	desc "Tower router, fox-hollow";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object fox-hollow-rtr-rtt {
+	ip "127.20.8.1";
+	type rtt;
+	desc "fox-hollow-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object fox-hollow-rtr-loss {
+	ip "127.20.8.1";
+	type pktloss;
+	desc "fox-hollow-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+	pktloss_tolerance 1;
+};
+
+object fox-hollow-rtr-cpu {
+	ip "127.20.8.1";
+	type snmp;
+	desc "fox-hollow-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object fox-hollow-rtr-uptime {
+	ip "127.20.8.1";
+	type snmp;
+	desc "fox-hollow-rtr reboot watch";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object fox-hollow-ups {
+	ip "127.20.8.2";
+	type ping;
+	desc "Battery plant, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-ups-volt {
+	ip "127.20.8.2";
+	type snmp;
+	desc "fox-hollow-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "fox-hollow-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object fox-hollow-sw {
+	ip "127.20.8.3";
+	type ping;
+	desc "Tower switch (PoE), fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-sw-volt {
+	ip "127.20.8.3";
+	type snmp;
+	desc "fox-hollow-sw input voltage below 46V - check the plant";
+	contact "noc@example.net";
+	dep "fox-hollow-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "46";
+};
+
+object fox-hollow-sw-temp {
+	ip "127.20.8.3";
+	type snmp;
+	desc "fox-hollow-sw switch temperature above 65C";
+	contact "noc@example.net";
+	dep "fox-hollow-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "65";
+};
+
+object fox-hollow-bh {
+	ip "127.20.8.4";
+	type ping;
+	desc "PTP 550 backhaul from fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-bh-rtt {
+	ip "127.20.8.4";
+	type rtt;
+	desc "fox-hollow-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "fox-hollow-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object fox-hollow-bh-loss {
+	ip "127.20.8.4";
+	type pktloss;
+	desc "fox-hollow-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "fox-hollow-bh";
+	pktloss_tolerance 1;
+};
+
+object fox-hollow-bh-uptime {
+	ip "127.20.8.4";
+	type snmp;
+	desc "fox-hollow-bh reboot watch";
+	contact "noc@example.net";
+	dep "fox-hollow-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object fox-hollow-sec-n {
+	ip "127.20.8.10";
+	type ping;
+	desc "N sector, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-sec-n-loss {
+	ip "127.20.8.10";
+	type pktloss;
+	desc "fox-hollow-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-n";
+	pktloss_tolerance 3;
+};
+
+object fox-hollow-sec-n-rtt {
+	ip "127.20.8.10";
+	type rtt;
+	desc "fox-hollow-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0024 {
+	ip "127.30.8.1";
+	type ping;
+	desc "Subscriber 0024, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-n";
+};
+
+object fox-hollow-sec-e {
+	ip "127.20.8.11";
+	type ping;
+	desc "E sector, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-sec-e-loss {
+	ip "127.20.8.11";
+	type pktloss;
+	desc "fox-hollow-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-e";
+	pktloss_tolerance 3;
+};
+
+object fox-hollow-sec-e-rtt {
+	ip "127.20.8.11";
+	type rtt;
+	desc "fox-hollow-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0025 {
+	ip "127.30.8.11";
+	type ping;
+	desc "Subscriber 0025, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-e";
+};
+
+object fox-hollow-sec-s {
+	ip "127.20.8.12";
+	type ping;
+	desc "S sector, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-sec-s-loss {
+	ip "127.20.8.12";
+	type pktloss;
+	desc "fox-hollow-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-s";
+	pktloss_tolerance 3;
+};
+
+object fox-hollow-sec-s-rtt {
+	ip "127.20.8.12";
+	type rtt;
+	desc "fox-hollow-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0026 {
+	ip "127.30.8.21";
+	type ping;
+	desc "Subscriber 0026, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-sec-s";
+};
+
+object fox-hollow-ap {
+	ip "127.20.8.20";
+	type ping;
+	desc "2.4GHz fill-in AP, fox-hollow";
+	contact "noc@example.net";
+	dep "fox-hollow-rtr";
+};
+
+object fox-hollow-ap-loss {
+	ip "127.20.8.20";
+	type pktloss;
+	desc "fox-hollow-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "fox-hollow-ap";
+	pktloss_tolerance 3;
+};
+
+object fox-hollow-ap-uptime {
+	ip "127.20.8.20";
+	type snmp;
+	desc "fox-hollow-ap reboot watch";
+	contact "noc@example.net";
+	dep "fox-hollow-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object granite-point-rtr {
+	ip "127.20.9.1";
+	type ping;
+	desc "Tower router, granite-point";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object granite-point-rtr-rtt {
+	ip "127.20.9.1";
+	type rtt;
+	desc "granite-point-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object granite-point-rtr-loss {
+	ip "127.20.9.1";
+	type pktloss;
+	desc "granite-point-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+	pktloss_tolerance 1;
+};
+
+object granite-point-rtr-cpu {
+	ip "127.20.9.1";
+	type snmp;
+	desc "granite-point-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object granite-point-rtr-uptime {
+	ip "127.20.9.1";
+	type snmp;
+	desc "granite-point-rtr reboot watch";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object granite-point-ups {
+	ip "127.20.9.2";
+	type ping;
+	desc "Battery plant, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-ups-volt {
+	ip "127.20.9.2";
+	type snmp;
+	desc "granite-point-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "granite-point-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object granite-point-sw {
+	ip "127.20.9.3";
+	type ping;
+	desc "Tower switch, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-sw-volt {
+	ip "127.20.9.3";
+	type snmp;
+	desc "granite-point-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "granite-point-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object granite-point-sw-temp {
+	ip "127.20.9.3";
+	type snmp;
+	desc "granite-point-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "granite-point-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object granite-point-bh {
+	ip "127.20.9.4";
+	type ping;
+	desc "Wave AP backhaul from granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-bh-loss {
+	ip "127.20.9.4";
+	type pktloss;
+	desc "granite-point-bh packet loss - rain fade shows here first";
+	contact "noc@example.net";
+	dep "granite-point-bh";
+	pktloss_tolerance 1;
+};
+
+object granite-point-bh-rtt {
+	ip "127.20.9.4";
+	type rtt;
+	desc "granite-point-bh latency above 30ms or jitter above 10ms";
+	contact "noc@example.net";
+	dep "granite-point-bh";
+	rtt_threshold 30;
+	jitter_threshold 10;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object granite-point-bh-uptime {
+	ip "127.20.9.4";
+	type snmp;
+	desc "granite-point-bh reboot watch";
+	contact "noc@example.net";
+	dep "granite-point-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object granite-point-sec-n {
+	ip "127.20.9.10";
+	type ping;
+	desc "N sector, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-sec-n-loss {
+	ip "127.20.9.10";
+	type pktloss;
+	desc "granite-point-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "granite-point-sec-n";
+	pktloss_tolerance 3;
+};
+
+object granite-point-sec-n-rtt {
+	ip "127.20.9.10";
+	type rtt;
+	desc "granite-point-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "granite-point-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0027 {
+	ip "127.30.9.1";
+	type ping;
+	desc "Subscriber 0027, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-sec-n";
+};
+
+object granite-point-sec-e {
+	ip "127.20.9.11";
+	type ping;
+	desc "E sector, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-sec-e-loss {
+	ip "127.20.9.11";
+	type pktloss;
+	desc "granite-point-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "granite-point-sec-e";
+	pktloss_tolerance 3;
+};
+
+object granite-point-sec-e-rtt {
+	ip "127.20.9.11";
+	type rtt;
+	desc "granite-point-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "granite-point-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0028 {
+	ip "127.30.9.11";
+	type ping;
+	desc "Subscriber 0028, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-sec-e";
+};
+
+object granite-point-sec-s {
+	ip "127.20.9.12";
+	type ping;
+	desc "S sector, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-sec-s-loss {
+	ip "127.20.9.12";
+	type pktloss;
+	desc "granite-point-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "granite-point-sec-s";
+	pktloss_tolerance 3;
+};
+
+object granite-point-sec-s-rtt {
+	ip "127.20.9.12";
+	type rtt;
+	desc "granite-point-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "granite-point-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0029 {
+	ip "127.30.9.21";
+	type ping;
+	desc "Subscriber 0029, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-sec-s";
+};
+
+object granite-point-sec-w {
+	ip "127.20.9.13";
+	type ping;
+	desc "W sector, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-sec-w-loss {
+	ip "127.20.9.13";
+	type pktloss;
+	desc "granite-point-sec-w sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "granite-point-sec-w";
+	pktloss_tolerance 3;
+};
+
+object granite-point-sec-w-rtt {
+	ip "127.20.9.13";
+	type rtt;
+	desc "granite-point-sec-w sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "granite-point-sec-w";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0030 {
+	ip "127.30.9.31";
+	type ping;
+	desc "Subscriber 0030, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-sec-w";
+};
+
+object granite-point-ap {
+	ip "127.20.9.20";
+	type ping;
+	desc "2.4GHz fill-in AP, granite-point";
+	contact "noc@example.net";
+	dep "granite-point-rtr";
+};
+
+object granite-point-ap-loss {
+	ip "127.20.9.20";
+	type pktloss;
+	desc "granite-point-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "granite-point-ap";
+	pktloss_tolerance 3;
+};
+
+object granite-point-ap-uptime {
+	ip "127.20.9.20";
+	type snmp;
+	desc "granite-point-ap reboot watch";
+	contact "noc@example.net";
+	dep "granite-point-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object willow-bend-rtr {
+	ip "127.20.10.1";
+	type ping;
+	desc "Tower router, willow-bend";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object willow-bend-rtr-rtt {
+	ip "127.20.10.1";
+	type rtt;
+	desc "willow-bend-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object willow-bend-rtr-loss {
+	ip "127.20.10.1";
+	type pktloss;
+	desc "willow-bend-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+	pktloss_tolerance 1;
+};
+
+object willow-bend-rtr-cpu {
+	ip "127.20.10.1";
+	type snmp;
+	desc "willow-bend-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object willow-bend-rtr-uptime {
+	ip "127.20.10.1";
+	type snmp;
+	desc "willow-bend-rtr reboot watch";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object willow-bend-ups {
+	ip "127.20.10.2";
+	type ping;
+	desc "Battery plant, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-ups-volt {
+	ip "127.20.10.2";
+	type snmp;
+	desc "willow-bend-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "willow-bend-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object willow-bend-sw {
+	ip "127.20.10.3";
+	type ping;
+	desc "Tower switch (PoE), willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-sw-volt {
+	ip "127.20.10.3";
+	type snmp;
+	desc "willow-bend-sw input voltage below 46V - check the plant";
+	contact "noc@example.net";
+	dep "willow-bend-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "46";
+};
+
+object willow-bend-sw-temp {
+	ip "127.20.10.3";
+	type snmp;
+	desc "willow-bend-sw switch temperature above 65C";
+	contact "noc@example.net";
+	dep "willow-bend-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "65";
+};
+
+object willow-bend-bh {
+	ip "127.20.10.4";
+	type ping;
+	desc "60GHz backhaul from willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-bh-rtt {
+	ip "127.20.10.4";
+	type rtt;
+	desc "willow-bend-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "willow-bend-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object willow-bend-bh-loss {
+	ip "127.20.10.4";
+	type pktloss;
+	desc "willow-bend-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "willow-bend-bh";
+	pktloss_tolerance 1;
+};
+
+object willow-bend-bh-uptime {
+	ip "127.20.10.4";
+	type snmp;
+	desc "willow-bend-bh reboot watch";
+	contact "noc@example.net";
+	dep "willow-bend-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object willow-bend-sec-n {
+	ip "127.20.10.10";
+	type ping;
+	desc "N sector, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-sec-n-loss {
+	ip "127.20.10.10";
+	type pktloss;
+	desc "willow-bend-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "willow-bend-sec-n";
+	pktloss_tolerance 3;
+};
+
+object willow-bend-sec-n-rtt {
+	ip "127.20.10.10";
+	type rtt;
+	desc "willow-bend-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "willow-bend-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0031 {
+	ip "127.30.10.1";
+	type ping;
+	desc "Subscriber 0031, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-sec-n";
+};
+
+object willow-bend-sec-e {
+	ip "127.20.10.11";
+	type ping;
+	desc "E sector, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-sec-e-loss {
+	ip "127.20.10.11";
+	type pktloss;
+	desc "willow-bend-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "willow-bend-sec-e";
+	pktloss_tolerance 3;
+};
+
+object willow-bend-sec-e-rtt {
+	ip "127.20.10.11";
+	type rtt;
+	desc "willow-bend-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "willow-bend-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0032 {
+	ip "127.30.10.11";
+	type ping;
+	desc "Subscriber 0032, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-sec-e";
+};
+
+object willow-bend-sec-s {
+	ip "127.20.10.12";
+	type ping;
+	desc "S sector, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-sec-s-loss {
+	ip "127.20.10.12";
+	type pktloss;
+	desc "willow-bend-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "willow-bend-sec-s";
+	pktloss_tolerance 3;
+};
+
+object willow-bend-sec-s-rtt {
+	ip "127.20.10.12";
+	type rtt;
+	desc "willow-bend-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "willow-bend-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0033 {
+	ip "127.30.10.21";
+	type ping;
+	desc "Subscriber 0033, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-sec-s";
+};
+
+object willow-bend-ap {
+	ip "127.20.10.20";
+	type ping;
+	desc "2.4GHz fill-in AP, willow-bend";
+	contact "noc@example.net";
+	dep "willow-bend-rtr";
+};
+
+object willow-bend-ap-loss {
+	ip "127.20.10.20";
+	type pktloss;
+	desc "willow-bend-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "willow-bend-ap";
+	pktloss_tolerance 3;
+};
+
+object willow-bend-ap-uptime {
+	ip "127.20.10.20";
+	type snmp;
+	desc "willow-bend-ap reboot watch";
+	contact "noc@example.net";
+	dep "willow-bend-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object stony-knob-rtr {
+	ip "127.20.11.1";
+	type ping;
+	desc "Tower router, stony-knob";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object stony-knob-rtr-rtt {
+	ip "127.20.11.1";
+	type rtt;
+	desc "stony-knob-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object stony-knob-rtr-loss {
+	ip "127.20.11.1";
+	type pktloss;
+	desc "stony-knob-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+	pktloss_tolerance 1;
+};
+
+object stony-knob-rtr-cpu {
+	ip "127.20.11.1";
+	type snmp;
+	desc "stony-knob-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object stony-knob-rtr-uptime {
+	ip "127.20.11.1";
+	type snmp;
+	desc "stony-knob-rtr reboot watch";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object stony-knob-ups {
+	ip "127.20.11.2";
+	type ping;
+	desc "Battery plant, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-ups-volt {
+	ip "127.20.11.2";
+	type snmp;
+	desc "stony-knob-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "stony-knob-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object stony-knob-sw {
+	ip "127.20.11.3";
+	type ping;
+	desc "Tower switch, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-sw-volt {
+	ip "127.20.11.3";
+	type snmp;
+	desc "stony-knob-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "stony-knob-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object stony-knob-sw-temp {
+	ip "127.20.11.3";
+	type snmp;
+	desc "stony-knob-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "stony-knob-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object stony-knob-bh {
+	ip "127.20.11.4";
+	type ping;
+	desc "PTP 550 backhaul from stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-bh-rtt {
+	ip "127.20.11.4";
+	type rtt;
+	desc "stony-knob-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "stony-knob-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object stony-knob-bh-loss {
+	ip "127.20.11.4";
+	type pktloss;
+	desc "stony-knob-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "stony-knob-bh";
+	pktloss_tolerance 1;
+};
+
+object stony-knob-bh-uptime {
+	ip "127.20.11.4";
+	type snmp;
+	desc "stony-knob-bh reboot watch";
+	contact "noc@example.net";
+	dep "stony-knob-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object stony-knob-sec-n {
+	ip "127.20.11.10";
+	type ping;
+	desc "N sector, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-sec-n-loss {
+	ip "127.20.11.10";
+	type pktloss;
+	desc "stony-knob-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "stony-knob-sec-n";
+	pktloss_tolerance 3;
+};
+
+object stony-knob-sec-n-rtt {
+	ip "127.20.11.10";
+	type rtt;
+	desc "stony-knob-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "stony-knob-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0034 {
+	ip "127.30.11.1";
+	type ping;
+	desc "Subscriber 0034, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-sec-n";
+};
+
+object stony-knob-sec-e {
+	ip "127.20.11.11";
+	type ping;
+	desc "E sector, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-sec-e-loss {
+	ip "127.20.11.11";
+	type pktloss;
+	desc "stony-knob-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "stony-knob-sec-e";
+	pktloss_tolerance 3;
+};
+
+object stony-knob-sec-e-rtt {
+	ip "127.20.11.11";
+	type rtt;
+	desc "stony-knob-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "stony-knob-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0035 {
+	ip "127.30.11.11";
+	type ping;
+	desc "Subscriber 0035, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-sec-e";
+};
+
+object stony-knob-sec-s {
+	ip "127.20.11.12";
+	type ping;
+	desc "S sector, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-sec-s-loss {
+	ip "127.20.11.12";
+	type pktloss;
+	desc "stony-knob-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "stony-knob-sec-s";
+	pktloss_tolerance 3;
+};
+
+object stony-knob-sec-s-rtt {
+	ip "127.20.11.12";
+	type rtt;
+	desc "stony-knob-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "stony-knob-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0036 {
+	ip "127.30.11.21";
+	type ping;
+	desc "Subscriber 0036, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-sec-s";
+};
+
+object stony-knob-ap {
+	ip "127.20.11.20";
+	type ping;
+	desc "2.4GHz fill-in AP, stony-knob";
+	contact "noc@example.net";
+	dep "stony-knob-rtr";
+};
+
+object stony-knob-ap-loss {
+	ip "127.20.11.20";
+	type pktloss;
+	desc "stony-knob-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "stony-knob-ap";
+	pktloss_tolerance 3;
+};
+
+object stony-knob-ap-uptime {
+	ip "127.20.11.20";
+	type snmp;
+	desc "stony-knob-ap reboot watch";
+	contact "noc@example.net";
+	dep "stony-knob-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object birch-summit-rtr {
+	ip "203.0.113.1";
+	type ping;
+	desc "Tower router, birch-summit";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object birch-summit-rtr-rtt {
+	ip "203.0.113.1";
+	type rtt;
+	desc "birch-summit-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object birch-summit-rtr-loss {
+	ip "203.0.113.1";
+	type pktloss;
+	desc "birch-summit-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+	pktloss_tolerance 1;
+};
+
+object birch-summit-rtr-cpu {
+	ip "203.0.113.1";
+	type snmp;
+	desc "birch-summit-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object birch-summit-rtr-uptime {
+	ip "203.0.113.1";
+	type snmp;
+	desc "birch-summit-rtr reboot watch";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object birch-summit-ups {
+	ip "203.0.113.2";
+	type ping;
+	desc "Battery plant, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-ups-volt {
+	ip "203.0.113.2";
+	type snmp;
+	desc "birch-summit-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "birch-summit-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object birch-summit-sw {
+	ip "203.0.113.3";
+	type ping;
+	desc "Tower switch (PoE), birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-sw-volt {
+	ip "203.0.113.3";
+	type snmp;
+	desc "birch-summit-sw input voltage below 46V - check the plant";
+	contact "noc@example.net";
+	dep "birch-summit-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "low";
+	snmp-low "46";
+};
+
+object birch-summit-sw-temp {
+	ip "203.0.113.3";
+	type snmp;
+	desc "birch-summit-sw switch temperature above 65C";
+	contact "noc@example.net";
+	dep "birch-summit-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "65";
+};
+
+object birch-summit-bh {
+	ip "203.0.113.4";
+	type ping;
+	desc "Wave AP backhaul from birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-bh-loss {
+	ip "203.0.113.4";
+	type pktloss;
+	desc "birch-summit-bh packet loss - rain fade shows here first";
+	contact "noc@example.net";
+	dep "birch-summit-bh";
+	pktloss_tolerance 1;
+};
+
+object birch-summit-bh-rtt {
+	ip "203.0.113.4";
+	type rtt;
+	desc "birch-summit-bh latency above 30ms or jitter above 10ms";
+	contact "noc@example.net";
+	dep "birch-summit-bh";
+	rtt_threshold 30;
+	jitter_threshold 10;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object birch-summit-bh-uptime {
+	ip "203.0.113.4";
+	type snmp;
+	desc "birch-summit-bh reboot watch";
+	contact "noc@example.net";
+	dep "birch-summit-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object birch-summit-sec-n {
+	ip "203.0.113.10";
+	type ping;
+	desc "N sector, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-sec-n-loss {
+	ip "203.0.113.10";
+	type pktloss;
+	desc "birch-summit-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "birch-summit-sec-n";
+	pktloss_tolerance 3;
+};
+
+object birch-summit-sec-n-rtt {
+	ip "203.0.113.10";
+	type rtt;
+	desc "birch-summit-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "birch-summit-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0037 {
+	ip "203.0.113.100";
+	type ping;
+	desc "Subscriber 0037, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-sec-n";
+};
+
+object birch-summit-sec-e {
+	ip "203.0.113.11";
+	type ping;
+	desc "E sector, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-sec-e-loss {
+	ip "203.0.113.11";
+	type pktloss;
+	desc "birch-summit-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "birch-summit-sec-e";
+	pktloss_tolerance 3;
+};
+
+object birch-summit-sec-e-rtt {
+	ip "203.0.113.11";
+	type rtt;
+	desc "birch-summit-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "birch-summit-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0038 {
+	ip "203.0.113.103";
+	type ping;
+	desc "Subscriber 0038, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-sec-e";
+};
+
+object birch-summit-sec-s {
+	ip "203.0.113.12";
+	type ping;
+	desc "S sector, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-sec-s-loss {
+	ip "203.0.113.12";
+	type pktloss;
+	desc "birch-summit-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "birch-summit-sec-s";
+	pktloss_tolerance 3;
+};
+
+object birch-summit-sec-s-rtt {
+	ip "203.0.113.12";
+	type rtt;
+	desc "birch-summit-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "birch-summit-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0039 {
+	ip "203.0.113.106";
+	type ping;
+	desc "Subscriber 0039, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-sec-s";
+};
+
+object birch-summit-ap {
+	ip "203.0.113.20";
+	type ping;
+	desc "2.4GHz fill-in AP, birch-summit";
+	contact "noc@example.net";
+	dep "birch-summit-rtr";
+};
+
+object birch-summit-ap-loss {
+	ip "203.0.113.20";
+	type pktloss;
+	desc "birch-summit-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "birch-summit-ap";
+	pktloss_tolerance 3;
+};
+
+object birch-summit-ap-uptime {
+	ip "203.0.113.20";
+	type snmp;
+	desc "birch-summit-ap reboot watch";
+	contact "noc@example.net";
+	dep "birch-summit-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object red-mesa-rtr {
+	ip "127.20.13.1";
+	type ping;
+	desc "Tower router, red-mesa";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object red-mesa-rtr-rtt {
+	ip "127.20.13.1";
+	type rtt;
+	desc "red-mesa-rtr tower latency above 25ms or jitter above 8ms";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+	rtt_threshold 25;
+	jitter_threshold 8;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object red-mesa-rtr-loss {
+	ip "127.20.13.1";
+	type pktloss;
+	desc "red-mesa-rtr packet loss at the tower";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+	pktloss_tolerance 1;
+};
+
+object red-mesa-rtr-cpu {
+	ip "127.20.13.1";
+	type snmp;
+	desc "red-mesa-rtr CPU above 85%";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.25.3.3.1.2.1";
+	snmp-type "high";
+	snmp-high "85";
+};
+
+object red-mesa-rtr-uptime {
+	ip "127.20.13.1";
+	type snmp;
+	desc "red-mesa-rtr reboot watch";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object red-mesa-ups {
+	ip "127.20.13.2";
+	type ping;
+	desc "Battery plant, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-ups-volt {
+	ip "127.20.13.2";
+	type snmp;
+	desc "red-mesa-ups voltage below 47.0V";
+	contact "noc@example.net";
+	dep "red-mesa-ups";
+	community "public";
+	oid ".1.3.6.1.4.1.45621.2.2.5.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object red-mesa-sw {
+	ip "127.20.13.3";
+	type ping;
+	desc "Tower switch, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-sw-volt {
+	ip "127.20.13.3";
+	type snmp;
+	desc "red-mesa-sw PSU voltage below 47V";
+	contact "noc@example.net";
+	dep "red-mesa-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.8.0";
+	snmp-type "low";
+	snmp-low "47";
+};
+
+object red-mesa-sw-temp {
+	ip "127.20.13.3";
+	type snmp;
+	desc "red-mesa-sw board temperature above 70C";
+	contact "noc@example.net";
+	dep "red-mesa-sw";
+	community "public";
+	oid ".1.3.6.1.4.1.14988.1.1.3.10.0";
+	snmp-type "high";
+	snmp-high "70";
+};
+
+object red-mesa-bh {
+	ip "127.20.13.4";
+	type ping;
+	desc "60GHz backhaul from red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-bh-rtt {
+	ip "127.20.13.4";
+	type rtt;
+	desc "red-mesa-bh link latency above 20ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "red-mesa-bh";
+	rtt_threshold 20;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object red-mesa-bh-loss {
+	ip "127.20.13.4";
+	type pktloss;
+	desc "red-mesa-bh packet loss on the backhaul";
+	contact "noc@example.net";
+	dep "red-mesa-bh";
+	pktloss_tolerance 1;
+};
+
+object red-mesa-bh-uptime {
+	ip "127.20.13.4";
+	type snmp;
+	desc "red-mesa-bh reboot watch";
+	contact "noc@example.net";
+	dep "red-mesa-bh";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object red-mesa-sec-n {
+	ip "127.20.13.10";
+	type ping;
+	desc "N sector, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-sec-n-loss {
+	ip "127.20.13.10";
+	type pktloss;
+	desc "red-mesa-sec-n sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "red-mesa-sec-n";
+	pktloss_tolerance 3;
+};
+
+object red-mesa-sec-n-rtt {
+	ip "127.20.13.10";
+	type rtt;
+	desc "red-mesa-sec-n sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "red-mesa-sec-n";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0040 {
+	ip "127.30.13.1";
+	type ping;
+	desc "Subscriber 0040, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-sec-n";
+};
+
+object red-mesa-sec-e {
+	ip "127.20.13.11";
+	type ping;
+	desc "E sector, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-sec-e-loss {
+	ip "127.20.13.11";
+	type pktloss;
+	desc "red-mesa-sec-e sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "red-mesa-sec-e";
+	pktloss_tolerance 3;
+};
+
+object red-mesa-sec-e-rtt {
+	ip "127.20.13.11";
+	type rtt;
+	desc "red-mesa-sec-e sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "red-mesa-sec-e";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0041 {
+	ip "127.30.13.11";
+	type ping;
+	desc "Subscriber 0041, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-sec-e";
+};
+
+object red-mesa-sec-s {
+	ip "127.20.13.12";
+	type ping;
+	desc "S sector, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-sec-s-loss {
+	ip "127.20.13.12";
+	type pktloss;
+	desc "red-mesa-sec-s sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "red-mesa-sec-s";
+	pktloss_tolerance 3;
+};
+
+object red-mesa-sec-s-rtt {
+	ip "127.20.13.12";
+	type rtt;
+	desc "red-mesa-sec-s sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "red-mesa-sec-s";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0042 {
+	ip "127.30.13.21";
+	type ping;
+	desc "Subscriber 0042, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-sec-s";
+};
+
+object red-mesa-sec-w {
+	ip "127.20.13.13";
+	type ping;
+	desc "W sector, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-sec-w-loss {
+	ip "127.20.13.13";
+	type pktloss;
+	desc "red-mesa-sec-w sustained packet loss on the sector";
+	contact "noc@example.net";
+	dep "red-mesa-sec-w";
+	pktloss_tolerance 3;
+};
+
+object red-mesa-sec-w-rtt {
+	ip "127.20.13.13";
+	type rtt;
+	desc "red-mesa-sec-w sector latency above 60ms or jitter above 25ms";
+	contact "noc@example.net";
+	dep "red-mesa-sec-w";
+	rtt_threshold 60;
+	jitter_threshold 25;
+	rtt_samples 5;
+	rtt_interval 200;
+};
+
+object cpe-0043 {
+	ip "127.30.13.31";
+	type ping;
+	desc "Subscriber 0043, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-sec-w";
+};
+
+object red-mesa-ap {
+	ip "127.20.13.20";
+	type ping;
+	desc "2.4GHz fill-in AP, red-mesa";
+	contact "noc@example.net";
+	dep "red-mesa-rtr";
+};
+
+object red-mesa-ap-loss {
+	ip "127.20.13.20";
+	type pktloss;
+	desc "red-mesa-ap sustained packet loss to subscribers";
+	contact "noc@example.net";
+	dep "red-mesa-ap";
+	pktloss_tolerance 3;
+};
+
+object red-mesa-ap-uptime {
+	ip "127.20.13.20";
+	type snmp;
+	desc "red-mesa-ap reboot watch";
+	contact "noc@example.net";
+	dep "red-mesa-ap";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object olt-1 {
+	ip "127.40.1.1";
+	type ping;
+	desc "OLT 1, fiber hut 1";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object olt-1-rtt {
+	ip "127.40.1.1";
+	type rtt;
+	desc "olt-1 OLT latency above 15ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "olt-1";
+	rtt_threshold 15;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object olt-1-loss {
+	ip "127.40.1.1";
+	type pktloss;
+	desc "olt-1 packet loss at the OLT";
+	contact "noc@example.net";
+	dep "olt-1";
+	pktloss_tolerance 1;
+};
+
+object olt-1-temp {
+	ip "127.40.1.1";
+	type snmp;
+	desc "olt-1 chassis temperature above 60C";
+	contact "noc@example.net";
+	dep "olt-1";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "60";
+};
+
+object olt-1-uptime {
+	ip "127.40.1.1";
+	type snmp;
+	desc "olt-1 reboot watch";
+	contact "noc@example.net";
+	dep "olt-1";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object fiber-agg-1 {
+	ip "127.40.1.2";
+	type ping;
+	desc "Fiber aggregation switch 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object fiber-agg-1-rtt {
+	ip "127.40.1.2";
+	type rtt;
+	desc "fiber-agg-1 latency above 15ms";
+	contact "noc@example.net";
+	dep "fiber-agg-1";
+	rtt_threshold 15;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object fiber-agg-1-temp {
+	ip "127.40.1.2";
+	type snmp;
+	desc "fiber-agg-1 temperature above 60C";
+	contact "noc@example.net";
+	dep "fiber-agg-1";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "60";
+};
+
+object fiber-agg-1-uptime {
+	ip "127.40.1.2";
+	type snmp;
+	desc "fiber-agg-1 reboot watch";
+	contact "noc@example.net";
+	dep "fiber-agg-1";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object hut-1-pdu {
+	ip "127.40.1.3";
+	type ping;
+	desc "Switched PDU, fiber hut 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object hut-1-pdu-amps {
+	ip "127.40.1.3";
+	type snmp;
+	desc "hut-1-pdu draw above 16A";
+	contact "noc@example.net";
+	dep "hut-1-pdu";
+	community "public";
+	oid ".1.3.6.1.4.1.318.1.1.12.2.3.1.1.2.1";
+	snmp-type "high";
+	snmp-high "16";
+};
+
+object ont-1-01 {
+	ip "127.41.1.1";
+	type ping;
+	desc "ONT 01 on OLT 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object ont-1-02 {
+	ip "127.41.1.2";
+	type ping;
+	desc "ONT 02 on OLT 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object ont-1-03 {
+	ip "127.41.1.3";
+	type ping;
+	desc "ONT 03 on OLT 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object ont-1-04 {
+	ip "127.41.1.4";
+	type ping;
+	desc "ONT 04 on OLT 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object ont-1-05 {
+	ip "127.41.1.5";
+	type ping;
+	desc "ONT 05 on OLT 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object ont-1-06 {
+	ip "127.41.1.6";
+	type ping;
+	desc "ONT 06 on OLT 1";
+	contact "noc@example.net";
+	dep "olt-1";
+};
+
+object olt-2 {
+	ip "127.40.2.1";
+	type ping;
+	desc "OLT 2, fiber hut 2";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object olt-2-rtt {
+	ip "127.40.2.1";
+	type rtt;
+	desc "olt-2 OLT latency above 15ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "olt-2";
+	rtt_threshold 15;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object olt-2-loss {
+	ip "127.40.2.1";
+	type pktloss;
+	desc "olt-2 packet loss at the OLT";
+	contact "noc@example.net";
+	dep "olt-2";
+	pktloss_tolerance 1;
+};
+
+object olt-2-temp {
+	ip "127.40.2.1";
+	type snmp;
+	desc "olt-2 chassis temperature above 60C";
+	contact "noc@example.net";
+	dep "olt-2";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "60";
+};
+
+object olt-2-uptime {
+	ip "127.40.2.1";
+	type snmp;
+	desc "olt-2 reboot watch";
+	contact "noc@example.net";
+	dep "olt-2";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object fiber-agg-2 {
+	ip "127.40.2.2";
+	type ping;
+	desc "Fiber aggregation switch 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object fiber-agg-2-rtt {
+	ip "127.40.2.2";
+	type rtt;
+	desc "fiber-agg-2 latency above 15ms";
+	contact "noc@example.net";
+	dep "fiber-agg-2";
+	rtt_threshold 15;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object fiber-agg-2-temp {
+	ip "127.40.2.2";
+	type snmp;
+	desc "fiber-agg-2 temperature above 60C";
+	contact "noc@example.net";
+	dep "fiber-agg-2";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "60";
+};
+
+object fiber-agg-2-uptime {
+	ip "127.40.2.2";
+	type snmp;
+	desc "fiber-agg-2 reboot watch";
+	contact "noc@example.net";
+	dep "fiber-agg-2";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object hut-2-pdu {
+	ip "127.40.2.3";
+	type ping;
+	desc "Switched PDU, fiber hut 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object hut-2-pdu-amps {
+	ip "127.40.2.3";
+	type snmp;
+	desc "hut-2-pdu draw above 16A";
+	contact "noc@example.net";
+	dep "hut-2-pdu";
+	community "public";
+	oid ".1.3.6.1.4.1.318.1.1.12.2.3.1.1.2.1";
+	snmp-type "high";
+	snmp-high "16";
+};
+
+object ont-2-01 {
+	ip "127.41.2.1";
+	type ping;
+	desc "ONT 01 on OLT 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object ont-2-02 {
+	ip "127.41.2.2";
+	type ping;
+	desc "ONT 02 on OLT 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object ont-2-03 {
+	ip "127.41.2.3";
+	type ping;
+	desc "ONT 03 on OLT 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object ont-2-04 {
+	ip "127.41.2.4";
+	type ping;
+	desc "ONT 04 on OLT 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object ont-2-05 {
+	ip "127.41.2.5";
+	type ping;
+	desc "ONT 05 on OLT 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object ont-2-06 {
+	ip "127.41.2.6";
+	type ping;
+	desc "ONT 06 on OLT 2";
+	contact "noc@example.net";
+	dep "olt-2";
+};
+
+object olt-3 {
+	ip "127.40.3.1";
+	type ping;
+	desc "OLT 3, fiber hut 3";
+	contact "noc@example.net";
+	dep "core-rtr-2";
+};
+
+object olt-3-rtt {
+	ip "127.40.3.1";
+	type rtt;
+	desc "olt-3 OLT latency above 15ms or jitter above 5ms";
+	contact "noc@example.net";
+	dep "olt-3";
+	rtt_threshold 15;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object olt-3-loss {
+	ip "127.40.3.1";
+	type pktloss;
+	desc "olt-3 packet loss at the OLT";
+	contact "noc@example.net";
+	dep "olt-3";
+	pktloss_tolerance 1;
+};
+
+object olt-3-temp {
+	ip "127.40.3.1";
+	type snmp;
+	desc "olt-3 chassis temperature above 60C";
+	contact "noc@example.net";
+	dep "olt-3";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "60";
+};
+
+object olt-3-uptime {
+	ip "127.40.3.1";
+	type snmp;
+	desc "olt-3 reboot watch";
+	contact "noc@example.net";
+	dep "olt-3";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object fiber-agg-3 {
+	ip "127.40.3.2";
+	type ping;
+	desc "Fiber aggregation switch 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object fiber-agg-3-rtt {
+	ip "127.40.3.2";
+	type rtt;
+	desc "fiber-agg-3 latency above 15ms";
+	contact "noc@example.net";
+	dep "fiber-agg-3";
+	rtt_threshold 15;
+	jitter_threshold 5;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object fiber-agg-3-temp {
+	ip "127.40.3.2";
+	type snmp;
+	desc "fiber-agg-3 temperature above 60C";
+	contact "noc@example.net";
+	dep "fiber-agg-3";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "high";
+	snmp-high "60";
+};
+
+object fiber-agg-3-uptime {
+	ip "127.40.3.2";
+	type snmp;
+	desc "fiber-agg-3 reboot watch";
+	contact "noc@example.net";
+	dep "fiber-agg-3";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object hut-3-pdu {
+	ip "127.40.3.3";
+	type ping;
+	desc "Switched PDU, fiber hut 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object hut-3-pdu-amps {
+	ip "127.40.3.3";
+	type snmp;
+	desc "hut-3-pdu draw above 16A";
+	contact "noc@example.net";
+	dep "hut-3-pdu";
+	community "public";
+	oid ".1.3.6.1.4.1.318.1.1.12.2.3.1.1.2.1";
+	snmp-type "high";
+	snmp-high "16";
+};
+
+object ont-3-01 {
+	ip "127.41.3.1";
+	type ping;
+	desc "ONT 01 on OLT 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object ont-3-02 {
+	ip "127.41.3.2";
+	type ping;
+	desc "ONT 02 on OLT 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object ont-3-03 {
+	ip "127.41.3.3";
+	type ping;
+	desc "ONT 03 on OLT 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object ont-3-04 {
+	ip "127.41.3.4";
+	type ping;
+	desc "ONT 04 on OLT 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object ont-3-05 {
+	ip "127.41.3.5";
+	type ping;
+	desc "ONT 05 on OLT 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object ont-3-06 {
+	ip "127.41.3.6";
+	type ping;
+	desc "ONT 06 on OLT 3";
+	contact "noc@example.net";
+	dep "olt-3";
+};
+
+object peer-ix {
+	ip "127.50.0.1";
+	type ping;
+	desc "IX peering fabric";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object peer-ix-rtt {
+	ip "127.50.0.1";
+	type rtt;
+	desc "peer-ix latency above 150ms or jitter above 30ms (ITU-T G.114 for voice)";
+	contact "noc@example.net";
+	dep "peer-ix";
+	rtt_threshold 150;
+	jitter_threshold 30;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object peer-ix-loss {
+	ip "127.50.0.1";
+	type pktloss;
+	desc "peer-ix packet loss";
+	contact "noc@example.net";
+	dep "peer-ix";
+	pktloss_tolerance 1;
+};
+
+object voip-carrier {
+	ip "127.50.0.2";
+	type ping;
+	desc "VoIP carrier SBC";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object voip-carrier-rtt {
+	ip "127.50.0.2";
+	type rtt;
+	desc "voip-carrier latency above 150ms or jitter above 30ms (ITU-T G.114 for voice)";
+	contact "noc@example.net";
+	dep "voip-carrier";
+	rtt_threshold 150;
+	jitter_threshold 30;
+	rtt_samples 5;
+	rtt_interval 100;
+};
+
+object voip-carrier-loss {
+	ip "127.50.0.2";
+	type pktloss;
+	desc "voip-carrier packet loss";
+	contact "noc@example.net";
+	dep "voip-carrier";
+	pktloss_tolerance 1;
+};
+
+object office-fw {
+	ip "127.50.0.3";
+	type ping;
+	desc "Office firewall";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object warehouse-sw {
+	ip "127.50.0.4";
+	type ping;
+	desc "Warehouse switch";
+	contact "noc@example.net";
+	dep "core-rtr-1";
+};
+
+object warehouse-sw-uptime {
+	ip "127.50.0.4";
+	type snmp;
+	desc "warehouse-sw reboot watch";
+	contact "noc@example.net";
+	dep "warehouse-sw";
+	community "public";
+	oid ".1.3.6.1.2.1.1.3.0";
+	snmp-type "reboot";
+};
+
+object cpe-0044 {
+	ip "127.31.1.45";
+	type ping;
+	desc "Subscriber 0044";
+	contact "noc@example.net";
+	dep "eagle-ridge-sec-n";
+};
+
