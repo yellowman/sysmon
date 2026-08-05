@@ -592,6 +592,10 @@ func Parse(content []byte) (*models.Config, error) {
 				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "rtt_samples "))); err == nil {
 					currentHost.RTTSamples = val
 				}
+			} else if strings.HasPrefix(line, "rtt_interval ") {
+				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "rtt_interval "))); err == nil {
+					currentHost.RTTInterval = val
+				}
 			} else if strings.HasPrefix(line, "pkt_loss_tolerance ") {
 				if val, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pkt_loss_tolerance "))); err == nil {
 					currentHost.PktLossTolerance = val

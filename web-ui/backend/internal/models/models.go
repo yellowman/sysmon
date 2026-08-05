@@ -94,13 +94,19 @@ type Host struct {
 	Type string `json:"type,omitempty"`
 	Port int    `json:"port,omitempty"`
 
-	// Ping/threshold settings (read-only from sysmond, not configurable via sysmon.conf)
+	// Ping status, read from sysmond and NOT configurable via sysmon.conf:
+	// the daemon hardcodes how many probes a plain ping check sends.
 	MinPings            int     `json:"minpings,omitempty"`
 	SendPings           int     `json:"sendpings,omitempty"`
 	PacketLossThreshold float64 `json:"packetlossthreshold,omitempty"`
-	RTTThreshold        int     `json:"rttthreshold,omitempty"`
-	JitterThreshold     int     `json:"jitterthreshold,omitempty"`
-	RTTSamples          int     `json:"rttsamples,omitempty"`
+
+	// RTT / latency check (type rtt) - all four are real per-object
+	// directives. RTTInterval is the ms between probes; the rest set the
+	// alert thresholds and how many probes make up the average.
+	RTTThreshold    int `json:"rttthreshold,omitempty"`
+	JitterThreshold int `json:"jitterthreshold,omitempty"`
+	RTTSamples      int `json:"rttsamples,omitempty"`
+	RTTInterval     int `json:"rttinterval,omitempty"`
 
 	// SNMP trap settings
 	TrapAlert bool `json:"trapalert,omitempty"`

@@ -773,6 +773,9 @@
                                                 <option value="pingv4">Ping IPv4 Only</option>
                                                 <option value="tcp">TCP Port</option>
                                                 <option value="udp">UDP Port</option>
+                                                <option value="rtt">RTT / Latency (ICMP)</option>
+                                                <option value="pktloss">Packet Loss (ICMP)</option>
+                                                <option value="ping6">Ping (IPv6)</option>
                                                 <option value="http">HTTP</option>
                                                 <option value="https">HTTPS</option>
                                                 <option value="ssh">SSH</option>
@@ -865,46 +868,67 @@
                                         </div>
 
                                         <!-- ICMP/Ping fields -->
-                                        <div x-show="['ping', 'pingv4'].includes(editingHost.type)" class="bg-gray-50 p-4 rounded-lg">
-                                            <h4 class="font-semibold text-gray-700 mb-3">Ping/ICMP Settings</h4>
-                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                <div>
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Send Pings</label>
-                                                    <input type="number" x-model="editingHost.sendpings" placeholder="5"
-                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">ICMP packets per check</p>
-                                                </div>
-                                                <div>
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Min Pings Required</label>
-                                                    <input type="number" x-model="editingHost.minpings" placeholder="1"
-                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">Min successful responses</p>
-                                                </div>
-                                                <div>
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Packet Loss % Threshold</label>
-                                                    <input type="number" step="0.1" x-model="editingHost.packetlossthreshold" placeholder="0.0"
-                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">Alert if loss exceeds (0-100%)</p>
-                                                </div>
+                                        <!-- Plain ICMP ping (v4/v6): nothing to tune. How many
+                                             probes a ping check sends is fixed in the daemon, so
+                                             this says so rather than showing inputs that do nothing.
+                                             Latency/jitter is the "rtt" type; a loss ratio is
+                                             "pktloss". -->
+                                        <div x-show="['ping', 'pingv4', 'ping6', 'pingv6'].includes(editingHost.type)" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-1">Ping (ICMP)</h4>
+                                            <p class="text-sm text-gray-600">
+                                                Up/down by ICMP echo. There is nothing to configure - the
+                                                daemon sets how many probes it sends. For a latency and
+                                                jitter alert use the <span class="font-mono">RTT / Latency</span>
+                                                type; for a loss ratio use <span class="font-mono">Packet Loss</span>.
+                                            </p>
+                                        </div>
+
+                                        <!-- RTT / latency: the one category the four rtt directives
+                                             belong to, arranged together. -->
+                                        <div x-show="editingHost.type === 'rtt'" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-1">RTT / Latency (ICMP)</h4>
+                                            <p class="text-xs text-gray-500 mb-3">
+                                                Sends <span class="font-mono">samples</span> probes spaced
+                                                <span class="font-mono">interval</span> apart and alerts on the
+                                                average round-trip time or the jitter between them.
+                                            </p>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">RTT Threshold (ms)</label>
-                                                    <input type="number" x-model="editingHost.rttthreshold" placeholder="100"
+                                                    <input type="number" min="0" x-model.number="editingHost.rttthreshold" placeholder="100"
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">Latency alert threshold</p>
+                                                    <p class="text-xs text-gray-500 mt-1">Alert if the average RTT exceeds this</p>
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">Jitter Threshold (ms)</label>
-                                                    <input type="number" x-model="editingHost.jitterthreshold" placeholder="50"
+                                                    <input type="number" min="0" x-model.number="editingHost.jitterthreshold" placeholder="30"
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">RTT variation threshold</p>
+                                                    <p class="text-xs text-gray-500 mt-1">Alert on RTT variation; 0 disables</p>
                                                 </div>
                                                 <div>
-                                                    <label class="block text-sm font-medium text-gray-700 mb-1">RTT Samples</label>
-                                                    <input type="number" x-model="editingHost.rttsamples" placeholder="5"
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Samples</label>
+                                                    <input type="number" min="1" max="64" x-model.number="editingHost.rttsamples" placeholder="5"
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                                                    <p class="text-xs text-gray-500 mt-1">Number of RTT samples</p>
+                                                    <p class="text-xs text-gray-500 mt-1">Probes per check (default 5)</p>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Interval (ms)</label>
+                                                    <input type="number" min="10" max="5000" x-model.number="editingHost.rttinterval" placeholder="100"
+                                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                                                    <p class="text-xs text-gray-500 mt-1">Spacing between probes, 10-5000 (default 100)</p>
                                                 </div>
                                             </div>
+                                        </div>
+
+                                        <!-- Packet loss: like RTT it has no per-object knobs in the
+                                             daemon; the batch and tolerance are fixed. Say so. -->
+                                        <div x-show="editingHost.type === 'pktloss'" class="bg-gray-50 p-4 rounded-lg">
+                                            <h4 class="font-semibold text-gray-700 mb-1">Packet Loss (ICMP)</h4>
+                                            <p class="text-sm text-gray-600">
+                                                Sends a fixed batch of ICMP probes each cycle and records the
+                                                loss ratio, keeping a rolling history. There is nothing to
+                                                configure per host; it alerts on any loss.
+                                            </p>
                                         </div>
 
                                         <!-- HTTP/HTTPS fields -->
@@ -1016,7 +1040,7 @@
                                         </div>
 
                                         <!-- No type-specific fields message -->
-                                        <div x-show="!['ping', 'pingv4', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp', 'tcp', 'udp', 'snmp', 'nntp', 'ircd'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
+                                        <div x-show="!['ping', 'pingv4', 'ping6', 'pingv6', 'rtt', 'pktloss', 'http', 'https', 'dns', 'radius', 'ssh', 'imap', 'pop3', 'smtp', 'tcp', 'udp', 'snmp', 'nntp', 'ircd'].includes(editingHost.type)" class="text-center py-8 text-gray-500">
                                             <i class="fas fa-info-circle text-4xl text-gray-300 mb-2"></i>
                                             <p>No additional type-specific settings for <span x-text="editingHost.type" class="font-semibold"></span> check type.</p>
                                             <p class="text-sm mt-1">Configure port number in Overview tab if needed.</p>
@@ -1647,6 +1671,7 @@ function unifiedConfigPage() {
                 rttthreshold: null,
                 jitterthreshold: null,
                 rttsamples: null,
+                rttinterval: null,
                 // HTTP/HTTPS
                 url: '',
                 urltext: '',
