@@ -585,6 +585,13 @@ short int name_to_type(char *sent_type)
                                 return SYSM_TYPE_WWW;
                         if (strcmp(type, "ssh") == 0)
                                 return SYSM_TYPE_SSHD;
+			/* "rtt" is three characters: it belongs here, by the
+			 * length this switch dispatches on. It sat in case 4
+			 * for its whole life, which no 3-character string ever
+			 * reaches, so "type rtt" was refused as invalid and the
+			 * RTT/jitter check could never be configured at all. */
+			if (strcmp(type, "rtt") == 0 && (!disable_icmp))
+				return SYSM_TYPE_PING_LATENCY;
 			break;
 		case 4:
 			if (strcmp(type, "imap") == 0)
@@ -597,8 +604,6 @@ short int name_to_type(char *sent_type)
                                 return SYSM_TYPE_PINGv6;
                         if (strcmp(type, "icmp6") == 0 && (!disable_icmp))
                                 return SYSM_TYPE_PINGv6;
-			if (strcmp(type, "rtt") == 0 && (!disable_icmp))
-				return SYSM_TYPE_PING_LATENCY;
 #ifdef ENABLE_SNMP
 			if (strcmp(type, "snmp") == 0)
 				return SYSM_TYPE_SNMP;
