@@ -710,7 +710,7 @@ function adminPage() {
         killitConfirm: false,
         killitText: '',
         currentUser: sessionStorage.getItem('sysmon_user') || '',
-        currentRole: sessionStorage.getItem('sysmon_role') || '',
+        get currentRole() { return this.$store.auth.role; },
         users: [],
         showAddUser: false,
         newUser: { username: '', password: '', role: 'user' },

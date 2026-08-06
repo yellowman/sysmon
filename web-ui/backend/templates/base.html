@@ -90,9 +90,11 @@
                         <span class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
                               x-text="'site ' + siteGone + ' is no longer in the fleet'"></span>
                     </template>
-                    <span class="hidden sm:inline text-xs text-gray-400" x-data="{user: sessionStorage.getItem('sysmon_user') || ''}" x-text="user"></span>
+                    <span class="hidden sm:inline text-xs text-gray-400" x-data x-text="$store.auth.user"></span>
                     <button onclick="doLogout()"
-                            class="text-xs text-gray-400 hover:text-gray-700">Logout</button>
+                            class="px-2.5 py-1 border border-gray-300 rounded text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+                        <i class="fas fa-sign-out-alt mr-1"></i>Logout
+                    </button>
                     <div class="sm:hidden">
                         <button @click="mobileOpen = !mobileOpen" class="text-gray-500 hover:text-gray-700 p-2">
                             <i :class="mobileOpen ? 'fa-times' : 'fa-bars'" class="fas text-xl"></i>
@@ -418,6 +420,27 @@
                 }
             }));
         }
+
+        // Who is logged in, from the server. sessionStorage is per-tab
+        // and only written at login, so a session that outlives a UI
+        // deploy (or a fresh tab) can be missing the role - and every
+        // admin-gated control would silently vanish while the server
+        // still says admin. The store seeds from sessionStorage for a
+        // paint without flicker, then /api/auth/me corrects both.
+        document.addEventListener('alpine:init', () => {
+            Alpine.store('auth', {
+                user: sessionStorage.getItem('sysmon_user') || '',
+                role: sessionStorage.getItem('sysmon_role') || '',
+            });
+            apiCall('/api/auth/me').then(me => {
+                if (me && me.username) {
+                    Alpine.store('auth').user = me.username;
+                    Alpine.store('auth').role = me.role || '';
+                    sessionStorage.setItem('sysmon_user', me.username);
+                    sessionStorage.setItem('sysmon_role', me.role || '');
+                }
+            }).catch(() => {});
+        });
 
         // Logout must actually revoke the server-side session: the cookie
         // is HttpOnly, so only a successful response from the server ends

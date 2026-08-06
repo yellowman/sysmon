@@ -12,7 +12,7 @@
             </p>
         </div>
         <div class="flex items-center gap-2">
-            <a x-show="sessionStorage.getItem('sysmon_role') === 'admin'"
+            <a x-show="$store.auth.role === 'admin'"
                href="/agents.html"
                class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
                 <i class="fas fa-plus mr-1"></i>Add a box
