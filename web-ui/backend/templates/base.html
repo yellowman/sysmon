@@ -270,6 +270,9 @@
                 async loadSites() {
                     try {
                         const r = await apiCall('/api/sites');
+                        // A fetch failure keeps the last-known list: a
+                        // blanked list would silently remove the site
+                        // selector from every page mid-outage.
                         this.sites = r.sites || [];
                         // A filter pointing at a site that has left the
                         // fleet is not silently reset to "all" - a UI that
@@ -278,7 +281,7 @@
                         if (this.site && !this.sites.some(s => s.site === this.site)) {
                             this.siteGone = this.site;
                         }
-                    } catch (e) { this.sites = []; }
+                    } catch (e) { /* keep the last-known list */ }
                 },
                 setSite(v) {
                     this.site = v;

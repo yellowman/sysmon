@@ -34,7 +34,12 @@
     <!-- Header -->
     <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
         <div>
-            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Dependency Map</h1>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Dependency Map
+                <span x-show="statusStale" x-cloak
+                      class="ml-2 align-middle text-xs font-normal text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                    live status unavailable - colours are the last poll's
+                </span>
+            </h1>
             <p class="text-xs text-gray-400 mt-1 tracking-wide">
                 <span x-show="!editMode && !site">Live view of every host and what it depends on</span>
                 <span x-show="!editMode && site" x-cloak>Viewing <span class="font-semibold" x-text="siteLabel()"></span> over the agent link</span>
@@ -155,6 +160,7 @@
         <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
             <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <h3 class="font-semibold text-gray-900"><i class="fas fa-layer-group mr-2"></i>Add device from template</h3>
+                <div x-show="tplError" x-cloak class="mt-2 text-xs text-red-700" x-text="tplError"></div>
                 <button @click="tplOpen = false" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
             <div class="p-6 space-y-4">
@@ -433,7 +439,10 @@ function mapPage() {
             try {
                 const r = await apiCall('/api/sites');
                 this.sitePickerSites = r.sites || [];
-            } catch (e) { this.sitePickerSites = []; }
+            } catch (e) {
+                this.sitePickerSites = [];
+                this.notice = 'The site list could not be loaded - the picker is empty, but the current selection still applies.';
+            }
             if (this.site && !this.sitePickerSites.some(s => s.site === this.site)) {
                 this.sitePickerSites.push({ site: this.site,
                     description: this.site + ' (no longer in the fleet)', reachable: false });
@@ -442,6 +451,9 @@ function mapPage() {
         hosts: [],
         version: '',
         statuses: {},
+        statusStale: false,
+        layoutLoadFailed: false,
+        tplError: '',
         // Hosts whose site is not answering. Their colour is the last
         // thing that site said, so the node is drawn dashed rather than
         // presented as current truth.
@@ -551,7 +563,10 @@ function mapPage() {
                 if (!this.tplForm.template_id && this.tplList.length) {
                     this.tplForm.template_id = this.tplList[0].id;
                 }
-            } catch (e) { this.tplList = []; }
+            } catch (e) {
+                this.tplList = [];
+                this.tplError = 'Template list unavailable: ' + (e.message || e);
+            }
         },
 
         tplDescription() {
@@ -610,7 +625,15 @@ function mapPage() {
         async loadPositions() {
             try {
                 this.positions = (await apiCall('/api/map/layout')) || {};
-            } catch (e) { this.positions = {}; }
+                this.layoutLoadFailed = false;
+            } catch (e) {
+                // Saving now would replace the whole stored layout -
+                // everyone's hand-placed positions - with the handful of
+                // nodes moved this session. Refuse until a load succeeds.
+                this.positions = {};
+                this.layoutLoadFailed = true;
+                this.notice = 'The saved layout could not be loaded; layout saving is disabled until it can be, so it cannot be overwritten by accident.';
+            }
             this.savedPositions = JSON.parse(JSON.stringify(this.positions));
         },
 
@@ -621,14 +644,24 @@ function mapPage() {
             if (this.layoutDirty || this.drag) return;
             try {
                 const remote = (await apiCall('/api/map/layout')) || {};
+                if (this.layoutLoadFailed) {
+                    // The load that failed at startup has now succeeded.
+                    this.layoutLoadFailed = false;
+                    this.savedPositions = JSON.parse(JSON.stringify(remote));
+                    this.notice = '';
+                }
                 if (JSON.stringify(remote) !== JSON.stringify(this.positions)) {
                     this.positions = remote;
                     this.layout();
                 }
-            } catch (e) { /* keep whatever we have */ }
+            } catch (e) { /* keep whatever we have; the next tick retries */ }
         },
 
         async savePositions() {
+            if (this.layoutLoadFailed) {
+                this.notice = 'Not saved: the stored layout never loaded, and writing now would replace it with only this session\'s moves.';
+                return;
+            }
             try {
                 await apiCall('/api/map/layout', {
                     method: 'PUT',
@@ -701,8 +734,14 @@ function mapPage() {
                 });
                 this.statuses = m;
                 this.staleHosts = st;
+                this.statusStale = false;
                 this.layout();
-            } catch (e) { /* map works fine without live status */ }
+            } catch (e) {
+                // The colours on screen are from the last successful
+                // poll. Frozen colour presented as current is the one
+                // thing this map must not do.
+                this.statusStale = true;
+            }
         },
 
         statusOf(id) { return this.statuses[id] || ''; },

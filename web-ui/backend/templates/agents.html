@@ -210,6 +210,7 @@ function agentsPage() {
         busy: false,
         notice: '',
         noticeBad: false,
+        loadFails: 0,
 
         init() {
             this.load();
@@ -220,7 +221,14 @@ function agentsPage() {
             try {
                 const r = await apiCall('/api/settings/agents');
                 this.agents = r.agents || [];
-            } catch (e) { /* the table simply does not refresh */ }
+            } catch (e) {
+                if (++this.loadFails >= 2) {
+                    this.say('Refresh is failing (' + (e.message || e) + ') - this table shows the last state it saw.', true);
+                }
+                return;
+            }
+            if (this.loadFails >= 2 && this.noticeBad) this.say('');
+            this.loadFails = 0;
         },
 
         // A zero time means the box has never connected. Saying "never" is
