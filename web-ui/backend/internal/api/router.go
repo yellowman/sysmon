@@ -261,6 +261,22 @@ func (r *Router) stopPush() {
 
 // Config handlers
 func (r *Router) handleConfig(w http.ResponseWriter, req *http.Request) {
+	if site := remoteSite(req); site != "" {
+		switch req.Method {
+		case http.MethodGet:
+			r.handleConfigSiteGet(w, site)
+		case http.MethodPut:
+			// Structured editing needs the splice machinery pointed at
+			// the box's file set; until then a remote box is edited in
+			// the raw editor, which stages and delivers.
+			r.sendError(w, http.StatusBadRequest,
+				"structured saves are local-only for now - edit "+site+" in the raw editor")
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
 	switch req.Method {
 	case http.MethodGet:
 		snapshot, err := r.config.GetConfig()
@@ -337,6 +353,18 @@ func (r *Router) handleConfigReload(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleConfigRaw(w http.ResponseWriter, req *http.Request) {
+	if site := remoteSite(req); site != "" {
+		switch req.Method {
+		case http.MethodGet:
+			r.handleConfigRawSiteGet(w, site)
+		case http.MethodPut:
+			r.handleConfigRawSitePut(w, req, site)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
 	switch req.Method {
 	case http.MethodGet:
 		content, version, err := r.config.GetRawConfig()
