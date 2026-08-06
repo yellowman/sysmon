@@ -36,11 +36,23 @@
         <div>
             <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Dependency Map</h1>
             <p class="text-xs text-gray-400 mt-1 tracking-wide">
-                <span x-show="!editMode">Live view of every host and what it depends on</span>
+                <span x-show="!editMode && !site">Live view of every host and what it depends on</span>
+                <span x-show="!editMode && site" x-cloak>Viewing <span class="font-semibold" x-text="siteLabel()"></span> over the agent link</span>
                 <span x-show="editMode">Edit mode - add hosts, draw dependencies, then save</span>
             </p>
         </div>
         <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5" x-show="sitePickerSites.length" x-cloak>
+                <label class="text-xs text-gray-500">Site</label>
+                <select @change="pickSite($event.target.value)"
+                        class="text-sm border border-gray-200 rounded px-2 py-1.5 bg-white max-w-[14rem]">
+                    <option value="" :selected="site === ''">This server</option>
+                    <template x-for="s in sitePickerSites" :key="s.site">
+                        <option :value="s.site" :selected="site === s.site"
+                                x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
+                    </template>
+                </select>
+            </div>
             <input type="text" x-model="search" placeholder="Find host..."
                    class="px-3 py-1.5 border border-gray-200 rounded text-sm w-44">
             <button @click="expandAll()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Expand all">
@@ -66,7 +78,7 @@
                     title="Discard hand-placed positions and re-run the automatic layout">
                 <i class="fas fa-wand-magic-sparkles mr-1"></i>Reset layout
             </button>
-            <template x-if="!editMode">
+            <template x-if="!editMode && !site">
                 <button @click="enterEdit()" class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
                     <i class="fas fa-pen-to-square mr-1"></i>Edit
                 </button>
@@ -407,6 +419,26 @@
 <script>
 function mapPage() {
     return {
+        // Which sysmond's config is drawn. Shares the nav selector's key;
+        // empty is the local file. Editing stays local-only: the edit
+        // path writes this server's sysmon.conf.
+        site: localStorage.getItem('sysmon-site') || '',
+        sitePickerSites: [],
+        siteLabel() {
+            const s = this.sitePickerSites.find(x => x.site === this.site);
+            return s ? (s.description || s.site) : this.site;
+        },
+        pickSite(v) { localStorage.setItem('sysmon-site', v); window.location.reload(); },
+        async loadSitesForPicker() {
+            try {
+                const r = await apiCall('/api/sites');
+                this.sitePickerSites = r.sites || [];
+            } catch (e) { this.sitePickerSites = []; }
+            if (this.site && !this.sitePickerSites.some(s => s.site === this.site)) {
+                this.sitePickerSites.push({ site: this.site,
+                    description: this.site + ' (no longer in the fleet)', reachable: false });
+            }
+        },
         hosts: [],
         version: '',
         statuses: {},
@@ -458,6 +490,7 @@ function mapPage() {
         statusTimer: null,
 
         async init() {
+            this.loadSitesForPicker();
             // The map is drawn from the CONFIG, so paint as soon as that
             // arrives. Live status only tints the nodes and can be slow on
             // a cold cache with hundreds of hosts - never block on it.
@@ -492,7 +525,7 @@ function mapPage() {
 
         async loadConfig() {
             try {
-                const r = await apiCall('/api/config');
+                const r = await apiCall('/api/config' + (this.site ? '?site=' + encodeURIComponent(this.site) : ''));
                 this.hosts = (r.config && r.config.hosts) || [];
                 this.version = r.version || '';
             } catch (e) {
@@ -649,7 +682,9 @@ function mapPage() {
         // that under-reports it does not.
         async loadStatus() {
             try {
-                const r = await apiCall('/api/monitoring/status');
+                // Filtered to the site on view, so bare node names cannot
+                // collide with another site's hosts of the same name.
+                const r = await apiCall('/api/monitoring/status' + (this.site ? '?site=' + encodeURIComponent(this.site) : ''));
                 const rank = { CRITICAL: 3, WARNING: 2, OK: 1 };
                 const m = {}, st = {};
                 const put = (k, h) => {

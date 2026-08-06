@@ -24,12 +24,32 @@
                     <i class="fas fa-code mr-2"></i>Raw
                 </button>
             </div>
+            <div class="flex items-center gap-2" x-show="sitePickerSites.length" x-cloak>
+                <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Editing</label>
+                <select @change="pickSite($event.target.value)"
+                        class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white max-w-[18rem]">
+                    <option value="" :selected="site === ''">This server (local sysmon.conf)</option>
+                    <template x-for="s in sitePickerSites" :key="s.site">
+                        <option :value="s.site" :selected="site === s.site"
+                                x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
+                    </template>
+                </select>
+            </div>
             <p class="text-sm text-gray-600">
                 <span x-show="editorMode === 'structured'">Form-based configuration editor with structured inputs</span>
                 <span x-show="editorMode === 'map'">Visual dependency map - click to add hosts and draw links</span>
                 <span x-show="editorMode === 'raw'">Direct text editing of sysmon.conf file</span>
             </p>
         </div>
+    </div>
+
+    <!-- Which box this page is editing, when it is not the local file -->
+    <div x-show="site" x-cloak class="mb-6 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+        <i class="fas fa-satellite-dish mr-2"></i>
+        Editing <span class="font-semibold" x-text="siteLabel()"></span> over the agent link<span x-show="remoteGeneration"> - running generation <span x-text="remoteGeneration"></span></span>.
+        Raw saves are staged, delivered, and validated by the box itself before its running
+        config is touched. The structured view is read-only for a remote box; backups and
+        Reload live on the box.
     </div>
 
     <!-- MAP MODE: one implementation lives on the Map page (view-first,
@@ -55,7 +75,7 @@
                 <i class="fas fa-code mr-2"></i>Configuration - Raw Editor
             </h1>
             <div class="flex space-x-3">
-                <button @click="reloadRaw()" :disabled="reloading"
+                <button @click="reloadRaw()" :disabled="reloading" x-show="!site"
                         class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50">
                     <i class="fas" :class="reloading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
                     Reload Sysmon
@@ -91,7 +111,7 @@
                         class="py-4 px-1 border-b-2 font-medium text-sm">
                     <i class="fas fa-edit mr-2"></i>Editor
                 </button>
-                <button @click="activeTab = 'backups'" :class="activeTab === 'backups' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
+                <button x-show="!site" @click="activeTab = 'backups'" :class="activeTab === 'backups' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
                         class="py-4 px-1 border-b-2 font-medium text-sm">
                     <i class="fas fa-history mr-2"></i>Backups
                 </button>
@@ -172,7 +192,7 @@
                 <button @click="reloadStructured()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
                     <i class="fas fa-sync mr-2"></i>Reload
                 </button>
-                <button @click="saveConfigStructured()" :disabled="savingStructured" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                <button @click="saveConfigStructured()" :disabled="savingStructured" x-show="!site" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                     <i class="fas fa-save mr-2"></i>
                     <span x-text="savingStructured ? 'Saving...' : 'Save Changes'"></span>
                 </button>
@@ -1314,6 +1334,31 @@ async function authFetch(url, opts = {}) {
 }
 function unifiedConfigPage() {
     return {
+        // Which sysmond this page is editing. Shares the nav selector's
+        // key, so picking a site anywhere follows the operator here.
+        // Empty means the local sysmon.conf.
+        site: localStorage.getItem('sysmon-site') || '',
+        sitePickerSites: [],
+        remoteGeneration: 0,
+        siteQ(sep = '?') { return this.site ? sep + 'site=' + encodeURIComponent(this.site) : ''; },
+        siteLabel() {
+            const s = this.sitePickerSites.find(x => x.site === this.site);
+            return s ? (s.description || s.site) : this.site;
+        },
+        pickSite(v) { localStorage.setItem('sysmon-site', v); window.location.reload(); },
+        async loadSitesForPicker() {
+            try {
+                const r = await (await authFetch('/api/sites')).json();
+                this.sitePickerSites = r.sites || [];
+            } catch (e) { this.sitePickerSites = []; }
+            // A remembered site that has left the fleet stays selected
+            // and flagged, never silently swapped for the local file.
+            if (this.site && !this.sitePickerSites.some(s => s.site === this.site)) {
+                this.sitePickerSites.push({ site: this.site,
+                    description: this.site + ' (no longer in the fleet)', reachable: false });
+            }
+        },
+
         // Mode control
         editorMode: 'structured',
 
@@ -1378,8 +1423,9 @@ function unifiedConfigPage() {
         successMessage: '',
 
         init() {
+            this.loadSitesForPicker();
             this.fetchConfigRaw();
-            this.fetchBackups();
+            if (!this.site) this.fetchBackups();
             this.loadConfigStructured();
 
             // Watch for mode changes
@@ -1413,7 +1459,7 @@ function unifiedConfigPage() {
         // RAW EDITOR METHODS
         async fetchConfigRaw() {
             try {
-                const response = await authFetch('/api/config/raw');
+                const response = await authFetch('/api/config/raw' + this.siteQ());
                 if (!response.ok) {
                     throw new Error(`Failed to load config: ${response.statusText}`);
                 }
@@ -1421,6 +1467,7 @@ function unifiedConfigPage() {
                 this.configContent = data.content;
                 this.originalConfigContent = data.content; // Save original for diff
                 this.currentVersion = data.version;
+                if (data.generation) this.remoteGeneration = data.generation;
                 this.modified = false;
             } catch (e) {
                 alert('Failed to load configuration: ' + (e?.message || e));
@@ -1434,7 +1481,7 @@ function unifiedConfigPage() {
             this.versionConflict = false;
 
             try {
-                const response = await authFetch('/api/config/raw', {
+                const response = await authFetch('/api/config/raw' + this.siteQ(), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1523,11 +1570,12 @@ function unifiedConfigPage() {
         async loadConfigStructured() {
             this.loadingStructured = true;
             try {
-                const response = await authFetch('/api/config');
+                const response = await authFetch('/api/config' + this.siteQ());
                 if (response.ok) {
                     const snapshot = await response.json();
                     this.structuredConfig = snapshot.config || {};
                     this.structuredConfigVersion = snapshot.version || '';
+                    if (snapshot.generation) this.remoteGeneration = snapshot.generation;
                     if (!this.structuredConfig.root) {
                         this.structuredConfig.root = '';
                     }
@@ -1563,6 +1611,10 @@ function unifiedConfigPage() {
         },
 
         async saveConfigStructured() {
+            if (this.site) {
+                alert('Structured saves are local-only for now - edit ' + this.siteLabel() + ' in the raw editor, which stages and delivers.');
+                return;
+            }
             if (!this.validateConfigStructured()) {
                 return;
             }
