@@ -3,7 +3,7 @@
 {{define "title"}}Fleet{{end}}
 
 {{define "content"}}
-<div x-data="fleetPage()" x-init="init()">
+<div x-data="fleetPage()">
     <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
         <div>
             <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Fleet Configuration</h1>
@@ -12,6 +12,11 @@
             </p>
         </div>
         <div class="flex items-center gap-2">
+            <a x-show="sessionStorage.getItem('sysmon_role') === 'admin'"
+               href="/agents.html"
+               class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
+                <i class="fas fa-plus mr-1"></i>Add a box
+            </a>
             <label class="text-xs text-gray-500">Watch window</label>
             <input type="number" x-model.number="watchSeconds" min="0" step="30"
                    class="w-20 px-2 py-1 border border-gray-200 rounded text-sm">
@@ -121,8 +126,8 @@
                 <tr x-show="!sites.length">
                     <td colspan="7" class="px-3 py-8 text-center text-gray-400 text-sm">
                         No daemons have connected yet. sysmond dials out; give each box
-                        <span class="mono">config aggregator</span>, a token from the admin
-                        page, and the certificate this process logged at startup.
+                        <span class="mono">config aggregator</span>, plus a token and the CA
+                        certificate from <a href="/agents.html" class="text-blue-600 hover:underline">Add a box</a>.
                     </td>
                 </tr>
             </tbody>

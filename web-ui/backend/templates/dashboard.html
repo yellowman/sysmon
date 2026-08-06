@@ -3,7 +3,7 @@
 {{define "title"}}Dashboard{{end}}
 
 {{define "content"}}
-<div x-data="dashboard()" x-init="init()">
+<div x-data="dashboard()">
     <!-- Daemon Status Bar -->
     <div x-show="daemon && daemon.version" class="flex flex-wrap items-center justify-between mb-6 pb-4 border-b border-gray-200">
         <div class="flex items-center gap-5">
