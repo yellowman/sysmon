@@ -24,6 +24,9 @@
                     <i class="fas fa-code mr-2"></i>Raw
                 </button>
             </div>
+            <span x-show="pickerError" x-cloak
+                  class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
+                  x-text="pickerError + (site ? ' - still editing ' + site : '')"></span>
             <div class="flex items-center gap-2" x-show="sitePickerSites.length" x-cloak>
                 <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Editing</label>
                 <select @change="pickSite($event.target.value)"
@@ -1340,6 +1343,7 @@ function unifiedConfigPage() {
         site: localStorage.getItem('sysmon-site') || '',
         sitePickerSites: [],
         remoteGeneration: 0,
+        pickerError: '',
         siteQ(sep = '?') { return this.site ? sep + 'site=' + encodeURIComponent(this.site) : ''; },
         siteLabel() {
             const s = this.sitePickerSites.find(x => x.site === this.site);
@@ -1350,7 +1354,10 @@ function unifiedConfigPage() {
             try {
                 const r = await (await authFetch('/api/sites')).json();
                 this.sitePickerSites = r.sites || [];
-            } catch (e) { this.sitePickerSites = []; }
+            } catch (e) {
+                this.sitePickerSites = [];
+                this.pickerError = 'site list unavailable';
+            }
             // A remembered site that has left the fleet stays selected
             // and flagged, never silently swapped for the local file.
             if (this.site && !this.sitePickerSites.some(s => s.site === this.site)) {

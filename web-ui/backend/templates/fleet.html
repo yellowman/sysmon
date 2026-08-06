@@ -32,6 +32,10 @@
         </div>
     </div>
 
+    <div x-show="staleError" x-cloak
+         class="mb-3 text-sm rounded p-3 bg-amber-50 border border-amber-200 text-amber-900"
+         x-text="staleError"></div>
+
     <div x-show="notice" x-cloak
          class="mb-3 text-sm rounded p-3"
          :class="noticeBad ? 'bg-red-50 border border-red-200 text-red-900' : 'bg-emerald-50 border border-emerald-200 text-emerald-900'">
@@ -181,6 +185,8 @@ function fleetPage() {
         noticeBad: false,
         complaints: [],
         timer: null,
+        loadFails: 0,
+        staleError: '',
 
         init() {
             this.load();
@@ -195,7 +201,15 @@ function fleetPage() {
                 this.sites = r.sites || [];
                 const ro = await apiCall('/api/config/rollout');
                 this.rollouts = ro.rollouts || [];
-            } catch (e) { /* the page is still readable without a refresh */ }
+                this.loadFails = 0;
+                this.staleError = '';
+            } catch (e) {
+                // One miss is a blip; a second means the page is now
+                // showing old state and has to say so.
+                if (++this.loadFails >= 2) {
+                    this.staleError = 'Refresh is failing (' + (e.message || e) + ') - this page shows the last state it saw.';
+                }
+            }
         },
 
         stateClass(s) {

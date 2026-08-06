@@ -130,16 +130,9 @@ function templatesPage() {
         notice: '',
         noticeBad: false,
         busy: false,
-        isAdmin: false,
+        get isAdmin() { return this.$store.auth.role === 'admin'; },
 
         init() {
-            // sessionStorage renders the right thing immediately; the
-            // server is asked because that is the copy that decides, and
-            // the one the PUT will be judged against.
-            this.isAdmin = sessionStorage.getItem('sysmon_role') === 'admin';
-            apiCall('/api/auth/me')
-                .then(me => { this.isAdmin = me.role === 'admin'; })
-                .catch(() => {});
             this.load();
         },
 
