@@ -202,15 +202,40 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// Serve static files (CSS, JS)
 	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
-	// Apply rate limiting (60 requests per minute for general API, configurable)
-	rateLimiter := middleware.NewRateLimiter(60, 1*time.Minute)
+	// Rate limiting, split by what each limit is protecting against.
+	//
+	// RequireAuth sits outside this in the chain, so almost everything
+	// that reaches a limiter already carries a valid session - the
+	// general bucket only has to bound runaway clients, and the UI's own
+	// polling across a handful of open tabs is legitimate traffic.
+	//
+	// /api/auth/login is the exception: RequireAuth lets it through
+	// unauthenticated, so it is the brute-force surface and gets its own
+	// small bucket.
+	//
+	// /api/auth/logout is never limited. It needs a valid session and
+	// only deletes it, and a 429 here leaves a session the browser
+	// cannot end - the HttpOnly cookie only dies on the server's say-so.
+	loginLimiter := middleware.NewRateLimiter(10, 1*time.Minute)
+	generalLimiter := middleware.NewRateLimiter(300, 1*time.Minute)
 
 	// Create cache middleware
 	cache := middleware.NewCacheConfig()
 
 	// Apply middleware chain
-	var handler http.Handler = r.mux
-	handler = rateLimiter.Middleware(handler)
+	unlimited := http.Handler(r.mux)
+	limited := generalLimiter.Middleware(r.mux)
+	loginLimited := loginLimiter.Middleware(r.mux)
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/api/auth/logout":
+			unlimited.ServeHTTP(w, req)
+		case "/api/auth/login":
+			loginLimited.ServeHTTP(w, req)
+		default:
+			limited.ServeHTTP(w, req)
+		}
+	})
 	handler = cache.Middleware(handler)
 	handler = metrics.Middleware(handler)
 

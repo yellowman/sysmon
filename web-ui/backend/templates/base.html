@@ -91,7 +91,7 @@
                               x-text="'site ' + siteGone + ' is no longer in the fleet'"></span>
                     </template>
                     <span class="hidden sm:inline text-xs text-gray-400" x-data="{user: sessionStorage.getItem('sysmon_user') || ''}" x-text="user"></span>
-                    <button onclick="fetch('/api/auth/logout',{method:'POST'}).then(()=>{sessionStorage.clear();window.location.href='/login.html'})"
+                    <button onclick="doLogout()"
                             class="text-xs text-gray-400 hover:text-gray-700">Logout</button>
                     <div class="sm:hidden">
                         <button @click="mobileOpen = !mobileOpen" class="text-gray-500 hover:text-gray-700 p-2">
@@ -417,6 +417,29 @@
                     sysmonResponse
                 }
             }));
+        }
+
+        // Logout must actually revoke the server-side session: the cookie
+        // is HttpOnly, so only a successful response from the server ends
+        // it - clearing sessionStorage alone just makes the UI *look*
+        // logged out while every page load re-authenticates off the
+        // cookie. So: send the Bearer token too (covers cookie-less
+        // sessions), retry once, and on failure say so instead of faking
+        // a logout that did not happen.
+        async function doLogout() {
+            const opts = { method: 'POST', headers: {} };
+            const t = sessionStorage.getItem('sysmon_token');
+            if (t) opts.headers['Authorization'] = 'Bearer ' + t;
+            let ok = false;
+            for (let i = 0; i < 2 && !ok; i++) {
+                try { ok = (await fetch('/api/auth/logout', opts)).ok; } catch (e) {}
+            }
+            if (ok) {
+                sessionStorage.clear();
+                window.location.href = '/login.html';
+            } else {
+                alert('Logout failed: the server did not confirm the session was ended.');
+            }
         }
 
         // Global helper to make authenticated API calls
