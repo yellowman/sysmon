@@ -14,16 +14,20 @@ import (
 
 var templateCache map[string]*template.Template
 
-// InitTemplates loads the HTML templates from a directory on disk - the
-// development path, where editing a file and restarting beats
-// recompiling. Production uses InitTemplatesFS with the embedded copy.
+// staticDir is where /static/ is served from; main sets it at startup.
+var staticDir = "./static"
+
+// SetStaticDir names the directory the static assets are served from.
+func SetStaticDir(dir string) { staticDir = dir }
+
+// InitTemplates parses the HTML templates from a directory on disk.
+// They are parsed once at startup: editing a file on disk changes
+// nothing until the process restarts.
 func InitTemplates(dir string) error {
-	return InitTemplatesFS(os.DirFS(dir))
+	return initTemplatesFS(os.DirFS(dir))
 }
 
-// InitTemplatesFS parses the HTML templates out of any filesystem,
-// normally the copy embedded in the binary.
-func InitTemplatesFS(fsys fs.FS) error {
+func initTemplatesFS(fsys fs.FS) error {
 	templateCache = make(map[string]*template.Template)
 
 	// List of page templates to load

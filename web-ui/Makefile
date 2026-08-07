@@ -1,6 +1,7 @@
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
 LIBEXECDIR = $(PREFIX)/libexec
+TEMPLATEDIR = $(LIBEXECDIR)/sysmon-web/templates
 
 GO = go
 # Binary optimization flags:
@@ -12,7 +13,7 @@ GO = go
 # NOTE: crypto/tls (~2-3MB) is pulled in by net/http even though we don't use HTTPS
 GOFLAGS = -ldflags="-s -w"
 
-.PHONY: all build build-small clean install uninstall dev
+.PHONY: all build build-small clean install uninstall dev css
 
 all: build
 
@@ -33,15 +34,17 @@ build-small: build
 clean:
 	rm -f backend/sysmon-web
 
-# The UI is embedded in the binary, so installing is one file. An older
-# install's template directory is deleted so nothing can ever point a
-# -templates flag at a stale copy by habit. Restart the service after -
-# templates are parsed at startup, so a running process keeps serving
+# Templates and static assets are read from disk; the old copies are
+# replaced wholesale so removed files do not linger. Restart the service
+# after - templates parse at startup, so a running process keeps serving
 # whatever it started with.
 install: build
 	install -d $(BINDIR)
 	install -m 755 backend/sysmon-web $(BINDIR)/sysmon-web
 	rm -rf $(LIBEXECDIR)/sysmon-web
+	install -d $(TEMPLATEDIR)
+	install -m 644 backend/templates/*.html $(TEMPLATEDIR)/
+	cp -R backend/static $(LIBEXECDIR)/sysmon-web/static
 	@echo "Installation complete - restart the sysmon-web service to pick it up."
 
 uninstall:
@@ -50,6 +53,11 @@ uninstall:
 
 dev:
 	cd backend && $(GO) run ./cmd/sysmon-web -listen :8080 -templates ./templates -config ../sysmon.conf
+
+# Rebuild the committed Tailwind output after changing classes in the
+# templates. Needs node; go build does not.
+css:
+	cd backend && npx tailwindcss@3.4.19 -c tailwind.config.js -i tailwind.input.css -o static/app.css --minify
 
 test:
 	cd backend && $(GO) test ./...

@@ -199,8 +199,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
 
-	// Serve static files (CSS, JS)
-	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	// The UI's assets - Tailwind build, Alpine, Chart.js, Font Awesome,
+	// fonts - are self-hosted and served from here, so the console works
+	// on a network with no route to the internet.
+	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
 	// Rate limiting, split by what each limit is protecting against.
 	//

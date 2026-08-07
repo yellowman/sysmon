@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"sysmon-web/internal/api"
-	webtemplates "sysmon-web/templates"
 	"sysmon-web/internal/auth"
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
@@ -187,6 +186,7 @@ func main() {
 	auditLog := flag.String("audit", "/var/log/sysmon-web-audit.log", "Audit log path")
 	backupDir := flag.String("backups", "/var/backups/sysmon", "Backup directory")
 	templateDir := flag.String("templates", "", "Templates directory (default: auto-detect)")
+	staticDir := flag.String("static", "", "Static asset directory (default: auto-detect)")
 	listen := flag.String("listen", "", "HTTP listen address (for dev mode, leave empty for FastCGI)")
 	socketUser := flag.String("socket-user", "", "owner for the FastCGI socket (default: first of www, www-data, nobody)")
 	socketGroup := flag.String("socket-group", "", "group for the FastCGI socket (default: first of www, www-data, nobody)")
@@ -362,22 +362,37 @@ func main() {
 	// === Phase 2: unprivileged initialization and serving ===============
 	log.Println("Initializing sysmon web configuration manager...")
 
-	// The UI travels inside the binary, so the pages can never be a
-	// version behind it. The old auto-detect preferred an installed
-	// template directory, which meant a fresh binary rendered whatever
-	// stale copy the previous install left there. -templates remains as
-	// the development override.
-	if *templateDir != "" {
-		if err := api.InitTemplates(*templateDir); err != nil {
-			log.Fatalf("Failed to load templates from %s: %v", *templateDir, err)
+	// Auto-detect template directory if not specified
+	finalTemplateDir := *templateDir
+	if finalTemplateDir == "" {
+		if _, err := os.Stat("/usr/local/libexec/sysmon-web/templates"); err == nil {
+			finalTemplateDir = "/usr/local/libexec/sysmon-web/templates"
+		} else if _, err := os.Stat("./templates"); err == nil {
+			finalTemplateDir = "./templates"
+		} else {
+			log.Fatal("Could not find templates directory. Use -templates flag to specify location.")
 		}
-		log.Printf("Templates loaded from %s (development override)", *templateDir)
-	} else {
-		if err := api.InitTemplatesFS(webtemplates.Files); err != nil {
-			log.Fatalf("Failed to load embedded templates: %v", err)
-		}
-		log.Printf("Templates loaded from the binary")
 	}
+	if err := api.InitTemplates(finalTemplateDir); err != nil {
+		log.Fatalf("Failed to load templates from %s: %v", finalTemplateDir, err)
+	}
+	log.Printf("Templates loaded from %s", finalTemplateDir)
+
+	// The static assets (Tailwind build, Alpine, Chart.js, Font Awesome,
+	// fonts) live beside the templates and are served from /static/ -
+	// self-hosted, so the console works with no route to the internet.
+	finalStaticDir := *staticDir
+	if finalStaticDir == "" {
+		if _, err := os.Stat("/usr/local/libexec/sysmon-web/static"); err == nil {
+			finalStaticDir = "/usr/local/libexec/sysmon-web/static"
+		} else if _, err := os.Stat("./static"); err == nil {
+			finalStaticDir = "./static"
+		} else {
+			log.Fatal("Could not find static asset directory. Use -static flag to specify location.")
+		}
+	}
+	api.SetStaticDir(finalStaticDir)
+	log.Printf("Static assets served from %s", finalStaticDir)
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService()

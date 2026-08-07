@@ -47,11 +47,11 @@
             </p>
         </div>
         <div class="flex items-center gap-2">
-            <div class="flex items-center gap-1.5" x-show="sitePickerSites.length" x-cloak>
+            <div class="flex items-center gap-1.5">
                 <label class="text-xs text-gray-500">Site</label>
-                <select @change="pickSite($event.target.value)"
-                        class="text-sm border border-gray-200 rounded px-2 py-1.5 bg-white max-w-[14rem]">
-                    <option value="" :selected="site === ''">This server</option>
+                <select @change="pickSite($event.target.value)" :disabled="!sitePickerSites.length"
+                        class="text-sm border border-gray-200 rounded px-2 py-1.5 bg-white max-w-[14rem] disabled:text-gray-400">
+                    <option x-show="!sitePickerSites.length" value="">No connected sysmond</option>
                     <template x-for="s in sitePickerSites" :key="s.site">
                         <option :value="s.site" :selected="site === s.site"
                                 x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
@@ -447,6 +447,9 @@ function mapPage() {
                 this.sitePickerSites.push({ site: this.site,
                     description: this.site + ' (no longer in the fleet)', reachable: false });
             }
+            if (!this.site && this.sitePickerSites.length) {
+                this.site = this.sitePickerSites[0].site;
+            }
         },
         hosts: [],
         version: '',
@@ -502,7 +505,12 @@ function mapPage() {
         statusTimer: null,
 
         async init() {
-            this.loadSitesForPicker();
+            // Sites first: the config fetch below needs to know which box.
+            await this.loadSitesForPicker();
+            if (!this.sitePickerSites.length) {
+                this.notice = 'No sysmond is connected over the agent link yet - there is nothing to draw. Add a box from the Fleet page.';
+                return;
+            }
             // The map is drawn from the CONFIG, so paint as soon as that
             // arrives. Live status only tints the nodes and can be slow on
             // a cold cache with hundreds of hosts - never block on it.
