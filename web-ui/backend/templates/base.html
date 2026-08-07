@@ -367,6 +367,8 @@
                         daemon: d.daemon,
                         stats: d.statistics,
                         snmp_traps: d.snmp_traps,   // only present on full fetches
+                        // undefined on servers that predate fleet coverage
+                        sitesReachable: d.sites_reachable,
                     };
                 },
 

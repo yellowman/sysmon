@@ -106,6 +106,12 @@ type Service struct {
 
 	monitoring *monitoring.Service
 	prevHosts  map[string]string
+
+	// Fleet coverage: when the whole fleet goes dark, nothing at all is
+	// being monitored, and the phones must hear about it even though no
+	// individual host transitions (they all just go stale).
+	fleetDarkSince    time.Time
+	fleetDarkNotified bool
 	stopCh     chan struct{}
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
@@ -975,6 +981,43 @@ func (s *Service) safeSeed() {
 	s.pollAndNotify(true)
 }
 
+// fleetDarkDwell is how long the fleet must stay entirely dark before
+// the loud push goes out. A daemon restarting after a config delivery
+// drops its agent link for a moment; paging for that would teach
+// everyone to ignore the page that matters.
+const fleetDarkDwell = 30 * time.Second
+
+// fleetCoverageChange updates the dark-fleet state for one poll and
+// returns what, if anything, should be pushed. Callers hold s.mu.
+func (s *Service) fleetCoverageChange(total, reachable int, now time.Time) (title, body string, critical, send bool) {
+	dark := total > 0 && reachable == 0
+	if dark {
+		if s.fleetDarkSince.IsZero() {
+			s.fleetDarkSince = now
+		}
+		if !s.fleetDarkNotified && now.Sub(s.fleetDarkSince) >= fleetDarkDwell {
+			s.fleetDarkNotified = true
+			plural := ""
+			if total != 1 {
+				plural = "s"
+			}
+			return "MONITORING DEGRADED",
+				fmt.Sprintf("No monitoring daemon is reporting to sysmon-web - %d site%s dark. Hosts are not being watched.", total, plural),
+				true, true
+		}
+		return "", "", false, false
+	}
+	wasNotified := s.fleetDarkNotified
+	s.fleetDarkSince = time.Time{}
+	s.fleetDarkNotified = false
+	if wasNotified {
+		return "MONITORING RESTORED",
+			fmt.Sprintf("%d of %d site(s) reporting again.", reachable, total),
+			false, true
+	}
+	return "", "", false, false
+}
+
 func (s *Service) pollAndNotify(initialSeed bool) {
 	status, err := s.monitoring.GetStatus()
 	s.mu.Lock()
@@ -1029,6 +1072,16 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	}
 	s.mu.Unlock()
 
+	// Fleet coverage is its own signal: hosts keep their last state
+	// (flagged stale) when the fleet goes dark, so the per-host loop
+	// above sees no transitions. The state tracking runs even when push
+	// is disabled, like prevHosts, so enabling later starts from now
+	// rather than replaying the past.
+	s.mu.Lock()
+	fleetTitle, fleetBody, fleetCritical, fleetSend := s.fleetCoverageChange(
+		status.SitesTotal, status.SitesReachable, time.Now())
+	s.mu.Unlock()
+
 	// If push is disabled or unconfigured we still updated prevHosts
 	// above, so the baseline stays current and re-enabling later doesn't
 	// replay a backlog of stale state changes - we just don't send.
@@ -1038,6 +1091,14 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	}
 	for _, c := range changes {
 		s.sendStateChange(c.host, c.prevStatus, badge)
+	}
+	if fleetSend {
+		st := "DEGRADED"
+		if !fleetCritical {
+			st = "OK"
+		}
+		log.Printf("push: fleet coverage %s - notifying subscribers", st)
+		s.notifyAll(fleetTitle, "", fleetBody, "sysmon-web", st, "", "", badge, fleetCritical, "fleet-coverage")
 	}
 }
 

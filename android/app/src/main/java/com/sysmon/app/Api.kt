@@ -45,8 +45,8 @@ object Api {
         json.decodeFromString(ListSerializer(Host.serializer()), response)
     }
 
-    suspend fun history(limit: Int = 300): List<HistoryEvent> = withContext(Dispatchers.IO) {
-        val response = authedRequest("/api/monitoring/history?limit=$limit", "GET", null)
+    suspend fun history(limit: Int = 300, window: String = "48h"): List<HistoryEvent> = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/monitoring/history?limit=$limit&window=$window", "GET", null)
         json.decodeFromString(HistoryResponse.serializer(), response).events
     }
 

@@ -11,12 +11,14 @@ import (
 
 var bucketHistoryEvents = []byte("events")
 
-// History is deliberately near-term: events expire after historyMaxAge.
+// History is kept for historyRetention and served over a caller-chosen
+// window no larger than that; the default window stays 48 hours.
 // historyMax is a safety backstop against event storms (flapping hosts)
 // within that window.
 const (
-	historyMaxAge = 48 * time.Hour
-	historyMax    = 5000
+	historyRetention     = 30 * 24 * time.Hour
+	HistoryDefaultWindow = 48 * time.Hour
+	historyMax           = 20000
 )
 
 // HistoryEvent is one observed host state transition - the raw material
@@ -98,11 +100,21 @@ func (h *HistoryStore) Append(events []HistoryEvent) {
 	h.prune(now)
 }
 
-// prune drops entries older than historyMaxAge, plus the oldest entries
+// PruneNow ages the store on a clock. Append prunes too, but a system
+// with no new transitions - a dead daemon being the obvious case -
+// would otherwise never prune at all, and the page would show the same
+// rows forever.
+func (h *HistoryStore) PruneNow() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.prune(time.Now().UTC())
+}
+
+// prune drops entries older than historyRetention, plus the oldest entries
 // beyond the historyMax backstop. Keys are chronological, so both walks
 // stop at the first survivor. Caller holds mu.
 func (h *HistoryStore) prune(now time.Time) {
-	cutoff := now.Add(-historyMaxAge)
+	cutoff := now.Add(-historyRetention)
 	h.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketHistoryEvents)
 		c := b.Cursor()
@@ -129,14 +141,18 @@ func (h *HistoryStore) prune(now time.Time) {
 	})
 }
 
-// Recent returns up to limit events from the last 48 hours, newest
+// Recent returns up to limit events from the last window, newest
 // first. The age check happens here too, not just in prune, so a quiet
-// system never serves stale events between prunes.
-func (h *HistoryStore) Recent(limit int) []HistoryEvent {
+// system never serves stale events between prunes. A window outside
+// (0, retention] is clamped to the default.
+func (h *HistoryStore) Recent(limit int, window time.Duration) []HistoryEvent {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	cutoff := time.Now().UTC().Add(-historyMaxAge)
+	if window <= 0 || window > historyRetention {
+		window = HistoryDefaultWindow
+	}
+	cutoff := time.Now().UTC().Add(-window)
 	out := make([]HistoryEvent, 0, limit)
 	h.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketHistoryEvents).Cursor()
@@ -145,7 +161,15 @@ func (h *HistoryStore) Recent(limit int) []HistoryEvent {
 			if json.Unmarshal(v, &ev) != nil {
 				continue
 			}
-			if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil && t.Before(cutoff) {
+			t, err := time.Parse(time.RFC3339, ev.Timestamp)
+			if err != nil {
+				// A row whose timestamp cannot be read has no age, so it
+				// can never be cut by one. Skipping beats serving it as
+				// if it were current, which is how frozen entries end up
+				// on the page.
+				continue
+			}
+			if t.Before(cutoff) {
 				break // keys are chronological: everything further back is older
 			}
 			out = append(out, ev)
