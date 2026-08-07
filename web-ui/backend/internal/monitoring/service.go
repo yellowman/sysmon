@@ -812,6 +812,8 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 	}
 	d.Daemon = cur.Daemon
 	d.Statistics = cur.Statistics
+	d.SitesTotal = cur.SitesTotal
+	d.SitesReachable = cur.SitesReachable
 
 	if since <= 0 || since < s.minDeltaRev || since > s.rev {
 		d.Full = true
@@ -1287,6 +1289,9 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 		merged.Rev = 0
 		return merged, nil
 	}
+
+	merged.SitesTotal = len(fleet)
+	merged.SitesReachable = reached
 
 	// Daemons are configured and not one answered: that is a real failure,
 	// and the caller's error handling should see it.

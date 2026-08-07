@@ -109,7 +109,8 @@ struct AlertsView: View {
                         ErrorBox(message: err) { Task { await store.refreshNow() } }
                             .padding(.horizontal, 16)
                     } else if store.alerts.isEmpty {
-                        AllClearCard(total: store.stats?.totalHosts ?? store.hosts.count)
+                        AllClearCard(total: store.stats?.totalHosts ?? store.hosts.count,
+                                     degraded: store.degraded)
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
                     } else {
@@ -130,7 +131,7 @@ struct AlertsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    LivePill(offline: store.offline)
+                    LivePill(offline: store.offline, degraded: store.degraded)
                     Menu {
                         ForEach(AlertSortKey.allCases, id: \.self) { key in
                             Button {
@@ -234,7 +235,7 @@ struct HostsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    LivePill(offline: store.offline)
+                    LivePill(offline: store.offline, degraded: store.degraded)
                 }
             }
             .refreshable { await store.refreshNow() }
@@ -381,22 +382,30 @@ struct MetricsRow: View {
 }
 
 // The good news, said loudly: shown when zero hosts are alerting.
+// Unless nothing is reporting - zero alerts from zero daemons is not
+// good news, and this card must not dress it as some.
 struct AllClearCard: View {
     let total: Int
+    var degraded: Bool = false
+    private var tone: Color { degraded ? Theme.warn : Theme.up }
     var body: some View {
         VStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Theme.up.opacity(0.12))
+                    .fill(tone.opacity(0.12))
                     .frame(width: 64, height: 64)
-                Image(systemName: "checkmark")
+                Image(systemName: degraded ? "exclamationmark.triangle" : "checkmark")
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundColor(Theme.up)
+                    .foregroundColor(tone)
             }
-            Text("All systems operational")
+            Text(degraded ? "No monitoring daemon connected" : "All systems operational")
                 .font(.system(size: 17, weight: .semibold, design: .serif))
                 .foregroundColor(Theme.ink)
-            if total > 0 {
+            if degraded {
+                Text("The server is up, but no sysmond is reporting to it")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.subtle)
+            } else if total > 0 {
                 Text("\(total) host\(total == 1 ? "" : "s") monitored · nothing needs you")
                     .font(.system(size: 12))
                     .foregroundColor(Theme.subtle)

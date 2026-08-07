@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
@@ -81,6 +82,7 @@ fun TopHeader(
     subtitle: String,
     refreshing: Boolean = false,
     live: Boolean? = null,
+    degraded: Boolean = false,
     onRefresh: (() -> Unit)? = null
 ) {
     Row(
@@ -102,7 +104,7 @@ fun TopHeader(
                 )
                 if (live != null) {
                     Box(modifier = Modifier.padding(start = 10.dp)) {
-                        LivePill(offline = !live)
+                        LivePill(offline = !live, degraded = degraded)
                     }
                 }
             }
@@ -143,9 +145,11 @@ fun TopHeader(
 }
 
 // Tiny heartbeat indicator: the visible face of the live delta poller.
-// Green + pulsing while updates flow, amber when the last poll failed.
+// Green + pulsing while updates flow, amber when the last poll failed
+// (OFFLINE) or when polling works but no sysmond is reporting to the
+// server (DEGRADED).
 @Composable
-fun LivePill(offline: Boolean) {
+fun LivePill(offline: Boolean, degraded: Boolean = false) {
     val transition = rememberInfiniteTransition(label = "live")
     val dotAlpha by transition.animateFloat(
         initialValue = 1f,
@@ -156,7 +160,8 @@ fun LivePill(offline: Boolean) {
         ),
         label = "liveAlpha"
     )
-    val color = if (offline) warnColor() else upColor()
+    val alarmed = offline || degraded
+    val color = if (alarmed) warnColor() else upColor()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -169,17 +174,17 @@ fun LivePill(offline: Boolean) {
         Box(
             modifier = Modifier
                 .size(6.dp)
-                .alpha(if (offline) 1f else dotAlpha)
+                .alpha(if (alarmed) 1f else dotAlpha)
                 .clip(CircleShape)
                 .background(color)
         )
         Text(
-            text = if (offline) "OFFLINE" else "LIVE",
+            text = if (offline) "OFFLINE" else if (degraded) "DEGRADED" else "LIVE",
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.2.sp,
             fontFamily = FontFamily.SansSerif,
-            color = if (offline) color else MaterialTheme.colorScheme.onSurfaceVariant
+            color = if (alarmed) color else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -521,8 +526,11 @@ private fun formatTicks(ticks: Long): String {
 }
 
 // The good news, said loudly: shown when zero hosts are alerting.
+// Unless nothing is reporting - zero alerts from zero daemons is not
+// good news, and this card must not dress it as some.
 @Composable
-fun AllClearCard(total: Int) {
+fun AllClearCard(total: Int, degraded: Boolean = false) {
+    val tone = if (degraded) warnColor() else upColor()
     Card {
         Column(
             modifier = Modifier
@@ -535,22 +543,28 @@ fun AllClearCard(total: Int) {
                 modifier = Modifier
                     .size(64.dp)
                     .clip(CircleShape)
-                    .background(upColor().copy(alpha = 0.12f)),
+                    .background(tone.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Check,
+                    imageVector = if (degraded) Icons.Outlined.WarningAmber else Icons.Outlined.Check,
                     contentDescription = null,
-                    tint = upColor(),
+                    tint = tone,
                     modifier = Modifier.size(30.dp)
                 )
             }
             Text(
-                text = "All systems operational",
+                text = if (degraded) "No monitoring daemon connected" else "All systems operational",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )
-            if (total > 0) {
+            if (degraded) {
+                Text(
+                    text = "The server is up, but no sysmond is reporting to it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (total > 0) {
                 Text(
                     text = "$total host${if (total == 1) "" else "s"} monitored · nothing needs you",
                     style = MaterialTheme.typography.bodySmall,

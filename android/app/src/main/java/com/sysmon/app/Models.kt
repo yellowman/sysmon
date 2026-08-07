@@ -101,7 +101,10 @@ data class StatusResponse(
     val daemon: DaemonInfo = DaemonInfo(),
     val statistics: Stats = Stats(),
     val hosts: List<Host> = emptyList(),
-    val rev: Long = 0
+    val rev: Long = 0,
+    // -1 = an older server that does not report fleet coverage.
+    @SerialName("sites_total") val sitesTotal: Int = -1,
+    @SerialName("sites_reachable") val sitesReachable: Int = -1
 )
 
 // Response to GET /api/monitoring/status?since=<rev>: only the hosts that
@@ -113,7 +116,9 @@ data class StatusDelta(
     val daemon: DaemonInfo = DaemonInfo(),
     val statistics: Stats = Stats(),
     val changed: List<Host> = emptyList(),
-    val removed: List<String> = emptyList()
+    val removed: List<String> = emptyList(),
+    @SerialName("sites_total") val sitesTotal: Int = -1,
+    @SerialName("sites_reachable") val sitesReachable: Int = -1
 )
 
 @Serializable

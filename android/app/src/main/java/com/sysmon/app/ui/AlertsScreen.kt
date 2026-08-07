@@ -87,6 +87,7 @@ fun AlertsScreen() {
                 subtitle = "Hosts requiring attention",
                 refreshing = refreshing,
                 live = !StatusStore.offline,
+                degraded = StatusStore.degraded,
                 onRefresh = {
                     scope.launch {
                         refreshing = true
@@ -138,7 +139,12 @@ fun AlertsScreen() {
             StatusStore.error != null && StatusStore.hosts.isEmpty() ->
                 item { ErrorBanner(StatusStore.error!!) }
             alerts.isEmpty() ->
-                item { AllClearCard(total = StatusStore.stats?.total ?: StatusStore.hosts.size) }
+                item {
+                    AllClearCard(
+                        total = StatusStore.stats?.total ?: StatusStore.hosts.size,
+                        degraded = StatusStore.degraded
+                    )
+                }
             else -> items(sortedAlerts, key = { it.objectName.ifEmpty { it.hostname } }) { host ->
                 Box(modifier = Modifier.animateItem()) {
                     HostRow(host, onClick = { selectedHost = host })
