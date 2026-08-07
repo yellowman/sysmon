@@ -197,6 +197,11 @@ type SysmonStatus struct {
 	Hosts      []HostStatus `json:"hosts"`
 	Statistics Stats        `json:"statistics"`
 	SNMPTraps  *TrapInfo    `json:"snmp_traps,omitempty"`
+	// How much of the fleet this snapshot actually covers. Reachable of
+	// 0 with a 200 response means sysmon-web is fine but nothing is
+	// reporting to it - the one state a client must not paint green.
+	SitesTotal     int `json:"sites_total"`
+	SitesReachable int `json:"sites_reachable"`
 	// Rev is a monotonic revision that bumps only when host state
 	// actually changes (not when timers/uptime merely tick). Clients
 	// pass it back as ?since= to fetch a StatusDelta of just what changed.
@@ -214,6 +219,9 @@ type StatusDelta struct {
 	Statistics Stats        `json:"statistics"`        // always included (small)
 	Changed    []HostStatus `json:"changed"`           // hosts new-or-changed since `since`
 	Removed    []string     `json:"removed,omitempty"` // object names removed since `since`
+	// Fleet coverage, as on SysmonStatus.
+	SitesTotal     int `json:"sites_total"`
+	SitesReachable int `json:"sites_reachable"`
 }
 
 // SiteInfo is one sysmond in the fleet, as the site picker sees it.

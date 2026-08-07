@@ -39,6 +39,11 @@ object StatusStore {
     // consecutive failures count.
     var offline by mutableStateOf(false)
         private set
+
+    // The server answered but no sysmond is reporting to it. Nothing is
+    // being monitored, which "all good" must not be allowed to claim.
+    var degraded by mutableStateOf(false)
+        private set
     private var failStreak = 0
     private const val OFFLINE_AFTER_FAILURES = 3
 
@@ -82,8 +87,11 @@ object StatusStore {
             if (rev == 0L) {
                 val status = Api.status()
                 applyFull(status.hosts, status.statistics, status.daemon, status.rev)
+                degraded = status.sitesReachable == 0
             } else {
-                applyDelta(Api.statusDelta(rev))
+                val delta = Api.statusDelta(rev)
+                applyDelta(delta)
+                degraded = delta.sitesReachable == 0
             }
             error = null
             failStreak = 0
@@ -136,6 +144,7 @@ object StatusStore {
         error = null
         failStreak = 0
         offline = false
+        degraded = false
         loading = true
     }
 }

@@ -144,6 +144,13 @@ struct StatusResponse: Codable {
     let hosts: [Host]
     let statistics: Stats
     let rev: Int64?
+    // nil = an older server that does not report fleet coverage.
+    let sitesReachable: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case daemon, hosts, statistics, rev
+        case sitesReachable = "sites_reachable"
+    }
 }
 
 // Response to GET /api/monitoring/status?since=<rev>: only the hosts that
@@ -157,6 +164,12 @@ struct StatusDelta: Codable {
     // has no changes - a non-optional array would fail to decode there.
     let changed: [Host]?
     let removed: [String]?
+    let sitesReachable: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case rev, full, daemon, statistics, changed, removed
+        case sitesReachable = "sites_reachable"
+    }
 }
 
 // One observed host state transition, from /api/monitoring/history.
