@@ -134,7 +134,7 @@
                 <template x-for="user in users" :key="user.username">
                     <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 group">
                         <div class="flex items-center gap-3">
-                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                            <div class="whitespace-nowrap w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
                                  :class="user.role === 'admin' ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-600'">
                                 <span x-text="user.username.charAt(0).toUpperCase()"></span>
                             </div>
@@ -180,7 +180,7 @@
                 <input type="checkbox" class="sr-only peer"
                        :checked="pushCfg.enabled"
                        @change="setPushEnabled($event.target.checked)">
-                <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                <div class="whitespace-nowrap w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
                 <span class="ml-2 text-xs font-medium text-gray-600" x-text="pushCfg.enabled ? 'Enabled' : 'Disabled'"></span>
             </label>
         </div>
@@ -215,14 +215,14 @@
                     <i class="fab fa-android text-green-600"></i>
                     <h4 class="text-sm font-semibold text-gray-800">FCM (Android)</h4>
                     <span x-show="pushCfg.fcm && !pushCfg.fcm.error && pushCfg.fcm.key_valid !== false"
-                          class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700"
+                          class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700"
                           x-text="pushCfg.fcm && pushCfg.fcm.key_valid === true ? 'Configured · key verified' : 'Configured'"></span>
                     <span x-show="pushCfg.fcm && !pushCfg.fcm.error && pushCfg.fcm.key_rejected"
-                          class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Key rejected by Google</span>
+                          class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Key rejected by Google</span>
                     <span x-show="pushCfg.fcm && !pushCfg.fcm.error && pushCfg.fcm.key_valid === false && !pushCfg.fcm.key_rejected"
-                          class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Key unverified</span>
-                    <span x-show="pushCfg.fcm && pushCfg.fcm.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
-                    <span x-show="!pushCfg.fcm" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
+                          class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Key unverified</span>
+                    <span x-show="pushCfg.fcm && pushCfg.fcm.error" class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
+                    <span x-show="!pushCfg.fcm" class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
                 </div>
 
                 <template x-if="pushCfg.fcm && !pushCfg.fcm.error">
@@ -283,10 +283,10 @@
                 <div class="flex items-center gap-2 mb-3">
                     <i class="fab fa-apple text-gray-800"></i>
                     <h4 class="text-sm font-semibold text-gray-800">APNs (iOS)</h4>
-                    <span x-show="pushCfg.apns && !pushCfg.apns.error && pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
-                    <span x-show="pushCfg.apns && !pushCfg.apns.error && !pushCfg.apns.ready" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Incomplete</span>
-                    <span x-show="pushCfg.apns && pushCfg.apns.error" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
-                    <span x-show="!pushCfg.apns" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.error && pushCfg.apns.ready" class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
+                    <span x-show="pushCfg.apns && !pushCfg.apns.error && !pushCfg.apns.ready" class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Incomplete</span>
+                    <span x-show="pushCfg.apns && pushCfg.apns.error" class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Stored but unreadable</span>
+                    <span x-show="!pushCfg.apns" class="whitespace-nowrap ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not configured</span>
                 </div>
 
                 <template x-if="pushCfg.apns && !pushCfg.apns.error">
@@ -466,7 +466,7 @@
                                     <span :class="{
                                         'bg-gray-800 text-white': sub.platform === 'ios',
                                         'bg-green-600 text-white': sub.platform === 'android'
-                                    }" class="px-2 py-1 rounded text-xs font-medium">
+                                    }" class="inline-flex items-center whitespace-nowrap px-2 py-1 rounded text-xs font-medium">
                                         <i :class="sub.platform === 'ios' ? 'fab fa-apple' : 'fab fa-android'" class="mr-1"></i>
                                         <span x-text="sub.platform === 'ios' ? 'iOS' : 'Android'"></span>
                                     </span>
