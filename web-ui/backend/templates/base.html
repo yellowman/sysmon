@@ -22,12 +22,16 @@
     <nav class="bg-white border-b border-gray-200"
          x-data="Object.assign({mobileOpen: false}, fleetState())" x-init="loadSites()">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-14">
-                <div class="flex">
+            <div class="flex justify-between gap-4 h-14">
+                <!-- The links give way, the controls never do: ten links
+                     plus a fleet selector overflow a ~1300px window, and
+                     an overflowing flex row silently pushes whatever is
+                     rightmost - the Logout button - off screen. -->
+                <div class="flex min-w-0">
                     <div class="flex-shrink-0 flex items-center">
                         <span class="text-lg font-extrabold tracking-tight text-gray-900">sys<span class="text-blue-600">mon</span></span>
                     </div>
-                    <div class="hidden sm:ml-16 sm:flex sm:space-x-8 items-center">
+                    <div class="hidden min-w-0 overflow-x-auto nav-scroll sm:ml-8 sm:flex sm:space-x-5 items-center">
                         <a href="/" class="nav-link {{if eq .Active "dashboard"}}active{{end}}">
                             <i class="fas fa-tachometer-alt mr-2"></i>Dashboard
                         </a>
@@ -60,7 +64,7 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-shrink-0 items-center gap-3">
                     <!-- Which sysmond are we looking at. Only shown when
                          there is more than one; a single-box install sees
                          no selector at all. -->
@@ -493,9 +497,12 @@
     </script>
 
     <style>
+        .nav-scroll { scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-link {
             display: inline-flex;
             align-items: center;
+            white-space: nowrap;
             padding: 0 0.25rem;
             border-bottom: 2px solid transparent;
             font-size: 0.8125rem;
