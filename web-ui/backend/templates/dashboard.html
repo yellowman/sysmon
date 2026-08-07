@@ -3,7 +3,7 @@
 {{define "title"}}Dashboard{{end}}
 
 {{define "content"}}
-<div x-data="dashboard()" x-init="init()">
+<div x-data="dashboard()">
     <!-- Daemon Status Bar -->
     <div x-show="daemon && daemon.version" class="flex flex-wrap items-center justify-between mb-6 pb-4 border-b border-gray-200">
         <div class="flex items-center gap-5">
@@ -143,6 +143,10 @@
             <div class="flex justify-between items-center">
                 <h2 class="section-title">
                     <i class="fas fa-exchange-alt mr-2"></i>Recent SNMP Traps
+                    <span x-show="trapsStale" x-cloak
+                          class="ml-2 text-xs font-normal text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                        refresh failing - showing last known
+                    </span>
                 </h2>
                 <a href="/traps.html" class="text-sm text-blue-600 hover:text-blue-800">View All →</a>
             </div>
@@ -222,6 +226,7 @@ function dashboard() {
         stats: {},
         alerts: [],
         traps: [],
+        trapsStale: false,
         refreshInterval: null,
         trapsInterval: null,
         poller: createStatusPoller(),
@@ -288,7 +293,8 @@ function dashboard() {
             try {
                 const t = await apiCall('/api/monitoring/traps');
                 this.traps = t.recent_traps || [];
-            } catch (e) { /* traps are decorative on this page */ }
+                this.trapsStale = false;
+            } catch (e) { this.trapsStale = true; }
         },
 
         async ackHost(hostname) {
