@@ -3,7 +3,7 @@
 {{define "title"}}Admin & Diagnostics{{end}}
 
 {{define "content"}}
-<div x-data="adminPage()" x-init="init()">
+<div x-data="adminPage()">
     <!-- Header -->
     <div class="mb-6">
         <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Administration</h1>
@@ -95,7 +95,9 @@
     <!-- User Management -->
     <div class="card mb-6" x-show="currentRole === 'admin'">
         <div class="card-header flex justify-between items-center">
-            <h2 class="section-title">Users</h2>
+            <h2 class="section-title">Users
+                <span x-show="usersError" x-cloak class="ml-2 text-xs font-normal text-red-700" x-text="usersError"></span>
+            </h2>
             <button @click="showAddUser = !showAddUser"
                     class="px-3 py-1 bg-gray-900 text-white text-xs rounded hover:bg-gray-800">
                 <i class="fas fa-plus mr-1"></i>Add User
@@ -107,12 +109,12 @@
                 <div class="flex flex-wrap gap-3 items-end">
                     <div>
                         <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Username</label>
-                        <input type="text" x-model="newUser.username" placeholder="username"
+                        <input type="text" autocomplete="off" x-model="newUser.username" placeholder="username"
                                class="px-3 py-1.5 border border-gray-200 rounded text-sm w-40 mono">
                     </div>
                     <div>
                         <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Password</label>
-                        <input type="password" x-model="newUser.password" placeholder="password"
+                        <input type="password" autocomplete="new-password" x-model="newUser.password" placeholder="password"
                                class="px-3 py-1.5 border border-gray-200 rounded text-sm w-40">
                     </div>
                     <div>
@@ -518,7 +520,9 @@
     <!-- Push Notification Log -->
     <div class="card mb-6">
         <div class="card-header flex justify-between items-center">
-            <h2 class="section-title">Push Log</h2>
+            <h2 class="section-title">Push Log
+                <span x-show="pushLogError" x-cloak class="ml-2 text-xs font-normal text-red-700" x-text="pushLogError"></span>
+            </h2>
             <div class="flex items-center space-x-2">
                 <span class="text-xs text-gray-500" x-text="pushLog.length + ' entries'"></span>
                 <button @click="loadPushLog()"
@@ -710,7 +714,7 @@ function adminPage() {
         killitConfirm: false,
         killitText: '',
         currentUser: sessionStorage.getItem('sysmon_user') || '',
-        currentRole: sessionStorage.getItem('sysmon_role') || '',
+        get currentRole() { return this.$store.auth.role; },
         users: [],
         showAddUser: false,
         newUser: { username: '', password: '', role: 'user' },
@@ -719,6 +723,8 @@ function adminPage() {
         pushSubs: [],
         pushSubsError: '',
         pushLog: [],
+        pushLogError: '',
+        usersError: '',
         pushCfg: { enabled: false, fcm: null, apns: null, apns_bundle_id: '', apns_production: false },
         pushHealth: null,
         testingToken: null,
@@ -876,8 +882,11 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/auth/users');
                 this.users = result.users || [];
+                this.usersError = '';
             } catch (e) {
+                // An empty table and a failed load must not look alike.
                 this.users = [];
+                this.usersError = 'User list unavailable: ' + (e.message || e);
             }
         },
 
@@ -1124,8 +1133,10 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/push/log?limit=50');
                 this.pushLog = result.entries || [];
+                this.pushLogError = '';
             } catch (e) {
                 this.pushLog = [];
+                this.pushLogError = 'Push log unavailable: ' + (e.message || e);
             }
         },
 

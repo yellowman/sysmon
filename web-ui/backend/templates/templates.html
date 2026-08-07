@@ -3,7 +3,7 @@
 {{define "title"}}Device templates{{end}}
 
 {{define "content"}}
-<div x-data="templatesPage()" x-init="init()">
+<div x-data="templatesPage()">
     <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
         <div>
             <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Device templates</h1>
@@ -130,16 +130,9 @@ function templatesPage() {
         notice: '',
         noticeBad: false,
         busy: false,
-        isAdmin: false,
+        get isAdmin() { return this.$store.auth.role === 'admin'; },
 
         init() {
-            // sessionStorage renders the right thing immediately; the
-            // server is asked because that is the copy that decides, and
-            // the one the PUT will be judged against.
-            this.isAdmin = sessionStorage.getItem('sysmon_role') === 'admin';
-            apiCall('/api/auth/me')
-                .then(me => { this.isAdmin = me.role === 'admin'; })
-                .catch(() => {});
             this.load();
         },
 
