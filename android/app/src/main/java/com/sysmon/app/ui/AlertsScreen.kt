@@ -68,7 +68,10 @@ fun AlertsScreen() {
         notifProblem = NotificationHealth.problem(context)
     }
 
-    val alerts = StatusStore.alerts
+    // The active board is the unacked; acked alerts are triaged into
+    // their own section below - still down, still listed, out of the way.
+    val alerts = StatusStore.unackedAlerts
+    val acked = StatusStore.ackedAlerts
     val sortedAlerts = run {
         val base = when (sortKey) {
             AlertSort.TIME_DOWN -> alerts.sortedBy { it.timeFailed }
@@ -138,7 +141,7 @@ fun AlertsScreen() {
                 item { CenteredSpinner() }
             StatusStore.error != null && StatusStore.hosts.isEmpty() ->
                 item { ErrorBanner(StatusStore.error!!) }
-            alerts.isEmpty() ->
+            alerts.isEmpty() && acked.isEmpty() ->
                 item {
                     AllClearCard(
                         total = StatusStore.stats?.total ?: StatusStore.hosts.size,
@@ -146,6 +149,20 @@ fun AlertsScreen() {
                     )
                 }
             else -> items(sortedAlerts, key = { it.objectName.ifEmpty { it.hostname } }) { host ->
+                Box(modifier = Modifier.animateItem()) {
+                    HostRow(host, onClick = { selectedHost = host })
+                }
+            }
+        }
+
+        if (acked.isNotEmpty()) {
+            item {
+                SectionHeader(
+                    label = "Acknowledged",
+                    accent = "${acked.size}"
+                )
+            }
+            items(acked, key = { "ack-" + it.objectName.ifEmpty { it.hostname } }) { host ->
                 Box(modifier = Modifier.animateItem()) {
                     HostRow(host, onClick = { selectedHost = host })
                 }

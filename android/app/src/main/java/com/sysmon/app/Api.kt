@@ -62,9 +62,12 @@ object Api {
         authedRequest("/api/monitoring/unack/" + objectName, "POST", null)
     }
 
-    suspend fun ackHost(objectName: String) = withContext(Dispatchers.IO) {
+    // The server refuses an ack without a note: triage means saying
+    // what you know, not just clicking.
+    suspend fun ackHost(objectName: String, note: String) = withContext(Dispatchers.IO) {
         val escaped = java.net.URLEncoder.encode(objectName, "UTF-8").replace("+", "%20")
-        authedRequest("/api/monitoring/ack/$escaped", "POST", null)
+        authedRequest("/api/monitoring/ack/$escaped", "POST",
+            "{\"note\": " + Json.encodeToString(note) + "}")
     }
 
     suspend fun subscribePush(fcmToken: String) = withContext(Dispatchers.IO) {

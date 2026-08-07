@@ -344,11 +344,6 @@ void page_someone(struct hostinfo *svc, int newstate, time_t now_t)
 	if (svc == NULL)
 		return;
 
-	/* An acknowledged outage pages nobody again: a human has said "I
-	 * know". Recovery notices still go out - they also mark the end of
-	 * the ack, which clears on the first OK check. */
-	if (newstate == SYSM_CONTACT_DOWN && svc->acked)
-		return;
 
 	/* Getuid can never fail per man page */
 	myuid = getuid();

@@ -55,6 +55,10 @@ object StatusStore {
     private var pollJob: Job? = null
 
     val alerts: List<Host> get() = hosts.filter { !it.isOK }
+    // The active board: what nobody has claimed yet. Acked alerts are
+    // triaged, not gone - screens list them separately.
+    val unackedAlerts: List<Host> get() = hosts.filter { !it.isOK && !it.acked }
+    val ackedAlerts: List<Host> get() = hosts.filter { !it.isOK && it.acked }
 
     private fun key(h: Host): String = h.objectName.ifEmpty { h.hostname }
 
@@ -104,7 +108,7 @@ object StatusStore {
             if (failStreak >= OFFLINE_AFTER_FAILURES) offline = true
         }
         loading = false
-        Session.alertCount = alerts.size
+        Session.alertCount = unackedAlerts.size
     }
 
     private fun applyFull(list: List<Host>, s: Stats, d: DaemonInfo, r: Long) {

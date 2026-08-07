@@ -904,10 +904,22 @@ func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// The note is the whole point of an ack: "seen, and here is what I
+	// know". Anonymous acks are refused.
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(req.Body).Decode(&body)
+	body.Note = strings.TrimSpace(body.Note)
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "A note is required to acknowledge - say what you know")
+		return
+	}
+
 	// Get auth key from header or body
 	authKey := r.getSysmonAuthKey()
 
-	err := r.monitoring.AckHost(hostname, authKey)
+	err := r.monitoring.AckHost(hostname, body.Note, authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -1247,6 +1259,7 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
+		Note      string   `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -1257,11 +1270,16 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 		r.sendError(w, http.StatusBadRequest, "Hostnames array is required and cannot be empty")
 		return
 	}
+	body.Note = strings.TrimSpace(body.Note)
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "A note is required to acknowledge - say what you know")
+		return
+	}
 
 	authKey := r.getSysmonAuthKey()
 
 	// Call bulk acknowledge
-	results := r.monitoring.BulkAckHosts(body.Hostnames, authKey)
+	results := r.monitoring.BulkAckHosts(body.Hostnames, body.Note, authKey)
 
 	// Count successes and failures
 	successCount := 0

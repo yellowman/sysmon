@@ -1036,7 +1036,7 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 	// want to act on). Sent on every push so iOS app icon stays accurate.
 	badge := 0
 	for _, h := range status.Hosts {
-		if strings.ToUpper(h.OverallStatus) != "OK" {
+		if strings.ToUpper(h.OverallStatus) != "OK" && !h.Acked {
 			badge++
 		}
 	}

@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +38,8 @@ import kotlinx.coroutines.launch
 fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
     var acking by remember { mutableStateOf(false) }
     var ackNote by remember { mutableStateOf<String?>(null) }
+    // The note is required: the server refuses an anonymous ack.
+    var ackText by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val isAdmin = Session.role == "admin"
 
@@ -108,12 +111,19 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
                 }
             }
             if (isAdmin && !host.isOK && !host.paused && !host.acked) {
+                OutlinedTextField(
+                    value = ackText,
+                    onValueChange = { ackText = it },
+                    label = { Text("Ack note (required) - say what you know") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2
+                )
                 Button(
                     onClick = {
                         acking = true
                         ackNote = null
                         scope.launch {
-                            runCatching { Api.ackHost(host.objectName.ifEmpty { host.hostname }) }
+                            runCatching { Api.ackHost(host.objectName.ifEmpty { host.hostname }, ackText.trim()) }
                                 .onSuccess {
                                     ackNote = "Acknowledged."
                                     StatusStore.refreshNow()
@@ -122,7 +132,7 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
                             acking = false
                         }
                     },
-                    enabled = !acking,
+                    enabled = !acking && ackText.isNotBlank(),
                     shape = RoundedCornerShape(4.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,

@@ -72,11 +72,13 @@
         </div>
     </div>
 
-    <!-- Active Alerts -->
+    <!-- Active Alerts: the board shows what nobody has claimed yet.
+         Acked alerts move to their own collapsed section - triage, not
+         suppression: still down, still listed, out of the way. -->
     <div class="mb-8" x-show="alerts.length > 0">
-        <h2 class="section-title mb-3">Active Alerts <span class="text-red-500" x-text="alerts.length"></span></h2>
+        <h2 class="section-title mb-3">Active Alerts <span class="text-red-500" x-text="unackedAlerts.length"></span></h2>
         <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-            <template x-for="alert in alerts" :key="alert.object_name || alert.hostname">
+            <template x-for="alert in unackedAlerts" :key="alert.object_name || alert.hostname">
                 <a :href="'/host-detail.html?hostname=' + encodeURIComponent(alert.object_name || alert.hostname)"
                    class="card block px-4 py-3 hover:shadow-md transition-shadow no-underline"
                    :class="alert.overall_status === 'CRITICAL' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400'">
@@ -126,15 +128,9 @@
                                 </div>
                             </div>
                             <div class="flex flex-col gap-1 flex-shrink-0" @click.prevent.stop>
-                                <button x-show="alert.acked" x-cloak
-                                        @click="unackHost(alert.object_name || alert.hostname)"
-                                        class="whitespace-nowrap px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] rounded hover:bg-blue-100"
-                                        title="Acknowledged - paging is suppressed until recovery. Click to un-acknowledge.">
-                                    <i class="fas fa-check mr-0.5"></i>acked
-                                </button>
-                                <button x-show="!alert.acked" @click="ackHost(alert.object_name || alert.hostname)"
+                                <button @click="openAckDialog(alert.object_name || alert.hostname)"
                                         class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
-                                        title="Acknowledge">
+                                        title="Acknowledge (a note is required)">
                                     <i class="fas fa-check"></i>
                                 </button>
                                 <button @click="showUpdateDialog(alert.object_name || alert.hostname)"
@@ -184,6 +180,60 @@
                     </div>
                 </div>
             </template>
+        </div>
+    </div>
+
+    <!-- Acknowledged: someone owns each of these. -->
+    <div class="mb-8" x-show="ackedAlerts.length > 0" x-cloak>
+        <button @click="showAcked = !showAcked" class="section-title mb-3 flex items-center gap-2">
+            <i class="fas" :class="showAcked ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+            Acknowledged <span class="text-blue-500" x-text="ackedAlerts.length"></span>
+        </button>
+        <div x-show="showAcked" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 opacity-75">
+            <template x-for="alert in ackedAlerts" :key="'ack-' + (alert.object_name || alert.hostname)">
+                <div class="card px-4 py-3 border-l-4 border-l-blue-300">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-medium text-gray-700 truncate" x-text="hostLabel(alert)"></span>
+                                <span x-show="hostSite(alert)" class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-xs mono" x-text="hostSite(alert)"></span>
+                                <span :class="alert.overall_status === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'"
+                                      class="px-1.5 py-0.5 rounded text-[10px] font-medium" x-text="alert.overall_status"></span>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1 italic" x-show="alert.notes" x-text="alert.notes"></div>
+                        </div>
+                        <button @click="unackHost(alert.object_name || alert.hostname)"
+                                class="whitespace-nowrap px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] rounded hover:bg-blue-100 flex-shrink-0"
+                                title="Un-acknowledge: back to the active board">
+                            <i class="fas fa-rotate-left mr-0.5"></i>unack
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Ack Dialog: the note is not optional. -->
+    <div x-show="ackDialog.show" @click.away="ackDialog.show = false"
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style="display: none;">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-check mr-2 text-blue-600"></i>Acknowledge
+            </h3>
+            <p class="text-sm text-gray-600 mb-4">
+                Move <span class="font-medium" x-text="ackDialog.hostname"></span> off the active
+                board. A note is required - say what you know.
+            </p>
+            <textarea x-model="ackDialog.note" rows="3"
+                class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="e.g. 'Fiber cut on Hwy 20, crew dispatched, ETA 2h'"></textarea>
+            <div class="mt-4 flex justify-end space-x-2">
+                <button @click="ackDialog.show = false" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Cancel</button>
+                <button @click="submitAck()" :disabled="!ackDialog.note.trim()"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                    <i class="fas fa-check mr-1"></i>Acknowledge
+                </button>
+            </div>
         </div>
     </div>
 
@@ -310,6 +360,33 @@ function dashboard() {
                 this.traps = t.recent_traps || [];
                 this.trapsStale = false;
             } catch (e) { this.trapsStale = true; }
+        },
+
+        get unackedAlerts() { return this.alerts.filter(a => !a.acked); },
+        get ackedAlerts() { return this.alerts.filter(a => a.acked); },
+        showAcked: false,
+        ackDialog: { show: false, hostname: '', note: '' },
+
+        openAckDialog(hostname) {
+            this.ackDialog = { show: true, hostname, note: '' };
+        },
+
+        async submitAck() {
+            const { hostname, note } = this.ackDialog;
+            if (!note.trim()) return;
+            try {
+                await apiCall(`/api/monitoring/ack/${hostname}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ note: note.trim() })
+                });
+                this.ackDialog.show = false;
+                this.showNotification(`${hostname} acknowledged`);
+                this.poller.invalidate();
+                setTimeout(() => this.fetchData(), 1000);
+            } catch (e) {
+                alert(`Failed to acknowledge: ${e.message}`);
+            }
         },
 
         async unackHost(hostname) {

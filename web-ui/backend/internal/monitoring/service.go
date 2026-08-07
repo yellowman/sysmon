@@ -356,6 +356,7 @@ func hostSignature(h *models.HostStatus) uint64 {
 	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%t\x00%t",
 		h.ObjectName, h.Hostname, h.OverallStatus, h.StatusColor, h.Contact,
 		h.Paused, h.Description, h.IPv4Address, h.Stale, h.Acked)
+	fmt.Fprintf(w, "\x03%s", h.Notes)
 	if h.LastChangeTime != nil {
 		fmt.Fprintf(w, "\x00%d", h.LastChangeTime.Unix())
 	}
@@ -902,6 +903,7 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 		DownCount:     xmlObj.DownCt,
 		UpCount:       xmlObj.UpCt,
 		Acked:         xmlObj.Acked != 0,
+		Notes:         xmlObj.ObjectNotes,
 		TotalDown:     xmlObj.TotalDown,
 		TotalChecked:  xmlObj.TotalChecked,
 		Checks:        []models.CheckResult{},
@@ -2064,13 +2066,26 @@ func daemonReply(what, response string) error {
 }
 
 // AckHost acknowledges an alert for a specific host
-func (s *Service) AckHost(hostname string, authKey string) error {
+// AckHost marks an outage as seen. The note is not optional: an
+// anonymous ack tells the next person nothing, so the note lands first
+// (UPD) and the flag second, on the same exchange.
+func (s *Service) AckHost(hostname, note string, authKey string) error {
 	return s.hostAction(hostname, authKey,
 		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, sanitizeCmd(note)))); err != nil {
+				return fmt.Errorf("failed to send UPD command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read UPD response: %w", err)
+			}
+			if err := daemonReply("UPD", response); err != nil {
+				return err
+			}
 			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
 				return fmt.Errorf("failed to send ACK command: %w", err)
 			}
-			response, err := r.ReadString('\n')
+			response, err = r.ReadString('\n')
 			if err != nil {
 				return fmt.Errorf("failed to read ACK response: %w", err)
 			}
@@ -2414,10 +2429,17 @@ func (s *Service) bulkBySite(hostnames []string, authKey string,
 	return results
 }
 
-// BulkAckHosts acknowledges multiple hosts in a single connection
-func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperationResult {
+// BulkAckHosts acknowledges multiple hosts in a single connection. One
+// note covers the batch - it lands on every host before its flag.
+func (s *Service) BulkAckHosts(hostnames []string, note string, authKey string) []BulkOperationResult {
 	return s.bulkBySite(hostnames, authKey,
 		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, sanitizeCmd(note)))); err != nil {
+				return false, fmt.Sprintf("failed to send note: %v", err)
+			}
+			if resp, err := r.ReadString('\n'); err != nil || !strings.HasPrefix(strings.TrimSpace(resp), "333") {
+				return false, "note refused: " + strings.TrimSpace(resp)
+			}
 			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
 				return false, fmt.Sprintf("failed to send command: %v", err)
 			}
