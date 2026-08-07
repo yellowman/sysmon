@@ -1,8 +1,6 @@
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
 LIBEXECDIR = $(PREFIX)/libexec
-TEMPLATEDIR = $(LIBEXECDIR)/sysmon-web/templates
-STATICDIR = $(LIBEXECDIR)/sysmon-web/static
 
 GO = go
 # Binary optimization flags:
@@ -35,16 +33,16 @@ build-small: build
 clean:
 	rm -f backend/sysmon-web
 
+# The UI is embedded in the binary, so installing is one file. An older
+# install's template directory is deleted so nothing can ever point a
+# -templates flag at a stale copy by habit. Restart the service after -
+# templates are parsed at startup, so a running process keeps serving
+# whatever it started with.
 install: build
 	install -d $(BINDIR)
-	install -d $(LIBEXECDIR)/sysmon-web
-	install -d $(TEMPLATEDIR)
-	install -d $(STATICDIR)
 	install -m 755 backend/sysmon-web $(BINDIR)/sysmon-web
-	install -m 644 backend/templates/*.html $(TEMPLATEDIR)/
-	@echo "Installation complete!"
-	@echo "Run: sysmon-web -listen :8080 (dev mode)"
-	@echo "Or configure as FastCGI service"
+	rm -rf $(LIBEXECDIR)/sysmon-web
+	@echo "Installation complete - restart the sysmon-web service to pick it up."
 
 uninstall:
 	rm -f $(BINDIR)/sysmon-web

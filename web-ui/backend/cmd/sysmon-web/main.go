@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"sysmon-web/internal/api"
+	webtemplates "sysmon-web/templates"
 	"sysmon-web/internal/auth"
 	"sysmon-web/internal/config"
 	"sysmon-web/internal/monitoring"
@@ -361,24 +362,22 @@ func main() {
 	// === Phase 2: unprivileged initialization and serving ===============
 	log.Println("Initializing sysmon web configuration manager...")
 
-	// Auto-detect template directory if not specified
-	finalTemplateDir := *templateDir
-	if finalTemplateDir == "" {
-		if _, err := os.Stat("/usr/local/libexec/sysmon-web/templates"); err == nil {
-			finalTemplateDir = "/usr/local/libexec/sysmon-web/templates"
-			log.Printf("Using installed templates at %s", finalTemplateDir)
-		} else if _, err := os.Stat("./templates"); err == nil {
-			finalTemplateDir = "./templates"
-			log.Printf("Using development templates at %s", finalTemplateDir)
-		} else {
-			log.Fatal("Could not find templates directory. Use -templates flag to specify location.")
+	// The UI travels inside the binary, so the pages can never be a
+	// version behind it. The old auto-detect preferred an installed
+	// template directory, which meant a fresh binary rendered whatever
+	// stale copy the previous install left there. -templates remains as
+	// the development override.
+	if *templateDir != "" {
+		if err := api.InitTemplates(*templateDir); err != nil {
+			log.Fatalf("Failed to load templates from %s: %v", *templateDir, err)
 		}
+		log.Printf("Templates loaded from %s (development override)", *templateDir)
+	} else {
+		if err := api.InitTemplatesFS(webtemplates.Files); err != nil {
+			log.Fatalf("Failed to load embedded templates: %v", err)
+		}
+		log.Printf("Templates loaded from the binary")
 	}
-
-	if err := api.InitTemplates(finalTemplateDir); err != nil {
-		log.Fatalf("Failed to load templates: %v", err)
-	}
-	log.Printf("Templates loaded successfully from %s", finalTemplateDir)
 
 	configService := config.NewService(*configPath, *backupDir, *auditLog)
 	monitoringService := monitoring.NewService()

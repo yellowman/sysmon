@@ -98,7 +98,6 @@ ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
   -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
-  -templates /usr/local/libexec/sysmon-web/templates \
   -backups /var/backups/sysmon \
   -audit /var/log/sysmon-web-audit.log
 Restart=always
@@ -133,12 +132,6 @@ server {
         fastcgi_pass unix:/var/www/run/sysmon-web.sock;
     }
 
-    # Static assets are served straight off disk, bypassing FastCGI.
-    location /static/ {
-        alias /usr/local/libexec/sysmon-web/static/;
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
 }
 ```
 
@@ -212,20 +205,7 @@ server "sysmon.example.com" {
     location "/*" {
         fastcgi socket "/run/sysmon-web.sock"
     }
-
-    # Serve static assets directly. They must live inside the chroot;
-    # copy or symlink them under /var/www.
-    location "/static/*" {
-        root "/htdocs/sysmon-web"   # => /var/www/htdocs/sysmon-web
-    }
 }
-```
-
-Place the static assets where httpd can reach them inside the chroot:
-
-```sh
-mkdir -p /var/www/htdocs/sysmon-web
-cp -R /usr/local/libexec/sysmon-web/static /var/www/htdocs/sysmon-web/
 ```
 
 Then:
