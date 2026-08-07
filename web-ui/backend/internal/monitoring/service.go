@@ -1254,13 +1254,9 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 	}
 
 	reached := 0
-	var firstErr error
 	var dark []*daemon
 	for i, r := range results {
 		if r.err != nil {
-			if firstErr == nil {
-				firstErr = r.err
-			}
 			dark = append(dark, fleet[i])
 			continue
 		}
@@ -1293,14 +1289,16 @@ func (s *Service) fetchFleet() (*models.SysmonStatus, error) {
 	merged.SitesTotal = len(fleet)
 	merged.SitesReachable = reached
 
-	// Daemons are configured and not one answered: that is a real failure,
-	// and the caller's error handling should see it.
-	if reached == 0 {
-		if firstErr == nil {
-			firstErr = fmt.Errorf("no sysmond answered")
-		}
-		return nil, firstErr
-	}
+	// Not one configured daemon answered. This used to be a hard error -
+	// which meant the cached status never updated and the revision never
+	// bumped, so every delta-polling client kept being told "nothing
+	// changed" off the last good snapshot. An app watching a fleet whose
+	// final daemon died stayed green forever.
+	//
+	// It is instead the stale-host rule applied to the whole fleet: a
+	// real snapshot, every host flagged stale, SitesReachable zero. The
+	// revision moves, the deltas flow, and clients see the state they
+	// are actually in.
 
 	// A site that did not answer keeps its hosts, flagged stale.
 	//
