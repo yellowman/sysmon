@@ -23,7 +23,8 @@ data class Host(
     @SerialName("overall_status") val overallStatus: String = "OK",
     val contact: String = "",
     val paused: Boolean = false,
-    // A human said "I know": paging is suppressed until recovery.
+    // A human has claimed this alert: it moves off the active board
+    // until the host recovers. Paging is unaffected.
     val acked: Boolean = false,
     @SerialName("down_count") val downCount: Long = 0,
     @SerialName("up_count") val upCount: Long = 0,

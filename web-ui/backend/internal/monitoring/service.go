@@ -2093,7 +2093,7 @@ func (s *Service) AckHost(hostname, note string, authKey string) error {
 		})
 }
 
-// UnackHost is the inverse: the outage pages again on its next interval.
+// UnackHost is the inverse: the alert returns to the active board.
 func (s *Service) UnackHost(hostname string, authKey string) error {
 	return s.hostAction(hostname, authKey,
 		func(conn net.Conn, r *bufio.Reader, object string) error {

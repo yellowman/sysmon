@@ -65,7 +65,7 @@
                 </button>
                 <button @click="bulkUnacknowledge()"
                         class="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors flex items-center"
-                        title="Paging resumes for these hosts on the next interval">
+                        title="Put these back on the active board">
                     <i class="fas fa-rotate-left mr-2"></i>
                     Un-acknowledge
                 </button>
@@ -865,7 +865,7 @@ function hostsPage() {
                 alert('No hosts selected');
                 return;
             }
-            if (!confirm(`Un-acknowledge ${this.selectedHosts.length} host(s)? Paging resumes on the next interval.`)) {
+            if (!confirm(`Un-acknowledge ${this.selectedHosts.length} host(s)? They go back on the active board.`)) {
                 return;
             }
             let ok = 0, failed = 0;

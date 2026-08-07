@@ -72,7 +72,7 @@ struct API {
         try await postVoid("/api/monitoring/ack/\(escaped)", body: ["note": note])
     }
 
-    // The inverse: paging resumes for the outage on its next interval.
+    // The inverse: the alert returns to the active board.
     func unackHost(objectName: String) async throws {
         let escaped = objectName.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed) ?? objectName

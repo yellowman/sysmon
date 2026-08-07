@@ -495,7 +495,7 @@ struct HostDetailView: View {
                 .card(padding: 16)
 
                 if (host.acked ?? false) && !host.isOK {
-                    Text("ACKNOWLEDGED · paging suppressed until recovery")
+                    Text("ACKNOWLEDGED · off the active board until it recovers")
                         .font(.system(size: 11, weight: .bold))
                         .tracking(0.5)
                         .foregroundColor(Theme.subtle)
@@ -541,7 +541,7 @@ struct HostDetailView: View {
             let api = API(baseURL: session.serverURL, token: session.token)
             do {
                 try await api.unackHost(objectName: host.id)
-                ackNote = "Un-acknowledged - paging resumes."
+                ackNote = "Un-acknowledged - back on the active board."
             } catch let e as APIError {
                 ackNote = e.message
             } catch {

@@ -873,7 +873,8 @@ void do_ack(struct clientstatus *client, char *buff)
 
 /*
  * UNACK <objectname>
- * The inverse of ACK: the outage pages again on its next interval.
+ * The inverse of ACK: the alert is unclaimed again. Neither command
+ * affects paging - an outage pages when it pages.
  */
 void do_unack(struct clientstatus *client, char *buff)
 {

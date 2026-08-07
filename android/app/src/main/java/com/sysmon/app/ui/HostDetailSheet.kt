@@ -87,7 +87,7 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
             DetailRow("FAIL / OK COUNT", "${host.downCount} / ${host.upCount}")
 
             if (host.acked && !host.isOK) {
-                DetailRow("ACKNOWLEDGED", "paging suppressed until recovery")
+                DetailRow("ACKNOWLEDGED", "off the active board until it recovers")
                 if (isAdmin) {
                     OutlinedButton(
                         onClick = {
@@ -96,7 +96,7 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
                             scope.launch {
                                 runCatching { Api.unackHost(host.objectName.ifEmpty { host.hostname }) }
                                     .onSuccess {
-                                        ackNote = "Un-acknowledged - paging resumes."
+                                        ackNote = "Un-acknowledged - back on the active board."
                                         StatusStore.refreshNow()
                                     }
                                     .onFailure { ackNote = it.message ?: "Un-acknowledge failed" }

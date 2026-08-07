@@ -520,12 +520,6 @@ func (s *Service) withDaemonConn(site string, fn func(net.Conn, *bufio.Reader) e
 	return fn(conn, reader)
 }
 
-// AdoptSite takes what is really on the box and makes it the first desired
-// generation.
-//
-// This is the only way a box becomes managed, and it is deliberately the
-// same operation as recovering from "somebody fixed it on the console at
-// 3am": pull up what is there, and agree that it is what should be there.
 // autoAdoptIfNew adopts a site this server has no record of at all -
 // first contact, straight after the token handshake. Idempotent and
 // safe to race: a second adoption of the same bytes stores the same
@@ -553,6 +547,12 @@ func (s *Service) autoAdoptIfNew(site string) {
 	log.Printf("agents: adopted %s on first connection - its running config is generation %d", site, gen)
 }
 
+// AdoptSite takes what is really on the box and makes it the first desired
+// generation.
+//
+// It is deliberately the same operation as recovering from "somebody
+// fixed it on the console at 3am": pull up what is there, and agree that
+// it is what should be there.
 func (s *Service) AdoptSite(site, by string) (uint64, error) {
 	store := s.Generations()
 	if store == nil {

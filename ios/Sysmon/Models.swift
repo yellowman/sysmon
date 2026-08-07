@@ -14,7 +14,8 @@ struct Host: Codable, Identifiable, Equatable {
     let ipv6Address: String?
     let overallStatus: String
     let paused: Bool?
-    // A human said "I know": paging is suppressed until recovery.
+    // A human has claimed this alert: it moves off the active board
+    // until the host recovers. Paging is unaffected.
     let acked: Bool?
     let downCount: Int64
     let upCount: Int64

@@ -75,7 +75,7 @@
     <!-- Active Alerts: the board shows what nobody has claimed yet.
          Acked alerts move to their own collapsed section - triage, not
          suppression: still down, still listed, out of the way. -->
-    <div class="mb-8" x-show="alerts.length > 0">
+    <div class="mb-8" x-show="unackedAlerts.length > 0">
         <h2 class="section-title mb-3">Active Alerts <span class="text-red-500" x-text="unackedAlerts.length"></span></h2>
         <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
             <template x-for="alert in unackedAlerts" :key="alert.object_name || alert.hostname">
@@ -392,27 +392,11 @@ function dashboard() {
         async unackHost(hostname) {
             try {
                 await apiCall(`/api/monitoring/unack/${hostname}`, { method: 'POST' });
-                this.showNotification(`${hostname} un-acknowledged - paging resumes`);
+                this.showNotification(`${hostname} back on the active board`);
                 this.poller.invalidate();
                 setTimeout(() => this.fetchData(), 1000);
             } catch (e) {
                 alert(`Failed to un-acknowledge: ${e.message}`);
-            }
-        },
-
-        async ackHost(hostname) {
-            try {
-                const result = await apiCall(`/api/monitoring/ack/${hostname}`, {
-                    method: 'POST'
-                });
-
-                this.showNotification(`Host ${hostname} acknowledged successfully`);
-
-                // Refresh data to show updated status
-                this.poller.invalidate();
-                setTimeout(() => this.fetchData(), 1000);
-            } catch (e) {
-                alert(`Failed to acknowledge host: ${e.message}`);
             }
         },
 
