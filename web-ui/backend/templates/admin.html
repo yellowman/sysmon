@@ -538,7 +538,7 @@
             </div>
             <div x-show="pushLog.length > 0" class="space-y-2 max-h-80 overflow-y-auto">
                 <template x-for="(entry, idx) in pushLog" :key="idx">
-                    <div class="flex items-center justify-between border-l-4 pl-3 py-2"
+                    <div class="flex items-center justify-between border-l-4 rounded-r pl-3 pr-3 py-2"
                          :class="{
                              'border-red-500 bg-red-50': entry.status === 'CRITICAL',
                              'border-yellow-500 bg-yellow-50': entry.status === 'WARNING',
@@ -626,7 +626,7 @@
         <div class="p-6">
             <div class="space-y-2 max-h-96 overflow-y-auto">
                 <template x-for="(entry, idx) in sessionLog" :key="idx">
-                    <div class="border-l-4 pl-3 py-2"
+                    <div class="border-l-4 rounded-r pl-3 pr-3 py-2"
                          :class="entry.is_error ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'">
                         <div class="flex justify-between items-start">
                             <span class="font-mono text-xs font-semibold"
