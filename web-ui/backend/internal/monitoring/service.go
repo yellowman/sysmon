@@ -849,10 +849,19 @@ func (s *Service) StartPoller(interval time.Duration) {
 			s.Refresh() // prime so the first request is warm
 			t := time.NewTicker(interval)
 			defer t.Stop()
+			// History pruning rides its own slow tick: Append prunes
+			// too, but a fleet with no transitions would otherwise
+			// never age its rows out.
+			pruneT := time.NewTicker(10 * time.Minute)
+			defer pruneT.Stop()
 			for {
 				select {
 				case <-t.C:
 					s.Refresh()
+				case <-pruneT.C:
+					if h := s.History(); h != nil {
+						h.PruneNow()
+					}
 				case <-s.pollStop:
 					return
 				}

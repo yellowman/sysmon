@@ -98,6 +98,16 @@ func (h *HistoryStore) Append(events []HistoryEvent) {
 	h.prune(now)
 }
 
+// PruneNow ages the store on a clock. Append prunes too, but a system
+// with no new transitions - a dead daemon being the obvious case -
+// would otherwise never prune at all, and the page would show the same
+// rows forever.
+func (h *HistoryStore) PruneNow() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.prune(time.Now().UTC())
+}
+
 // prune drops entries older than historyMaxAge, plus the oldest entries
 // beyond the historyMax backstop. Keys are chronological, so both walks
 // stop at the first survivor. Caller holds mu.
@@ -145,7 +155,15 @@ func (h *HistoryStore) Recent(limit int) []HistoryEvent {
 			if json.Unmarshal(v, &ev) != nil {
 				continue
 			}
-			if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil && t.Before(cutoff) {
+			t, err := time.Parse(time.RFC3339, ev.Timestamp)
+			if err != nil {
+				// A row whose timestamp cannot be read has no age, so it
+				// can never be cut by one. Skipping beats serving it as
+				// if it were current, which is how frozen entries end up
+				// on the page.
+				continue
+			}
+			if t.Before(cutoff) {
 				break // keys are chronological: everything further back is older
 			}
 			out = append(out, ev)
