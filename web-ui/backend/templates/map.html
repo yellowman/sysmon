@@ -272,7 +272,7 @@
             <i class="fas fa-link text-gray-500 w-4"></i>
             <span>Draw dependency from here</span>
         </button>
-        <a :href="'/host-detail.html?hostname=' + encodeURIComponent(ctx?.host?.id || '')"
+        <a :href="'/host-detail.html?hostname=' + encodeURIComponent((site ? site + ':' : '') + (ctx?.host?.id || ''))"
            class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 no-underline text-gray-900">
             <i class="fas fa-chart-line text-gray-500 w-4"></i>
             <span>Open host detail</span>
@@ -314,7 +314,7 @@
                 <div><div class="text-xs text-gray-400">Depends on</div><div class="mono" x-text="selected.dependencies || '(root)'"></div></div>
                 <div><div class="text-xs text-gray-400">Description</div><div x-text="selected.notes || '-'"></div></div>
                 <div class="col-span-2 md:col-span-4">
-                    <a :href="'/host-detail.html?hostname=' + encodeURIComponent(selected.id)"
+                    <a :href="'/host-detail.html?hostname=' + encodeURIComponent((site ? site + ':' : '') + selected.id)"
                        class="text-blue-600 text-xs hover:underline">Open host detail &rarr;</a>
                 </div>
             </div>

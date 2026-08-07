@@ -1997,6 +1997,33 @@ func (s *Service) hostAction(qualified, authKey string,
 		return fmt.Errorf("no object name in %q", qualified)
 	}
 
+	// A bare name - an old bookmark, a hand-typed URL - is resolved to
+	// the one site that owns an object by that name. One match routes,
+	// zero says so, and two or more must be qualified by the caller:
+	// guessing between sites is how an ack lands on the wrong box.
+	if site == "" {
+		var owners []string
+		for _, d := range s.fleet() {
+			d.mu.Lock()
+			for i := range d.lastHosts {
+				if d.lastHosts[i].LocalName == object || d.lastHosts[i].Hostname == object {
+					owners = append(owners, d.site)
+					break
+				}
+			}
+			d.mu.Unlock()
+		}
+		switch len(owners) {
+		case 1:
+			site = owners[0]
+		case 0:
+			return fmt.Errorf("no connected site has an object named %q", object)
+		default:
+			return fmt.Errorf("%q exists at %s - say which as site:object",
+				object, strings.Join(owners, ", "))
+		}
+	}
+
 	return s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
 		if err := enterXMLMode(conn, r); err != nil {
 			return err

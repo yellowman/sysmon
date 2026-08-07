@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -525,6 +526,33 @@ func (s *Service) withDaemonConn(site string, fn func(net.Conn, *bufio.Reader) e
 // This is the only way a box becomes managed, and it is deliberately the
 // same operation as recovering from "somebody fixed it on the console at
 // 3am": pull up what is there, and agree that it is what should be there.
+// autoAdoptIfNew adopts a site this server has no record of at all -
+// first contact, straight after the token handshake. Idempotent and
+// safe to race: a second adoption of the same bytes stores the same
+// generation 1, and any existing record (including a deliberate
+// Unmanage, which keeps a record with Adopted false) short-circuits.
+func (s *Service) autoAdoptIfNew(site string) {
+	store := s.Generations()
+	if store == nil {
+		return
+	}
+	if _, ok := store.GetDesired(site); ok {
+		return
+	}
+	// The daemon just connected; give its first status cycle a moment
+	// so the CONFIG-GET does not race the greeting.
+	time.Sleep(2 * time.Second)
+	if _, ok := store.GetDesired(site); ok {
+		return
+	}
+	gen, err := s.AdoptSite(site, "first connection")
+	if err != nil {
+		log.Printf("agents: could not auto-adopt %s (%v) - the Adopt button on the fleet page still works", site, err)
+		return
+	}
+	log.Printf("agents: adopted %s on first connection - its running config is generation %d", site, gen)
+}
+
 func (s *Service) AdoptSite(site, by string) (uint64, error) {
 	store := s.Generations()
 	if store == nil {

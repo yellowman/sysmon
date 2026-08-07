@@ -149,6 +149,13 @@ func (a *AgentListener) handshake(conn net.Conn) {
 
 	a.svc.adoptAgent(site, remote, conn, reader)
 	log.Printf("agents: site %s connected from %s", site, remote)
+
+	// The operator who put this box's token in its sysmon.conf already
+	// made the management decision; a first connection from a box this
+	// server has never seen records its running config as generation 1
+	// without a second ceremony in the UI. A site that was deliberately
+	// unmanaged has a record with Adopted false and is left alone.
+	go a.svc.autoAdoptIfNew(site)
 }
 
 // ValidSiteName mirrors the daemon's own rule. A colon would make
