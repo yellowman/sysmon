@@ -879,8 +879,14 @@ func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Reques
 			limit = parsed
 		}
 	}
-	events := hist.Recent(limit)
-	r.sendJSON(w, map[string]interface{}{"events": events, "count": len(events), "available": true})
+	// Two windows only: the near-term default and the month the store
+	// retains. Anything else is somebody probing, and gets the default.
+	window := monitoring.HistoryDefaultWindow
+	if req.URL.Query().Get("window") == "30d" {
+		window = 30 * 24 * time.Hour
+	}
+	events := hist.Recent(limit, window)
+	r.sendJSON(w, map[string]interface{}{"events": events, "count": len(events), "available": true, "window": req.URL.Query().Get("window")})
 }
 
 func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {

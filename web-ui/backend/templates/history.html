@@ -8,7 +8,8 @@
     <div class="flex flex-wrap items-center justify-between mb-6 gap-3">
         <div>
             <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Alert History</h1>
-            <p class="text-xs text-gray-400 mt-1 tracking-wide">Host state transitions from the last 48 hours</p>
+            <p class="text-xs text-gray-400 mt-1 tracking-wide"
+               x-text="'Host state transitions from the last ' + (window === '30d' ? '30 days' : '48 hours')"></p>
         </div>
         <div class="flex items-center gap-2">
             <input type="text" x-model="search" placeholder="Filter by host..."
@@ -18,11 +19,19 @@
                 <option value="downs">Downs only</option>
                 <option value="recoveries">Recoveries only</option>
             </select>
+            <select x-model="window" @change="fetchHistory()" class="px-2 py-1.5 border border-gray-200 rounded text-xs">
+                <option value="48h">Last 48 hours</option>
+                <option value="30d">Last 30 days</option>
+            </select>
             <button @click="fetchHistory()" class="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
                 <i class="fas fa-sync-alt mr-1"></i>Refresh
             </button>
         </div>
     </div>
+
+    <div x-show="staleError" x-cloak
+         class="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900"
+         x-text="staleError"></div>
 
     <!-- Loading -->
     <div x-show="loading" class="text-center py-16">
@@ -55,7 +64,7 @@
                 <template x-for="(ev, idx) in filtered" :key="idx">
                     <tr :class="ev.new_status === 'CRITICAL' ? 'bg-red-50/50' : (ev.new_status === 'OK' ? 'bg-green-50/40' : 'bg-amber-50/40')">
                         <td class="px-4 py-3 whitespace-nowrap">
-                            <div class="text-sm text-gray-900" x-text="formatRelativeTime(ev.timestamp)"></div>
+                            <div class="text-sm text-gray-900" x-text="age(ev.timestamp)"></div>
                             <div class="text-xs text-gray-400" x-text="formatTime(ev.timestamp)"></div>
                         </td>
                         <td class="px-4 py-3">
@@ -81,7 +90,7 @@
         </table>
     </div>
     <p class="text-xs text-gray-400 mt-3" x-show="available"
-       x-text="'Showing ' + filtered.length + ' of ' + events.length + ' transitions from the last 48 hours (newest first)'"></p>
+       x-text="'Showing ' + filtered.length + ' of ' + events.length + ' transitions from the last ' + (window === '30d' ? '30 days' : '48 hours') + ' (newest first)'"></p>
 </div>
 
 <script>
@@ -91,17 +100,31 @@ function historyPage() {
         available: true,
         loading: true,
         filter: 'all',
+        window: '48h',
         search: '',
         refreshInterval: null,
+        clockInterval: null,
+        now: Date.now(),
+        loadFails: 0,
+        staleError: '',
 
         init() {
             this.fetchHistory();
             this.refreshInterval = setInterval(() => this.fetchHistory(), 30000);
+            // Ages advance on their own clock. Rendering only on fetch
+            // meant a failed or throttled fetch froze every "1d ago" at
+            // whatever it said last.
+            this.clockInterval = setInterval(() => { this.now = Date.now(); }, 30000);
         },
 
         destroy() {
             if (this.refreshInterval) clearInterval(this.refreshInterval);
+            if (this.clockInterval) clearInterval(this.clockInterval);
         },
+
+        // Reading this.now makes each row's age reactive to the clock,
+        // not just to data changes.
+        age(ts) { this.now; return formatRelativeTime(ts); },
 
         get filtered() {
             return this.events.filter(ev => {
@@ -125,11 +148,15 @@ function historyPage() {
 
         async fetchHistory() {
             try {
-                const r = await apiCall('/api/monitoring/history?limit=500');
+                const r = await apiCall('/api/monitoring/history?limit=500&window=' + this.window);
                 this.events = r.events || [];
                 this.available = r.available !== false;
+                this.loadFails = 0;
+                this.staleError = '';
             } catch (e) {
-                console.error('Failed to fetch history:', e);
+                if (++this.loadFails >= 2) {
+                    this.staleError = 'Refresh is failing (' + (e.message || e) + ') - this page shows the last events it saw.';
+                }
             }
             this.loading = false;
         }

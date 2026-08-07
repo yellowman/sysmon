@@ -48,10 +48,22 @@ fun HistoryScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var filter by rememberSaveable { mutableStateOf(HistoryFilter.ALL) }
+    var windowDays by rememberSaveable { mutableStateOf(false) }  // false = 48h, true = 30d
     val scope = rememberCoroutineScope()
 
+    // Ages advance on their own clock: rows only recompose when state
+    // changes, and without this a quiet screen froze every "1d ago" at
+    // whatever it said when the data last arrived.
+    var clock by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            clock = System.currentTimeMillis()
+        }
+    }
+
     suspend fun fetch() {
-        runCatching { Api.history() }
+        runCatching { Api.history(window = if (windowDays) "30d" else "48h") }
             .onSuccess { events = it; error = null }
             .onFailure { error = it.message }
         loading = false
@@ -61,6 +73,7 @@ fun HistoryScreen() {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         scope.launch { fetch() }
     }
+    LaunchedEffect(windowDays) { fetch() }
 
     val filtered = when (filter) {
         HistoryFilter.ALL -> events
@@ -72,7 +85,7 @@ fun HistoryScreen() {
         item {
             TopHeader(
                 title = "History",
-                subtitle = "Transitions, last 48 hours",
+                subtitle = if (windowDays) "Transitions, last 30 days" else "Transitions, last 48 hours",
                 refreshing = refreshing,
                 onRefresh = {
                     scope.launch {
@@ -123,6 +136,33 @@ fun HistoryScreen() {
                         )
                     }
                 }
+                Spacer(modifier = Modifier.weight(1f))
+                listOf(false to "48H", true to "30D").forEach { (days, label) ->
+                    val active = windowDays == days
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (active) MaterialTheme.colorScheme.surfaceVariant
+                                else Color.Transparent
+                            )
+                            .border(
+                                1.dp,
+                                if (active) MaterialTheme.colorScheme.outline
+                                else Color.Transparent,
+                                RoundedCornerShape(50)
+                            )
+                            .clickable { windowDays = days }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (active) MaterialTheme.colorScheme.onBackground
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
 
@@ -131,19 +171,19 @@ fun HistoryScreen() {
             error != null && events.isEmpty() -> item { ErrorBanner(error!!) }
             filtered.isEmpty() -> item {
                 EmptyState(
-                    if (events.isEmpty()) "No transitions in the last 48 hours"
+                    if (events.isEmpty()) "No transitions in the last " + (if (windowDays) "30 days" else "48 hours")
                     else "No events match the filter"
                 )
             }
             else -> itemsIndexed(filtered) { _, ev ->
-                HistoryRow(ev)
+                HistoryRow(ev, clock)
             }
         }
     }
 }
 
 @Composable
-private fun HistoryRow(ev: HistoryEvent) {
+private fun HistoryRow(ev: HistoryEvent, clock: Long) {
     Card {
         Row(
             modifier = Modifier
@@ -162,7 +202,9 @@ private fun HistoryRow(ev: HistoryEvent) {
                         modifier = Modifier.weight(1f)
                     )
                     Text(
-                        text = relativeTime(ev.timestamp),
+                        // clock in the expression makes the age
+                        // recompose on the ticker, not only on new data.
+                        text = clock.let { relativeTime(ev.timestamp) },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
