@@ -107,21 +107,25 @@ struct StatusDot: View {
 
 // Tiny heartbeat indicator for the nav bar: the visible face of the
 // live delta poller. Green + pulsing while updates flow, amber when the
-// last poll failed.
+// last poll failed (OFFLINE) or when polling works but no sysmond is
+// reporting to the server (DEGRADED).
 struct LivePill: View {
     let offline: Bool
+    var degraded: Bool = false
     @State private var animating = false
+
+    private var alarmed: Bool { offline || degraded }
 
     var body: some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(offline ? Theme.warn : Theme.up)
+                .fill(alarmed ? Theme.warn : Theme.up)
                 .frame(width: 6, height: 6)
-                .opacity(offline ? 1 : (animating ? 0.25 : 1))
-            Text(offline ? "OFFLINE" : "LIVE")
+                .opacity(alarmed ? 1 : (animating ? 0.25 : 1))
+            Text(offline ? "OFFLINE" : (degraded ? "DEGRADED" : "LIVE"))
                 .font(.system(size: 9, weight: .bold))
                 .tracking(1.2)
-                .foregroundColor(offline ? Theme.warn : Theme.subtle)
+                .foregroundColor(alarmed ? Theme.warn : Theme.subtle)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

@@ -24,6 +24,10 @@ final class StatusStore: ObservableObject {
     // half the time on a healthy connection. Only consecutive failures
     // count.
     @Published private(set) var offline = false
+
+    // The server answered but no sysmond is reporting to it. Nothing is
+    // being monitored, which "all good" must not be allowed to claim.
+    @Published private(set) var degraded = false
     private var failStreak = 0
     private let offlineAfterFailures = 3
 
@@ -74,10 +78,12 @@ final class StatusStore: ObservableObject {
                 let status: StatusResponse = try await api.get("/api/monitoring/status")
                 applyFull(status.hosts, stats: status.statistics,
                           daemon: status.daemon, rev: status.rev ?? 0)
+                degraded = status.sitesReachable == 0
             } else {
                 let delta: StatusDelta =
                     try await api.get("/api/monitoring/status?since=\(rev)")
                 applyDelta(delta)
+                degraded = delta.sitesReachable == 0
             }
             error = nil
             failStreak = 0
@@ -154,6 +160,7 @@ final class StatusStore: ObservableObject {
         error = nil
         failStreak = 0
         offline = false
+        degraded = false
         loading = true
     }
 }

@@ -12,7 +12,7 @@
             <span class="text-xs text-gray-400">Uptime <span class="font-medium text-gray-600" x-text="formatUptime(daemon.uptime_seconds)"></span></span>
         </div>
         <div class="flex items-center gap-3">
-            <span x-show="daemon.paused" class="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-semibold tracking-wide uppercase"><i class="fas fa-pause mr-1"></i>Paused</span>
+            <span x-show="daemon.paused" class="whitespace-nowrap px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-semibold tracking-wide uppercase"><i class="fas fa-pause mr-1"></i>Paused</span>
             <span class="text-xs text-gray-300" x-text="new Date().toLocaleTimeString()"></span>
         </div>
     </div>
