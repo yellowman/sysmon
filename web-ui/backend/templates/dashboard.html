@@ -126,7 +126,12 @@
                                 </div>
                             </div>
                             <div class="flex flex-col gap-1 flex-shrink-0" @click.prevent.stop>
-                                <button @click="ackHost(alert.object_name || alert.hostname)"
+                                <span x-show="alert.acked" x-cloak
+                                      class="whitespace-nowrap px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] rounded"
+                                      title="Acknowledged - paging is suppressed until this host recovers">
+                                    <i class="fas fa-check mr-0.5"></i>acked
+                                </span>
+                                <button x-show="!alert.acked" @click="ackHost(alert.object_name || alert.hostname)"
                                         class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
                                         title="Acknowledge">
                                     <i class="fas fa-check"></i>

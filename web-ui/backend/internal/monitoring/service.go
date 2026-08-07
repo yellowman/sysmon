@@ -353,9 +353,9 @@ func hostKey(h *models.HostStatus) string {
 // live "up/down for X" locally from LastChangeTime.
 func hostSignature(h *models.HostStatus) uint64 {
 	w := fnv.New64a()
-	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%t",
+	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%t\x00%t",
 		h.ObjectName, h.Hostname, h.OverallStatus, h.StatusColor, h.Contact,
-		h.Paused, h.Description, h.IPv4Address, h.Stale)
+		h.Paused, h.Description, h.IPv4Address, h.Stale, h.Acked)
 	if h.LastChangeTime != nil {
 		fmt.Fprintf(w, "\x00%d", h.LastChangeTime.Unix())
 	}
@@ -901,6 +901,7 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 		Contact:       xmlObj.ObjectContact,
 		DownCount:     xmlObj.DownCt,
 		UpCount:       xmlObj.UpCt,
+		Acked:         xmlObj.Acked != 0,
 		TotalDown:     xmlObj.TotalDown,
 		TotalChecked:  xmlObj.TotalChecked,
 		Checks:        []models.CheckResult{},

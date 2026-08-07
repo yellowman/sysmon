@@ -477,7 +477,13 @@ struct HostDetailView: View {
                 }
                 .card(padding: 16)
 
-                if isAdmin && !host.isOK && !host.isPaused {
+                if (host.acked ?? false) && !host.isOK {
+                    Text("ACKNOWLEDGED · paging suppressed until recovery")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(Theme.subtle)
+                        .padding(.top, 4)
+                } else if isAdmin && !host.isOK && !host.isPaused {
                     Button(action: ack) {
                         Text(acking ? "ACKNOWLEDGING..." : "ACKNOWLEDGE")
                     }

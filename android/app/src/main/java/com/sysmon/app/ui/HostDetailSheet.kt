@@ -82,7 +82,10 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
             if (duration != null) DetailRow("DURATION", duration)
             DetailRow("FAIL / OK COUNT", "${host.downCount} / ${host.upCount}")
 
-            if (isAdmin && !host.isOK && !host.paused) {
+            if (host.acked && !host.isOK) {
+                DetailRow("ACKNOWLEDGED", "paging suppressed until recovery")
+            }
+            if (isAdmin && !host.isOK && !host.paused && !host.acked) {
                 Button(
                     onClick = {
                         acking = true

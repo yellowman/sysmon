@@ -272,6 +272,10 @@ type HostStatus struct {
 	StatusColor    string        `json:"status_color"`
 	Contact        string        `json:"contact,omitempty"`
 	Paused         bool          `json:"paused"`
+	// Acked means a human has said "I know" - paging for this host is
+	// suppressed until it recovers. The flag travels with every status;
+	// an invisible ack made the button look broken.
+	Acked          bool          `json:"acked,omitempty"`
 	DownCount      int64         `json:"down_count"`                 // Consecutive down count
 	UpCount        int64         `json:"up_count"`                   // Consecutive up count
 	TotalDown      int64         `json:"total_down"`                 // Total times down
