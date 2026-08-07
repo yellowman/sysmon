@@ -142,6 +142,11 @@ struct Stats: Codable, Equatable {
     }
 }
 
+struct MeResponse: Codable {
+    let username: String
+    let role: String
+}
+
 struct StatusResponse: Codable {
     let daemon: DaemonInfo?
     let hosts: [Host]

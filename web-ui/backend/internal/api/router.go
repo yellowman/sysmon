@@ -133,6 +133,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/templates", r.handleTemplates)
 	r.mux.HandleFunc("/api/templates/expand", r.handleTemplateExpand)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
+	r.mux.HandleFunc("/api/monitoring/unack/", auth.RequireAdmin(r.handleMonitoringUnack))
 	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
 	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
 
@@ -1215,6 +1216,27 @@ func (r *Router) handleAdminSessionErrors(w http.ResponseWriter, req *http.Reque
 }
 
 // Bulk operation handlers
+
+func (r *Router) handleMonitoringUnack(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/unack/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+	if err := r.monitoring.UnackHost(hostname, r.getSysmonAuthKey()); err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to un-acknowledge host: %v", err))
+		return
+	}
+	r.sendJSON(w, map[string]string{
+		"status":   "success",
+		"message":  fmt.Sprintf("Host %s un-acknowledged", hostname),
+		"hostname": hostname,
+	})
+}
 
 func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {

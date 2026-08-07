@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -84,6 +85,27 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
 
             if (host.acked && !host.isOK) {
                 DetailRow("ACKNOWLEDGED", "paging suppressed until recovery")
+                if (isAdmin) {
+                    OutlinedButton(
+                        onClick = {
+                            acking = true
+                            ackNote = null
+                            scope.launch {
+                                runCatching { Api.unackHost(host.objectName.ifEmpty { host.hostname }) }
+                                    .onSuccess {
+                                        ackNote = "Un-acknowledged - paging resumes."
+                                        StatusStore.refreshNow()
+                                    }
+                                    .onFailure { ackNote = it.message ?: "Un-acknowledge failed" }
+                                acking = false
+                            }
+                        },
+                        enabled = !acking,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(if (acking) "WORKING..." else "UN-ACKNOWLEDGE")
+                    }
+                }
             }
             if (isAdmin && !host.isOK && !host.paused && !host.acked) {
                 Button(

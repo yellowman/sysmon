@@ -99,6 +99,12 @@ data class Stats(
 )
 
 @Serializable
+data class MeResponse(
+    val username: String = "",
+    val role: String = ""
+)
+
+@Serializable
 data class StatusResponse(
     val daemon: DaemonInfo = DaemonInfo(),
     val statistics: Stats = Stats(),

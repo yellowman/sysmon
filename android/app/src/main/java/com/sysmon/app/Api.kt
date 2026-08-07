@@ -51,6 +51,17 @@ object Api {
     }
 
     // Acknowledge an active alert. Admin-only on the server.
+    // Who am I, per the server. The stored role is a login-time copy and
+    // a session outlives many app versions; the server's answer wins.
+    suspend fun me(): MeResponse = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/auth/me", "GET", null)
+        json.decodeFromString(MeResponse.serializer(), response)
+    }
+
+    suspend fun unackHost(objectName: String) = withContext(Dispatchers.IO) {
+        authedRequest("/api/monitoring/unack/" + objectName, "POST", null)
+    }
+
     suspend fun ackHost(objectName: String) = withContext(Dispatchers.IO) {
         val escaped = java.net.URLEncoder.encode(objectName, "UTF-8").replace("+", "%20")
         authedRequest("/api/monitoring/ack/$escaped", "POST", null)

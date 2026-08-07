@@ -1429,6 +1429,12 @@ void handle_retval(struct monitorent *handle_this, time_t now)
 	{
 		handle_this->checkent->upct ++;
 		handle_this->checkent->downct = 0;
+		/* An ack lives for one outage. The first OK check ends both. */
+		if (handle_this->checkent->acked)
+		{
+			handle_this->checkent->acked = FALSE;
+			object_changed(handle_this->checkent);
+		}
 		/* and maybe tell someone */
 		if ((handle_this->checkent->upct >=
 			handle_this->checkent->max_down) &&

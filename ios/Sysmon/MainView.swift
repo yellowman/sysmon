@@ -31,6 +31,7 @@ struct MainView: View {
         // One poller feeds every tab (and the badge). Run it while the app
         // is foreground; pause it in the background to save battery/data.
         .onAppear { store.start() }
+        .task { await session.refreshIdentity() }
         .onChange(of: scenePhase) { phase in
             if phase == .active { store.start() } else { store.stop() }
         }
@@ -483,6 +484,13 @@ struct HostDetailView: View {
                         .tracking(0.5)
                         .foregroundColor(Theme.subtle)
                         .padding(.top, 4)
+                    if isAdmin {
+                        Button(action: unack) {
+                            Text(acking ? "WORKING..." : "UN-ACKNOWLEDGE")
+                        }
+                        .buttonStyle(SlabButtonStyle(enabled: !acking))
+                        .disabled(acking)
+                    }
                 } else if isAdmin && !host.isOK && !host.isPaused {
                     Button(action: ack) {
                         Text(acking ? "ACKNOWLEDGING..." : "ACKNOWLEDGE")
@@ -504,6 +512,23 @@ struct HostDetailView: View {
         .background(Theme.paper)
         .navigationTitle(host.hostname)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func unack() {
+        acking = true
+        ackNote = nil
+        Task {
+            let api = API(baseURL: session.serverURL, token: session.token)
+            do {
+                try await api.unackHost(objectName: host.id)
+                ackNote = "Un-acknowledged - paging resumes."
+            } catch let e as APIError {
+                ackNote = e.message
+            } catch {
+                ackNote = "Un-acknowledge failed"
+            }
+            acking = false
+        }
     }
 
     private func ack() {

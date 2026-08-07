@@ -2078,6 +2078,21 @@ func (s *Service) AckHost(hostname string, authKey string) error {
 		})
 }
 
+// UnackHost is the inverse: the outage pages again on its next interval.
+func (s *Service) UnackHost(hostname string, authKey string) error {
+	return s.hostAction(hostname, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UNACK %s\n", object))); err != nil {
+				return fmt.Errorf("failed to send UNACK command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read UNACK response: %w", err)
+			}
+			return daemonReply("UNACK", response)
+		})
+}
+
 // UpdateHostStatus updates a host with a status note
 func (s *Service) UpdateHostStatus(hostname string, note string, authKey string) error {
 	note = sanitizeCmd(note)
