@@ -27,12 +27,6 @@ server {
         # auth_basic_user_file /etc/nginx/.htpasswd;
     }
 
-    location /static/ {
-        alias /usr/local/libexec/sysmon-web/static/;
-        expires 1h;
-        add_header Cache-Control "public, immutable";
-    }
-
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
@@ -75,12 +69,6 @@ server {
         # allow 192.168.1.0/24;
         # allow 10.0.0.0/8;
         # deny all;
-    }
-
-    location /static/ {
-        alias /usr/local/libexec/sysmon-web/static/;
-        expires 1h;
-        add_header Cache-Control "public, immutable";
     }
 
     # Security headers

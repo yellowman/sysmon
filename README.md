@@ -324,27 +324,32 @@ Three things to know:
 
 ## Quick start
 
+`./configure && make` at the top builds the daemon, and the web UI too
+if a Go toolchain is present; `make install` installs both.
+
 ### Daemon
 ```sh
 ./configure && make
+make install                                              # binaries + setuid ping helper
 cp examples/sysmon.conf.dist /usr/local/etc/sysmon.conf   # then edit
-src/sysmond -f /usr/local/etc/sysmon.conf
+sysmond -f /usr/local/etc/sysmon.conf
 ```
+
+`make install` is what puts `sysmon-ping-helper` in place setuid root.
+Without it the daemon still runs, but it has no fallback if the kernel
+refuses to send on a raw socket after dropping privileges.
 
 `examples/` also has `sysmon.conf.full`, which shows every directive, and
 `sysmon.conf.fleet` - the 500-object wireless ISP in the screenshots
 above. The fleet file is addressed entirely on loopback, so
-`src/sysmond -t -f examples/sysmon.conf.fleet` validates it and running
-it gives you something to look at while you find your way around the web
+`sysmond -t -f examples/sysmon.conf.fleet` validates it, and running it
+gives you something to look at while you find your way around the web
 UI.
 
 ### Web UI
-```sh
-cd web-ui
-make
-make install     # binary to $PREFIX/bin, pages to $PREFIX/libexec/sysmon-web
-```
-Then run it - standalone HTTP for development, a FastCGI socket for
+Built and installed by the top-level `make`; on its own it is
+`make web` / `make install-web`, or from `web-ui/` just `make`. Then run
+it - standalone HTTP for development, a FastCGI socket for
 nginx or httpd(8) in production (see `web-ui/nginx.conf.example`):
 ```sh
 sysmon-web -listen 127.0.0.1:8180 -config /usr/local/etc/sysmon.conf -debug
