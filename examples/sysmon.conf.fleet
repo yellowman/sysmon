@@ -12,6 +12,9 @@
 # reserved documentation ranges that answer nothing, which is what puts
 # the outage on the map.
 #
+# The three fiber huts are a ring rather than a star: olt-1 to
+# fiber-agg-3 and back again, so the dependency map draws it as one.
+#
 # It is an example, not a starting point for your network: change the
 # addresses, the contact, and the thresholds that matter to you.
 #
@@ -4322,6 +4325,7 @@ object olt-1 {
 	desc "OLT 1, fiber hut 1";
 	contact "noc@example.net";
 	dep "core-rtr-2";
+	dep "fiber-agg-3";
 };
 
 object olt-1-rtt {
@@ -4484,7 +4488,7 @@ object olt-2 {
 	type ping;
 	desc "OLT 2, fiber hut 2";
 	contact "noc@example.net";
-	dep "core-rtr-2";
+	dep "fiber-agg-1";
 };
 
 object olt-2-rtt {
@@ -4647,7 +4651,7 @@ object olt-3 {
 	type ping;
 	desc "OLT 3, fiber hut 3";
 	contact "noc@example.net";
-	dep "core-rtr-2";
+	dep "fiber-agg-2";
 };
 
 object olt-3-rtt {
