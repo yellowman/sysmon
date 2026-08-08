@@ -340,12 +340,17 @@ UI.
 
 ### Web UI
 ```sh
-cd web-ui/backend
-go build ./cmd/sysmon-web
-# development: standalone HTTP
-./sysmon-web -listen 127.0.0.1:8180 -config /usr/local/etc/sysmon.conf -debug
-# production: FastCGI socket for nginx/httpd - see web-ui/nginx.conf.example
+cd web-ui
+make
+make install     # binary to $PREFIX/bin, pages to $PREFIX/libexec/sysmon-web
 ```
+Then run it - standalone HTTP for development, a FastCGI socket for
+nginx or httpd(8) in production (see `web-ui/nginx.conf.example`):
+```sh
+sysmon-web -listen 127.0.0.1:8180 -config /usr/local/etc/sysmon.conf -debug
+```
+`make dev` does the same thing without installing. Templates and static
+assets are read at startup, so restart the service after `make install`.
 First login is `admin` / `sysmon` - change it immediately (Admin page).
 State lives in `/var/lib/sysmon` (auth, push credentials, settings,
 alert history).
