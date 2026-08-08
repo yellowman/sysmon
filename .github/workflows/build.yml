@@ -1,0 +1,87 @@
+name: build
+
+# The daemon and the web UI had no CI at all - only the two app
+# workflows - so `make check` and `go test ./...` only ever ran when
+# somebody remembered to run them.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  daemon:
+    name: sysmond (C)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex libwrap0-dev libncurses-dev libssl-dev
+
+      - name: Configure and build
+        run: ./configure && make
+
+      - name: Test suites
+        # trapdecode and confgen fuzz (200k and 20k rounds) as part of this.
+        run: cd src && make check
+
+      - name: The shipped examples must parse
+        run: |
+          for f in examples/sysmon.conf.dist examples/sysmon.conf.full \
+                   examples/sysmon.conf.fleet; do
+            echo "== $f"
+            src/sysmond -t -f "$f"
+          done
+
+  web:
+    name: sysmon-web (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: web-ui/backend/go.mod
+          cache-dependency-path: web-ui/backend/go.sum
+
+      - name: Vet
+        run: cd web-ui/backend && go vet ./...
+
+      - name: Test
+        run: cd web-ui/backend && go test ./...
+
+      - name: Build
+        run: cd web-ui/backend && go build ./cmd/sysmon-web
+
+      - name: Templates and assets are installed, not just built
+        # make install is the path a deployment actually takes; a page
+        # that is not copied is a page nobody sees.
+        run: |
+          make -C web-ui install PREFIX="$PWD/stage"
+          test -x stage/bin/sysmon-web
+          test -f stage/libexec/sysmon-web/templates/base.html
+          test -f stage/libexec/sysmon-web/static/app.css
+
+  css:
+    name: Tailwind build is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Rebuild static/app.css and diff it
+        # app.css is committed so `go build` needs no node. That only
+        # holds if the committed copy matches the templates it came from.
+        run: |
+          cd web-ui/backend
+          npx --yes tailwindcss@3.4.19 -c tailwind.config.js \
+            -i tailwind.input.css -o /tmp/app.css --minify
+          if ! diff -q /tmp/app.css static/app.css; then
+            echo "static/app.css is stale - run 'make css' in web-ui/ and commit it"
+            diff <(head -c 400 /tmp/app.css) <(head -c 400 static/app.css) || true
+            exit 1
+          fi

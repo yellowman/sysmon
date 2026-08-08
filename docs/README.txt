@@ -22,15 +22,17 @@ Architecture
 
 Prerequisites
 
-  - Go 1.21 or later
-  - Running sysmon daemon
-  - Web server with FastCGI support (nginx, Apache) for production
+  - Go 1.25 or later (see web-ui/backend/go.mod)
+  - One or more sysmond daemons, each given a token so it dials in
+  - Web server with FastCGI support (nginx, httpd) for production
 
 Building
 
 `bash
 cd web-ui
-make build
+make
+
+The top-level `make` builds this too when a Go toolchain is present.
 `
 
 Development Mode
@@ -48,12 +50,10 @@ Or manually:
 `bash
 cd backend
 go run ./cmd/sysmon-web \
-  - listen :8080 \
-  - templates ./templates \
-  - config /etc/sysmon.conf \
-  - sysmon localhost:3333 \
-  - backups /var/backups/sysmon \
-  - audit /var/log/sysmon-web-audit.log
+  -listen :8080 \
+  -config /etc/sysmon.conf \
+  -backups /var/backups/sysmon \
+  -audit /var/log/sysmon-web-audit.log
 `
 
 Installation
@@ -83,12 +83,10 @@ Type=simple
 User=www-data
 Group=www-data
 ExecStart=/usr/local/bin/sysmon-web \
-  - socket /var/run/sysmon-web.sock \
-  - config /etc/sysmon.conf \
-  - sysmon localhost:3333 \
-  - templates /usr/local/libexec/sysmon-web/templates \
-  - backups /var/backups/sysmon \
-  - audit /var/log/sysmon-web-audit.log
+  -socket /var/run/sysmon-web.sock \
+  -config /etc/sysmon.conf \
+  -backups /var/backups/sysmon \
+  -audit /var/log/sysmon-web-audit.log
 Restart=always
 
 [Install]
@@ -164,14 +162,23 @@ Command-line flags:
   - -socket - FastCGI socket path (default: /var/run/sysmon-web.sock)
   - -listen - HTTP listen address for dev mode (empty = FastCGI mode)
   - -config - Sysmon config file path (default: /etc/sysmon.conf)
-  - -sysmon - Sysmon daemon address (default: localhost:3333)
-  - -templates - Templates directory (default: ./templates)
+  - -templates - Templates directory (default: auto-detect)
+  - -static - Static asset directory (default: auto-detect)
   - -backups - Backup directory (default: /var/backups/sysmon)
   - -audit - Audit log file (default: /var/log/sysmon-web-audit.log)
+  - -foreground - Do not detach (for systemd Type=simple)
+  - -agent-listen - Address daemons dial in on (default: :1347)
+  - -mint-agent, -list-agents, -revoke-agent, -replace-agent - agent tokens
+
+sysmon-web does not dial daemons. Each sysmond is given a token and an
+aggregator address and connects here; there is no daemon address to
+configure.
 
 Security Considerations
 
-1. Authentication: This version has no built-in authentication. Use reverse proxy authentication (nginx auth_basic, oauth2_proxy, etc.)
+1. Authentication: built in - users, sessions and admin/user roles,
+   first login admin/sysmon, which you change immediately on the Admin
+   page. Reverse-proxy auth on top is optional, not a substitute.
 
 2. Authorization: The web UI can modify the sysmon configuration. Restrict access appropriately.
 
@@ -217,7 +224,7 @@ All configuration changes are logged with:
 
 Sysmon Protocol
 
-The web UI communicates with sysmon daemon using the XML mode protocol. After connecting to the daemon's client port, it sends MODE xml to enable structured XML output, then uses commands like STATO, SHOWOBJ, and UPD to retrieve monitoring data.
+The web UI communicates with sysmon daemon using the XML mode protocol. Each daemon dials in and the conversation runs over the connection it opened: MODE xml to enable structured XML output, then commands like STATO, SHOWOBJ, ACK and UPD.
 
 Browser Compatibility
 
@@ -282,7 +289,7 @@ web-ui/
 |   |   +-- monitoring/     # Monitoring service (sysmon connection)
 |   |   +-- models/         # Data models
 |   +-- templates/          # HTML templates
-|   +-- static/             # Static assets (future)
+|   +-- static/             # Tailwind build, Alpine, Chart.js, fonts
 |   +-- go.mod
 +-- Makefile
 +-- README.md

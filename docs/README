@@ -2,18 +2,22 @@
 
 Installation Notes:
 
-	The sysmond daemon can now drop root privileges after initialization
-for improved security. A setuid helper (sysmon-ping-helper) is installed
-to handle ICMP operations when running unprivileged.
+	The sysmond daemon drops root privileges after initialization, on
+its own, with nothing to configure. Its raw ICMP sockets are opened
+while still root and keep working afterwards, because a raw socket's
+privilege is checked when it is created rather than on every send.
 
-	When using "config drop_privileges", you must configure a writable
-directory for status file generation with "config statustempdir". Create
-a directory owned by the dropped-privilege user (nobody/daemon):
-	mkdir -p /var/run/sysmon
-	chown nobody:nobody /var/run/sysmon
-	chmod 755 /var/run/sysmon
+	"make install" also installs a small setuid helper
+(sysmon-ping-helper). It is only a fallback, for a kernel that refuses
+to send on those sockets once privileges are gone, and the daemon finds
+that out from the send itself rather than assuming it.
 
-	You may need ncurses, net-snmp libraries, and should have gcc for
+	Everything the daemon writes goes in one state directory, by
+default /var/db/sysmon, created and handed to the unprivileged user at
+startup. Nothing else needs making writable.
+
+	You may need ncurses; sysmond speaks SNMP itself and needs no
+net-snmp. You should have gcc for
 compiling this program. For JSON output support, the daemon can write
 monitoring data in JSON format. A web-based configuration manager is
 included in the web-ui/ directory.
