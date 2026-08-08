@@ -51,9 +51,23 @@ object Api {
     }
 
     // Acknowledge an active alert. Admin-only on the server.
-    suspend fun ackHost(objectName: String) = withContext(Dispatchers.IO) {
+    // Who am I, per the server. The stored role is a login-time copy and
+    // a session outlives many app versions; the server's answer wins.
+    suspend fun me(): MeResponse = withContext(Dispatchers.IO) {
+        val response = authedRequest("/api/auth/me", "GET", null)
+        json.decodeFromString(MeResponse.serializer(), response)
+    }
+
+    suspend fun unackHost(objectName: String) = withContext(Dispatchers.IO) {
+        authedRequest("/api/monitoring/unack/" + objectName, "POST", null)
+    }
+
+    // The server refuses an ack without a note: triage means saying
+    // what you know, not just clicking.
+    suspend fun ackHost(objectName: String, note: String) = withContext(Dispatchers.IO) {
         val escaped = java.net.URLEncoder.encode(objectName, "UTF-8").replace("+", "%20")
-        authedRequest("/api/monitoring/ack/$escaped", "POST", null)
+        authedRequest("/api/monitoring/ack/$escaped", "POST",
+            "{\"note\": " + Json.encodeToString(note) + "}")
     }
 
     suspend fun subscribePush(fcmToken: String) = withContext(Dispatchers.IO) {

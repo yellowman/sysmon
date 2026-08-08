@@ -14,6 +14,9 @@ struct Host: Codable, Identifiable, Equatable {
     let ipv6Address: String?
     let overallStatus: String
     let paused: Bool?
+    // A human has claimed this alert: it moves off the active board
+    // until the host recovers. Paging is unaffected.
+    let acked: Bool?
     let downCount: Int64
     let upCount: Int64
     let timeUp: Int64?
@@ -44,6 +47,7 @@ struct Host: Codable, Identifiable, Equatable {
         case ipv6Address = "ipv6_address"
         case overallStatus = "overall_status"
         case paused
+        case acked
         case downCount = "down_count"
         case upCount = "up_count"
         case timeUp = "time_up"
@@ -137,6 +141,11 @@ struct Stats: Codable, Equatable {
         case warningHosts = "warning_hosts"
         case criticalHosts = "critical_hosts"
     }
+}
+
+struct MeResponse: Codable {
+    let username: String
+    let role: String
 }
 
 struct StatusResponse: Codable {

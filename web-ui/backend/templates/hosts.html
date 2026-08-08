@@ -30,6 +30,7 @@
                 <option value="OK">OK</option>
                 <option value="WARNING">Warning</option>
                 <option value="CRITICAL">Critical</option>
+                <option value="acked">Acked</option>
             </select>
             <select x-model="perPage" @change="changePerPage()" class="px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-gray-900">
                 <option value="100">100</option>
@@ -61,6 +62,12 @@
                         class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors flex items-center">
                     <i class="fas fa-check mr-2"></i>
                     Acknowledge
+                </button>
+                <button @click="bulkUnacknowledge()"
+                        class="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors flex items-center"
+                        title="Put these back on the active board">
+                    <i class="fas fa-rotate-left mr-2"></i>
+                    Un-acknowledge
                 </button>
                 <button @click="showBulkUpdateModal = true"
                         class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center">
@@ -538,7 +545,8 @@ function hostsPage() {
                     (host.description && host.description.toLowerCase().includes(this.searchQuery.toLowerCase())) ||
                     (host.ipv4_address && host.ipv4_address.includes(this.searchQuery));
 
-                const matchesStatus = !this.filterStatus || host.overall_status === this.filterStatus;
+                const matchesStatus = !this.filterStatus
+                    || (this.filterStatus === 'acked' ? !!host.acked : host.overall_status === this.filterStatus);
 
                 return matchesSearch && matchesStatus;
             });
@@ -831,15 +839,14 @@ function hostsPage() {
                 return;
             }
 
-            if (!confirm(`Acknowledge ${this.selectedHosts.length} host(s)?`)) {
-                return;
-            }
+            const note = (prompt(`Acknowledge ${this.selectedHosts.length} host(s)?\n\nA note is required - one note covers the batch:`) || '').trim();
+            if (!note) return;
 
             try {
                 const result = await apiCall('/api/monitoring/bulk/ack', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ hostnames: this.selectedHosts })
+                    body: JSON.stringify({ hostnames: this.selectedHosts, note })
                 });
                 alert(`Acknowledged ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
@@ -851,6 +858,24 @@ function hostsPage() {
                 console.error('Bulk acknowledge failed:', e);
                 alert(`Error: ${e.message}`);
             }
+        },
+
+        async bulkUnacknowledge() {
+            if (this.selectedHosts.length === 0) {
+                alert('No hosts selected');
+                return;
+            }
+            if (!confirm(`Un-acknowledge ${this.selectedHosts.length} host(s)? They go back on the active board.`)) {
+                return;
+            }
+            let ok = 0, failed = 0;
+            for (const h of this.selectedHosts) {
+                try { await apiCall(`/api/monitoring/unack/${h}`, { method: 'POST' }); ok++; }
+                catch (e) { failed++; }
+            }
+            alert(`Un-acknowledged ${ok} host(s).` + (failed ? ` Failed: ${failed}` : ''));
+            this.clearSelection();
+            await this.fetchHosts();
         },
 
         async bulkUpdate() {

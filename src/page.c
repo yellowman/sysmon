@@ -344,6 +344,7 @@ void page_someone(struct hostinfo *svc, int newstate, time_t now_t)
 	if (svc == NULL)
 		return;
 
+
 	/* Getuid can never fail per man page */
 	myuid = getuid();
 

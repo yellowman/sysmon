@@ -33,7 +33,7 @@ func TestHostActionsRouteBySite(t *testing.T) {
 		}
 	}
 
-	check("AckHost", s.AckHost("metro:core", ""))
+	check("AckHost", s.AckHost("metro:core", "note", ""))
 	check("UpdateHostStatus", s.UpdateHostStatus("metro:core", "a note", ""))
 
 	_, err := s.ToggleTrace("metro:core", "")
@@ -47,7 +47,7 @@ func TestHostActionsRouteBySite(t *testing.T) {
 // install never qualifies anything.
 func TestHostActionKeepsUnqualifiedNames(t *testing.T) {
 	s := NewService()
-	err := s.AckHost("core", "")
+	err := s.AckHost("core", "note", "")
 	if err == nil {
 		t.Fatal("expected an error from an empty fleet")
 	}
@@ -62,7 +62,7 @@ func TestBulkResultsStayInOrderAcrossSites(t *testing.T) {
 	s := NewService()
 
 	hosts := []string{"metro:core", "depot:core", "metro:edge", "", "depot:edge"}
-	results := s.BulkAckHosts(hosts, "")
+	results := s.BulkAckHosts(hosts, "note", "")
 
 	if len(results) != len(hosts) {
 		t.Fatalf("got %d results for %d hosts", len(results), len(hosts))

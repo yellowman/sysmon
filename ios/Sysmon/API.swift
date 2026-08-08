@@ -64,10 +64,19 @@ struct API {
 
     // Acknowledge an active alert. Admin-only on the server; the caller
     // gates the UI on role but the server is the real authority.
-    func ackHost(objectName: String) async throws {
+    // The server refuses an ack without a note: triage means saying
+    // what you know, not just clicking.
+    func ackHost(objectName: String, note: String) async throws {
         let escaped = objectName.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed) ?? objectName
-        try await postVoid("/api/monitoring/ack/\(escaped)", body: EmptyBody())
+        try await postVoid("/api/monitoring/ack/\(escaped)", body: ["note": note])
+    }
+
+    // The inverse: the alert returns to the active board.
+    func unackHost(objectName: String) async throws {
+        let escaped = objectName.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed) ?? objectName
+        try await postVoid("/api/monitoring/unack/\(escaped)", body: EmptyBody())
     }
 
     private func send<B: Encodable>(_ path: String, method: String, body: B?) async throws -> Data {

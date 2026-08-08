@@ -102,6 +102,14 @@ The config as a graph, coloured live. When a tower router stops
 answering, everything behind it goes with it, and sysmond pages you about
 the router rather than the forty things behind it.
 
+![A fiber ring drawn as a ring](docs/screenshots/map-ring.png)
+
+A ring in the config is drawn as a ring. The three fiber huts in the
+example depend on each other in a loop - a cut in one span leaves every
+hut reachable the other way round - so the map puts them on a circle
+with their own dependencies as its rim, rather than stacking them in a
+column with the lines crossing.
+
 #### Push administration
 
 ![Push subscribers and the delivery pipeline panel](docs/screenshots/admin-push.png)

@@ -272,6 +272,12 @@ type HostStatus struct {
 	StatusColor    string        `json:"status_color"`
 	Contact        string        `json:"contact,omitempty"`
 	Paused         bool          `json:"paused"`
+	// Acked is triage state: a human has seen this outage and moved it
+	// off the active board. It clears on the first OK check.
+	Acked          bool          `json:"acked,omitempty"`
+	// Notes is the operator-attached note (UPD) - required when acking,
+	// so the board never shows an anonymous "someone knows".
+	Notes          string        `json:"notes,omitempty"`
 	DownCount      int64         `json:"down_count"`                 // Consecutive down count
 	UpCount        int64         `json:"up_count"`                   // Consecutive up count
 	TotalDown      int64         `json:"total_down"`                 // Total times down

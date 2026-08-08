@@ -57,6 +57,9 @@ fun MainScreen(onLogout: () -> Unit) {
     // One poller feeds every tab (and the badge). Run it while the app is
     // foreground; pause it when backgrounded to save battery/data.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { StatusStore.start() }
+    // The server's answer on who this session belongs to beats the
+    // login-time copy in prefs; see Session.refreshIdentity.
+    LaunchedEffect(Unit) { Session.refreshIdentity() }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { StatusStore.stop() }
 
     Scaffold(

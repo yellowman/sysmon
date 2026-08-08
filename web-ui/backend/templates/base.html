@@ -5,24 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sysmon - {{block "title" .}}Monitoring{{end}}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-    tailwind.config = {
-        theme: {
-            extend: {
-                fontFamily: {
-                    sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-                    mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
-                },
-            }
-        }
-    }
-    </script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <!-- Everything below ships in the binary and is served from
+         /static/ - no CDN, so the UI works on a network with no route
+         to the internet, which is where monitoring consoles live. -->
+    <link rel="stylesheet" href="/static/fonts/fonts.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/fontawesome/css/all.min.css">
+    <script defer src="/static/alpine.min.js"></script>
+    <script src="/static/chart.umd.min.js"></script>
     <style>
         [x-cloak] { display: none !important; }
     </style>
@@ -32,12 +22,16 @@
     <nav class="bg-white border-b border-gray-200"
          x-data="Object.assign({mobileOpen: false}, fleetState())" x-init="loadSites()">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-14">
-                <div class="flex">
+            <div class="flex justify-between gap-4 h-14">
+                <!-- The links give way, the controls never do: ten links
+                     plus a fleet selector overflow a ~1300px window, and
+                     an overflowing flex row silently pushes whatever is
+                     rightmost - the Logout button - off screen. -->
+                <div class="flex min-w-0">
                     <div class="flex-shrink-0 flex items-center">
                         <span class="text-lg font-extrabold tracking-tight text-gray-900">sys<span class="text-blue-600">mon</span></span>
                     </div>
-                    <div class="hidden sm:ml-16 sm:flex sm:space-x-8 items-center">
+                    <div class="hidden min-w-0 overflow-x-auto nav-scroll sm:ml-8 sm:flex sm:space-x-5 items-center">
                         <a href="/" class="nav-link {{if eq .Active "dashboard"}}active{{end}}">
                             <i class="fas fa-tachometer-alt mr-2"></i>Dashboard
                         </a>
@@ -70,7 +64,7 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-shrink-0 items-center gap-3">
                     <!-- Which sysmond are we looking at. Only shown when
                          there is more than one; a single-box install sees
                          no selector at all. -->
@@ -503,9 +497,12 @@
     </script>
 
     <style>
+        .nav-scroll { scrollbar-width: none; }
+        .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-link {
             display: inline-flex;
             align-items: center;
+            white-space: nowrap;
             padding: 0 0.25rem;
             border-bottom: 2px solid transparent;
             font-size: 0.8125rem;

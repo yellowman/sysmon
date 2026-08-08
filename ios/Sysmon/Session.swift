@@ -80,6 +80,20 @@ class Session: ObservableObject {
         await requestPushPermission()
     }
 
+    // The persisted role is whatever the login response said, possibly
+    // versions ago - a session predating role storage has none, and every
+    // admin control stays hidden while the server still says admin. Ask
+    // the server and correct the stored copy.
+    func refreshIdentity() async {
+        guard token != nil, !serverURL.isEmpty else { return }
+        let api = API(baseURL: serverURL, token: token)
+        if let me: MeResponse = try? await api.get("/api/auth/me"),
+           !me.username.isEmpty {
+            self.username = me.username
+            self.role = me.role
+        }
+    }
+
     func logout() {
         let serverSnapshot = serverURL
         let tokenSnapshot = token

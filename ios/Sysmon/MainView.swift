@@ -31,6 +31,7 @@ struct MainView: View {
         // One poller feeds every tab (and the badge). Run it while the app
         // is foreground; pause it in the background to save battery/data.
         .onAppear { store.start() }
+        .task { await session.refreshIdentity() }
         .onChange(of: scenePhase) { phase in
             if phase == .active { store.start() } else { store.stop() }
         }
@@ -70,11 +71,11 @@ struct AlertsView: View {
         let base: [Host]
         switch sortKey {
         case .timeDown:
-            base = store.alerts.sorted { ($0.timeFailed ?? 0) < ($1.timeFailed ?? 0) }
+            base = store.unackedAlerts.sorted { ($0.timeFailed ?? 0) < ($1.timeFailed ?? 0) }
         case .name:
-            base = store.alerts.sorted { $0.hostname.lowercased() < $1.hostname.lowercased() }
+            base = store.unackedAlerts.sorted { $0.hostname.lowercased() < $1.hostname.lowercased() }
         case .ip:
-            base = store.alerts.sorted { ipSortable($0.ip) < ipSortable($1.ip) }
+            base = store.unackedAlerts.sorted { ipSortable($0.ip) < ipSortable($1.ip) }
         }
         return sortAscending ? base : base.reversed()
     }
@@ -97,8 +98,8 @@ struct AlertsView: View {
 
                     SectionHeader(
                         "ACTIVE",
-                        accent: store.alerts.isEmpty ? nil
-                            : "\(store.alerts.count) ALERT\(store.alerts.count == 1 ? "" : "S")"
+                        accent: store.unackedAlerts.isEmpty ? nil
+                            : "\(store.unackedAlerts.count) ALERT\(store.unackedAlerts.count == 1 ? "" : "S")"
                     )
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -108,7 +109,7 @@ struct AlertsView: View {
                     } else if let err = store.error, store.hosts.isEmpty {
                         ErrorBox(message: err) { Task { await store.refreshNow() } }
                             .padding(.horizontal, 16)
-                    } else if store.alerts.isEmpty {
+                    } else if store.unackedAlerts.isEmpty && store.ackedAlerts.isEmpty {
                         AllClearCard(total: store.stats?.totalHosts ?? store.hosts.count,
                                      degraded: store.degraded)
                             .padding(.horizontal, 16)
@@ -122,6 +123,21 @@ struct AlertsView: View {
                             }
                         }
                         .padding(.horizontal, 16)
+                    }
+
+                    if !store.ackedAlerts.isEmpty {
+                        SectionHeader("ACKNOWLEDGED", accent: "\(store.ackedAlerts.count)")
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                        VStack(spacing: 8) {
+                            ForEach(store.ackedAlerts) { host in
+                                NavigationLink { HostDetailView(host: host) }
+                                    label: { HostRow(host: host) }
+                                    .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .opacity(0.7)
                     }
                 }
                 .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.hosts)
@@ -424,6 +440,7 @@ struct HostDetailView: View {
     let host: Host
     @EnvironmentObject var session: Session
     @State private var acking = false
+    @State private var ackText = ""
     @State private var ackNote: String?
 
     private var isAdmin: Bool { session.role == "admin" }
@@ -477,13 +494,30 @@ struct HostDetailView: View {
                 }
                 .card(padding: 16)
 
-                if isAdmin && !host.isOK && !host.isPaused {
+                if (host.acked ?? false) && !host.isOK {
+                    Text("ACKNOWLEDGED · off the active board until it recovers")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(Theme.subtle)
+                        .padding(.top, 4)
+                    if isAdmin {
+                        Button(action: unack) {
+                            Text(acking ? "WORKING..." : "UN-ACKNOWLEDGE")
+                        }
+                        .buttonStyle(SlabButtonStyle(enabled: !acking))
+                        .disabled(acking)
+                    }
+                } else if isAdmin && !host.isOK && !host.isPaused {
+                    TextField("Ack note (required) - say what you know",
+                              text: $ackText, axis: .vertical)
+                        .lineLimit(2...4)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.top, 4)
                     Button(action: ack) {
                         Text(acking ? "ACKNOWLEDGING..." : "ACKNOWLEDGE")
                     }
-                    .buttonStyle(SlabButtonStyle(enabled: !acking))
-                    .disabled(acking)
-                    .padding(.top, 4)
+                    .buttonStyle(SlabButtonStyle(enabled: !acking && !ackText.trimmingCharacters(in: .whitespaces).isEmpty))
+                    .disabled(acking || ackText.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 if let note = ackNote {
                     Text(note)
@@ -500,13 +534,31 @@ struct HostDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private func unack() {
+        acking = true
+        ackNote = nil
+        Task {
+            let api = API(baseURL: session.serverURL, token: session.token)
+            do {
+                try await api.unackHost(objectName: host.id)
+                ackNote = "Un-acknowledged - back on the active board."
+            } catch let e as APIError {
+                ackNote = e.message
+            } catch {
+                ackNote = "Un-acknowledge failed"
+            }
+            acking = false
+        }
+    }
+
     private func ack() {
         acking = true
         ackNote = nil
         Task {
             let api = API(baseURL: session.serverURL, token: session.token)
             do {
-                try await api.ackHost(objectName: host.id)
+                try await api.ackHost(objectName: host.id,
+                                      note: ackText.trimmingCharacters(in: .whitespaces))
                 ackNote = "Acknowledged - sysmond will suppress further alerts."
             } catch let e as APIError {
                 ackNote = e.message

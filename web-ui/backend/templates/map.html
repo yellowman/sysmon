@@ -47,11 +47,11 @@
             </p>
         </div>
         <div class="flex items-center gap-2">
-            <div class="flex items-center gap-1.5" x-show="sitePickerSites.length" x-cloak>
+            <div class="flex items-center gap-1.5">
                 <label class="text-xs text-gray-500">Site</label>
-                <select @change="pickSite($event.target.value)"
-                        class="text-sm border border-gray-200 rounded px-2 py-1.5 bg-white max-w-[14rem]">
-                    <option value="" :selected="site === ''">This server</option>
+                <select @change="pickSite($event.target.value)" :disabled="!sitePickerSites.length"
+                        class="text-sm border border-gray-200 rounded px-2 py-1.5 bg-white max-w-[14rem] disabled:text-gray-400">
+                    <option x-show="!sitePickerSites.length" value="">No connected sysmond</option>
                     <template x-for="s in sitePickerSites" :key="s.site">
                         <option :value="s.site" :selected="site === s.site"
                                 x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
@@ -117,8 +117,9 @@
         <span><span x-text="stats.total"></span> hosts</span>
         <span><span x-text="stats.roots"></span> roots</span>
         <span><span x-text="stats.depth"></span> levels deep</span>
-        <span x-show="stats.ring > 0" class="text-amber-600" title="Hosts in a dependency ring - normal for redundant paths">
-            <span x-text="stats.ring"></span> in rings
+        <span x-show="stats.ring > 0" class="text-amber-600" title="Dependency rings - redundant paths, drawn as rings">
+            <span x-text="stats.rings"></span> ring<span x-show="stats.rings !== 1">s</span>,
+            <span x-text="stats.ring"></span> hosts
         </span>
         <span x-show="stats.multi > 0" class="text-indigo-600">
             <span x-text="stats.multi"></span> with multiple parents
@@ -272,7 +273,7 @@
             <i class="fas fa-link text-gray-500 w-4"></i>
             <span>Draw dependency from here</span>
         </button>
-        <a :href="'/host-detail.html?hostname=' + encodeURIComponent(ctx?.host?.id || '')"
+        <a :href="'/host-detail.html?hostname=' + encodeURIComponent((site ? site + ':' : '') + (ctx?.host?.id || ''))"
            class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 no-underline text-gray-900">
             <i class="fas fa-chart-line text-gray-500 w-4"></i>
             <span>Open host detail</span>
@@ -314,7 +315,7 @@
                 <div><div class="text-xs text-gray-400">Depends on</div><div class="mono" x-text="selected.dependencies || '(root)'"></div></div>
                 <div><div class="text-xs text-gray-400">Description</div><div x-text="selected.notes || '-'"></div></div>
                 <div class="col-span-2 md:col-span-4">
-                    <a :href="'/host-detail.html?hostname=' + encodeURIComponent(selected.id)"
+                    <a :href="'/host-detail.html?hostname=' + encodeURIComponent((site ? site + ':' : '') + selected.id)"
                        class="text-blue-600 text-xs hover:underline">Open host detail &rarr;</a>
                 </div>
             </div>
@@ -447,6 +448,9 @@ function mapPage() {
                 this.sitePickerSites.push({ site: this.site,
                     description: this.site + ' (no longer in the fleet)', reachable: false });
             }
+            if (!this.site && this.sitePickerSites.length) {
+                this.site = this.sitePickerSites[0].site;
+            }
         },
         hosts: [],
         version: '',
@@ -460,6 +464,7 @@ function mapPage() {
         staleHosts: {},
         nodes: [],
         edges: [],
+        ringCircles: [],
         collapsed: {},
         stats: { total: 0, roots: 0, depth: 0, hidden: 0 },
         selected: null,
@@ -502,7 +507,12 @@ function mapPage() {
         statusTimer: null,
 
         async init() {
-            this.loadSitesForPicker();
+            // Sites first: the config fetch below needs to know which box.
+            await this.loadSitesForPicker();
+            if (!this.sitePickerSites.length) {
+                this.notice = 'No sysmond is connected over the agent link yet - there is nothing to draw. Add a box from the Fleet page.';
+                return;
+            }
             // The map is drawn from the CONFIG, so paint as soon as that
             // arrives. Live status only tints the nodes and can be slow on
             // a cold cache with hundreds of hosts - never block on it.
@@ -781,6 +791,71 @@ function mapPage() {
             Object.values(kids).forEach(l => l.sort((a, b) => a.id.localeCompare(b.id)));
             roots.sort((a, b) => a.id.localeCompare(b.id));
 
+            // Rings are strongly connected components: every member can
+            // reach every other, which is what a redundant path looks like
+            // in a dependency graph. Finding them as components - rather
+            // than asking "is this node in some cycle" - is what lets each
+            // ring be drawn as one ring. Tarjan, iterative, because an
+            // 800-host config would blow the stack on the recursive form.
+            const sccOf = {}, comps = [];
+            {
+                let idx = 0;
+                const index = {}, low = {}, onStack = {}, stack = [];
+                for (const h of this.hosts) {
+                    if (!h.id || index[h.id] !== undefined) continue;
+                    const work = [{ v: h.id, i: 0 }];
+                    while (work.length) {
+                        const f = work[work.length - 1];
+                        if (f.i === 0) {
+                            index[f.v] = low[f.v] = idx++;
+                            stack.push(f.v); onStack[f.v] = true;
+                        }
+                        const ps = parents[f.v] || [];
+                        let descended = false;
+                        while (f.i < ps.length) {
+                            const w = ps[f.i++];
+                            if (index[w] === undefined) { work.push({ v: w, i: 0 }); descended = true; break; }
+                            if (onStack[w]) low[f.v] = Math.min(low[f.v], index[w]);
+                        }
+                        if (descended) continue;
+                        if (low[f.v] === index[f.v]) {
+                            const comp = [];
+                            for (;;) {
+                                const w = stack.pop(); onStack[w] = false; comp.push(w);
+                                if (w === f.v) break;
+                            }
+                            comp.forEach(m => { sccOf[m] = comps.length; });
+                            comps.push(comp);
+                        }
+                        work.pop();
+                        if (work.length) {
+                            const up = work[work.length - 1].v;
+                            low[up] = Math.min(low[up], low[f.v]);
+                        }
+                    }
+                }
+            }
+
+            const ringOf = {};        // node id -> ring id (rings only)
+            const ringMembers = {};   // ring id -> members in ring order
+            const ring = new Set();
+            comps.forEach((comp, cid) => {
+                if (comp.length < 2) return;
+                comp.forEach(m => { ringOf[m] = cid; ring.add(m); });
+                // Walk the ring to order it, so neighbours on the circle are
+                // neighbours in the config: the ring's own edges become its
+                // perimeter instead of chords crossing the middle.
+                const inRing = new Set(comp), order = [], seen = new Set();
+                let cur = comp.slice().sort()[0];
+                while (cur && !seen.has(cur)) {
+                    order.push(cur); seen.add(cur);
+                    cur = (parents[cur] || []).find(x => inRing.has(x) && !seen.has(x)) ||
+                          (kids[cur] || []).map(k => k.id).find(x => inRing.has(x) && !seen.has(x));
+                }
+                comp.forEach(m => { if (!seen.has(m)) order.push(m); });
+                ringMembers[cid] = order;
+            });
+
             // Depth = shortest path from a root, computed by BFS. A
             // longest-path walk is undefined once dependencies form a
             // ring (real networks have them: two routers each depending
@@ -819,36 +894,75 @@ function mapPage() {
             this.hosts.forEach(h => {
                 if (h.id && depth[h.id] === undefined) { depth[h.id] = 0; visible.add(h.id); }
             });
+            // One ring sits in one column: its members share the shallowest
+            // depth any of them reached, so the circle is not smeared across
+            // two columns by the order the BFS happened to arrive in.
+            Object.values(ringMembers).forEach(ms => {
+                const d = Math.min(...ms.map(m => depth[m] === undefined ? 0 : depth[m]));
+                ms.forEach(m => { depth[m] = d; });
+            });
 
             const COL = 215, ROW = 46;
             const nodes = [], pos = {};
             const q = this.search.trim().toLowerCase();
             let row = 0, maxDepth = 0;
             const placed = new Set();
+            const ringGeom = {};
+
+            // A ring is laid out as a ring: members evenly spaced on a
+            // circle, in config order. The radius grows with the member
+            // count so the boxes never touch.
+            const placeRing = (cid) => {
+                const members = ringMembers[cid].filter(m => visible.has(m));
+                if (members.length < 2) {
+                    // Half a ring is not a ring. With its neighbours
+                    // collapsed away there is nothing circular left to
+                    // show, so the survivor sits in the ordinary column.
+                    members.forEach(m => {
+                        placed.add(m);
+                        const manual = this.positions[m];
+                        pos[m] = manual ? { x: manual.x, y: manual.y }
+                                        : { x: (depth[m] || 0) * COL, y: row * ROW };
+                        if (!manual) row++;
+                    });
+                    return;
+                }
+                const n = members.length;
+                const r = n < 3 ? 132 : Math.max(132, 172 / (2 * Math.sin(Math.PI / n)));
+                const cx = (depth[members[0]] || 0) * COL + r;
+                const cy = row * ROW + r;
+                let anyMoved = false;
+                members.forEach((m, i) => {
+                    placed.add(m);
+                    const manual = this.positions[m];
+                    if (manual) { pos[m] = { x: manual.x, y: manual.y }; anyMoved = true; return; }
+                    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+                    pos[m] = { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+                });
+                row += Math.ceil((2 * r + ROW) / ROW);
+                // A hand-placed member means the circle is no longer where
+                // the ring is; drawing it would be a lie about the layout.
+                if (!anyMoved) ringGeom[cid] = { cx, cy, r, n };
+            };
 
             const place = (h) => {
                 if (placed.has(h.id) || !visible.has(h.id)) return;
+                const cid = ringOf[h.id];
+                if (cid !== undefined) {
+                    placeRing(cid);
+                    // Every member's branch, not just the one we arrived on.
+                    ringMembers[cid].forEach(m => {
+                        (kids[m] || []).forEach(c => {
+                            if ((parents[c.id] || [])[0] === m) place(c);
+                        });
+                    });
+                    return;
+                }
                 placed.add(h.id);
-                const d = depth[h.id] || 0;
-                maxDepth = Math.max(maxDepth, d);
                 const manual = this.positions[h.id];
-                const x = manual ? manual.x : d * COL;
-                const y = manual ? manual.y : row * ROW;
+                const d = depth[h.id] || 0;
+                pos[h.id] = manual ? { x: manual.x, y: manual.y } : { x: d * COL, y: row * ROW };
                 if (!manual) row++;
-                pos[h.id] = { x, y };
-                const childCount = (kids[h.id] || []).length;
-                nodes.push({
-                    id: h.id,
-                    label: h.id || h.ip || '(unnamed)',
-                    sub: [h.type || 'ping', h.ip].filter(Boolean).join('  '),
-                    x, y,
-                    kids: childCount,
-                    parents: (parents[h.id] || []).length,
-                    moved: !!manual,
-                    status: this.statuses[h.id] || '',
-                    stale: !!this.staleHosts[h.id],
-                    match: q ? ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) : false
-                });
                 // depth-first over children keeps a branch together
                 (kids[h.id] || []).forEach(c => {
                     if ((parents[c.id] || [])[0] === h.id) place(c);
@@ -857,42 +971,77 @@ function mapPage() {
             roots.forEach(place);
             this.hosts.forEach(h => { if (h.id && visible.has(h.id)) place(h); });
 
+            this.hosts.forEach(h => {
+                if (!h.id || !pos[h.id]) return;
+                const d = depth[h.id] || 0;
+                maxDepth = Math.max(maxDepth, d);
+                nodes.push({
+                    id: h.id,
+                    label: h.id || h.ip || '(unnamed)',
+                    sub: [h.type || 'ping', h.ip].filter(Boolean).join('  '),
+                    x: pos[h.id].x, y: pos[h.id].y,
+                    kids: (kids[h.id] || []).length,
+                    parents: (parents[h.id] || []).length,
+                    moved: !!this.positions[h.id],
+                    status: this.statuses[h.id] || '',
+                    stale: !!this.staleHosts[h.id],
+                    ring: ring.has(h.id),
+                    match: q ? ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) : false
+                });
+            });
+
+            // Where a line leaves a node box, along the direction it is
+            // travelling - so a ring's edges stop at the boxes instead of
+            // running under them.
+            const boxHit = (dx, dy) => {
+                const t = Math.min(dx ? 76 / Math.abs(dx) : Infinity,
+                                   dy ? 21 / Math.abs(dy) : Infinity);
+                return { x: dx * t, y: dy * t };
+            };
+            // How many children each parent holds in the ordinary column
+            // layout: with more than one, they share a trunk.
+            const columnKids = {};
+            this.hosts.forEach(h => {
+                if (!pos[h.id] || ringOf[h.id] !== undefined || this.positions[h.id]) return;
+                const p = (parents[h.id] || [])[0];
+                if (p && pos[p]) columnKids[p] = (columnKids[p] || 0) + 1;
+            });
+
             const edges = [];
             this.hosts.forEach(h => {
                 if (!pos[h.id]) return;
                 (parents[h.id] || []).forEach(p => {
                     if (!pos[p]) return;
                     const a = pos[p], b = pos[h.id];
-                    const mx = (a.x + 72 + b.x - 72) / 2;
-                    edges.push({
-                        id: h.id + '<-' + p,
-                        secondary: (parents[h.id] || [])[0] !== p,
-                        d: `M ${a.x + 72} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x - 72} ${b.y}`
-                    });
+                    const sameRing = ringOf[h.id] !== undefined && ringOf[h.id] === ringOf[p];
+                    const primary = (parents[h.id] || [])[0] === p;
+                    const trunk = a.x + 72 + 38;
+                    let d;
+                    if (sameRing) {
+                        // The ring's own edge: a straight side of the
+                        // polygon its members are sitting on.
+                        const o1 = boxHit(b.x - a.x, b.y - a.y);
+                        const o2 = boxHit(a.x - b.x, a.y - b.y);
+                        d = 'M ' + (a.x + o1.x) + ' ' + (a.y + o1.y) +
+                            ' L ' + (b.x + o2.x) + ' ' + (b.y + o2.y);
+                    } else if (primary && (columnKids[p] || 0) > 1 &&
+                               ringOf[h.id] === undefined && !this.positions[h.id] &&
+                               b.x - 72 > trunk + 10) {
+                        // Siblings share one vertical trunk. Thirty children
+                        // of one hub used to draw thirty curves through the
+                        // same 71px channel, which is one illegible smear;
+                        // this is one line and thirty short stubs.
+                        d = 'M ' + (a.x + 72) + ' ' + a.y + ' H ' + trunk +
+                            ' V ' + b.y + ' H ' + (b.x - 72);
+                    } else {
+                        const mx = (a.x + 72 + b.x - 72) / 2;
+                        d = 'M ' + (a.x + 72) + ' ' + a.y + ' C ' + mx + ' ' + a.y +
+                            ', ' + mx + ' ' + b.y + ', ' + (b.x - 72) + ' ' + b.y;
+                    }
+                    edges.push({ id: h.id + '<-' + p, secondary: !primary, ring: sameRing, d });
                 });
             });
-
-            // Ring members: hosts that can reach themselves by following
-            // dependencies. Worth surfacing (they are why a "root" may not
-            // look like one), never worth blocking.
-            const ring = new Set();
-            const canReach = (from, target) => {
-                const seen = new Set(); const st = [...(parents[from] || [])];
-                while (st.length) {
-                    const id = st.pop();
-                    if (id === target) return true;
-                    if (seen.has(id)) continue;
-                    seen.add(id);
-                    (parents[id] || []).forEach(p => st.push(p));
-                }
-                return false;
-            };
-            this.hosts.forEach(h => { if (canReach(h.id, h.id)) ring.add(h.id); });
-            edges.forEach(e => {
-                const [child, parent] = e.id.split('<-');
-                e.ring = ring.has(child) && ring.has(parent);
-            });
-            nodes.forEach(n => { n.ring = ring.has(n.id); });
+            this.ringCircles = Object.values(ringGeom);
 
             this.nodes = nodes;
             this.edges = edges;
@@ -902,7 +1051,8 @@ function mapPage() {
                 depth: maxDepth + 1,
                 hidden: this.hosts.length - visible.size,
                 multi: this.hosts.filter(h => (parents[h.id] || []).length > 1).length,
-                ring: ring.size
+                ring: ring.size,
+                rings: Object.keys(ringMembers).length
             };
         },
 
@@ -1297,6 +1447,13 @@ function mapPage() {
                 '<g data-viewport transform="translate(' + this.view.x + ',' +
                 this.view.y + ') scale(' + this.view.k + ')">';
 
+            for (const g of this.ringCircles) {
+                out += '<circle cx="' + g.cx + '" cy="' + g.cy + '" r="' + g.r +
+                    '" fill="none" stroke="#f59e0b" stroke-width="1" ' +
+                    'stroke-dasharray="7 7" opacity="0.35"/>' +
+                    '<text x="' + g.cx + '" y="' + (g.cy + 4) + '" text-anchor="middle" ' +
+                    'font-size="10" fill="#b45309" opacity="0.7">ring of ' + g.n + '</text>';
+            }
             for (const e of this.edges) {
                 // Extra parents render dashed so the primary spine of the
                 // tree stays legible in a DAG.

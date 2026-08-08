@@ -64,6 +64,24 @@ object Session {
 
     fun isLoggedIn(): Boolean = token.isNotEmpty() && serverUrl.isNotEmpty()
 
+    // The persisted role is whatever the login response said, possibly
+    // versions ago - a session predating role storage has none at all,
+    // and every admin control would stay hidden while the server still
+    // says admin. Ask the server and correct the stored copy.
+    suspend fun refreshIdentity() {
+        if (!isLoggedIn()) return
+        runCatching { Api.me() }.onSuccess { me ->
+            if (me.username.isNotEmpty()) {
+                username = me.username
+                role = me.role
+                prefs.edit()
+                    .putString(KEY_USERNAME, me.username)
+                    .putString(KEY_ROLE, me.role)
+                    .apply()
+            }
+        }
+    }
+
     // Normalize a user-entered server URL: trim, default to https://, drop trailing slash.
     fun normalize(raw: String): String {
         var s = raw.trim()

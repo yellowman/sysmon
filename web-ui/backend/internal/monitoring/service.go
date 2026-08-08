@@ -353,9 +353,10 @@ func hostKey(h *models.HostStatus) string {
 // live "up/down for X" locally from LastChangeTime.
 func hostSignature(h *models.HostStatus) uint64 {
 	w := fnv.New64a()
-	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%t",
+	fmt.Fprintf(w, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%t\x00%t",
 		h.ObjectName, h.Hostname, h.OverallStatus, h.StatusColor, h.Contact,
-		h.Paused, h.Description, h.IPv4Address, h.Stale)
+		h.Paused, h.Description, h.IPv4Address, h.Stale, h.Acked)
+	fmt.Fprintf(w, "\x03%s", h.Notes)
 	if h.LastChangeTime != nil {
 		fmt.Fprintf(w, "\x00%d", h.LastChangeTime.Unix())
 	}
@@ -901,6 +902,8 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 		Contact:       xmlObj.ObjectContact,
 		DownCount:     xmlObj.DownCt,
 		UpCount:       xmlObj.UpCt,
+		Acked:         xmlObj.Acked != 0,
+		Notes:         xmlObj.ObjectNotes,
 		TotalDown:     xmlObj.TotalDown,
 		TotalChecked:  xmlObj.TotalChecked,
 		Checks:        []models.CheckResult{},
@@ -1997,6 +2000,33 @@ func (s *Service) hostAction(qualified, authKey string,
 		return fmt.Errorf("no object name in %q", qualified)
 	}
 
+	// A bare name - an old bookmark, a hand-typed URL - is resolved to
+	// the one site that owns an object by that name. One match routes,
+	// zero says so, and two or more must be qualified by the caller:
+	// guessing between sites is how an ack lands on the wrong box.
+	if site == "" {
+		var owners []string
+		for _, d := range s.fleet() {
+			d.mu.Lock()
+			for i := range d.lastHosts {
+				if d.lastHosts[i].LocalName == object || d.lastHosts[i].Hostname == object {
+					owners = append(owners, d.site)
+					break
+				}
+			}
+			d.mu.Unlock()
+		}
+		switch len(owners) {
+		case 1:
+			site = owners[0]
+		case 0:
+			return fmt.Errorf("no connected site has an object named %q", object)
+		default:
+			return fmt.Errorf("%q exists at %s - say which as site:object",
+				object, strings.Join(owners, ", "))
+		}
+	}
+
 	return s.withDaemonConn(site, func(conn net.Conn, r *bufio.Reader) error {
 		if err := enterXMLMode(conn, r); err != nil {
 			return err
@@ -2036,17 +2066,45 @@ func daemonReply(what, response string) error {
 }
 
 // AckHost acknowledges an alert for a specific host
-func (s *Service) AckHost(hostname string, authKey string) error {
+// AckHost marks an outage as seen. The note is not optional: an
+// anonymous ack tells the next person nothing, so the note lands first
+// (UPD) and the flag second, on the same exchange.
+func (s *Service) AckHost(hostname, note string, authKey string) error {
 	return s.hostAction(hostname, authKey,
 		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, sanitizeCmd(note)))); err != nil {
+				return fmt.Errorf("failed to send UPD command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read UPD response: %w", err)
+			}
+			if err := daemonReply("UPD", response); err != nil {
+				return err
+			}
 			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
 				return fmt.Errorf("failed to send ACK command: %w", err)
 			}
-			response, err := r.ReadString('\n')
+			response, err = r.ReadString('\n')
 			if err != nil {
 				return fmt.Errorf("failed to read ACK response: %w", err)
 			}
 			return daemonReply("ACK", response)
+		})
+}
+
+// UnackHost is the inverse: the alert returns to the active board.
+func (s *Service) UnackHost(hostname string, authKey string) error {
+	return s.hostAction(hostname, authKey,
+		func(conn net.Conn, r *bufio.Reader, object string) error {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UNACK %s\n", object))); err != nil {
+				return fmt.Errorf("failed to send UNACK command: %w", err)
+			}
+			response, err := r.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read UNACK response: %w", err)
+			}
+			return daemonReply("UNACK", response)
 		})
 }
 
@@ -2371,10 +2429,17 @@ func (s *Service) bulkBySite(hostnames []string, authKey string,
 	return results
 }
 
-// BulkAckHosts acknowledges multiple hosts in a single connection
-func (s *Service) BulkAckHosts(hostnames []string, authKey string) []BulkOperationResult {
+// BulkAckHosts acknowledges multiple hosts in a single connection. One
+// note covers the batch - it lands on every host before its flag.
+func (s *Service) BulkAckHosts(hostnames []string, note string, authKey string) []BulkOperationResult {
 	return s.bulkBySite(hostnames, authKey,
 		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, sanitizeCmd(note)))); err != nil {
+				return false, fmt.Sprintf("failed to send note: %v", err)
+			}
+			if resp, err := r.ReadString('\n'); err != nil || !strings.HasPrefix(strings.TrimSpace(resp), "333") {
+				return false, "note refused: " + strings.TrimSpace(resp)
+			}
 			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
 				return false, fmt.Sprintf("failed to send command: %v", err)
 			}

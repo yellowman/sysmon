@@ -23,6 +23,9 @@ data class Host(
     @SerialName("overall_status") val overallStatus: String = "OK",
     val contact: String = "",
     val paused: Boolean = false,
+    // A human has claimed this alert: it moves off the active board
+    // until the host recovers. Paging is unaffected.
+    val acked: Boolean = false,
     @SerialName("down_count") val downCount: Long = 0,
     @SerialName("up_count") val upCount: Long = 0,
     @SerialName("time_up") val timeUp: Long = 0,
@@ -94,6 +97,12 @@ data class Stats(
     @SerialName("healthy_hosts") val healthy: Int = 0,
     @SerialName("warning_hosts") val warning: Int = 0,
     @SerialName("critical_hosts") val critical: Int = 0
+)
+
+@Serializable
+data class MeResponse(
+    val username: String = "",
+    val role: String = ""
 )
 
 @Serializable

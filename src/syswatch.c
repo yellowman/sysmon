@@ -1429,6 +1429,12 @@ void handle_retval(struct monitorent *handle_this, time_t now)
 	{
 		handle_this->checkent->upct ++;
 		handle_this->checkent->downct = 0;
+		/* An ack lives for one outage. The first OK check ends both. */
+		if (handle_this->checkent->acked)
+		{
+			handle_this->checkent->acked = FALSE;
+			object_changed(handle_this->checkent);
+		}
 		/* and maybe tell someone */
 		if ((handle_this->checkent->upct >=
 			handle_this->checkent->max_down) &&
@@ -1796,23 +1802,24 @@ void revoke_root_if_necessary()
 		return;
 	}
 
-	/* If ICMP is enabled, we need to use the ping helper for privilege dropping */
-	/* Sending ICMP packets requires CAP_NET_RAW (Linux) or root privileges */
+	/*
+	 * ICMP needs no helper to survive the drop: the raw sockets were
+	 * opened while still root, a raw socket's privilege is checked at
+	 * creation rather than per send, and the descriptors keep working
+	 * after setuid. The setuid helper is registered only as a fallback
+	 * for a platform that refuses to send on them post-drop - which the
+	 * send path discovers from the send itself (EPERM/EACCES) rather
+	 * than assuming it here.
+	 */
 	if (!disable_icmp)
 	{
-		/* Enable ping helper - allows us to drop privileges while still sending ICMP */
-		use_ping_helper = 1;
-		print_err(0, "revoke_root: ICMP monitoring is enabled - using ping helper for privilege drop");
-		print_err(0, "revoke_root: Ping helper will be invoked via: %s", PING_HELPER_PATH);
-
-		/* Check if helper exists and is executable */
-		if (access(PING_HELPER_PATH, X_OK) != 0) {
-			print_err(1, "WARNING: Ping helper not found or not executable at %s", PING_HELPER_PATH);
-			print_err(1, "WARNING: ICMP checks will fail until helper is installed");
-			print_err(1, "WARNING: Run 'make install' in src/ to install helper with setuid permissions");
+		if (access(PING_HELPER_PATH, X_OK) == 0) {
+			use_ping_helper = 1;
+			print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop; %s stands by as the fallback", PING_HELPER_PATH);
+		} else {
+			print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop");
+			print_err(0, "revoke_root: no fallback helper at %s - only matters if this platform refuses raw-socket sends after a privilege drop", PING_HELPER_PATH);
 		}
-
-		/* Continue to drop privileges below */
 	}
 
 	pw = sysmon_drop_user();

@@ -872,6 +872,40 @@ void do_ack(struct clientstatus *client, char *buff)
 }
 
 /*
+ * UNACK <objectname>
+ * The inverse of ACK: the alert is unclaimed again. Neither command
+ * affects paging - an outage pages when it pages.
+ */
+void do_unack(struct clientstatus *client, char *buff)
+{
+	char objname[OBJECT_NAME_SIZE];
+	struct graph_elements *found_obj = NULL;
+
+	if (client->authlvl <= 0)
+	{
+		sendline(client->filedes, "444 Permission Denied");
+		return;
+	}
+	strncpy(objname, buff+6, OBJECT_NAME_SIZE-1);
+	objname[OBJECT_NAME_SIZE-1] = '\0';
+	if (!client->xml)
+	{
+		sendline(client->filedes, "403 do mode xml first");
+		return;
+	}
+	found_obj = find_object_by_name(objname);
+	if (found_obj == NULL)
+	{
+		sendline(client->filedes, "403 object not found");
+		return;
+	}
+	found_obj->data->acked = FALSE;
+	object_changed(found_obj->data);
+	sendline(client->filedes, "333 object updated");
+	return;
+}
+
+/*
  * UPD <objectname> <string>
  * like ACK but read a second line that includes a note
  */
@@ -1490,6 +1524,10 @@ void	do_service(struct clientstatus *here, char *buff, time_t now_t)
 	else if (strncmp(buff, "ACK ", 4) == 0)
 	{
 		do_ack(here, buff);
+	}
+	else if (strncmp(buff, "UNACK ", 6) == 0)
+	{
+		do_unack(here, buff);
 	}
  	else if (strncmp(buff, "GET ", 4) == 0) /* Client is a web browser */
 	{

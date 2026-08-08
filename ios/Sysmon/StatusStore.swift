@@ -39,6 +39,10 @@ final class StatusStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
 
     var alerts: [Host] { hosts.filter { !$0.isOK } }
+    // The active board is the unacked; acked alerts are triaged into
+    // their own section - still down, still listed, out of the way.
+    var unackedAlerts: [Host] { hosts.filter { !$0.isOK && !($0.acked ?? false) } }
+    var ackedAlerts: [Host] { hosts.filter { !$0.isOK && ($0.acked ?? false) } }
 
     // Begin (or resume) polling. Idempotent - safe to call on every
     // scene-active transition and view appearance.
@@ -143,7 +147,7 @@ final class StatusStore: ObservableObject {
     }
 
     private func publishAlertCount() {
-        let count = alerts.count
+        let count = unackedAlerts.count
         Session.shared?.alertCount = count
         Task { try? await UNUserNotificationCenter.current().setBadgeCount(count) }
     }

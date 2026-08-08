@@ -30,6 +30,7 @@ func NewCacheConfig() *CacheConfig {
 			"/api/bulk/":       -1,   // Mutations
 			"/api/push":        -1,   // Subscriptions / credentials
 			"/api/auth":        -1,   // Sessions / users
+			"/static/":         3600, // embedded assets; change only with the binary
 			"/api/docs":        3600, // API docs
 			"/openapi.yaml":    3600, // OpenAPI spec
 		},

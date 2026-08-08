@@ -133,6 +133,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/templates", r.handleTemplates)
 	r.mux.HandleFunc("/api/templates/expand", r.handleTemplateExpand)
 	r.mux.HandleFunc("/api/monitoring/ack/", auth.RequireAdmin(r.handleMonitoringAck))
+	r.mux.HandleFunc("/api/monitoring/unack/", auth.RequireAdmin(r.handleMonitoringUnack))
 	r.mux.HandleFunc("/api/monitoring/update/", auth.RequireAdmin(r.handleMonitoringUpdate))
 	r.mux.HandleFunc("/api/monitoring/trace/", auth.RequireAdmin(r.handleMonitoringTrace))
 
@@ -199,8 +200,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/admin.html", r.handleAdminPage)
 	r.mux.HandleFunc("/metrics.html", r.handleMetricsPage)
 
-	// Serve static files (CSS, JS)
-	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	// The UI's assets - Tailwind build, Alpine, Chart.js, Font Awesome,
+	// fonts - are self-hosted and served from here, so the console works
+	// on a network with no route to the internet.
+	r.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
 	// Rate limiting, split by what each limit is protecting against.
 	//
@@ -901,10 +904,22 @@ func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// The note is the whole point of an ack: "seen, and here is what I
+	// know". Anonymous acks are refused.
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(req.Body).Decode(&body)
+	body.Note = strings.TrimSpace(body.Note)
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "A note is required to acknowledge - say what you know")
+		return
+	}
+
 	// Get auth key from header or body
 	authKey := r.getSysmonAuthKey()
 
-	err := r.monitoring.AckHost(hostname, authKey)
+	err := r.monitoring.AckHost(hostname, body.Note, authKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
@@ -1214,6 +1229,27 @@ func (r *Router) handleAdminSessionErrors(w http.ResponseWriter, req *http.Reque
 
 // Bulk operation handlers
 
+func (r *Router) handleMonitoringUnack(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
+		return
+	}
+	hostname := strings.TrimPrefix(req.URL.Path, "/api/monitoring/unack/")
+	if hostname == "" {
+		r.sendError(w, http.StatusBadRequest, "Hostname required")
+		return
+	}
+	if err := r.monitoring.UnackHost(hostname, r.getSysmonAuthKey()); err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, fmt.Sprintf("Failed to un-acknowledge host: %v", err))
+		return
+	}
+	r.sendJSON(w, map[string]string{
+		"status":   "success",
+		"message":  fmt.Sprintf("Host %s un-acknowledged", hostname),
+		"hostname": hostname,
+	})
+}
+
 func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		r.sendError(w, http.StatusMethodNotAllowed, "Only POST allowed")
@@ -1223,6 +1259,7 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 	// Parse JSON body
 	var body struct {
 		Hostnames []string `json:"hostnames"`
+		Note      string   `json:"note"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -1233,11 +1270,16 @@ func (r *Router) handleBulkAck(w http.ResponseWriter, req *http.Request) {
 		r.sendError(w, http.StatusBadRequest, "Hostnames array is required and cannot be empty")
 		return
 	}
+	body.Note = strings.TrimSpace(body.Note)
+	if body.Note == "" {
+		r.sendError(w, http.StatusBadRequest, "A note is required to acknowledge - say what you know")
+		return
+	}
 
 	authKey := r.getSysmonAuthKey()
 
 	// Call bulk acknowledge
-	results := r.monitoring.BulkAckHosts(body.Hostnames, authKey)
+	results := r.monitoring.BulkAckHosts(body.Hostnames, body.Note, authKey)
 
 	// Count successes and failures
 	successCount := 0

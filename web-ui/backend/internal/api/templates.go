@@ -4,19 +4,30 @@ import (
 	"bytes"
 	"errors"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
-	"path/filepath"
+	"os"
 	"syscall"
 	"sysmon-web/internal/auth"
 )
 
 var templateCache map[string]*template.Template
-var templateDir string
 
-// InitTemplates initializes HTML templates
+// staticDir is where /static/ is served from; main sets it at startup.
+var staticDir = "./static"
+
+// SetStaticDir names the directory the static assets are served from.
+func SetStaticDir(dir string) { staticDir = dir }
+
+// InitTemplates parses the HTML templates from a directory on disk.
+// They are parsed once at startup: editing a file on disk changes
+// nothing until the process restarts.
 func InitTemplates(dir string) error {
-	templateDir = dir
+	return initTemplatesFS(os.DirFS(dir))
+}
+
+func initTemplatesFS(fsys fs.FS) error {
 	templateCache = make(map[string]*template.Template)
 
 	// List of page templates to load
@@ -37,10 +48,7 @@ func InitTemplates(dir string) error {
 
 	// Parse each page template along with base template
 	for _, page := range pages {
-		tmpl, err := template.ParseFiles(
-			filepath.Join(templateDir, "base.html"),
-			filepath.Join(templateDir, page),
-		)
+		tmpl, err := template.ParseFS(fsys, "base.html", page)
 		if err != nil {
 			return err
 		}
@@ -49,7 +57,7 @@ func InitTemplates(dir string) error {
 
 	// Parse standalone templates (no base template)
 	for _, page := range []string{"login.html"} {
-		tmpl, err := template.ParseFiles(filepath.Join(templateDir, page))
+		tmpl, err := template.ParseFS(fsys, page)
 		if err != nil {
 			return err
 		}
