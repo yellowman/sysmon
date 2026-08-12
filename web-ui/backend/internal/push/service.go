@@ -44,8 +44,17 @@ type Subscription struct {
 	LastPushStatus string   `json:"last_push_status,omitempty"`
 	PushCount      int64    `json:"push_count"`
 	FailCount      int64    `json:"fail_count"`
-	IPAddress      string   `json:"ip_address,omitempty"`
-	UserAgent      string   `json:"user_agent,omitempty"`
+	// Unregistered is FCM's authoritative "this token no longer exists"
+	// verdict (UNREGISTERED on a send): app uninstalled, data cleared,
+	// restored to a new device, or purged after 270 days of device
+	// inactivity. It is permanent for this token string - only the app
+	// minting a fresh token (deleteToken + getToken) recovers, so the
+	// row is kept as the signal that tells the app to do exactly that
+	// on its next subscribe. Cleared if a send ever succeeds again.
+	Unregistered   bool   `json:"unregistered,omitempty"`
+	UnregisteredAt string `json:"unregistered_at,omitempty"`
+	IPAddress      string `json:"ip_address,omitempty"`
+	UserAgent      string `json:"user_agent,omitempty"`
 }
 
 func generateAPIKey() string {
@@ -476,23 +485,28 @@ func (s *Service) Stop() {
 	})
 }
 
-func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (string, error) {
+// Subscribe registers (or refreshes) a device subscription. tokenDead
+// reports whether FCM has already refused this exact token with
+// UNREGISTERED: re-storing the same string doesn't resurrect it, so the
+// caller must relay that verdict to the app - the phone's Firebase SDK
+// is the one party that doesn't know its cached token is dead, and only
+// the app can mint a fresh one.
+func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAddr, userAgent string) (apiKey string, tokenDead bool, err error) {
 	s.opsMu.RLock()
 	defer s.opsMu.RUnlock()
 	if s.stopped {
-		return "", ErrServiceStopped
+		return "", false, ErrServiceStopped
 	}
 	if platform != PlatformIOS && platform != PlatformAndroid {
-		return "", fmt.Errorf("platform must be 'ios' or 'android'")
+		return "", false, fmt.Errorf("platform must be 'ios' or 'android'")
 	}
 	if token == "" {
-		return "", fmt.Errorf("device_token is required")
+		return "", false, fmt.Errorf("device_token is required")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	apiKey := ""
 
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err = s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSubscriptions)
 
 		var sub Subscription
@@ -513,6 +527,12 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 			if sub.Owner != "" && sub.Owner != owner {
 				ownerChanged = true
 			}
+			// The dead-token flag survives a re-subscribe of the same
+			// token on purpose: UNREGISTERED is permanent for this
+			// string, and reporting it back is what triggers the app's
+			// renewal. A genuinely fresh token arrives under a new key
+			// and starts clean.
+			tokenDead = sub.Unregistered
 		}
 
 		if sub.APIKey != "" && !ownerChanged {
@@ -539,7 +559,7 @@ func (s *Service) Subscribe(token string, platform Platform, label, owner, ipAdd
 		}
 		return b.Put([]byte(token), data)
 	})
-	return apiKey, err
+	return apiKey, tokenDead, err
 }
 
 // TouchLastSeen updates the last_seen timestamp for a device.
@@ -570,8 +590,11 @@ func (s *Service) TouchLastSeen(token, ipAddr string) {
 
 // RecordPush updates push delivery stats for a device. On failure,
 // status carries a short classified reason (e.g. "failed: project
-// mismatch") that the subscribers admin page surfaces per device.
-func (s *Service) RecordPush(token string, success bool, status string) {
+// mismatch") that the subscribers admin page surfaces per device, and
+// unregistered marks FCM's permanent "token no longer exists" verdict
+// (see Subscription.Unregistered). A success clears the flag - a
+// delivered push is proof the token lives.
+func (s *Service) RecordPush(token string, success bool, status string, unregistered bool) {
 	s.opsMu.RLock()
 	defer s.opsMu.RUnlock()
 	if s.stopped {
@@ -587,16 +610,31 @@ func (s *Service) RecordPush(token string, success bool, status string) {
 		if err := json.Unmarshal(v, &sub); err != nil {
 			return nil
 		}
-		sub.LastPushAt = time.Now().UTC().Format(time.RFC3339)
+		now := time.Now().UTC().Format(time.RFC3339)
+		sub.LastPushAt = now
 		if success {
 			sub.PushCount++
+			sub.Unregistered = false
+			sub.UnregisteredAt = ""
 		} else {
 			sub.FailCount++
+			if unregistered && !sub.Unregistered {
+				sub.Unregistered = true
+				sub.UnregisteredAt = now
+			}
 		}
 		sub.LastPushStatus = status
 		data, _ := json.Marshal(sub)
 		return b.Put([]byte(token), data)
 	})
+}
+
+// isUnregistered reports whether a send failure was FCM's authoritative
+// "this token no longer exists" verdict - the one failure that never
+// heals on its own and needs the app to mint a fresh token.
+func isUnregistered(err error) bool {
+	var se *FCMSendError
+	return errors.As(err, &se) && se.Reason == "UNREGISTERED"
 }
 
 // pushFailStatus compresses a send error into a short per-device status
@@ -793,7 +831,7 @@ func (s *Service) SendTest(token string, platform Platform) error {
 		status = pushFailStatus(err) + " (test)"
 		sent = 0
 	}
-	s.RecordPush(token, err == nil, status)
+	s.RecordPush(token, err == nil, status, isUnregistered(err))
 	label := token
 	if len(label) > 12 {
 		label = label[:12] + "…"
@@ -880,6 +918,18 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		Type:     checkType,
 	}
 	for _, sub := range subs {
+		// FCM already refused this token with UNREGISTERED - permanent
+		// for this string, so every further send is a guaranteed
+		// failure (and, per Google, exactly the traffic a sender is
+		// supposed to stop). The row stays: the admin page shows it,
+		// and the app's next subscribe of this token gets told to mint
+		// a fresh one - test pushes still go through, so a wrongly
+		// flagged token clears itself on the first success.
+		if sub.Unregistered {
+			log.Printf("push: skipping %s/%s - token unregistered since %s, awaiting app renewal",
+				sub.Platform, sub.Label, sub.UnregisteredAt)
+			continue
+		}
 		var err error
 		skipped := false
 		switch sub.Platform {
@@ -909,7 +959,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 			continue
 		}
 		if err != nil {
-			s.RecordPush(sub.DeviceToken, false, pushFailStatus(err))
+			s.RecordPush(sub.DeviceToken, false, pushFailStatus(err), isUnregistered(err))
 			log.Printf("push: send to %s/%s failed: %v", sub.Platform, sub.Label, err)
 			// An auth-level refusal means the key itself died - flip the
 			// settings-panel key status now instead of at the next hourly
@@ -919,7 +969,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 				s.kickKeyCheck()
 			}
 		} else {
-			s.RecordPush(sub.DeviceToken, true, "ok")
+			s.RecordPush(sub.DeviceToken, true, "ok", false)
 			sent++
 		}
 	}

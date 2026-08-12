@@ -1700,6 +1700,7 @@ func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
 		LastPushAt     string `json:"last_push_at,omitempty"`
 		LastPushStatus string `json:"last_push_status,omitempty"`
 		PushCount      int64  `json:"push_count"`
+		Unregistered   bool   `json:"unregistered,omitempty"`
 	}
 	out := make([]safeSub, len(subs))
 	for i, s := range subs {
@@ -1707,7 +1708,7 @@ func (r *Router) handlePushMe(w http.ResponseWriter, req *http.Request) {
 			DeviceToken: s.DeviceToken, Platform: string(s.Platform), Label: s.Label,
 			CreatedAt: s.CreatedAt, LastSeen: s.LastSeen,
 			LastPushAt: s.LastPushAt, LastPushStatus: s.LastPushStatus,
-			PushCount: s.PushCount,
+			PushCount: s.PushCount, Unregistered: s.Unregistered,
 		}
 	}
 	r.sendJSON(w, map[string]interface{}{
@@ -1743,16 +1744,25 @@ func (r *Router) handlePushSubscribe(w http.ResponseWriter, req *http.Request) {
 		_, clientIP := r.getUserInfo(req)
 		userAgent := req.Header.Get("User-Agent")
 		owner := req.Header.Get("X-Session-User")
-		apiKey, err := svc.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, owner, clientIP, userAgent)
+		apiKey, tokenDead, err := svc.Subscribe(body.DeviceToken, push.Platform(body.Platform), body.Label, owner, clientIP, userAgent)
 		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		r.sendJSON(w, map[string]string{
+		resp := map[string]string{
 			"status":  "subscribed",
 			"api_key": apiKey,
-		})
+		}
+		if tokenDead {
+			// FCM has already refused this exact token with UNREGISTERED.
+			// The phone's own Firebase SDK doesn't know that - it keeps
+			// re-registering the dead token from cache - so this response
+			// is the app's only cue to deleteToken() and mint a fresh one.
+			resp["token_status"] = "invalid"
+			resp["message"] = "FCM reports this device token is no longer valid - delete the cached token, obtain a fresh one, and subscribe again"
+		}
+		r.sendJSON(w, resp)
 
 	case http.MethodDelete:
 		svc := r.push.Load()
@@ -1822,6 +1832,8 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 		LastPushStatus string `json:"last_push_status,omitempty"`
 		PushCount      int64  `json:"push_count"`
 		FailCount      int64  `json:"fail_count"`
+		Unregistered   bool   `json:"unregistered,omitempty"`
+		UnregisteredAt string `json:"unregistered_at,omitempty"`
 		IPAddress      string `json:"ip_address,omitempty"`
 		UserAgent      string `json:"user_agent,omitempty"`
 	}
@@ -1838,6 +1850,8 @@ func (r *Router) handlePushSubscriptions(w http.ResponseWriter, req *http.Reques
 			LastPushStatus: s.LastPushStatus,
 			PushCount:      s.PushCount,
 			FailCount:      s.FailCount,
+			Unregistered:   s.Unregistered,
+			UnregisteredAt: s.UnregisteredAt,
 			IPAddress:      s.IPAddress,
 			UserAgent:      s.UserAgent,
 		}

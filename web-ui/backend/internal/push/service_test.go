@@ -3,10 +3,13 @@ package push
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/oauth2"
 )
 
 // seedSubscription writes a raw subscription row straight into the db,
@@ -94,7 +97,7 @@ func TestSendTestIsRecorded(t *testing.T) {
 	}
 	defer svc.Stop()
 
-	if _, err := svc.Subscribe("tok-test-device", PlatformAndroid, "pixel", "chris", "", ""); err != nil {
+	if _, _, err := svc.Subscribe("tok-test-device", PlatformAndroid, "pixel", "chris", "", ""); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
@@ -145,3 +148,136 @@ func TestPushFailStatusClassification(t *testing.T) {
 }
 
 var errRandom = json.Unmarshal([]byte("x"), &struct{}{})
+
+// fakeFCM stands in for the FCM v1 endpoint: it answers UNREGISTERED
+// for tokens in dead, 200 for everything else, and counts the sends it
+// saw per token.
+type fakeFCM struct {
+	mu    sync.Mutex
+	dead  map[string]bool
+	sends map[string]int
+}
+
+func newFakeFCM(deadTokens ...string) *fakeFCM {
+	f := &fakeFCM{dead: map[string]bool{}, sends: map[string]int{}}
+	for _, tok := range deadTokens {
+		f.dead[tok] = true
+	}
+	return f
+}
+
+func (f *fakeFCM) sendCount(token string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sends[token]
+}
+
+func (f *fakeFCM) handler(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Message struct {
+			Token string `json:"token"`
+		} `json:"message"`
+	}
+	json.NewDecoder(req.Body).Decode(&body)
+	f.mu.Lock()
+	f.sends[body.Message.Token]++
+	dead := f.dead[body.Message.Token]
+	f.mu.Unlock()
+	if dead {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`))
+		return
+	}
+	w.Write([]byte(`{"name":"projects/test/messages/1"}`))
+}
+
+// fcmClientFor wires an FCMClient at a fake endpoint - no OAuth, no
+// network beyond the test server.
+func fcmClientFor(t *testing.T, f *fakeFCM) *FCMClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(f.handler))
+	t.Cleanup(ts.Close)
+	return &FCMClient{
+		httpClient:  ts.Client(),
+		tokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"}),
+		projectID:   "test",
+		endpoint:    ts.URL,
+	}
+}
+
+// TestUnregisteredTokenLifecycle walks the whole renewal handshake:
+// UNREGISTERED flags the token, fan-outs skip it, re-subscribing the
+// same token reports it dead (the app's cue to mint a fresh one), the
+// fresh token starts clean, and a later successful send clears a flag.
+func TestUnregisteredTokenLifecycle(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "push.db")
+	svc, err := NewService(Config{Enabled: true}, dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	defer svc.Stop()
+
+	fake := newFakeFCM("tok-dead")
+	svc.fcm = fcmClientFor(t, fake)
+
+	for _, tok := range []string{"tok-dead", "tok-alive"} {
+		if _, dead, err := svc.Subscribe(tok, PlatformAndroid, tok, "chris", "", ""); err != nil || dead {
+			t.Fatalf("Subscribe(%s) = dead %v, err %v", tok, dead, err)
+		}
+	}
+
+	// First fan-out: both tokens are tried; FCM refuses the dead one.
+	svc.notifyAll("host DOWN", "", "host is unreachable", "host", "CRITICAL", "OK", "", 1, true, "host")
+	if got := fake.sendCount("tok-dead"); got != 1 {
+		t.Fatalf("dead token sends after first fan-out = %d, want 1", got)
+	}
+
+	byToken := func() map[string]Subscription {
+		m := map[string]Subscription{}
+		for _, s := range svc.ListSubscriptions() {
+			m[s.DeviceToken] = s
+		}
+		return m
+	}
+	subs := byToken()
+	if !subs["tok-dead"].Unregistered || subs["tok-dead"].UnregisteredAt == "" {
+		t.Errorf("dead token not flagged unregistered: %+v", subs["tok-dead"])
+	}
+	if subs["tok-dead"].LastPushStatus != "failed: token dead" {
+		t.Errorf("dead token LastPushStatus = %q", subs["tok-dead"].LastPushStatus)
+	}
+	if subs["tok-alive"].Unregistered || subs["tok-alive"].LastPushStatus != "ok" {
+		t.Errorf("live token disturbed: %+v", subs["tok-alive"])
+	}
+
+	// Second fan-out: the flagged token is skipped, the live one isn't.
+	svc.notifyAll("host RECOVERED", "", "host is back up", "host", "OK", "CRITICAL", "", 0, false, "host")
+	if got := fake.sendCount("tok-dead"); got != 1 {
+		t.Errorf("dead token sends after second fan-out = %d, want still 1 (skipped)", got)
+	}
+	if got := fake.sendCount("tok-alive"); got != 2 {
+		t.Errorf("live token sends = %d, want 2", got)
+	}
+
+	// The app re-subscribes the same dead token at launch: it must be
+	// told, and the flag must survive the re-subscribe.
+	if _, dead, err := svc.Subscribe("tok-dead", PlatformAndroid, "tok-dead", "chris", "", ""); err != nil || !dead {
+		t.Errorf("re-subscribe of dead token: dead = %v, err = %v, want dead = true", dead, err)
+	}
+	// A genuinely fresh token starts clean.
+	if _, dead, err := svc.Subscribe("tok-fresh", PlatformAndroid, "tok-fresh", "chris", "", ""); err != nil || dead {
+		t.Errorf("fresh token reported dead = %v, err = %v", dead, err)
+	}
+
+	// A successful send (e.g. an admin test push to a wrongly flagged
+	// token) clears the flag - test sends bypass the fan-out skip.
+	fake.mu.Lock()
+	fake.dead["tok-dead"] = false
+	fake.mu.Unlock()
+	if err := svc.SendTest("tok-dead", PlatformAndroid); err != nil {
+		t.Fatalf("SendTest after revival: %v", err)
+	}
+	if sub := byToken()["tok-dead"]; sub.Unregistered || sub.UnregisteredAt != "" {
+		t.Errorf("flag not cleared by successful send: %+v", sub)
+	}
+}

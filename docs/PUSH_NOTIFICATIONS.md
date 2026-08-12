@@ -182,6 +182,26 @@ test operations require a valid session that owns the device. The
 api_key is reserved for future use (e.g., letting the daemon mark
 device-specific delivery state).
 
+If FCM has previously refused this exact token with `UNREGISTERED`
+(see Token Lifecycle below), the subscription is still stored but the
+response carries a verdict:
+
+```json
+{
+  "status": "subscribed",
+  "api_key": "a1b2c3d4...",
+  "token_status": "invalid",
+  "message": "FCM reports this device token is no longer valid - delete the cached token, obtain a fresh one, and subscribe again"
+}
+```
+
+`token_status: "invalid"` is the app's cue to force a token rotation
+(`deleteToken()` then `getToken()` on Android) and subscribe again with
+the fresh token. This matters because FCM only ever reports a dead
+token to the *sender*: the Firebase SDK on the device keeps returning
+the dead token from its cache and `onNewToken` never fires, so without
+this signal the app would re-register the same dead token forever.
+
 ### List my subscriptions
 
 ```
@@ -190,7 +210,9 @@ Authorization: Bearer <token>
 ```
 
 Returns only the current user's own subscriptions. `api_key` is
-stripped from the response (the app already has it).
+stripped from the response (the app already has it). A subscription
+whose token FCM has refused with `UNREGISTERED` additionally carries
+`"unregistered": true`.
 
 ```json
 {
@@ -396,9 +418,21 @@ class SysmonMessagingService : FirebaseMessagingService() {
 - **OS issues new push token**: Subscribe again with the same session
   token but the new device_token. A new `api_key` is issued. Optionally
   unsubscribe the old token.
-- **App uninstall**: Subscription remains in the database but pushes
-  to the dead token will fail silently. An admin can clean it up via
-  `DELETE /api/push/remove/<token>`.
+- **FCM declares the token UNREGISTERED**: happens on app uninstall,
+  cleared app data, restore to a new device, Google-side key rotations,
+  or after ~270 days of device inactivity. This verdict is permanent
+  for that token string, and only the sender ever sees it — the
+  device's own Firebase SDK keeps returning the dead token from cache.
+  The server reacts by flagging the subscription (`unregistered`,
+  shown on the admin page as "token dead"), skipping it during alert
+  fan-outs (per Google's guidance to stop sending to dead tokens), and
+  answering the app's next subscribe of that token with
+  `token_status: "invalid"`. The Android app then deletes its cached
+  token, mints a fresh one, and re-subscribes — the flagged row is
+  replaced and delivery resumes. The row is kept (not deleted) exactly
+  so this handshake can happen; an admin can still remove it manually
+  via `DELETE /api/push/remove/<token>`. A test push to a flagged
+  token is still attempted, and a success clears the flag.
 
 ## Database
 
@@ -423,6 +457,16 @@ owner must unsubscribe first, or an admin can `DELETE /api/push/remove/<token>`.
 **Subscribe returns 503 "Push notifications not configured"**
 Either `config push-notifications;` is missing from sysmon.conf, or
 sysmon-web couldn't open `/var/lib/sysmon/push.db`. Check the logs.
+
+**One device shows "failed: token dead" and gets no alerts**
+FCM refused that device's token with `UNREGISTERED` — the token is
+gone for good (uninstall, cleared data, device restore, or the
+270-day inactivity purge). The subscription is flagged (red "token
+dead" badge on the admin page) and alert sends skip it. It heals
+itself the next time the app is opened on that device: the launch-time
+subscribe is answered with `token_status: "invalid"`, and the app
+mints a fresh token and re-registers. If the device is genuinely gone,
+kick the row via the admin page or `DELETE /api/push/remove/<token>`.
 
 **Test push sent but not received**
 - iOS: notification permissions in Settings > Notifications

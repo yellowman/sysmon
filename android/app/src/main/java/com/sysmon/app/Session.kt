@@ -7,10 +7,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 object Session {
     private const val KEY_SERVER = "server_url"
@@ -158,24 +160,64 @@ object Session {
      * is non-null and differs from [fcmToken], the previous subscription is
      * unsubscribed first so the backend doesn't end up with orphaned entries
      * after Firebase rotates the token.
+     *
+     * If the server answers that FCM has declared this token UNREGISTERED
+     * (uninstall/reinstall races, backup-restore to a new device, the
+     * 270-day inactivity purge, a Google-side invalidation), the Firebase
+     * SDK on this phone is the one party that doesn't know: getToken()
+     * keeps returning the dead token from cache and onNewToken never
+     * fires. The only escape is deleteToken() + getToken(), which mints a
+     * genuinely new token - so do that, once, and re-register. [renewal]
+     * marks the second pass so a token that is somehow *still* refused
+     * (project mismatch, Firebase trouble) surfaces as an error instead
+     * of looping.
      */
-    fun registerPushToken(fcmToken: String, replacing: String? = null) {
+    fun registerPushToken(fcmToken: String, replacing: String? = null, renewal: Boolean = false) {
         FcmTokenStore.update(fcmToken)
         if (!isLoggedIn()) return
         val serverSnap = serverUrl
         val tokenSnap = token
         scope.launch {
+            // Best-effort: the replaced subscription may already be gone
+            // (admin kicked it, or a competing registration cleaned it
+            // up) - that must not fail the new registration.
+            if (replacing != null && replacing != fcmToken &&
+                serverSnap.isNotEmpty() && tokenSnap.isNotEmpty()
+            ) {
+                runCatching { Api.unsubscribePush(serverSnap, tokenSnap, replacing) }
+            }
             runCatching {
-                if (replacing != null && replacing != fcmToken &&
-                    serverSnap.isNotEmpty() && tokenSnap.isNotEmpty()
-                ) {
-                    Api.unsubscribePush(serverSnap, tokenSnap, replacing)
-                }
                 Api.subscribePush(fcmToken)
-                pushStatus = "Push registered"
+            }.onSuccess { response ->
+                if (response.tokenStatus == "invalid") {
+                    if (renewal) {
+                        pushStatus = "Push token renewal failed - the server still reports the new token invalid"
+                    } else {
+                        pushStatus = "Push token expired - requesting a new one…"
+                        renewFcmToken(dead = fcmToken)
+                    }
+                } else {
+                    pushStatus = "Push registered"
+                }
             }.onFailure {
                 pushStatus = "Push registration failed: ${it.message ?: "unknown error"}"
             }
+        }
+    }
+
+    // Force the Firebase SDK to abandon its cached token and mint a fresh
+    // one, then register it (replacing the dead subscription). onNewToken
+    // may also fire for the fresh token; both paths converge on
+    // registerPushToken, which is idempotent per token.
+    private suspend fun renewFcmToken(dead: String) {
+        runCatching {
+            val messaging = FirebaseMessaging.getInstance()
+            messaging.deleteToken().await()
+            messaging.token.await()
+        }.onSuccess { fresh ->
+            registerPushToken(fresh, replacing = dead, renewal = true)
+        }.onFailure {
+            pushStatus = "Push token renewal failed: ${it.message ?: "unknown error"}"
         }
     }
 }
