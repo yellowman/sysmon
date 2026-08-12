@@ -328,6 +328,22 @@ type SNMPStats struct {
 	SysUpTime int64 `json:"sysuptime_ticks,omitempty"`
 	// LastResponse is when the agent last answered, unix seconds.
 	LastResponse int64 `json:"last_response,omitempty"`
+	// CheckType is the comparison this object runs: high, low, range,
+	// exact, rate, or reboot.
+	CheckType string `json:"check_type,omitempty"`
+	// LastValue is the reading the last poll returned, for every check
+	// type except reboot (where the reading IS SysUpTime) - a
+	// board-temperature check's 38 lands here. A pointer because 0 is
+	// a real reading on a gauge.
+	LastValue *int64 `json:"last_value,omitempty"`
+	// The operator's own limits, so a reader can see how far past
+	// acceptable the value is. Which ones mean anything depends on
+	// CheckType: High for "high", Low for "low", both for "range",
+	// Exact for "exact", Rate for "rate". Zero means unset.
+	Low   int64 `json:"low,omitempty"`
+	High  int64 `json:"high,omitempty"`
+	Exact int64 `json:"exact,omitempty"`
+	Rate  int64 `json:"rate,omitempty"`
 }
 
 // RTTStats is one rtt check's latency and jitter figures.

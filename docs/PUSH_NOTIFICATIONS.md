@@ -293,7 +293,7 @@ Authorization: Bearer <admin-token>
     "alert": {
       "title": "router-core DOWN",
       "subtitle": "Core router - DC1",
-      "body": "router-core ping check failed"
+      "body": "router-core rtt check failed - rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"
     },
     "sound": "default"
   }
@@ -306,18 +306,29 @@ Authorization: Bearer <admin-token>
 {
   "notification": {
     "title": "router-core DOWN",
-    "body": "router-core ping check failed"
+    "body": "router-core rtt check failed - rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"
   },
   "data": {
     "hostname": "router-core",
     "status": "CRITICAL",
-    "type": "ping"
+    "type": "rtt",
+    "details": "rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"
   }
 }
 ```
 
+When the object measures something, the figures ride in the visible
+body (and again in the `details` data key for programmatic use): rtt
+checks quote latency/jitter against the configured limits and any
+probe loss, pktloss checks quote the loss percentage and counts, SNMP
+value checks quote the last reading against its threshold ("reading 52
+(max 45)" for a temperature check), and SNMP reboot checks quote the
+device's uptime — how long ago it came back. Plain ping/tcp checks
+have nothing to measure, so their body stays as-is. Recoveries carry
+the current (healthy) figures too.
+
 Recovery: title becomes `"router-core RECOVERED"`, body is
-`"router-core is back up (was CRITICAL)"`.
+`"router-core is back up (was CRITICAL) - rtt avg 11.0ms (limit 80ms)"`.
 
 ## Mobile App Integration
 

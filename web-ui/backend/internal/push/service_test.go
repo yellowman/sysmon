@@ -10,6 +10,8 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/oauth2"
+
+	"sysmon-web/internal/models"
 )
 
 // seedSubscription writes a raw subscription row straight into the db,
@@ -149,6 +151,47 @@ func TestPushFailStatusClassification(t *testing.T) {
 
 var errRandom = json.Unmarshal([]byte("x"), &struct{}{})
 
+func i64(v int64) *int64 { return &v }
+
+func TestCheckDetail(t *testing.T) {
+	cases := []struct {
+		name string
+		host models.HostStatus
+		want string
+	}{
+		{"plain ping - nothing measured", models.HostStatus{}, ""},
+		{"rtt over limit with loss", models.HostStatus{
+			RTT: &models.RTTStats{Avg: 143.25, Threshold: 80, Jitter: 12.1, JitterThreshold: 20, Replies: 3, Probes: 5},
+		}, "rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"},
+		{"rtt no thresholds, all replies", models.HostStatus{
+			RTT: &models.RTTStats{Avg: 12.0, Replies: 5, Probes: 5},
+		}, "rtt avg 12.0ms"},
+		{"packet loss", models.HostStatus{
+			PacketLoss: &models.PacketLossStats{Sent: 64, Received: 56, Lost: 8, LossPct: 12.5, Tolerance: 4},
+		}, "loss 12.5% (8/64 lost, tolerance 4)"},
+		{"snmp temperature over max", models.HostStatus{
+			SNMP: &models.SNMPStats{CheckType: "high", LastValue: i64(52), High: 45},
+		}, "reading 52 (max 45)"},
+		{"snmp range", models.HostStatus{
+			SNMP: &models.SNMPStats{CheckType: "range", LastValue: i64(3), Low: 10, High: 45},
+		}, "reading 3 (range 10-45)"},
+		{"snmp zero reading is still a reading", models.HostStatus{
+			SNMP: &models.SNMPStats{CheckType: "low", LastValue: i64(0), Low: 10},
+		}, "reading 0 (min 10)"},
+		{"snmp rate value withheld (raw counter, not a rate)", models.HostStatus{
+			SNMP: &models.SNMPStats{CheckType: "rate", LastValue: i64(981231231), Rate: 1000},
+		}, ""},
+		{"snmp reboot", models.HostStatus{
+			SNMP: &models.SNMPStats{CheckType: "reboot", SysUpTime: 24 * 3600 * 100},
+		}, "device uptime 1d 0h"},
+	}
+	for _, tc := range cases {
+		if got := checkDetail(tc.host); got != tc.want {
+			t.Errorf("%s: checkDetail = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // fakeFCM stands in for the FCM v1 endpoint: it answers UNREGISTERED
 // for tokens in dead, 200 for everything else, and counts the sends it
 // saw per token.
@@ -227,7 +270,7 @@ func TestUnregisteredTokenLifecycle(t *testing.T) {
 	}
 
 	// First fan-out: both tokens are tried; FCM refuses the dead one.
-	svc.notifyAll("host DOWN", "", "host is unreachable", "host", "CRITICAL", "OK", "", 1, true, "host")
+	svc.notifyAll("host DOWN", "", "host is unreachable", "", "host", "CRITICAL", "OK", "", 1, true, "host")
 	if got := fake.sendCount("tok-dead"); got != 1 {
 		t.Fatalf("dead token sends after first fan-out = %d, want 1", got)
 	}
@@ -251,7 +294,7 @@ func TestUnregisteredTokenLifecycle(t *testing.T) {
 	}
 
 	// Second fan-out: the flagged token is skipped, the live one isn't.
-	svc.notifyAll("host RECOVERED", "", "host is back up", "host", "OK", "CRITICAL", "", 0, false, "host")
+	svc.notifyAll("host RECOVERED", "", "host is back up", "", "host", "OK", "CRITICAL", "", 0, false, "host")
 	if got := fake.sendCount("tok-dead"); got != 1 {
 		t.Errorf("dead token sends after second fan-out = %d, want still 1 (skipped)", got)
 	}

@@ -902,8 +902,10 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 
 // critical drives sound/heads-up vs silent delivery; collapseKey (the
 // object name) makes newer notifications for a host replace older ones,
-// so a WARN vanishes when the CRIT or the recovery arrives.
-func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus, checkType string, badge int, critical bool, collapseKey string) {
+// so a WARN vanishes when the CRIT or the recovery arrives. detail is
+// the measured figures behind the change (see checkDetail), already
+// part of body but repeated as a data field for the apps.
+func (s *Service) notifyAll(title, subtitle, body, detail, hostname, status, prevStatus, checkType string, badge int, critical bool, collapseKey string) {
 	// Snapshot the clients once so a concurrent Reconfigure can't swap
 	// them mid-fan-out, and so we don't hold a lock across slow sends.
 	fcm, apns, _ := s.clients()
@@ -916,6 +918,7 @@ func (s *Service) notifyAll(title, subtitle, body, hostname, status, prevStatus,
 		Object:   collapseKey,
 		Status:   status,
 		Type:     checkType,
+		Details:  detail,
 	}
 	for _, sub := range subs {
 		// FCM already refused this token with UNREGISTERED - permanent
@@ -1148,8 +1151,84 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 			st = "OK"
 		}
 		log.Printf("push: fleet coverage %s - notifying subscribers", st)
-		s.notifyAll(fleetTitle, "", fleetBody, "sysmon-web", st, "", "", badge, fleetCritical, "fleet-coverage")
+		s.notifyAll(fleetTitle, "", fleetBody, "", "sysmon-web", st, "", "", badge, fleetCritical, "fleet-coverage")
 	}
+}
+
+// ticksToUptime renders SNMP TimeTicks (1/100s) as a short human
+// duration ("37d 4h", "12m").
+func ticksToUptime(ticks int64) string {
+	secs := ticks / 100
+	d := secs / 86400
+	h := (secs % 86400) / 3600
+	m := (secs % 3600) / 60
+	switch {
+	case d > 0:
+		return fmt.Sprintf("%dd %dh", d, h)
+	case h > 0:
+		return fmt.Sprintf("%dh %dm", h, m)
+	default:
+		return fmt.Sprintf("%dm", m)
+	}
+}
+
+// checkDetail renders the measured figures behind a state change - "rtt
+// avg 143.2ms (limit 80ms)", "loss 12.5% (8/64 lost)", "reading 52 (max
+// 45)" - so the page itself says how bad it is, not just that it is.
+// Empty for objects that measure nothing (plain ping/tcp checks). Sent
+// on recoveries too: the current reading is the proof of health.
+func checkDetail(host models.HostStatus) string {
+	var parts []string
+	if r := host.RTT; r != nil {
+		p := fmt.Sprintf("rtt avg %.1fms", r.Avg)
+		if r.Threshold > 0 {
+			p += fmt.Sprintf(" (limit %dms)", r.Threshold)
+		}
+		parts = append(parts, p)
+		if r.JitterThreshold > 0 {
+			parts = append(parts, fmt.Sprintf("jitter %.1fms (limit %dms)", r.Jitter, r.JitterThreshold))
+		}
+		if r.Replies < r.Probes {
+			parts = append(parts, fmt.Sprintf("%d/%d replies", r.Replies, r.Probes))
+		}
+	}
+	if pl := host.PacketLoss; pl != nil {
+		p := fmt.Sprintf("loss %.1f%% (%d/%d lost", pl.LossPct, pl.Lost, pl.Sent)
+		if pl.Tolerance > 0 {
+			p += fmt.Sprintf(", tolerance %d", pl.Tolerance)
+		}
+		parts = append(parts, p+")")
+	}
+	if sn := host.SNMP; sn != nil {
+		switch sn.CheckType {
+		case "reboot":
+			// A reboot alert's uptime is how long ago the device came
+			// back - the figure that turns "it rebooted" into "it
+			// rebooted 4 minutes ago".
+			if sn.SysUpTime > 0 {
+				parts = append(parts, "device uptime "+ticksToUptime(sn.SysUpTime))
+			}
+		case "high", "low", "range", "exact":
+			// "rate" is deliberately absent: its stashed value is the
+			// raw counter sample, not the rate, and quoting it would
+			// mislead.
+			if sn.LastValue != nil {
+				p := fmt.Sprintf("reading %d", *sn.LastValue)
+				switch {
+				case sn.CheckType == "high" && sn.High != 0:
+					p += fmt.Sprintf(" (max %d)", sn.High)
+				case sn.CheckType == "low" && sn.Low != 0:
+					p += fmt.Sprintf(" (min %d)", sn.Low)
+				case sn.CheckType == "range" && (sn.Low != 0 || sn.High != 0):
+					p += fmt.Sprintf(" (range %d-%d)", sn.Low, sn.High)
+				case sn.CheckType == "exact":
+					p += fmt.Sprintf(" (expected %d)", sn.Exact)
+				}
+				parts = append(parts, p)
+			}
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, badge int) {
@@ -1181,6 +1260,14 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, bad
 		body = fmt.Sprintf("status changed from %s to %s", prevStatus, host.OverallStatus)
 	}
 
+	// The measurements behind the transition ride in the visible body -
+	// the alert should say HOW down, not just that it is - and again as
+	// a data field for the apps to use programmatically.
+	detail := checkDetail(host)
+	if detail != "" {
+		body += " - " + detail
+	}
+
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
 		host.Hostname, prevStatus, host.OverallStatus)
 
@@ -1189,5 +1276,5 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, bad
 	if collapseKey == "" {
 		collapseKey = host.Hostname
 	}
-	s.notifyAll(title, subtitle, body, host.Hostname, host.OverallStatus, prevStatus, checkType, badge, critical, collapseKey)
+	s.notifyAll(title, subtitle, body, detail, host.Hostname, host.OverallStatus, prevStatus, checkType, badge, critical, collapseKey)
 }

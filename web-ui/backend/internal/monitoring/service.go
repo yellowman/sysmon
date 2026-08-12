@@ -1011,9 +1011,20 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 	if xmlObj.SNMPLastResp > 0 || (xmlObj.SNMPSysUpTime > 0 && xmlObj.SNMPType == "reboot") {
 		host.SNMP = &models.SNMPStats{
 			LastResponse: xmlObj.SNMPLastResp,
+			CheckType:    xmlObj.SNMPType,
+			Low:          xmlObj.SNMPLow,
+			High:         xmlObj.SNMPHigh,
+			Exact:        xmlObj.SNMPExact,
+			Rate:         xmlObj.SNMPRate,
 		}
 		if xmlObj.SNMPType == "reboot" {
 			host.SNMP.SysUpTime = xmlObj.SNMPSysUpTime
+		} else {
+			// The stashed last reading - the temperature, the counter,
+			// whatever the OID returned - which is what a page about
+			// this object should be quoting.
+			v := xmlObj.SNMPSysUpTime
+			host.SNMP.LastValue = &v
 		}
 	}
 
