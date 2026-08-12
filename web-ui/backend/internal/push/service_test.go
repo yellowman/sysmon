@@ -128,6 +128,11 @@ func TestSendTestIsRecorded(t *testing.T) {
 	if log[0].Status != "TEST" || log[0].Recipients != 0 {
 		t.Errorf("log entry = %+v, want Status TEST with 0 recipients", log[0])
 	}
+	// The log names the owner, with the token prefix to tell one of
+	// their devices from another.
+	if want := "Test push → chris (tok-test-dev…)"; log[0].Hostname != want {
+		t.Errorf("log entry hostname = %q, want %q", log[0].Hostname, want)
+	}
 }
 
 func TestPushFailStatusClassification(t *testing.T) {

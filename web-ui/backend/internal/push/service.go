@@ -772,49 +772,33 @@ func (s *Service) ListSubscriptionsByOwner(owner string) []Subscription {
 	return subs
 }
 
-// GetPlatform returns the platform of the subscription with the given token,
-// or empty string if not found.
-func (s *Service) GetPlatform(token string) Platform {
+// getSubscription looks up one subscription row by device token.
+func (s *Service) getSubscription(token string) (sub Subscription, ok bool) {
 	s.opsMu.RLock()
 	defer s.opsMu.RUnlock()
 	if s.stopped {
-		return ""
+		return Subscription{}, false
 	}
-	var platform Platform
 	s.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
-		if v == nil {
-			return nil
-		}
-		var sub Subscription
-		if err := json.Unmarshal(v, &sub); err == nil {
-			platform = sub.Platform
+		if v := tx.Bucket(bucketSubscriptions).Get([]byte(token)); v != nil {
+			ok = json.Unmarshal(v, &sub) == nil
 		}
 		return nil
 	})
-	return platform
+	return sub, ok
+}
+
+// GetPlatform returns the platform of the subscription with the given token,
+// or empty string if not found.
+func (s *Service) GetPlatform(token string) Platform {
+	sub, _ := s.getSubscription(token)
+	return sub.Platform
 }
 
 // IsOwner checks if the given user owns the subscription with the given token.
 func (s *Service) IsOwner(token, owner string) bool {
-	s.opsMu.RLock()
-	defer s.opsMu.RUnlock()
-	if s.stopped {
-		return false
-	}
-	owned := false
-	s.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketSubscriptions).Get([]byte(token))
-		if v == nil {
-			return nil
-		}
-		var sub Subscription
-		if err := json.Unmarshal(v, &sub); err == nil && sub.Owner == owner {
-			owned = true
-		}
-		return nil
-	})
-	return owned
+	sub, ok := s.getSubscription(token)
+	return ok && sub.Owner == owner
 }
 
 func (s *Service) SendTest(token string, platform Platform) error {
@@ -849,13 +833,19 @@ func (s *Service) SendTest(token string, platform Platform) error {
 		sent = 0
 	}
 	s.RecordPush(token, err == nil, status, isUnregistered(err))
-	label := token
-	if len(label) > 12 {
-		label = label[:12] + "…"
+	target := token
+	if len(target) > 12 {
+		target = target[:12] + "…"
+	}
+	// "Who was this sent to" is the question the log answers, and a
+	// person is a better answer than a token prefix - the prefix stays
+	// for telling one of their devices from another.
+	if sub, ok := s.getSubscription(token); ok && sub.Owner != "" {
+		target = sub.Owner + " (" + target + ")"
 	}
 	s.appendPushLog(pushLogEntry{
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
-		Hostname:   "Test push → " + label,
+		Hostname:   "Test push → " + target,
 		Status:     "TEST",
 		Recipients: sent,
 	})
