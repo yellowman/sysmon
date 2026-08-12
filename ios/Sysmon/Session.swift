@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import UserNotifications
+import FirebaseMessaging
 
 @MainActor
 class Session: ObservableObject {
@@ -135,23 +136,74 @@ class Session: ObservableObject {
         }
     }
 
+    // Tokens we already tried to renew this launch. Breaks any loop
+    // where the "renewed" token comes back identical - e.g. the
+    // direct-APNs fallback usually re-delivers the same token, and its
+    // delegate callback re-enters registerPushToken with no way to mark
+    // the call as a renewal pass.
+    private var renewalAttempted = Set<String>()
+
+    /// Register a (possibly rotated) push token with the backend. If the
+    /// server answers that FCM has declared this token UNREGISTERED
+    /// (uninstall/reinstall, restore to a new device, the 270-day
+    /// inactivity purge, a Google-side invalidation), the Firebase SDK on
+    /// this device is the one party that doesn't know: it keeps serving
+    /// the dead token from cache and the MessagingDelegate never fires.
+    /// The only escape is deleteToken() + token(), which mints a
+    /// genuinely new one - so do that, once per token per launch, and
+    /// re-register.
     func registerPushToken(_ deviceToken: String, replacing previous: String? = nil) async {
         guard let auth = token, !serverURL.isEmpty else { return }
         let api = API(baseURL: serverURL, token: auth)
 
-        // Clean up the previous subscription if APNs rotated the token.
+        // Clean up the previous subscription if the token rotated.
+        // Best-effort: it may already be gone (admin kicked it, or a
+        // competing registration cleaned it up).
         if let previous, previous != deviceToken {
             _ = try? await api.unsubscribePush(deviceToken: previous)
         }
 
         do {
-            try await api.subscribePush(deviceToken: deviceToken,
-                                        label: UIDevice.current.name)
-            pushStatus = "Push registered"
+            let response = try await api.subscribePush(deviceToken: deviceToken,
+                                                       label: UIDevice.current.name)
+            if response.tokenStatus == "invalid" {
+                if renewalAttempted.contains(deviceToken) {
+                    pushStatus = "Push token renewal failed - the server still reports the token invalid"
+                } else {
+                    renewalAttempted.insert(deviceToken)
+                    pushStatus = "Push token expired - requesting a new one…"
+                    await renewPushToken(dead: deviceToken)
+                }
+            } else {
+                pushStatus = "Push registered"
+            }
         } catch let e as APIError {
             pushStatus = "Push registration failed: \(e.message)"
         } catch {
             pushStatus = "Push registration failed"
+        }
+    }
+
+    // Force a fresh push token after the server reports the registered
+    // one dead. Firebase-relayed builds hold an FCM token: deleteToken()
+    // + token() mints a genuinely new one. The MessagingDelegate may also
+    // observe the fresh token; both paths converge on registerPushToken,
+    // which is idempotent per token. Direct-APNs builds have no
+    // client-side delete - just ask the system again and let AppDelegate
+    // register whatever comes back.
+    private func renewPushToken(dead: String) async {
+        guard AppDelegate.firebaseEnabled else {
+            UIApplication.shared.registerForRemoteNotifications()
+            return
+        }
+        do {
+            let messaging = Messaging.messaging()
+            try await messaging.deleteToken()
+            let fresh = try await messaging.token()
+            DeviceTokenStore.shared.update(fresh)
+            await registerPushToken(fresh, replacing: dead)
+        } catch {
+            pushStatus = "Push token renewal failed: \(error.localizedDescription)"
         }
     }
 }

@@ -41,12 +41,19 @@ struct API {
         try await postVoid("/api/auth/logout", body: EmptyBody())
     }
 
-    func subscribePush(deviceToken: String, label: String) async throws {
-        try await postVoid("/api/push/subscribe", body: [
+    // The reply can carry a verdict on the token itself (see
+    // SubscribeResponse). The HTTP call succeeding means the
+    // subscription is stored; a body that doesn't decode (older server)
+    // just means "no verdict", not a failed subscribe.
+    @discardableResult
+    func subscribePush(deviceToken: String, label: String) async throws -> SubscribeResponse {
+        let data = try await send("/api/push/subscribe", method: "POST", body: [
             "device_token": deviceToken,
             "platform": "ios",
             "label": label
         ])
+        return (try? Self.decoder.decode(SubscribeResponse.self, from: data))
+            ?? SubscribeResponse(status: nil, tokenStatus: nil, message: nil)
     }
 
     func unsubscribePush(deviceToken: String) async throws {

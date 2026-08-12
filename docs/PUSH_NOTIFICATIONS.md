@@ -195,11 +195,12 @@ response carries a verdict:
 }
 ```
 
-`token_status: "invalid"` is the app's cue to force a token rotation
-(`deleteToken()` then `getToken()` on Android) and subscribe again with
-the fresh token. This matters because FCM only ever reports a dead
-token to the *sender*: the Firebase SDK on the device keeps returning
-the dead token from its cache and `onNewToken` never fires, so without
+`token_status: "invalid"` is the app's cue to force a token rotation —
+`deleteToken()` then `getToken()` on Android, `deleteToken()` then
+`token()` on iOS — and subscribe again with the fresh token. This
+matters because FCM only ever reports a dead token to the *sender*: the
+Firebase SDK on the device keeps returning the dead token from its
+cache and `onNewToken` / the MessagingDelegate never fires, so without
 this signal the app would re-register the same dead token forever.
 
 ### List my subscriptions
@@ -427,9 +428,9 @@ class SysmonMessagingService : FirebaseMessagingService() {
   shown on the admin page as "token dead"), skipping it during alert
   fan-outs (per Google's guidance to stop sending to dead tokens), and
   answering the app's next subscribe of that token with
-  `token_status: "invalid"`. The Android app then deletes its cached
-  token, mints a fresh one, and re-subscribes — the flagged row is
-  replaced and delivery resumes. The row is kept (not deleted) exactly
+  `token_status: "invalid"`. The apps (Android and iOS alike) then
+  delete their cached token, mint a fresh one, and re-subscribe — the
+  flagged row is replaced and delivery resumes. The row is kept (not deleted) exactly
   so this handshake can happen; an admin can still remove it manually
   via `DELETE /api/push/remove/<token>`. A test push to a flagged
   token is still attempted, and a success clears the flag.

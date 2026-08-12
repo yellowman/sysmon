@@ -46,6 +46,14 @@ On successful login, the app requests push notification permission
 and registers the device token with sysmon. From then on, you'll
 receive a push whenever a monitored host changes state.
 
+The registration repeats on every cold launch, and the server's reply
+carries a verdict: if FCM has refused the token with `UNREGISTERED`
+since the last launch (reinstall, device restore, or the 270-day
+inactivity purge — the Firebase SDK itself never finds out and keeps
+serving the dead token from cache), the app deletes the cached token,
+mints a fresh one, and re-registers automatically. No user action
+needed beyond opening the app.
+
 ## Files
 
 - `SysmonApp.swift` — app entry, routes between login and main view

@@ -6,6 +6,23 @@ struct LoginResponse: Codable {
     let role: String
 }
 
+// Response to POST /api/push/subscribe. tokenStatus is "invalid" when
+// the server already knows - from FCM's UNREGISTERED verdict on a past
+// send - that the token just registered is dead. That's the app's cue
+// to delete the cached token and mint a fresh one: FCM only ever
+// reports a dead token to the sender, so the device can't find out any
+// other way. Older servers omit the field.
+struct SubscribeResponse: Codable {
+    let status: String?
+    let tokenStatus: String?
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, message
+        case tokenStatus = "token_status"
+    }
+}
+
 struct Host: Codable, Identifiable, Equatable {
     let objectName: String?
     let hostname: String
