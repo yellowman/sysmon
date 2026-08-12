@@ -42,6 +42,20 @@ class MainActivity : ComponentActivity() {
         handlePushIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // "Not registered" on the Settings tab is local knowledge: logged
+        // in with no stored FCM token - the launch-time fetch failed (a
+        // Play Services hiccup) or notifications were denied and granted
+        // later in system settings. Act on it at the next foreground
+        // instead of waiting for a cold start. Never prompt from here -
+        // a permission dialog on every resume is nagging - so only
+        // proceed when permission is already granted.
+        if (Session.isLoggedIn() && FcmTokenStore.token == null && hasPushPermission()) {
+            registerForFcm()
+        }
+    }
+
     // A launch from a tapped notification carries our EXTRA_NAVIGATE (from
     // a foreground-posted notification) or the FCM data payload's
     // "hostname" key (when the system posts a background notification and
@@ -67,18 +81,17 @@ class MainActivity : ComponentActivity() {
         const val NAV_ALERTS = "alerts"
     }
 
-    private fun requestPushPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
+    private fun hasPushPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
                 this, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-            if (granted) {
-                registerForFcm()
-            } else {
-                pushPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        } else {
+
+    private fun requestPushPermission() {
+        if (hasPushPermission()) {
             registerForFcm()
+        } else {
+            pushPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 

@@ -136,6 +136,20 @@ class Session: ObservableObject {
         }
     }
 
+    // "Not registered" on the Settings tab is local knowledge: logged in
+    // with no stored push token - the launch-time registration failed or
+    // notification permission arrived after it. Act on it when the app
+    // foregrounds instead of waiting for a cold start. Never prompts:
+    // registration is only re-requested when authorization was already
+    // granted, so this is silent and idempotent.
+    func refreshPushRegistrationIfNeeded() async {
+        guard token != nil, DeviceTokenStore.shared.token == nil else { return }
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        guard settings.authorizationStatus == .authorized
+            || settings.authorizationStatus == .provisional else { return }
+        UIApplication.shared.registerForRemoteNotifications()
+    }
+
     // Tokens we already tried to renew this launch. Breaks any loop
     // where the "renewed" token comes back identical - e.g. the
     // direct-APNs fallback usually re-delivers the same token, and its

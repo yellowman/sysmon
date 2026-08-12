@@ -51,6 +51,13 @@ type daemon struct {
 	lastErr  string
 	lastOK   time.Time
 
+	// version is what VERS answered on the versConn socket. The far end
+	// of an established connection cannot change process, so the
+	// version is asked once per connection rather than once per poll;
+	// a reconnect arrives on a new socket and naturally re-asks.
+	version  string
+	versConn net.Conn
+
 	// Incremental fetch state.
 	//
 	// confSeq is the highest object sequence this daemon has reported. It
@@ -1458,12 +1465,6 @@ func SplitQualified(name string) (site, object string) {
 	return "", name
 }
 
-// connection returns the socket this daemon dialled in on.
-//
-// There is only ever the one. A daemon that has dropped its link is not
-// reachable from here at all - it lives behind a NAT or a firewall that
-// only lets traffic out - so the answer is to say so and wait for it to
-// come back, not to try to reach it.
 // siteName reads the daemon's site under its lock. Callers already
 // holding d.mu must read d.site directly instead.
 func (d *daemon) siteName() string {
@@ -1472,6 +1473,12 @@ func (d *daemon) siteName() string {
 	return d.site
 }
 
+// connection returns the socket this daemon dialled in on.
+//
+// There is only ever the one. A daemon that has dropped its link is not
+// reachable from here at all - it lives behind a NAT or a firewall that
+// only lets traffic out - so the answer is to say so and wait for it to
+// come back, not to try to reach it.
 func (d *daemon) connection() (net.Conn, *bufio.Reader, error) {
 	d.mu.Lock()
 	conn, reader := d.conn, d.reader
@@ -1560,17 +1567,33 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		CurrentTime: time.Now(),
 	}
 
-	// Get version with VERS command
-	_, err = conn.Write([]byte("VERS\n"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to send VERS command: %w", err)
+	// The version is a property of the process on the far end, and the
+	// far end of an established connection cannot change process - so
+	// VERS is asked once per connection, not once per poll. The answer
+	// is cached against the socket it came over; a reconnect is a new
+	// socket and re-asks.
+	d.mu.Lock()
+	version := d.version
+	if d.versConn != conn {
+		version = ""
 	}
-	versResp, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read VERS response: %w", err)
+	d.mu.Unlock()
+	if version == "" {
+		if _, err = conn.Write([]byte("VERS\n")); err != nil {
+			return nil, fmt.Errorf("failed to send VERS command: %w", err)
+		}
+		var versResp string
+		versResp, err = reader.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("failed to read VERS response: %w", err)
+		}
+		version = strings.TrimSpace(versResp)
+		s.sessionLog.Log(site, "VERS", version, false, "")
+		d.mu.Lock()
+		d.version, d.versConn = version, conn
+		d.mu.Unlock()
 	}
-	daemonInfo.Version = strings.TrimSpace(versResp)
-	s.sessionLog.Log(site, "VERS", daemonInfo.Version, false, "")
+	daemonInfo.Version = version
 
 	// Get uptime with UPTIME command
 	_, err = conn.Write([]byte("UPTIME\n"))
