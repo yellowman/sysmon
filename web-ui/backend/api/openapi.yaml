@@ -664,6 +664,11 @@ paths:
             type: integer
             default: 100
             maximum: 1000
+        - name: site
+          in: query
+          description: Only entries from this sysmond; omit for the whole fleet
+          schema:
+            type: string
       responses:
         '200':
           description: Session log retrieved
@@ -691,6 +696,11 @@ paths:
             type: integer
             default: 10
             maximum: 100
+        - name: site
+          in: query
+          description: Only entries from this sysmond; omit for the whole fleet
+          schema:
+            type: string
       responses:
         '200':
           description: Session errors retrieved
@@ -924,6 +934,9 @@ components:
         timestamp:
           type: string
           format: date-time
+        site:
+          type: string
+          description: Which sysmond the exchange was with
         command:
           type: string
         response:

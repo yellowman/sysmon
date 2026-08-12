@@ -621,6 +621,17 @@
         <div class="card-header flex justify-between items-center">
             <h2 class="section-title">Session Log</h2>
             <div class="flex items-center space-x-2">
+                <!-- One web-ui talks to a whole fleet; this narrows the
+                     log to one sysmond. Hidden on single-box installs. -->
+                <select x-show="sessionLogSites().length > 1" x-cloak
+                        x-model="sessionLogSite" @change="loadSessionLog()"
+                        class="text-xs border border-gray-200 rounded px-2 py-1 max-w-[14rem]"
+                        title="Which sysmond's exchanges to show">
+                    <option value="">All sysmond</option>
+                    <template x-for="s in sessionLogSites()" :key="s.site">
+                        <option :value="s.site" x-text="s.description || s.site"></option>
+                    </template>
+                </select>
                 <span class="text-xs text-gray-500" x-text="sessionLog.length + ' entries'"></span>
                 <button @click="loadSessionLog()"
                         class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
@@ -634,9 +645,13 @@
                     <div class="border-l-4 rounded-r pl-3 pr-3 py-2"
                          :class="entry.is_error ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'">
                         <div class="flex justify-between items-start">
-                            <span class="font-mono text-xs font-semibold"
-                                  :class="entry.is_error ? 'text-red-700' : 'text-blue-700'"
-                                  x-text="entry.command"></span>
+                            <span>
+                                <span class="font-mono text-xs font-semibold"
+                                      :class="entry.is_error ? 'text-red-700' : 'text-blue-700'"
+                                      x-text="entry.command"></span>
+                                <span x-show="entry.site" class="ml-2 text-xs text-gray-400"
+                                      x-text="'@ ' + entry.site"></span>
+                            </span>
                             <span class="text-xs text-gray-500" x-text="new Date(entry.timestamp).toLocaleTimeString()"></span>
                         </div>
                         <div class="mt-1 text-xs"
@@ -725,6 +740,8 @@ function adminPage() {
         newUser: { username: '', password: '', role: 'user' },
         sessionLog: [],
         sessionErrors: [],
+        sessionLogSite: '',
+        fleetSites: [],
         pushSubs: [],
         pushSubsError: '',
         pushLog: [],
@@ -749,6 +766,7 @@ function adminPage() {
         init() {
             this.loadVersion();
             this.loadUptime();
+            this.loadSites();
             this.loadSessionLog();
             this.loadSessionErrors();
             this.loadPushSubs();
@@ -1169,9 +1187,25 @@ function adminPage() {
             return 'text-red-500';
         },
 
+        // The fleet, for the session log's per-sysmond filter.
+        sessionLogSites() {
+            return this.fleetSites;
+        },
+
+        async loadSites() {
+            try {
+                const result = await apiCall('/api/sites');
+                this.fleetSites = result.sites || [];
+            } catch (e) {
+                console.error('Failed to load sites:', e);
+            }
+        },
+
         async loadSessionLog() {
             try {
-                const result = await apiCall('/api/admin/session-log?limit=50');
+                const site = this.sessionLogSite
+                    ? '&site=' + encodeURIComponent(this.sessionLogSite) : '';
+                const result = await apiCall('/api/admin/session-log?limit=50' + site);
                 this.sessionLog = result.entries || [];
             } catch (e) {
                 console.error('Failed to load session log:', e);

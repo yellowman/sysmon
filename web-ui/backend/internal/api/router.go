@@ -1198,7 +1198,8 @@ func (r *Router) handleAdminSessionLog(w http.ResponseWriter, req *http.Request)
 		}
 	}
 
-	entries := r.monitoring.GetSessionLog(limit)
+	// ?site= narrows to one sysmond's exchanges; empty means the fleet.
+	entries := r.monitoring.GetSessionLog(limit, req.URL.Query().Get("site"))
 	r.sendJSON(w, map[string]interface{}{
 		"entries": entries,
 		"count":   len(entries),
@@ -1220,7 +1221,7 @@ func (r *Router) handleAdminSessionErrors(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
-	errors := r.monitoring.GetSessionErrors(limit)
+	errors := r.monitoring.GetSessionErrors(limit, req.URL.Query().Get("site"))
 	r.sendJSON(w, map[string]interface{}{
 		"errors": errors,
 		"count":  len(errors),
