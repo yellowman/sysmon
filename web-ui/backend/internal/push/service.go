@@ -878,15 +878,22 @@ func (s *Service) subscriberCount() int {
 	return count
 }
 
-// looksLikeAPNsToken distinguishes a raw APNs device token (32 bytes as
-// 64 hex chars, as registered by Firebase-less iOS builds) from an FCM
-// registration token (much longer, contains ':'). One deployment can
-// hold both kinds at once - some installs built with a
-// GoogleService-Info.plist, some without - so the send path routes each
-// token to the transport that can actually deliver to it instead of
-// assuming every iOS token is whatever the server has configured.
+// looksLikeAPNsToken distinguishes a raw APNs device token (hex-encoded
+// bytes, as registered by Firebase-less iOS builds) from an FCM
+// registration token. One deployment can hold both kinds at once - some
+// installs built with a GoogleService-Info.plist, some without - so the
+// send path routes each token to the transport that can actually
+// deliver to it instead of assuming every iOS token is whatever the
+// server has configured.
+//
+// The test is shape, not size: Apple explicitly documents the token
+// length as variable (it has grown before), so hardcoding today's 32
+// bytes would silently misroute every raw-APNs device the day it grows
+// again. FCM registration tokens always carry non-hex structure (a ':'
+// separator at minimum), so pure hex of plausible byte-encoded length
+// can only be an APNs token.
 func looksLikeAPNsToken(token string) bool {
-	if len(token) != 64 {
+	if len(token) < 32 || len(token)%2 != 0 {
 		return false
 	}
 	for _, c := range token {

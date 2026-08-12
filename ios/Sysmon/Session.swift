@@ -2,11 +2,22 @@ import Foundation
 import SwiftUI
 import UIKit
 import UserNotifications
+import BackgroundTasks
 import FirebaseMessaging
 
 @MainActor
 class Session: ObservableObject {
     static private(set) weak var shared: Session?
+
+    // Whether a login survives on disk - the gate for scheduling
+    // background work. Static and storage-based (UserDefaults +
+    // Keychain) so it can be answered on a cold background launch
+    // before any Session instance exists.
+    nonisolated static func hasPersistedLogin() -> Bool {
+        guard let url = UserDefaults.standard.string(forKey: "sysmon_server_url"),
+              !url.isEmpty else { return false }
+        return KeychainHelper.load("sysmon_token") != nil
+    }
 
     @Published var serverURL: String {
         didSet { UserDefaults.standard.set(serverURL, forKey: "sysmon_server_url") }
@@ -107,6 +118,9 @@ class Session: ObservableObject {
         alertCount = 0
         StatusStore.shared.reset()
         Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
+
+        // No login, nothing for the daily token check to check.
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: AppDelegate.pushHealthTaskID)
 
         // Best-effort backend cleanup
         Task {

@@ -21,6 +21,7 @@ object Session {
     private const val KEY_ROLE = "role"
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     var serverUrl by mutableStateOf("")
@@ -48,6 +49,7 @@ object Session {
     }
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -110,6 +112,9 @@ object Session {
             .putString(KEY_USERNAME, response.username)
             .putString(KEY_ROLE, response.role)
             .apply()
+        // Now there is a sysmon to talk to, the daily token health
+        // check has something to check.
+        PushHealthWorker.schedule(appContext)
     }
 
     fun logout() {
@@ -128,6 +133,9 @@ object Session {
             .remove(KEY_USERNAME)
             .remove(KEY_ROLE)
             .apply()
+
+        // No login, nothing for the daily token check to check.
+        PushHealthWorker.cancel(appContext)
 
         // Best-effort backend cleanup with snapshotted credentials
         scope.launch {

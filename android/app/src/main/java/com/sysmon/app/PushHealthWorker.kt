@@ -1,8 +1,14 @@
 package com.sysmon.app
 
 import android.content.Context
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import java.util.concurrent.TimeUnit
 
 /**
  * The scheduled half of dead-token recovery: once a day, re-run the
@@ -35,5 +41,26 @@ class PushHealthWorker(
 
     companion object {
         const val NAME = "push-health"
+
+        // Scheduled on login (and at process start for an install that
+        // is already signed in), cancelled on logout: an app pointed at
+        // no sysmon has nothing to check, so it gets no scheduled work
+        // at all. KEEP so re-scheduling never resets the 24h clock.
+        fun schedule(context: Context) {
+            val request = PeriodicWorkRequestBuilder<PushHealthWorker>(24, TimeUnit.HOURS)
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                NAME, ExistingPeriodicWorkPolicy.KEEP, request
+            )
+        }
+
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(NAME)
+        }
     }
 }

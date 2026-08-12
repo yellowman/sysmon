@@ -472,7 +472,9 @@ class SysmonMessagingService : FirebaseMessagingService() {
   The handshake runs on every app launch/foreground AND once a day in
   the background (WorkManager on Android; BGTaskScheduler app refresh
   on iOS, so its timing rides the system's refresh budget) - a phone
-  left in a drawer heals without anyone opening the app.
+  left in a drawer heals without anyone opening the app. The daily job
+  is only scheduled while a login is stored: an installed-but-unpointed
+  app does no background work at all.
 
 ## Database
 

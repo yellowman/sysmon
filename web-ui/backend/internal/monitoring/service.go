@@ -218,9 +218,12 @@ func (sl *SessionLogger) Log(site, command, response string, isError bool, error
 }
 
 // tail returns the up-to-n most recent entries of src, oldest first,
-// keeping only the given site's when site is non-empty.
+// keeping only the given site's when site is non-empty. n is clamped
+// to what exists BEFORE it becomes an allocation size: it arrives
+// straight from a ?limit= query parameter, and make() with a
+// caller-controlled capacity is a one-request crash.
 func tail(src []SessionLogEntry, n int, site string) []SessionLogEntry {
-	if n <= 0 {
+	if n <= 0 || n > len(src) {
 		n = len(src)
 	}
 	result := make([]SessionLogEntry, 0, n)

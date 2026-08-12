@@ -18,9 +18,10 @@ struct SysmonApp: App {
                     if phase == .active {
                         Task { await session.refreshPushRegistrationIfNeeded() }
                     }
-                    // Each backgrounding re-arms the daily token health
-                    // check (BGTaskScheduler requests don't persist a
-                    // fired slot; the handler also re-arms after a run).
+                    // Each backgrounding makes sure a daily token health
+                    // check is pending. The call is a no-op when one is
+                    // already queued (submitting again would reset its
+                    // 24h clock) or when nobody is logged in.
                     if phase == .background {
                         AppDelegate.schedulePushHealthCheck()
                     }

@@ -181,14 +181,21 @@ func TestIsUnregistered(t *testing.T) {
 
 func TestLooksLikeAPNsToken(t *testing.T) {
 	apnsToken := "0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789abcdef"
-	if !looksLikeAPNsToken(apnsToken) {
-		t.Errorf("64 hex chars not recognized as an APNs token")
+	for name, tok := range map[string]string{
+		"today's 32-byte token": apnsToken,
+		// Apple documents the length as variable and has grown it
+		// before - a longer pure-hex token must still route to APNs.
+		"future longer token": apnsToken + "0123456789abcdef",
+	} {
+		if !looksLikeAPNsToken(tok) {
+			t.Errorf("%s: %q not recognized as an APNs token", name, tok)
+		}
 	}
 	fcmish := "dGVzdA:APA91bFoo-Bar_Baz0123456789abcdefghijklmnopqrstuvwxyz0123"
 	for name, tok := range map[string]string{
 		"fcm-shaped (colon)": fcmish,
-		"too short":          apnsToken[:63],
-		"too long":           apnsToken + "0",
+		"odd length":         apnsToken[:63],
+		"far too short":      "abcdef012345",
 		"non-hex":            apnsToken[:63] + "g",
 		"empty":              "",
 	} {
