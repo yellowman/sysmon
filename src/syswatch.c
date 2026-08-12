@@ -2001,6 +2001,13 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			needssleep(now_t);
 		}
 
+		/* Checkpoint check state every so often. Saving only at
+		   shutdown meant a crash or power loss lost everything since
+		   the last clean stop - and an unclean death is exactly when
+		   the next start most needs to know who was already paged.
+		   Self-gated to once per interval. */
+		checkpoint_state(now_t, path_savestate);
+
 		if (stop_daemon)
 		{
 			stop_it(now_t);

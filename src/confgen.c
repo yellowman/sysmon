@@ -723,7 +723,8 @@ const char *sysmon_logfile(void)
 }
 
 /*
- * The check-state checkpoint, written at shutdown and read at startup.
+ * The check-state checkpoint, written at shutdown (and every few
+ * minutes in between, from the watch loop) and read at startup.
  * Not .xml: it stopped being XML when something finally had to read it
  * back, and a name that lies about a format is worse than no name.
  */

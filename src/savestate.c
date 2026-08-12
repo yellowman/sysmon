@@ -1,6 +1,10 @@
 /*
  * savestate.c - carry check state across a restart.
  *
+ * Written at shutdown and checkpointed every few minutes in between,
+ * so an unclean death (crash, OOM, power) costs minutes of state, not
+ * everything since the last clean stop.
+ *
  * A restart used to lose everything the daemon had learned: how long a
  * host had been down, how many consecutive failures it was at, and - the
  * one that gets somebody out of bed - whether anyone had already been
@@ -58,6 +62,10 @@
  */
 #define STATE_MAX_AGE	(12 * 60 * 60)
 
+/* How often the watch loop checkpoints. Ten minutes bounds what an
+   unclean death can forget to ten minutes of state changes. */
+#define STATE_CHECKPOINT_SECS	(10 * 60)
+
 /*
  * Which fields the line actually carried. A checkpoint written by another
  * version of this daemon may be missing some, and "missing" has to mean
@@ -101,8 +109,13 @@ struct saved_state {
  * Write the checkpoint, atomically. A restart that reads a half-written
  * file would be worse than one that reads none, and a daemon being shut
  * down is exactly when a write is most likely to be interrupted.
+ *
+ * Returns the number of objects written, or -1 when nothing was written
+ * (no path, or the write failed - which complains on its own). Quiet on
+ * success: this also runs every few minutes from the watch loop, and a
+ * routine checkpoint is not news.
  */
-void save_state(const char *path)
+static long write_state(const char *path)
 {
 	char tmp[PATH_MAX + 8];
 	FILE *fh;
@@ -110,7 +123,7 @@ void save_state(const char *path)
 	unsigned long count = 0;
 
 	if (path == NULL || *path == '\0')
-		return;
+		return -1;
 
 	for (here = currenthead; here != NULL; here = here->next)
 		count++;
@@ -120,7 +133,7 @@ void save_state(const char *path)
 	if (fh == NULL)
 	{
 		print_err(1, "save_state: cannot write %s: %s", tmp, strerror(errno));
-		return;
+		return -1;
 	}
 
 	fprintf(fh, "%s %d %lld %lu\n", STATE_MAGIC, STATE_VERSION,
@@ -149,16 +162,56 @@ void save_state(const char *path)
 	{
 		print_err(1, "save_state: cannot finish writing %s", tmp);
 		unlink(tmp);
-		return;
+		return -1;
 	}
 	if (rename(tmp, path) == -1)
 	{
 		print_err(1, "save_state: cannot move %s into place: %s",
 			path, strerror(errno));
 		unlink(tmp);
+		return -1;
+	}
+	return (long)count;
+}
+
+/*
+ * The shutdown save: the same write, but announced - a stopping daemon
+ * saying what it preserved is worth one syslog line.
+ */
+void save_state(const char *path)
+{
+	long count = write_state(path);
+
+	if (count >= 0)
+		print_err(0, "save_state: wrote %ld objects to %s", count, path);
+}
+
+/*
+ * The periodic checkpoint. Shutdown-only saving meant a crash or power
+ * loss lost everything since the last clean stop - and an unclean death
+ * is exactly when the next start most needs to know who was already
+ * paged. Called from the watch loop every pass; writes at most once per
+ * STATE_CHECKPOINT_SECS, silently (failures still complain).
+ */
+void checkpoint_state(time_t now, const char *path)
+{
+	static time_t last = 0;
+
+	if (path == NULL || *path == '\0')
+		return;
+	if (last == 0 || now < last)
+	{
+		/* First pass after start - load_state only just read this
+		   file, so there is nothing new to write - or the clock
+		   stepped backwards. Either way: (re)arm, wait a full
+		   interval. */
+		last = now;
 		return;
 	}
-	print_err(0, "save_state: wrote %lu objects to %s", count, path);
+	if (now - last < STATE_CHECKPOINT_SECS)
+		return;
+	last = now;
+	write_state(path);
 }
 
 /* ------------------------------------------------------------------ */
@@ -230,20 +283,20 @@ static struct saved_state *read_state(const char *path, time_t now)
 		sscanf(line, STATE_MAGIC " %d %lld %lu",
 			&version, &written, &claimed) != 3)
 	{
-		print_err(1, "save_state: %s is not a state file; ignoring it", path);
+		print_err(1, "load_state: %s is not a state file; ignoring it", path);
 		fclose(fh);
 		return NULL;
 	}
 	if (version != STATE_VERSION)
 	{
-		print_err(1, "save_state: %s is version %d, this daemon writes %d; "
+		print_err(1, "load_state: %s is version %d, this daemon writes %d; "
 			"starting clean", path, version, STATE_VERSION);
 		fclose(fh);
 		return NULL;
 	}
 	if (now - (time_t)written > STATE_MAX_AGE)
 	{
-		print_err(1, "save_state: %s is %lld hours old; starting clean rather "
+		print_err(1, "load_state: %s is %lld hours old; starting clean rather "
 			"than acting on it", path,
 			(long long)((now - (time_t)written) / 3600));
 		fclose(fh);
@@ -412,6 +465,6 @@ void load_state(const char *path)
 	}
 
 	free_saved(saved);
-	print_err(1, "save_state: restored %lu objects from %s (%lu had no saved "
+	print_err(1, "load_state: restored %lu objects from %s (%lu had no saved "
 		"state and start clean)", restored, path, missing);
 }
