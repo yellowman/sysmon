@@ -25,10 +25,17 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <!-- The daily push-token health check (AppDelegate.pushHealthTaskID).
+         "fetch" grants the app-refresh budget the task runs on. -->
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>com.sysmon.app.push-health</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIBackgroundModes</key>
     <array>
+        <string>fetch</string>
         <string>remote-notification</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>

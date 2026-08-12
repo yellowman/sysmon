@@ -150,6 +150,25 @@ class Session: ObservableObject {
         UIApplication.shared.registerForRemoteNotifications()
     }
 
+    // The scheduled half of dead-token recovery: once a day (as iOS's
+    // app-refresh budget allows) re-run the registration handshake in
+    // the background. Re-subscribing IS the check - the server's reply
+    // carries the verdict when FCM/APNs refused this token since the
+    // last send - and registerPushToken already renews on it. So a
+    // phone left in a drawer heals without anyone opening the app.
+    func dailyPushHealthCheck() async {
+        guard token != nil else { return }
+        // The renewal loop-guard is per-launch; a renewal that failed
+        // earlier (network trouble mid-rotation) deserves a fresh try
+        // on today's pass.
+        renewalAttempted.removeAll()
+        if let push = DeviceTokenStore.shared.token {
+            await registerPushToken(push)
+        } else {
+            await refreshPushRegistrationIfNeeded()
+        }
+    }
+
     // Tokens we already tried to renew this launch. Breaks any loop
     // where the "renewed" token comes back identical - e.g. the
     // direct-APNs fallback usually re-delivers the same token, and its

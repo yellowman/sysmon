@@ -1,5 +1,6 @@
 import UIKit
 import UserNotifications
+import BackgroundTasks
 import FirebaseCore
 import FirebaseMessaging
 
@@ -17,6 +18,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     // keeps unconfigured builds from crashing in FirebaseApp.configure().
     private(set) static var firebaseEnabled = false
 
+    // The daily push-token health check. Must match Info.plist's
+    // BGTaskSchedulerPermittedIdentifiers entry.
+    static let pushHealthTaskID = "com.sysmon.app.push-health"
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         if Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
@@ -25,7 +30,42 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             AppDelegate.firebaseEnabled = true
         }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        // Handlers must be registered before launching finishes; the
+        // actual requests are submitted whenever the app backgrounds.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.pushHealthTaskID, using: nil
+        ) { task in
+            guard let refresh = task as? BGAppRefreshTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            AppDelegate.handlePushHealth(refresh)
+        }
         return true
+    }
+
+    // Ask for the next slot ~24h out. iOS treats this as an earliest
+    // bound, not a schedule - the run itself rides the system's app
+    // refresh budget, so it can slip. Combined with the launch-time and
+    // foreground checks, a slipped slot costs nothing but delay.
+    static func schedulePushHealthCheck() {
+        let request = BGAppRefreshTaskRequest(identifier: pushHealthTaskID)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 24 * 60 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    static func handlePushHealth(_ task: BGAppRefreshTask) {
+        // Re-arm before doing anything: an expired or crashed run must
+        // not also cost tomorrow's slot.
+        schedulePushHealthCheck()
+        let work = Task { @MainActor in
+            await Session.shared?.dailyPushHealthCheck()
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = {
+            work.cancel()
+            task.setTaskCompleted(success: false)
+        }
     }
 
     func application(_ application: UIApplication,

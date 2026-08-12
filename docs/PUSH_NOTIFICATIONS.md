@@ -469,6 +469,10 @@ class SysmonMessagingService : FirebaseMessagingService() {
   so this handshake can happen; an admin can still remove it manually
   via `DELETE /api/push/remove/<token>`. A test push to a flagged
   token is still attempted, and a success clears the flag.
+  The handshake runs on every app launch/foreground AND once a day in
+  the background (WorkManager on Android; BGTaskScheduler app refresh
+  on iOS, so its timing rides the system's refresh budget) - a phone
+  left in a drawer heals without anyone opening the app.
 
 ## Database
 
