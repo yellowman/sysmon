@@ -85,6 +85,16 @@ In the admin UI under **APNs**:
 The certificate is validated on upload; its Subject CN and expiry are
 shown in the panel.
 
+**With both FCM and APNs configured**, each iOS device still receives
+exactly one notification — there is one subscription row per device,
+and the send path picks one transport per token. Which one is decided
+by the token itself: a raw APNs device token (64 hex chars, registered
+by app builds without a `GoogleService-Info.plist`) goes direct to
+APNs; anything else goes via FCM, which relays to APNs internally.
+This means a mixed fleet — some installs built with Firebase, some
+without — delivers correctly from one server, and neither transport
+is ever handed a token it can't deliver to.
+
 ### 3. Enable
 
 Flip the master **Enabled** switch in the admin UI to start the push
@@ -312,7 +322,8 @@ Authorization: Bearer <admin-token>
     "hostname": "router-core",
     "status": "CRITICAL",
     "type": "rtt",
-    "details": "rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"
+    "details": "rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies",
+    "related": "core-temp reading 38 (max 45); core-loss loss 0.0% (0/64 lost)"
   }
 }
 ```
@@ -326,6 +337,16 @@ value checks quote the last reading against its threshold ("reading 52
 device's uptime — how long ago it came back. Plain ping/tcp checks
 have nothing to measure, so their body stays as-is. Recoveries carry
 the current (healthy) figures too.
+
+The notification also quotes what the *other* objects watching the
+same box last measured — matched by hostname/address within the same
+site. A ping object can only say down/up, but its siblings (the rtt
+object, the temperature check) hold the last readings the fleet has
+for that machine, so a ping-down body ends with e.g.
+`- also: core-rtt rtt avg 44.0ms (limit 80ms); core-temp reading 38
+(max 45)`. Siblings that measure nothing are skipped, a sibling that
+is itself failing is marked (`[CRITICAL]`), and the list is capped at
+3 (`+N more`). The same string rides in the `related` data key.
 
 Recovery: title becomes `"router-core RECOVERED"`, body is
 `"router-core is back up (was CRITICAL) - rtt avg 11.0ms (limit 80ms)"`.
@@ -430,15 +451,18 @@ class SysmonMessagingService : FirebaseMessagingService() {
 - **OS issues new push token**: Subscribe again with the same session
   token but the new device_token. A new `api_key` is issued. Optionally
   unsubscribe the old token.
-- **FCM declares the token UNREGISTERED**: happens on app uninstall,
-  cleared app data, restore to a new device, Google-side key rotations,
-  or after ~270 days of device inactivity. This verdict is permanent
-  for that token string, and only the sender ever sees it — the
-  device's own Firebase SDK keeps returning the dead token from cache.
-  The server reacts by flagging the subscription (`unregistered`,
-  shown on the admin page as "token dead"), skipping it during alert
-  fan-outs (per Google's guidance to stop sending to dead tokens), and
-  answering the app's next subscribe of that token with
+- **The transport declares the token dead**: FCM answers a send with
+  `UNREGISTERED`; direct APNs answers HTTP 410 `Unregistered` — the
+  same verdict in different clothes. It happens on app uninstall,
+  cleared app data, restore to a new device, provider-side key
+  rotations, or (FCM) after ~270 days of device inactivity. The
+  verdict is permanent for that token string, and only the sender ever
+  sees it — the device's own push SDK keeps returning the dead token
+  from cache. The server reacts identically for both transports:
+  flagging the subscription (`unregistered`, shown on the admin page
+  as "token dead"), skipping it during alert fan-outs (per the
+  providers' guidance to stop sending to dead tokens), and answering
+  the app's next subscribe of that token with
   `token_status: "invalid"`. The apps (Android and iOS alike) then
   delete their cached token, mint a fresh one, and re-subscribe — the
   flagged row is replaced and delivery resumes. The row is kept (not deleted) exactly

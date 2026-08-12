@@ -629,12 +629,17 @@ func (s *Service) RecordPush(token string, success bool, status string, unregist
 	})
 }
 
-// isUnregistered reports whether a send failure was FCM's authoritative
-// "this token no longer exists" verdict - the one failure that never
-// heals on its own and needs the app to mint a fresh token.
+// isUnregistered reports whether a send failure was the transport's
+// authoritative "this token no longer exists" verdict - FCM's
+// UNREGISTERED or APNs' 410 Unregistered - the one failure that never
+// heals on its own and needs the app to re-register.
 func isUnregistered(err error) bool {
 	var se *FCMSendError
-	return errors.As(err, &se) && se.Reason == "UNREGISTERED"
+	if errors.As(err, &se) && se.Reason == "UNREGISTERED" {
+		return true
+	}
+	var ae *APNsSendError
+	return errors.As(err, &ae) && ae.Reason == "Unregistered"
 }
 
 // pushFailStatus compresses a send error into a short per-device status
@@ -650,6 +655,18 @@ func pushFailStatus(err error) string {
 		}
 		if se.Reason != "" {
 			return "failed: " + strings.ToLower(se.Reason)
+		}
+	}
+	var ae *APNsSendError
+	if errors.As(err, &ae) {
+		switch ae.Reason {
+		case "Unregistered":
+			return "failed: token dead"
+		case "BadDeviceToken":
+			return "failed: bad device token (env mismatch?)"
+		}
+		if ae.Reason != "" {
+			return "failed: " + strings.ToLower(ae.Reason)
 		}
 	}
 	var kr *KeyRejectedError
@@ -871,6 +888,27 @@ func (s *Service) subscriberCount() int {
 	return count
 }
 
+// looksLikeAPNsToken distinguishes a raw APNs device token (32 bytes as
+// 64 hex chars, as registered by Firebase-less iOS builds) from an FCM
+// registration token (much longer, contains ':'). One deployment can
+// hold both kinds at once - some installs built with a
+// GoogleService-Info.plist, some without - so the send path routes each
+// token to the transport that can actually deliver to it instead of
+// assuming every iOS token is whatever the server has configured.
+func looksLikeAPNsToken(token string) bool {
+	if len(token) != 64 {
+		return false
+	}
+	for _, c := range token {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) sendToDevice(token string, platform Platform, title, subtitle, body string) error {
 	fcm, apns, _ := s.clients()
 	// Test pushes present as critical so the full sound/heads-up path is
@@ -882,12 +920,14 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 		// Firebase-first: with FCM configured, iOS devices register FCM
 		// tokens and Firebase relays to APNs (auth key uploaded once in
 		// the Firebase console, never expires). Direct cert-based APNs
-		// remains the fallback for Firebase-less deployments.
+		// serves Firebase-less deployments - and, by token shape, the
+		// individual devices running a Firebase-less build even when FCM
+		// is configured (see looksLikeAPNsToken).
+		if apns != nil && (fcm == nil || looksLikeAPNsToken(token)) {
+			return apns.Send(token, title, subtitle, body, nil, critical, collapse)
+		}
 		if fcm != nil {
 			return fcm.Send(token, title, subtitle, body, nil, fcmData{}, critical, collapse)
-		}
-		if apns != nil {
-			return apns.Send(token, title, subtitle, body, nil, critical, collapse)
 		}
 		return fmt.Errorf("no iOS push transport configured (FCM or APNs)")
 	case PlatformAndroid:
@@ -900,12 +940,12 @@ func (s *Service) sendToDevice(token string, platform Platform, title, subtitle,
 	}
 }
 
-// critical drives sound/heads-up vs silent delivery; collapseKey (the
-// object name) makes newer notifications for a host replace older ones,
-// so a WARN vanishes when the CRIT or the recovery arrives. detail is
-// the measured figures behind the change (see checkDetail), already
-// part of body but repeated as a data field for the apps.
-func (s *Service) notifyAll(title, subtitle, body, detail, hostname, status, prevStatus, checkType string, badge int, critical bool, collapseKey string) {
+// critical drives sound/heads-up vs silent delivery; data.Object (the
+// object name) doubles as the collapse key, making newer notifications
+// for a host replace older ones, so a WARN vanishes when the CRIT or
+// the recovery arrives. data's Details/Related figures are already part
+// of body; they repeat as data fields for the apps.
+func (s *Service) notifyAll(title, subtitle, body string, data fcmData, prevStatus string, badge int, critical bool) {
 	// Snapshot the clients once so a concurrent Reconfigure can't swap
 	// them mid-fan-out, and so we don't hold a lock across slow sends.
 	fcm, apns, _ := s.clients()
@@ -913,13 +953,7 @@ func (s *Service) notifyAll(title, subtitle, body, detail, hostname, status, pre
 	sent := 0
 	badgePtr := &badge
 
-	data := fcmData{
-		Hostname: hostname,
-		Object:   collapseKey,
-		Status:   status,
-		Type:     checkType,
-		Details:  detail,
-	}
+	hostname, status, collapseKey := data.Hostname, data.Status, data.Object
 	for _, sub := range subs {
 		// FCM already refused this token with UNREGISTERED - permanent
 		// for this string, so every further send is a guaranteed
@@ -937,12 +971,12 @@ func (s *Service) notifyAll(title, subtitle, body, detail, hostname, status, pre
 		skipped := false
 		switch sub.Platform {
 		case PlatformIOS:
-			// Firebase-first, direct APNs as the cert-based fallback -
-			// see sendToDevice.
-			if fcm != nil {
-				err = fcm.Send(sub.DeviceToken, title, subtitle, body, badgePtr, data, critical, collapseKey)
-			} else if apns != nil {
+			// Firebase-first, direct APNs for Firebase-less deployments
+			// and for individual raw-APNs tokens - see sendToDevice.
+			if apns != nil && (fcm == nil || looksLikeAPNsToken(sub.DeviceToken)) {
 				err = apns.Send(sub.DeviceToken, title, subtitle, body, badgePtr, critical, collapseKey)
+			} else if fcm != nil {
+				err = fcm.Send(sub.DeviceToken, title, subtitle, body, badgePtr, data, critical, collapseKey)
 			} else {
 				skipped = true
 			}
@@ -1143,7 +1177,7 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 		return
 	}
 	for _, c := range changes {
-		s.sendStateChange(c.host, c.prevStatus, badge)
+		s.sendStateChange(c.host, c.prevStatus, badge, relatedDetail(status.Hosts, c.host))
 	}
 	if fleetSend {
 		st := "DEGRADED"
@@ -1151,7 +1185,11 @@ func (s *Service) pollAndNotify(initialSeed bool) {
 			st = "OK"
 		}
 		log.Printf("push: fleet coverage %s - notifying subscribers", st)
-		s.notifyAll(fleetTitle, "", fleetBody, "", "sysmon-web", st, "", "", badge, fleetCritical, "fleet-coverage")
+		s.notifyAll(fleetTitle, "", fleetBody, fcmData{
+			Hostname: "sysmon-web",
+			Object:   "fleet-coverage",
+			Status:   st,
+		}, "", badge, fleetCritical)
 	}
 }
 
@@ -1231,7 +1269,65 @@ func checkDetail(host models.HostStatus) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, badge int) {
+// maxRelated caps how many sibling objects a notification quotes, so a
+// heavily instrumented box doesn't overflow the payload.
+const maxRelated = 3
+
+// relatedDetail summarizes what the OTHER objects watching the same box
+// last measured. A ping object can only say down/up, but its siblings -
+// the rtt object, the temperature check - hold the last readings the
+// fleet has for that machine, which is exactly the context a page
+// should carry: "ping died, and the last rtt we saw was 44ms". Matched
+// by hostname or address within the same site (private addresses reused
+// across sites are different boxes). Siblings that measure nothing
+// (other ping/tcp objects) are skipped; a sibling that is itself
+// failing says so.
+func relatedDetail(all []models.HostStatus, h models.HostStatus) string {
+	selfKey := h.ObjectName
+	if selfKey == "" {
+		selfKey = h.Hostname
+	}
+	var parts []string
+	extra := 0
+	for i := range all {
+		o := &all[i]
+		key := o.ObjectName
+		if key == "" {
+			key = o.Hostname
+		}
+		if key == selfKey || o.Site != h.Site {
+			continue
+		}
+		sameBox := (h.Hostname != "" && strings.EqualFold(o.Hostname, h.Hostname)) ||
+			(h.IPv4Address != "" && o.IPv4Address == h.IPv4Address) ||
+			(h.IPv6Address != "" && o.IPv6Address == h.IPv6Address)
+		if !sameBox {
+			continue
+		}
+		d := checkDetail(*o)
+		if d == "" {
+			continue
+		}
+		if len(parts) >= maxRelated {
+			extra++
+			continue
+		}
+		if st := strings.ToUpper(o.OverallStatus); st != "" && st != "OK" {
+			d += " [" + st + "]"
+		}
+		name := o.LocalName
+		if name == "" {
+			name = key
+		}
+		parts = append(parts, name+" "+d)
+	}
+	if extra > 0 {
+		parts = append(parts, fmt.Sprintf("+%d more", extra))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, badge int, related string) {
 	var title, subtitle, body string
 
 	checkType := ""
@@ -1262,10 +1358,14 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, bad
 
 	// The measurements behind the transition ride in the visible body -
 	// the alert should say HOW down, not just that it is - and again as
-	// a data field for the apps to use programmatically.
+	// data fields for the apps to use programmatically. The sibling
+	// objects' last readings follow the host's own.
 	detail := checkDetail(host)
 	if detail != "" {
 		body += " - " + detail
+	}
+	if related != "" {
+		body += " - also: " + related
 	}
 
 	log.Printf("push: %s status %s -> %s, notifying subscribers",
@@ -1276,5 +1376,12 @@ func (s *Service) sendStateChange(host models.HostStatus, prevStatus string, bad
 	if collapseKey == "" {
 		collapseKey = host.Hostname
 	}
-	s.notifyAll(title, subtitle, body, detail, host.Hostname, host.OverallStatus, prevStatus, checkType, badge, critical, collapseKey)
+	s.notifyAll(title, subtitle, body, fcmData{
+		Hostname: host.Hostname,
+		Object:   collapseKey,
+		Status:   host.OverallStatus,
+		Type:     checkType,
+		Details:  detail,
+		Related:  related,
+	}, prevStatus, badge, critical)
 }

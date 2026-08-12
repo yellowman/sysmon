@@ -139,6 +139,9 @@ func TestPushFailStatusClassification(t *testing.T) {
 		{"unregistered", &FCMSendError{StatusCode: http.StatusNotFound, Reason: "UNREGISTERED"}, "failed: token dead"},
 		{"mismatch", &FCMSendError{StatusCode: http.StatusForbidden, Reason: "SENDER_ID_MISMATCH"}, "failed: project mismatch"},
 		{"other fcm", &FCMSendError{StatusCode: 500, Reason: "INTERNAL"}, "failed: internal"},
+		{"apns unregistered", &APNsSendError{StatusCode: http.StatusGone, Reason: "Unregistered"}, "failed: token dead"},
+		{"apns bad token", &APNsSendError{StatusCode: http.StatusBadRequest, Reason: "BadDeviceToken"}, "failed: bad device token (env mismatch?)"},
+		{"apns other", &APNsSendError{StatusCode: 429, Reason: "TooManyRequests"}, "failed: toomanyrequests"},
 		{"key rejected", &KeyRejectedError{Detail: "revoked"}, "failed: key rejected"},
 		{"generic", errRandom, "failed"},
 	}
@@ -146,6 +149,90 @@ func TestPushFailStatusClassification(t *testing.T) {
 		if got := pushFailStatus(tc.err); got != tc.want {
 			t.Errorf("%s: pushFailStatus = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// Both transports' dead-token verdicts - and only those - count as
+// unregistered.
+func TestIsUnregistered(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"fcm unregistered", &FCMSendError{StatusCode: 404, Reason: "UNREGISTERED"}, true},
+		{"apns unregistered", &APNsSendError{StatusCode: 410, Reason: "Unregistered"}, true},
+		{"fcm mismatch", &FCMSendError{StatusCode: 403, Reason: "SENDER_ID_MISMATCH"}, false},
+		{"apns bad token", &APNsSendError{StatusCode: 400, Reason: "BadDeviceToken"}, false},
+		{"nil", nil, false},
+		{"generic", errRandom, false},
+	}
+	for _, tc := range cases {
+		if got := isUnregistered(tc.err); got != tc.want {
+			t.Errorf("%s: isUnregistered = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestLooksLikeAPNsToken(t *testing.T) {
+	apnsToken := "0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789abcdef"
+	if !looksLikeAPNsToken(apnsToken) {
+		t.Errorf("64 hex chars not recognized as an APNs token")
+	}
+	fcmish := "dGVzdA:APA91bFoo-Bar_Baz0123456789abcdefghijklmnopqrstuvwxyz0123"
+	for name, tok := range map[string]string{
+		"fcm-shaped (colon)": fcmish,
+		"too short":          apnsToken[:63],
+		"too long":           apnsToken + "0",
+		"non-hex":            apnsToken[:63] + "g",
+		"empty":              "",
+	} {
+		if looksLikeAPNsToken(tok) {
+			t.Errorf("%s: %q misrecognized as an APNs token", name, tok)
+		}
+	}
+}
+
+func TestRelatedDetail(t *testing.T) {
+	ping := models.HostStatus{
+		ObjectName: "site1:core-ping", LocalName: "core-ping",
+		Site: "site1", Hostname: "core.example.net", OverallStatus: "CRITICAL",
+	}
+	all := []models.HostStatus{
+		ping, // self - excluded
+		{ // sibling by hostname, measures rtt
+			ObjectName: "site1:core-rtt", LocalName: "core-rtt",
+			Site: "site1", Hostname: "CORE.example.net", OverallStatus: "OK",
+			RTT: &models.RTTStats{Avg: 44.0, Threshold: 80, Replies: 5, Probes: 5},
+		},
+		{ // sibling by hostname, snmp temperature, itself failing
+			ObjectName: "site1:core-temp", LocalName: "core-temp",
+			Site: "site1", Hostname: "core.example.net", OverallStatus: "WARNING",
+			SNMP: &models.SNMPStats{CheckType: "high", LastValue: i64(52), High: 45},
+		},
+		{ // sibling but measures nothing - skipped
+			ObjectName: "site1:core-tcp", LocalName: "core-tcp",
+			Site: "site1", Hostname: "core.example.net", OverallStatus: "OK",
+		},
+		{ // same hostname, different site - a different box
+			ObjectName: "site2:core-rtt", LocalName: "core-rtt",
+			Site: "site2", Hostname: "core.example.net", OverallStatus: "OK",
+			RTT: &models.RTTStats{Avg: 9.0, Replies: 5, Probes: 5},
+		},
+		{ // unrelated host
+			ObjectName: "site1:edge-rtt", LocalName: "edge-rtt",
+			Site: "site1", Hostname: "edge.example.net", OverallStatus: "OK",
+			RTT: &models.RTTStats{Avg: 12.0, Replies: 5, Probes: 5},
+		},
+	}
+	want := "core-rtt rtt avg 44.0ms (limit 80ms); core-temp reading 52 (max 45) [WARNING]"
+	if got := relatedDetail(all, ping); got != want {
+		t.Errorf("relatedDetail = %q, want %q", got, want)
+	}
+
+	// No siblings → empty.
+	if got := relatedDetail(all, all[5]); got != "" {
+		t.Errorf("relatedDetail for lone host = %q, want empty", got)
 	}
 }
 
@@ -270,7 +357,8 @@ func TestUnregisteredTokenLifecycle(t *testing.T) {
 	}
 
 	// First fan-out: both tokens are tried; FCM refuses the dead one.
-	svc.notifyAll("host DOWN", "", "host is unreachable", "", "host", "CRITICAL", "OK", "", 1, true, "host")
+	svc.notifyAll("host DOWN", "", "host is unreachable",
+		fcmData{Hostname: "host", Object: "host", Status: "CRITICAL"}, "OK", 1, true)
 	if got := fake.sendCount("tok-dead"); got != 1 {
 		t.Fatalf("dead token sends after first fan-out = %d, want 1", got)
 	}
@@ -294,7 +382,8 @@ func TestUnregisteredTokenLifecycle(t *testing.T) {
 	}
 
 	// Second fan-out: the flagged token is skipped, the live one isn't.
-	svc.notifyAll("host RECOVERED", "", "host is back up", "", "host", "OK", "CRITICAL", "", 0, false, "host")
+	svc.notifyAll("host RECOVERED", "", "host is back up",
+		fcmData{Hostname: "host", Object: "host", Status: "OK"}, "CRITICAL", 0, false)
 	if got := fake.sendCount("tok-dead"); got != 1 {
 		t.Errorf("dead token sends after second fan-out = %d, want still 1 (skipped)", got)
 	}

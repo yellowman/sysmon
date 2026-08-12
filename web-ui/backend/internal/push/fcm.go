@@ -122,13 +122,11 @@ type fcmData struct {
 	Status   string
 	Type     string
 	Details  string // "rtt avg 143.2ms (limit 80ms)", "reading 52 (max 45)", …
+	Related  string // sibling objects' last readings - see relatedDetail
 }
 
 func (d fcmData) toMap() map[string]string {
-	if d.Hostname == "" && d.Object == "" && d.Status == "" && d.Type == "" && d.Details == "" {
-		return nil
-	}
-	m := make(map[string]string, 5)
+	m := make(map[string]string, 6)
 	if d.Hostname != "" {
 		m["hostname"] = d.Hostname
 	}
@@ -143,6 +141,12 @@ func (d fcmData) toMap() map[string]string {
 	}
 	if d.Details != "" {
 		m["details"] = d.Details
+	}
+	if d.Related != "" {
+		m["related"] = d.Related
+	}
+	if len(m) == 0 {
+		return nil
 	}
 	return m
 }
