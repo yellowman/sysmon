@@ -1144,8 +1144,10 @@ const char *sysmon_statefile(void);
 
 /* savestate.c - check state across a restart. Only the runtime fields
    hard_copy() already carries across a SIGHUP; nothing structural and
-   nothing secret. */
+   nothing secret. Saved at shutdown, checkpointed from the watch loop
+   in between, read back at startup. */
 void save_state(const char *);
+void checkpoint_state(time_t, const char *);
 void load_state(const char *);
 const char *sysmon_ca_file(void);
 void confgen_prepare(uid_t, gid_t);

@@ -1999,7 +1999,18 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			wakeup_checks(now_t);
 			do_tree_periodic(now_t);
 			needssleep(now_t);
+			/* Paused is not stopped: checks in flight still finish
+			   and pages still record, and a pause can last hours -
+			   the checkpoint keeps its schedule through it. */
+			checkpoint_state(now_t, path_savestate);
 		}
+
+		/* Checkpoint check state every so often. Saving only at
+		   shutdown meant a crash or power loss lost everything since
+		   the last clean stop - and an unclean death is exactly when
+		   the next start most needs to know who was already paged.
+		   Self-gated to once per interval. */
+		checkpoint_state(now_t, path_savestate);
 
 		if (stop_daemon)
 		{

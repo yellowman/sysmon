@@ -108,6 +108,7 @@ func emptyTrapInfo() *models.TrapInfo {
 // saying out loud rather than quietly under-reporting.
 func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 	d.mu.Lock()
+	site := d.site
 	since := d.trapSeq
 	d.mu.Unlock()
 
@@ -116,7 +117,7 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 		cmd = fmt.Sprintf("TRAPS %d\n", since)
 	}
 	if _, err := conn.Write([]byte(cmd)); err != nil {
-		s.sessionLog.Log("TRAPS", "", true, "write failed: "+err.Error())
+		s.sessionLog.Log(site, "TRAPS", "", true, "write failed: "+err.Error())
 		return
 	}
 
@@ -131,7 +132,7 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 		trimmed := strings.TrimSpace(line)
 
 		if strings.HasPrefix(trimmed, "444") || strings.HasPrefix(trimmed, "403") {
-			s.sessionLog.Log("TRAPS", trimmed, true, "daemon refused the trap query")
+			s.sessionLog.Log(site, "TRAPS", trimmed, true, "daemon refused the trap query")
 			return // daemon too old to know TRAPS, or not in xml mode
 		}
 		if strings.HasPrefix(trimmed, "333") {
@@ -152,12 +153,12 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 			if perr := xml.Unmarshal([]byte(block.String()), &t); perr == nil {
 				fresh = append(fresh, t)
 			} else {
-				s.sessionLog.Log("TRAPS", block.String(), true, perr.Error())
+				s.sessionLog.Log(site, "TRAPS", block.String(), true, perr.Error())
 			}
 			block.Reset()
 		}
 		if err != nil {
-			s.sessionLog.Log("TRAPS", "", true, "read failed: "+err.Error())
+			s.sessionLog.Log(site, "TRAPS", "", true, "read failed: "+err.Error())
 			return
 		}
 	}
@@ -175,7 +176,7 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 	if since > 0 && oldest > since+1 {
 		missed := int(oldest - since - 1)
 		d.trapsLost += missed
-		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since), "", true,
+		s.sessionLog.Log(site, fmt.Sprintf("TRAPS %d", since), "", true,
 			fmt.Sprintf("%d trap(s) aged out of sysmond's ring before we collected them", missed))
 	}
 
@@ -186,7 +187,7 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 		if len(d.trapHistory) > trapsKept {
 			d.trapHistory = d.trapHistory[:trapsKept]
 		}
-		s.sessionLog.Log(fmt.Sprintf("TRAPS %d", since),
+		s.sessionLog.Log(site, fmt.Sprintf("TRAPS %d", since),
 			fmt.Sprintf("%d new (seq %d, %d held)", len(fresh), current, len(d.trapHistory)), false, "")
 	}
 	// Hold the cursor at 0 for one cycle after a restart, so the next

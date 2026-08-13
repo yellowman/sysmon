@@ -70,7 +70,7 @@ object Api {
             "{\"note\": " + Json.encodeToString(note) + "}")
     }
 
-    suspend fun subscribePush(fcmToken: String) = withContext(Dispatchers.IO) {
+    suspend fun subscribePush(fcmToken: String): SubscribeResponse = withContext(Dispatchers.IO) {
         val body = json.encodeToString(
             SubscribeRequest(
                 platform = "android",
@@ -78,7 +78,12 @@ object Api {
                 label = "Android (${android.os.Build.MODEL})"
             )
         )
-        authedRequest("/api/push/subscribe", "POST", body)
+        val response = authedRequest("/api/push/subscribe", "POST", body)
+        // The HTTP call succeeded, so the subscription is stored; a body
+        // that doesn't parse (old server, unexpected shape) just means
+        // "no token verdict", not a failed subscribe.
+        runCatching { json.decodeFromString(SubscribeResponse.serializer(), response) }
+            .getOrDefault(SubscribeResponse())
     }
 
     // Returns the server's warning, if any (e.g. "push is disabled - this

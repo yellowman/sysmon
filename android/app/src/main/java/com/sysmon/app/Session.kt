@@ -7,10 +7,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 object Session {
     private const val KEY_SERVER = "server_url"
@@ -19,6 +21,7 @@ object Session {
     private const val KEY_ROLE = "role"
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     var serverUrl by mutableStateOf("")
@@ -46,6 +49,7 @@ object Session {
     }
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -108,6 +112,9 @@ object Session {
             .putString(KEY_USERNAME, response.username)
             .putString(KEY_ROLE, response.role)
             .apply()
+        // Now there is a sysmon to talk to, the daily token health
+        // check has something to check.
+        PushHealthWorker.schedule(appContext)
     }
 
     fun logout() {
@@ -126,6 +133,9 @@ object Session {
             .remove(KEY_USERNAME)
             .remove(KEY_ROLE)
             .apply()
+
+        // No login, nothing for the daily token check to check.
+        PushHealthWorker.cancel(appContext)
 
         // Best-effort backend cleanup with snapshotted credentials
         scope.launch {
@@ -158,24 +168,85 @@ object Session {
      * is non-null and differs from [fcmToken], the previous subscription is
      * unsubscribed first so the backend doesn't end up with orphaned entries
      * after Firebase rotates the token.
+     *
+     * If the server answers that FCM has declared this token UNREGISTERED
+     * (uninstall/reinstall races, backup-restore to a new device, the
+     * 270-day inactivity purge, a Google-side invalidation), the Firebase
+     * SDK on this phone is the one party that doesn't know: getToken()
+     * keeps returning the dead token from cache and onNewToken never
+     * fires. The only escape is deleteToken() + getToken(), which mints a
+     * genuinely new token - so do that, once, and re-register. The
+     * renewal flag on [syncPushToken] marks the second pass, so a token
+     * that is somehow *still* refused (project mismatch, Firebase
+     * trouble) surfaces as an error instead of looping.
      */
     fun registerPushToken(fcmToken: String, replacing: String? = null) {
         FcmTokenStore.update(fcmToken)
         if (!isLoggedIn()) return
+        scope.launch { syncPushToken(fcmToken, replacing) }
+    }
+
+    /**
+     * The suspend core of registration, also the body of the daily
+     * background health check (PushHealthWorker): re-subscribing IS the
+     * check, because the server's reply carries the dead-token verdict.
+     * Returns true when the subscription is in good standing on return
+     * (including after a successful renewal).
+     */
+    suspend fun syncPushToken(
+        fcmToken: String,
+        replacing: String? = null,
+        renewal: Boolean = false
+    ): Boolean {
+        FcmTokenStore.update(fcmToken)
+        if (!isLoggedIn()) return false
         val serverSnap = serverUrl
         val tokenSnap = token
-        scope.launch {
-            runCatching {
-                if (replacing != null && replacing != fcmToken &&
-                    serverSnap.isNotEmpty() && tokenSnap.isNotEmpty()
-                ) {
-                    Api.unsubscribePush(serverSnap, tokenSnap, replacing)
-                }
-                Api.subscribePush(fcmToken)
-                pushStatus = "Push registered"
-            }.onFailure {
-                pushStatus = "Push registration failed: ${it.message ?: "unknown error"}"
-            }
+        // Best-effort: the replaced subscription may already be gone
+        // (admin kicked it, or a competing registration cleaned it
+        // up) - that must not fail the new registration.
+        if (replacing != null && replacing != fcmToken &&
+            serverSnap.isNotEmpty() && tokenSnap.isNotEmpty()
+        ) {
+            runCatching { Api.unsubscribePush(serverSnap, tokenSnap, replacing) }
         }
+        val response = try {
+            Api.subscribePush(fcmToken)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            pushStatus = "Push registration failed: ${e.message ?: "unknown error"}"
+            return false
+        }
+        return if (response.tokenStatus == "invalid") {
+            if (renewal) {
+                pushStatus = "Push token renewal failed - the server still reports the new token invalid"
+                false
+            } else {
+                pushStatus = "Push token expired - requesting a new one…"
+                renewFcmToken(dead = fcmToken)
+            }
+        } else {
+            pushStatus = "Push registered"
+            true
+        }
+    }
+
+    // Force the Firebase SDK to abandon its cached token and mint a fresh
+    // one, then register it (replacing the dead subscription). onNewToken
+    // may also fire for the fresh token; both paths converge on the same
+    // registration, which is idempotent per token.
+    private suspend fun renewFcmToken(dead: String): Boolean {
+        val fresh = try {
+            val messaging = FirebaseMessaging.getInstance()
+            messaging.deleteToken().await()
+            messaging.token.await()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            pushStatus = "Push token renewal failed: ${e.message ?: "unknown error"}"
+            return false
+        }
+        return syncPushToken(fresh, replacing = dead, renewal = true)
     }
 }

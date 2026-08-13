@@ -11,6 +11,16 @@ class SysmonApplication : Application() {
         Session.init(this)
         FcmTokenStore.init(this)
         createNotificationChannel()
+        // The daily token health check runs only for a signed-in
+        // install - no sysmon to talk to, nothing to check. Login and
+        // logout flip it (see Session); this covers process restarts,
+        // and clears work a since-logged-out (or older) build left
+        // scheduled.
+        if (Session.isLoggedIn()) {
+            PushHealthWorker.schedule(this)
+        } else {
+            PushHealthWorker.cancel(this)
+        }
     }
 
     private fun createNotificationChannel() {

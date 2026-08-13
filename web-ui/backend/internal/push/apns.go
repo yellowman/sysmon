@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -145,8 +146,42 @@ func (c *APNsClient) Send(deviceToken string, title, subtitle, body string, badg
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("APNs error %d: %s", resp.StatusCode, string(respBody))
+		var parsed struct {
+			Reason string `json:"reason"`
+		}
+		json.Unmarshal(respBody, &parsed)
+		body := strings.TrimSpace(string(respBody))
+		if len(body) > 300 {
+			body = body[:300] + "…"
+		}
+		return &APNsSendError{
+			StatusCode: resp.StatusCode,
+			Reason:     parsed.Reason,
+			Body:       body,
+		}
 	}
 
 	return nil
+}
+
+// APNsSendError classifies a direct-APNs send failure, mirroring
+// FCMSendError so callers can react the same way to either transport.
+// Apple's dead-token verdict is HTTP 410 with reason "Unregistered" -
+// the exact equivalent of FCM's UNREGISTERED: permanent for that token,
+// only visible to the sender, cured only by the app re-registering.
+type APNsSendError struct {
+	StatusCode int
+	Reason     string // APNs reason: Unregistered, BadDeviceToken, …
+	Body       string
+}
+
+func (e *APNsSendError) Error() string {
+	switch e.Reason {
+	case "Unregistered":
+		return fmt.Sprintf("APNs: device token is no longer valid for this app (uninstalled or token rotated) [HTTP %d]", e.StatusCode)
+	case "BadDeviceToken":
+		return fmt.Sprintf("APNs: bad device token - usually a sandbox/production environment mismatch between the app build and the uploaded cert [HTTP %d]", e.StatusCode)
+	default:
+		return fmt.Sprintf("APNs error %d (%s): %s", e.StatusCode, e.Reason, e.Body)
+	}
 }

@@ -114,32 +114,52 @@ func (r *Router) handleConfigRawSitePut(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	files, _, hash, err := r.monitoring.SiteConfigFiles(site)
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	if len(files) == 0 {
-		r.sendError(w, http.StatusServiceUnavailable, "the box sent no files")
-		return
-	}
-	if data.Version != "" && data.Version != hash {
-		w.WriteHeader(http.StatusConflict)
-		r.sendJSON(w, &models.VersionConflictError{
-			Expected: data.Version,
-			Actual:   hash,
-			Message:  "the box's config changed since this copy was loaded - reload and redo the edit",
-		})
+	files := r.siteFilesForEdit(w, site, data.Version)
+	if files == nil {
 		return
 	}
 
 	files[0].Content = []byte(data.Content)
 
-	user, _ := r.getUserInfo(req)
 	note := data.Comment
 	if note == "" {
 		note = "raw edit from the config page"
 	}
+	r.stageAndDeliver(w, req, site, files, note)
+}
+
+// siteFilesForEdit is the shared front half of every site save: fetch
+// the box's current file set and check the caller's copy of it is still
+// current. Answers the request and returns nil when anything
+// disqualifies the save.
+func (r *Router) siteFilesForEdit(w http.ResponseWriter, site, version string) []settings.GenFile {
+	files, _, hash, err := r.monitoring.SiteConfigFiles(site)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, err.Error())
+		return nil
+	}
+	if len(files) == 0 {
+		r.sendError(w, http.StatusServiceUnavailable, "the box sent no files")
+		return nil
+	}
+	if version != "" && version != hash {
+		w.WriteHeader(http.StatusConflict)
+		r.sendJSON(w, &models.VersionConflictError{
+			Expected: version,
+			Actual:   hash,
+			Message:  "the box's config changed since this copy was loaded - reload and redo the edit",
+		})
+		return nil
+	}
+	return files
+}
+
+// stageAndDeliver is the shared back half of every site save: stage the
+// file set as a new generation, deliver it, and answer with what the
+// box is now running - or with its parser's own words when it refuses,
+// which costs the box nothing.
+func (r *Router) stageAndDeliver(w http.ResponseWriter, req *http.Request, site string, files []settings.GenFile, note string) {
+	user, _ := r.getUserInfo(req)
 	if _, _, err := r.monitoring.StageGeneration(site, files, user, note); err != nil {
 		r.sendError(w, http.StatusBadRequest, err.Error())
 		return
@@ -165,4 +185,78 @@ func (r *Router) handleConfigRawSitePut(w http.ResponseWriter, req *http.Request
 		out["warning"] = res.Warning
 	}
 	r.sendJSON(w, out)
+}
+
+// PUT /api/config?site=X - a structured save for a managed box.
+//
+// The box's file set is SPLICED, never regenerated. The model cannot
+// carry comments, include structure, or directives it has no fields
+// for - the box's own aggregator lines above all, which the uplink
+// guard in StageGeneration would (rightly) refuse to see vanish. So
+// the edit is applied the way the local path applies it: only the
+// objects that actually changed are rewritten, in the file they live
+// in, and every other byte of the set survives untouched. Then the
+// same stage-and-deliver as a raw save - the box's own parser
+// validates before anything running is touched.
+func (r *Router) handleConfigSitePut(w http.ResponseWriter, req *http.Request, site string) {
+	var update models.ConfigUpdate
+	if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	// The site's reachability is judged before the payload: a save for
+	// a box that cannot be reached is answered as such whatever the
+	// body says.
+	files := r.siteFilesForEdit(w, site, update.Version)
+	if files == nil {
+		return
+	}
+	if err := config.Validate(&update.Config); err != nil {
+		r.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// The splice machinery works on paths; give it the file set laid
+	// out the way a generation directory lays it out - flat names in
+	// one directory - exactly as parseSiteFiles does for reads.
+	dir, err := os.MkdirTemp("", "sysmon-site-edit-*")
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer os.RemoveAll(dir)
+	for _, f := range files {
+		name := filepath.Base(f.Name)
+		if err := os.WriteFile(filepath.Join(dir, name), f.Content, 0600); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	doc, err := config.LoadDocument(filepath.Join(dir, filepath.Base(files[0].Name)))
+	if err != nil {
+		r.sendError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("%s's config fetched but did not load here: %v", site, err))
+		return
+	}
+	doc.Apply(&update.Config)
+	if err := doc.Save(); err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i := range files {
+		b, err := os.ReadFile(filepath.Join(dir, filepath.Base(files[i].Name)))
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		files[i].Content = b
+	}
+
+	note := update.Comment
+	if note == "" {
+		note = "structured edit from the config page"
+	}
+	r.stageAndDeliver(w, req, site, files, note)
 }

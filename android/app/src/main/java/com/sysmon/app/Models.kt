@@ -137,6 +137,19 @@ data class SubscribeRequest(
     val label: String = ""
 )
 
+// Response to POST /api/push/subscribe. tokenStatus is "invalid" when
+// the server already knows - from FCM's UNREGISTERED verdict on a past
+// send - that the token just registered is dead. That's the app's cue
+// to delete the cached token and mint a fresh one: the Firebase SDK on
+// the phone never learns its token died, so the signal has to come
+// from here. Older servers omit the field entirely.
+@Serializable
+data class SubscribeResponse(
+    val status: String = "",
+    @SerialName("token_status") val tokenStatus: String = "",
+    val message: String? = null
+)
+
 @Serializable
 data class ApiError(val error: String = "", val message: String = "")
 

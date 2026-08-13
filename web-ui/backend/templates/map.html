@@ -427,8 +427,8 @@
 function mapPage() {
     return {
         // Which sysmond's config is drawn. Shares the nav selector's key;
-        // empty is the local file. Editing stays local-only: the edit
-        // path writes this server's sysmon.conf.
+        // empty is the local file. Edits follow the same selection: a
+        // site save is staged and delivered over the agent link.
         site: localStorage.getItem('sysmon-site') || '',
         sitePickerSites: [],
         siteLabel() {
@@ -1403,10 +1403,17 @@ function mapPage() {
                 // Re-read, swap in our host list, write back: the map only
                 // owns hosts, so global/spawn/contact settings survive
                 // untouched even if someone edited them meanwhile.
-                const cur = await apiCall('/api/config');
+                //
+                // The site rides on BOTH calls. It once rode on neither:
+                // the map displayed the remote box's hosts but read and
+                // wrote the LOCAL config - a save clobbered the local
+                // file's host list with the remote one and delivered
+                // nothing anywhere.
+                const q = this.site ? '?site=' + encodeURIComponent(this.site) : '';
+                const cur = await apiCall('/api/config' + q);
                 const cfg = cur.config || {};
                 cfg.hosts = this.hosts;
-                const r = await apiCall('/api/config', {
+                const r = await apiCall('/api/config' + q, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1417,7 +1424,9 @@ function mapPage() {
                 });
                 this.version = r.version || this.version;
                 this.dirty = false;
-                this.notice = 'Saved. Reload sysmond to apply.';
+                this.notice = this.site
+                    ? 'Delivered - the box validated the config and reloaded.'
+                    : 'Saved. Reload sysmond to apply.';
                 setTimeout(() => this.notice = '', 5000);
             } catch (e) {
                 this.notice = 'Save failed: ' + (e.message || e);

@@ -53,6 +53,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+    // Daily background push-token health check (PushHealthWorker).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation(platform("com.google.firebase:firebase-bom:34.14.0"))
     // BoM 34 removed the -ktx artifacts (their KTX APIs live in the main
     // module now) — "firebase-messaging-ktx" no longer resolves.

@@ -46,6 +46,16 @@ On successful login, the app requests push notification permission
 and registers the device token with sysmon. From then on, you'll
 receive a push whenever a monitored host changes state.
 
+The registration repeats on every cold launch — and roughly once a day
+in the background via a BGTaskScheduler app-refresh task (its timing
+rides iOS's refresh budget, so it can slip) — and the server's reply
+carries a verdict: if FCM/APNs has refused the token since the last
+check (reinstall, device restore, or the 270-day inactivity purge —
+the push SDK itself never finds out and keeps serving the dead token
+from cache), the app deletes the cached token, mints a fresh one, and
+re-registers automatically. No user action needed; even a phone that
+sits unopened heals within about a day.
+
 ## Files
 
 - `SysmonApp.swift` — app entry, routes between login and main view

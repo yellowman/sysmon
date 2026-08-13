@@ -1,7 +1,9 @@
 import UIKit
 import UserNotifications
+import BackgroundTasks
 import FirebaseCore
 import FirebaseMessaging
+import os
 
 extension Notification.Name {
     static let sysmonPushTapped = Notification.Name("SysmonPushTapped")
@@ -17,6 +19,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     // keeps unconfigured builds from crashing in FirebaseApp.configure().
     private(set) static var firebaseEnabled = false
 
+    // The daily push-token health check. Must match Info.plist's
+    // BGTaskSchedulerPermittedIdentifiers entry.
+    static let pushHealthTaskID = "com.sysmon.app.push-health"
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         if Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
@@ -25,7 +31,83 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             AppDelegate.firebaseEnabled = true
         }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        // Handlers must be registered before launching finishes; the
+        // actual requests are submitted whenever the app backgrounds.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.pushHealthTaskID, using: nil
+        ) { task in
+            guard let refresh = task as? BGAppRefreshTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            AppDelegate.handlePushHealth(refresh)
+        }
         return true
+    }
+
+    // Ask for the next slot ~24h out. iOS treats this as an earliest
+    // bound, not a schedule - the run itself rides the system's app
+    // refresh budget, so it can slip. Combined with the launch-time and
+    // foreground checks, a slipped slot costs nothing but delay.
+    //
+    // Two gates, both load-bearing:
+    //  - No stored login, no request: an app installed but pointed at
+    //    no sysmon has nothing to check.
+    //  - Never replace a pending request. Submitting the same
+    //    identifier again resets its earliestBeginDate to now+24h, so
+    //    re-arming on every backgrounding would perpetually defer the
+    //    task on any phone used more than once a day - the clock-reset
+    //    bug the Android side avoids with ExistingPeriodicWorkPolicy.KEEP.
+    static func schedulePushHealthCheck() {
+        guard Session.hasPersistedLogin() else { return }
+        BGTaskScheduler.shared.getPendingTaskRequests { pending in
+            guard !pending.contains(where: { $0.identifier == pushHealthTaskID }) else { return }
+            let request = BGAppRefreshTaskRequest(identifier: pushHealthTaskID)
+            request.earliestBeginDate = Date(timeIntervalSinceNow: 24 * 60 * 60)
+            try? BGTaskScheduler.shared.submit(request)
+        }
+    }
+
+    static func handlePushHealth(_ task: BGAppRefreshTask) {
+        // Re-arm before doing anything: an expired or crashed run must
+        // not also cost tomorrow's slot. (Our own request stopped being
+        // pending the moment it launched, so this submits.)
+        schedulePushHealthCheck()
+
+        // Completion must happen exactly once. The expiration handler
+        // races the work: cancellation is cooperative, and a swallowed
+        // CancellationError lets the work run on to its own completion
+        // after the expiration path has already reported - completing a
+        // BGTask twice is a documented programming error.
+        let completed = OSAllocatedUnfairLock(initialState: false)
+        func complete(_ success: Bool) {
+            let first = completed.withLock { (done: inout Bool) -> Bool in
+                if done { return false }
+                done = true
+                return true
+            }
+            if first { task.setTaskCompleted(success: success) }
+        }
+
+        // The expiration handler is installed before the work starts,
+        // so an early expiration always has something to cancel.
+        var work: Task<Void, Never>?
+        task.expirationHandler = {
+            work?.cancel()
+            complete(false)
+        }
+        work = Task { @MainActor in
+            // A cold background launch connects no scene, so the
+            // SwiftUI-owned Session was never built and Session.shared
+            // is nil - and a terminated app is precisely the
+            // phone-in-a-drawer case this task exists for. Build a
+            // Session from the persisted credentials (its init reads
+            // UserDefaults and the Keychain) for the duration of the
+            // check.
+            let session = Session.shared ?? Session()
+            await session.dailyPushHealthCheck()
+            complete(true)
+        }
     }
 
     func application(_ application: UIApplication,

@@ -114,19 +114,19 @@ type fcmV1APSAlert struct {
 
 // fcmData carries the optional structured payload tagged onto each
 // notification for use inside the app (host that flapped, new status,
-// check type). All values must be strings in the v1 API.
+// check type, the measured figures behind the change). All values must
+// be strings in the v1 API.
 type fcmData struct {
 	Hostname string
 	Object   string // object name - the app's notification-replacement key
 	Status   string
 	Type     string
+	Details  string // "rtt avg 143.2ms (limit 80ms)", "reading 52 (max 45)", …
+	Related  string // sibling objects' last readings - see relatedDetail
 }
 
 func (d fcmData) toMap() map[string]string {
-	if d.Hostname == "" && d.Object == "" && d.Status == "" && d.Type == "" {
-		return nil
-	}
-	m := make(map[string]string, 4)
+	m := make(map[string]string, 6)
 	if d.Hostname != "" {
 		m["hostname"] = d.Hostname
 	}
@@ -138,6 +138,15 @@ func (d fcmData) toMap() map[string]string {
 	}
 	if d.Type != "" {
 		m["type"] = d.Type
+	}
+	if d.Details != "" {
+		m["details"] = d.Details
+	}
+	if d.Related != "" {
+		m["related"] = d.Related
+	}
+	if len(m) == 0 {
+		return nil
 	}
 	return m
 }

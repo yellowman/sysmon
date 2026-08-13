@@ -267,6 +267,46 @@ static void test_unknown_object(void)
 	free_tree_local();
 }
 
+/*
+ * The periodic checkpoint must pace itself: nothing on the first pass
+ * (load_state only just read the file), nothing inside the interval,
+ * a write once the interval has elapsed, and a clock that steps
+ * backwards re-arms rather than stalling forever or writing wildly.
+ */
+static void test_checkpoint_pacing(void)
+{
+	static const char *names[] = { "core" };
+	time_t t0 = 1700000000;
+
+	make_tree(names, 1);
+	find("core")->downct = 5;
+	unlink(statepath);
+
+	checkpoint_state(t0, statepath);
+	check(access(statepath, F_OK) != 0, "the first pass arms, never writes");
+
+	checkpoint_state(t0 + 599, statepath);
+	check(access(statepath, F_OK) != 0, "inside the interval nothing is written");
+
+	checkpoint_state(t0 + 600, statepath);
+	check(access(statepath, F_OK) == 0, "the interval elapsing writes the checkpoint");
+
+	/* The checkpoint is a real one: a fresh tree can read it back. */
+	free_tree_local();
+	make_tree(names, 1);
+	load_state(statepath);
+	check(find("core")->downct == 5, "the checkpoint round-trips");
+
+	/* Clock steps backwards: re-arm, then honour the interval again. */
+	unlink(statepath);
+	checkpoint_state(t0 - 5000, statepath);
+	check(access(statepath, F_OK) != 0, "a backwards clock re-arms instead of writing");
+	checkpoint_state(t0 - 5000 + 600, statepath);
+	check(access(statepath, F_OK) == 0, "the re-armed interval writes again");
+
+	free_tree_local();
+}
+
 int main(void)
 {
 	char dir[] = "/tmp/sysmon-savestate-XXXXXX";
@@ -283,6 +323,7 @@ int main(void)
 	test_partial_and_unknown_fields();
 	test_rejections();
 	test_unknown_object();
+	test_checkpoint_pacing();
 
 	unlink(statepath);
 	rmdir(dir);

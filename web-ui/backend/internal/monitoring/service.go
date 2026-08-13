@@ -51,6 +51,13 @@ type daemon struct {
 	lastErr  string
 	lastOK   time.Time
 
+	// version is what VERS answered on the versConn socket. The far end
+	// of an established connection cannot change process, so the
+	// version is asked once per connection rather than once per poll;
+	// a reconnect arrives on a new socket and naturally re-asks.
+	version  string
+	versConn net.Conn
+
 	// Incremental fetch state.
 	//
 	// confSeq is the highest object sequence this daemon has reported. It
@@ -151,10 +158,14 @@ const maxRemovedTracked = 256
 // SessionLogEntry represents a single logged operation
 type SessionLogEntry struct {
 	Timestamp time.Time `json:"timestamp"`
-	Command   string    `json:"command"`
-	Response  string    `json:"response"`
-	IsError   bool      `json:"is_error"`
-	ErrorMsg  string    `json:"error_msg,omitempty"`
+	// Site is which sysmond the exchange was with - one web-ui talks to
+	// a whole fleet, and an interleaved log with no attribution can't
+	// answer "which box said that".
+	Site     string `json:"site,omitempty"`
+	Command  string `json:"command"`
+	Response string `json:"response"`
+	IsError  bool   `json:"is_error"`
+	ErrorMsg string `json:"error_msg,omitempty"`
 }
 
 // SessionLogger captures all sysmon protocol operations
@@ -176,13 +187,15 @@ func NewSessionLogger(maxEntries, maxErrors int) *SessionLogger {
 	}
 }
 
-// Log adds an entry to the session log
-func (sl *SessionLogger) Log(command, response string, isError bool, errorMsg string) {
+// Log adds an entry to the session log. site is the sysmond the
+// exchange was with.
+func (sl *SessionLogger) Log(site, command, response string, isError bool, errorMsg string) {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
 
 	entry := SessionLogEntry{
 		Timestamp: time.Now(),
+		Site:      site,
 		Command:   command,
 		Response:  response,
 		IsError:   isError,
@@ -204,34 +217,43 @@ func (sl *SessionLogger) Log(command, response string, isError bool, errorMsg st
 	}
 }
 
-// GetRecentEntries returns the N most recent log entries
-func (sl *SessionLogger) GetRecentEntries(n int) []SessionLogEntry {
-	sl.mu.RLock()
-	defer sl.mu.RUnlock()
-
-	if n <= 0 || n > len(sl.entries) {
-		n = len(sl.entries)
+// tail returns the up-to-n most recent entries of src, oldest first,
+// keeping only the given site's when site is non-empty. n is clamped
+// to what exists BEFORE it becomes an allocation size: it arrives
+// straight from a ?limit= query parameter, and make() with a
+// caller-controlled capacity is a one-request crash.
+func tail(src []SessionLogEntry, n int, site string) []SessionLogEntry {
+	if n <= 0 || n > len(src) {
+		n = len(src)
 	}
-
-	// Return last N entries
-	result := make([]SessionLogEntry, n)
-	copy(result, sl.entries[len(sl.entries)-n:])
+	result := make([]SessionLogEntry, 0, n)
+	for i := len(src) - 1; i >= 0 && len(result) < n; i-- {
+		if site != "" && src[i].Site != site {
+			continue
+		}
+		result = append(result, src[i])
+	}
+	// Collected newest-first; callers render oldest-first.
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
 	return result
 }
 
-// GetRecentErrors returns the N most recent error entries
-func (sl *SessionLogger) GetRecentErrors(n int) []SessionLogEntry {
+// GetRecentEntries returns the N most recent log entries, optionally
+// only those from one site ("" means all).
+func (sl *SessionLogger) GetRecentEntries(n int, site string) []SessionLogEntry {
 	sl.mu.RLock()
 	defer sl.mu.RUnlock()
+	return tail(sl.entries, n, site)
+}
 
-	if n <= 0 || n > len(sl.errors) {
-		n = len(sl.errors)
-	}
-
-	// Return last N errors
-	result := make([]SessionLogEntry, n)
-	copy(result, sl.errors[len(sl.errors)-n:])
-	return result
+// GetRecentErrors returns the N most recent error entries, optionally
+// only those from one site ("" means all).
+func (sl *SessionLogger) GetRecentErrors(n int, site string) []SessionLogEntry {
+	sl.mu.RLock()
+	defer sl.mu.RUnlock()
+	return tail(sl.errors, n, site)
 }
 
 // XMLParseError represents an XML parsing error with debug data
@@ -385,13 +407,14 @@ func hostSignature(h *models.HostStatus) uint64 {
 }
 
 // GetSessionLog returns recent session log entries
-func (s *Service) GetSessionLog(limit int) []SessionLogEntry {
-	return s.sessionLog.GetRecentEntries(limit)
+func (s *Service) GetSessionLog(limit int, site string) []SessionLogEntry {
+	return s.sessionLog.GetRecentEntries(limit, site)
 }
 
-// GetSessionErrors returns recent error entries
-func (s *Service) GetSessionErrors(limit int) []SessionLogEntry {
-	return s.sessionLog.GetRecentErrors(limit)
+// GetSessionErrors returns recent error entries, optionally filtered to
+// one site ("" means all).
+func (s *Service) GetSessionErrors(limit int, site string) []SessionLogEntry {
+	return s.sessionLog.GetRecentErrors(limit, site)
 }
 
 // SysmonResponse represents a parsed response from sysmon daemon
@@ -1011,9 +1034,20 @@ func hostFromXML(xmlObj XMLObjectStatus, daemonStart time.Time, site string) (mo
 	if xmlObj.SNMPLastResp > 0 || (xmlObj.SNMPSysUpTime > 0 && xmlObj.SNMPType == "reboot") {
 		host.SNMP = &models.SNMPStats{
 			LastResponse: xmlObj.SNMPLastResp,
+			CheckType:    xmlObj.SNMPType,
+			Low:          xmlObj.SNMPLow,
+			High:         xmlObj.SNMPHigh,
+			Exact:        xmlObj.SNMPExact,
+			Rate:         xmlObj.SNMPRate,
 		}
 		if xmlObj.SNMPType == "reboot" {
 			host.SNMP.SysUpTime = xmlObj.SNMPSysUpTime
+		} else {
+			// The stashed last reading - the temperature, the counter,
+			// whatever the OID returned - which is what a page about
+			// this object should be quoting.
+			v := xmlObj.SNMPSysUpTime
+			host.SNMP.LastValue = &v
 		}
 	}
 
@@ -1074,6 +1108,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 	// first cycle - ask for everything anyway, so counters that tick
 	// without counting as a change do not drift.
 	d.mu.Lock()
+	site := d.site
 	since := d.confSeq
 	if d.hostCache == nil || time.Since(d.fullResyncAt) > fullResyncEvery {
 		since = 0
@@ -1096,7 +1131,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 
 		// "444 Permission Denied" / "444 - Unk": no bulk path here.
 		if strings.HasPrefix(trimmed, "444") || strings.HasPrefix(trimmed, "403") {
-			s.sessionLog.Log("CONF", trimmed, true, "falling back to per-object fetch")
+			s.sessionLog.Log(site, "CONF", trimmed, true, "falling back to per-object fetch")
 			return nil, false
 		}
 		if strings.HasPrefix(trimmed, "333") {
@@ -1111,7 +1146,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 			if perr := xml.Unmarshal([]byte(block.String()), &xmlObj); perr != nil {
 				// One unreadable object should not cost us the whole
 				// poll - the per-object path would have skipped it too.
-				s.sessionLog.Log("CONF", block.String(), true, perr.Error())
+				s.sessionLog.Log(site, "CONF", block.String(), true, perr.Error())
 			} else {
 				objs = append(objs, xmlObj)
 			}
@@ -1122,7 +1157,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 		}
 
 		if err != nil {
-			s.sessionLog.Log("CONF", "", true, fmt.Sprintf("read error after %d objects: %v", len(objs), err))
+			s.sessionLog.Log(site, "CONF", "", true, fmt.Sprintf("read error after %d objects: %v", len(objs), err))
 			return nil, false
 		}
 	}
@@ -1137,7 +1172,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 	if daemonSeq < d.confSeq {
 		// The daemon restarted: its counter went backwards, so everything
 		// we hold is from a previous life.
-		s.sessionLog.Log("CONF", "sysmond sequence went backwards - resyncing", false, "")
+		s.sessionLog.Log(site, "CONF", "sysmond sequence went backwards - resyncing", false, "")
 		d.hostCache = make(map[string]XMLObjectStatus, len(objs))
 		d.fullResyncAt = time.Time{}
 	}
@@ -1151,7 +1186,7 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 	// what we hold, the cache has ghosts in it and the next cycle asks for
 	// everything. (Older daemons send no count; 0 means "did not say".)
 	if daemonTotal > 0 && uint64(len(d.hostCache)) != daemonTotal {
-		s.sessionLog.Log("CONF",
+		s.sessionLog.Log(site, "CONF",
 			fmt.Sprintf("holding %d objects, daemon has %d - resyncing",
 				len(d.hostCache), daemonTotal), false, "")
 		d.fullResyncAt = time.Time{}
@@ -1167,10 +1202,10 @@ func (s *Service) fetchAllObjectsXML(d *daemon, conn net.Conn, reader *bufio.Rea
 		return nil, false
 	}
 	if since > 0 {
-		s.sessionLog.Log(fmt.Sprintf("CONF %d", since),
+		s.sessionLog.Log(site, fmt.Sprintf("CONF %d", since),
 			fmt.Sprintf("%d changed of %d held (seq %d)", len(objs), len(merged), daemonSeq), false, "")
 	} else {
-		s.sessionLog.Log("CONF", fmt.Sprintf("Retrieved %d objects in one command", len(objs)), false, "")
+		s.sessionLog.Log(site, "CONF", fmt.Sprintf("Retrieved %d objects in one command", len(objs)), false, "")
 	}
 	return merged, true
 }
@@ -1433,6 +1468,14 @@ func SplitQualified(name string) (site, object string) {
 	return "", name
 }
 
+// siteName reads the daemon's site under its lock. Callers already
+// holding d.mu must read d.site directly instead.
+func (d *daemon) siteName() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.site
+}
+
 // connection returns the socket this daemon dialled in on.
 //
 // There is only ever the one. A daemon that has dropped its link is not
@@ -1485,6 +1528,10 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		return nil, err
 	}
 
+	// Attribution for the session log. Until the SITE exchange below
+	// answers, this is last cycle's name ("local" on first contact).
+	site := d.siteName()
+
 	// One socket, two users. A config delivery has to have the
 	// connection to itself - interleaving a multi-megabyte CONFIG-PUT
 	// with a status poll on the same socket would put both halves'
@@ -1523,17 +1570,33 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		CurrentTime: time.Now(),
 	}
 
-	// Get version with VERS command
-	_, err = conn.Write([]byte("VERS\n"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to send VERS command: %w", err)
+	// The version is a property of the process on the far end, and the
+	// far end of an established connection cannot change process - so
+	// VERS is asked once per connection, not once per poll. The answer
+	// is cached against the socket it came over; a reconnect is a new
+	// socket and re-asks.
+	d.mu.Lock()
+	version := d.version
+	if d.versConn != conn {
+		version = ""
 	}
-	versResp, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read VERS response: %w", err)
+	d.mu.Unlock()
+	if version == "" {
+		if _, err = conn.Write([]byte("VERS\n")); err != nil {
+			return nil, fmt.Errorf("failed to send VERS command: %w", err)
+		}
+		var versResp string
+		versResp, err = reader.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("failed to read VERS response: %w", err)
+		}
+		version = strings.TrimSpace(versResp)
+		s.sessionLog.Log(site, "VERS", version, false, "")
+		d.mu.Lock()
+		d.version, d.versConn = version, conn
+		d.mu.Unlock()
 	}
-	daemonInfo.Version = strings.TrimSpace(versResp)
-	s.sessionLog.Log("VERS", daemonInfo.Version, false, "")
+	daemonInfo.Version = version
 
 	// Get uptime with UPTIME command
 	_, err = conn.Write([]byte("UPTIME\n"))
@@ -1545,7 +1608,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		return nil, fmt.Errorf("failed to read UPTIME response: %w", err)
 	}
 	uptimeStr := strings.TrimSpace(uptimeResp)
-	s.sessionLog.Log("UPTIME", uptimeStr, false, "")
+	s.sessionLog.Log(site, "UPTIME", uptimeStr, false, "")
 
 	// Parse uptime string like "Uptime = 2d 5h 30m 15s" or similar
 	// Extract seconds from the uptime string
@@ -1567,7 +1630,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	if resp.IsError || resp.Code != "333" {
 		return nil, fmt.Errorf("MODE xml failed: %s", resp.Message)
 	}
-	s.sessionLog.Log("MODE xml", resp.Message, false, "")
+	s.sessionLog.Log(site, "MODE xml", resp.Message, false, "")
 
 	// Who is this daemon? The answer becomes the first half of every
 	// object name we store, so it has to be known before any object is
@@ -1577,6 +1640,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	d.mu.Lock()
 	d.site, d.siteDesc = daemonInfo.Site, daemonInfo.SiteDesc
 	d.mu.Unlock()
+	site = daemonInfo.Site
 
 	// Step 2: Get list of ALL objects with STATAL command
 	// CRITICAL: Use STATAL (not STATO or STAT) because:
@@ -1617,7 +1681,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 			objectNames = append(objectNames, objectName)
 		}
 	}
-	s.sessionLog.Log("STATAL", fmt.Sprintf("Retrieved %d objects (all hosts)", len(objectNames)), false, "")
+	s.sessionLog.Log(site, "STATAL", fmt.Sprintf("Retrieved %d objects (all hosts)", len(objectNames)), false, "")
 
 	// Step 3: Get detailed XML for each object with SHOWOBJ
 	daemonInfo.Paused = daemonPaused
@@ -1679,7 +1743,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		resp, err := readSysmonResponse(reader)
 		if err != nil {
 			errMsg := fmt.Sprintf("Error reading first line for %s: %v", objName, err)
-			s.sessionLog.Log(fmt.Sprintf("SHOWOBJ %s", objName), "", true, errMsg)
+			s.sessionLog.Log(site, fmt.Sprintf("SHOWOBJ %s", objName), "", true, errMsg)
 
 			// Capture the failed response
 			capture := ResponseCapture{
@@ -1702,7 +1766,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 		// Check if response is an error code (403, 444)
 		if resp.IsError {
 			// Daemon returned an error (object not found, permission denied, etc.)
-			s.sessionLog.Log(fmt.Sprintf("SHOWOBJ %s", objName), resp.Message, true, resp.Message)
+			s.sessionLog.Log(site, fmt.Sprintf("SHOWOBJ %s", objName), resp.Message, true, resp.Message)
 
 			// Capture the error response
 			capture := ResponseCapture{
@@ -1736,7 +1800,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 			if err != nil {
 				// Save error for reporting
 				readErr = err
-				s.sessionLog.Log(fmt.Sprintf("SHOWOBJ %s", objName), xmlData, true, fmt.Sprintf("Error reading line: %v", err))
+				s.sessionLog.Log(site, fmt.Sprintf("SHOWOBJ %s", objName), xmlData, true, fmt.Sprintf("Error reading line: %v", err))
 				break
 			}
 		}
@@ -1813,7 +1877,7 @@ func (s *Service) fetchStatus(d *daemon) (status *models.SysmonStatus, err error
 	// QUIT would make it hang up and reconnect on every single cycle.
 
 	// Log successful completion
-	s.sessionLog.Log("GetStatus", fmt.Sprintf("Complete: %d total, %d up, %d down, %d warnings",
+	s.sessionLog.Log(site, "GetStatus", fmt.Sprintf("Complete: %d total, %d up, %d down, %d warnings",
 		len(objectNames), hostsUp, hostsDown, status.Statistics.WarningHosts), false, "")
 
 	return status, nil
@@ -2381,7 +2445,7 @@ type BulkOperationResult struct {
 // groups rather than dialling per host. Results stay in the caller's
 // order: the API pairs them with the request by position.
 func (s *Service) bulkBySite(hostnames []string, authKey string,
-	fn func(conn net.Conn, r *bufio.Reader, object string) (bool, string)) []BulkOperationResult {
+	fn func(conn net.Conn, r *bufio.Reader, object, site string) (bool, string)) []BulkOperationResult {
 
 	results := make([]BulkOperationResult, len(hostnames))
 	bySite := make(map[string][]int)
@@ -2408,7 +2472,7 @@ func (s *Service) bulkBySite(hostnames []string, authKey string,
 			}
 			for _, i := range idxs {
 				_, object := SplitQualified(hostnames[i])
-				ok, msg := fn(conn, r, sanitizeCmd(object))
+				ok, msg := fn(conn, r, sanitizeCmd(object), site)
 				results[i].Success = ok
 				if !ok {
 					results[i].Error = msg
@@ -2433,7 +2497,7 @@ func (s *Service) bulkBySite(hostnames []string, authKey string,
 // note covers the batch - it lands on every host before its flag.
 func (s *Service) BulkAckHosts(hostnames []string, note string, authKey string) []BulkOperationResult {
 	return s.bulkBySite(hostnames, authKey,
-		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+		func(conn net.Conn, r *bufio.Reader, object, site string) (bool, string) {
 			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, sanitizeCmd(note)))); err != nil {
 				return false, fmt.Sprintf("failed to send note: %v", err)
 			}
@@ -2443,14 +2507,14 @@ func (s *Service) BulkAckHosts(hostnames []string, note string, authKey string) 
 			if _, err := conn.Write([]byte(fmt.Sprintf("ACK %s\n", object))); err != nil {
 				return false, fmt.Sprintf("failed to send command: %v", err)
 			}
-			s.sessionLog.Log(fmt.Sprintf("ACK %s", object), "", false, "")
+			s.sessionLog.Log(site, fmt.Sprintf("ACK %s", object), "", false, "")
 
 			response, err := r.ReadString('\n')
 			if err != nil {
 				return false, fmt.Sprintf("failed to read response: %v", err)
 			}
 			response = strings.TrimSpace(response)
-			s.sessionLog.Log(fmt.Sprintf("ACK %s", object), response, false, "")
+			s.sessionLog.Log(site, fmt.Sprintf("ACK %s", object), response, false, "")
 
 			// sysmond responds with "333 ..." on success
 			if strings.HasPrefix(response, "333") {
@@ -2476,7 +2540,7 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 	note = sanitizeCmd(note)
 
 	return s.bulkBySite(hostnames, authKey,
-		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+		func(conn net.Conn, r *bufio.Reader, object, site string) (bool, string) {
 			if _, err := conn.Write([]byte(fmt.Sprintf("UPD %s %s\n", object, note))); err != nil {
 				return false, fmt.Sprintf("failed to send command: %v", err)
 			}
@@ -2495,7 +2559,7 @@ func (s *Service) BulkUpdateHosts(hostnames []string, note string, authKey strin
 // BulkToggleTrace toggles trace for multiple hosts in a single connection
 func (s *Service) BulkToggleTrace(hostnames []string, enable bool, authKey string) []BulkOperationResult {
 	return s.bulkBySite(hostnames, authKey,
-		func(conn net.Conn, r *bufio.Reader, object string) (bool, string) {
+		func(conn net.Conn, r *bufio.Reader, object, site string) (bool, string) {
 			if _, err := conn.Write([]byte(fmt.Sprintf("TRACE %s\n", object))); err != nil {
 				return false, fmt.Sprintf("failed to send command: %v", err)
 			}

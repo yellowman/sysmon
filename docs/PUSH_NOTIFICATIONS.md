@@ -85,6 +85,16 @@ In the admin UI under **APNs**:
 The certificate is validated on upload; its Subject CN and expiry are
 shown in the panel.
 
+**With both FCM and APNs configured**, each iOS device still receives
+exactly one notification — there is one subscription row per device,
+and the send path picks one transport per token. Which one is decided
+by the token itself: a raw APNs device token (64 hex chars, registered
+by app builds without a `GoogleService-Info.plist`) goes direct to
+APNs; anything else goes via FCM, which relays to APNs internally.
+This means a mixed fleet — some installs built with Firebase, some
+without — delivers correctly from one server, and neither transport
+is ever handed a token it can't deliver to.
+
 ### 3. Enable
 
 Flip the master **Enabled** switch in the admin UI to start the push
@@ -182,6 +192,27 @@ test operations require a valid session that owns the device. The
 api_key is reserved for future use (e.g., letting the daemon mark
 device-specific delivery state).
 
+If FCM has previously refused this exact token with `UNREGISTERED`
+(see Token Lifecycle below), the subscription is still stored but the
+response carries a verdict:
+
+```json
+{
+  "status": "subscribed",
+  "api_key": "a1b2c3d4...",
+  "token_status": "invalid",
+  "message": "FCM reports this device token is no longer valid - delete the cached token, obtain a fresh one, and subscribe again"
+}
+```
+
+`token_status: "invalid"` is the app's cue to force a token rotation —
+`deleteToken()` then `getToken()` on Android, `deleteToken()` then
+`token()` on iOS — and subscribe again with the fresh token. This
+matters because FCM only ever reports a dead token to the *sender*: the
+Firebase SDK on the device keeps returning the dead token from its
+cache and `onNewToken` / the MessagingDelegate never fires, so without
+this signal the app would re-register the same dead token forever.
+
 ### List my subscriptions
 
 ```
@@ -190,7 +221,9 @@ Authorization: Bearer <token>
 ```
 
 Returns only the current user's own subscriptions. `api_key` is
-stripped from the response (the app already has it).
+stripped from the response (the app already has it). A subscription
+whose token FCM has refused with `UNREGISTERED` additionally carries
+`"unregistered": true`.
 
 ```json
 {
@@ -270,7 +303,7 @@ Authorization: Bearer <admin-token>
     "alert": {
       "title": "router-core DOWN",
       "subtitle": "Core router - DC1",
-      "body": "router-core ping check failed"
+      "body": "router-core rtt check failed - rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"
     },
     "sound": "default"
   }
@@ -283,18 +316,40 @@ Authorization: Bearer <admin-token>
 {
   "notification": {
     "title": "router-core DOWN",
-    "body": "router-core ping check failed"
+    "body": "router-core rtt check failed - rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies"
   },
   "data": {
     "hostname": "router-core",
     "status": "CRITICAL",
-    "type": "ping"
+    "type": "rtt",
+    "details": "rtt avg 143.2ms (limit 80ms), jitter 12.1ms (limit 20ms), 3/5 replies",
+    "related": "core-temp reading 38 (max 45); core-loss loss 0.0% (0/64 lost)"
   }
 }
 ```
 
+When the object measures something, the figures ride in the visible
+body (and again in the `details` data key for programmatic use): rtt
+checks quote latency/jitter against the configured limits and any
+probe loss, pktloss checks quote the loss percentage and counts, SNMP
+value checks quote the last reading against its threshold ("reading 52
+(max 45)" for a temperature check), and SNMP reboot checks quote the
+device's uptime — how long ago it came back. Plain ping/tcp checks
+have nothing to measure, so their body stays as-is. Recoveries carry
+the current (healthy) figures too.
+
+The notification also quotes what the *other* objects watching the
+same box last measured — matched by hostname/address within the same
+site. A ping object can only say down/up, but its siblings (the rtt
+object, the temperature check) hold the last readings the fleet has
+for that machine, so a ping-down body ends with e.g.
+`- also: core-rtt rtt avg 44.0ms (limit 80ms); core-temp reading 38
+(max 45)`. Siblings that measure nothing are skipped, a sibling that
+is itself failing is marked (`[CRITICAL]`), and the list is capped at
+3 (`+N more`). The same string rides in the `related` data key.
+
 Recovery: title becomes `"router-core RECOVERED"`, body is
-`"router-core is back up (was CRITICAL)"`.
+`"router-core is back up (was CRITICAL) - rtt avg 11.0ms (limit 80ms)"`.
 
 ## Mobile App Integration
 
@@ -396,9 +451,30 @@ class SysmonMessagingService : FirebaseMessagingService() {
 - **OS issues new push token**: Subscribe again with the same session
   token but the new device_token. A new `api_key` is issued. Optionally
   unsubscribe the old token.
-- **App uninstall**: Subscription remains in the database but pushes
-  to the dead token will fail silently. An admin can clean it up via
-  `DELETE /api/push/remove/<token>`.
+- **The transport declares the token dead**: FCM answers a send with
+  `UNREGISTERED`; direct APNs answers HTTP 410 `Unregistered` — the
+  same verdict in different clothes. It happens on app uninstall,
+  cleared app data, restore to a new device, provider-side key
+  rotations, or (FCM) after ~270 days of device inactivity. The
+  verdict is permanent for that token string, and only the sender ever
+  sees it — the device's own push SDK keeps returning the dead token
+  from cache. The server reacts identically for both transports:
+  flagging the subscription (`unregistered`, shown on the admin page
+  as "token dead"), skipping it during alert fan-outs (per the
+  providers' guidance to stop sending to dead tokens), and answering
+  the app's next subscribe of that token with
+  `token_status: "invalid"`. The apps (Android and iOS alike) then
+  delete their cached token, mint a fresh one, and re-subscribe — the
+  flagged row is replaced and delivery resumes. The row is kept (not deleted) exactly
+  so this handshake can happen; an admin can still remove it manually
+  via `DELETE /api/push/remove/<token>`. A test push to a flagged
+  token is still attempted, and a success clears the flag.
+  The handshake runs on every app launch/foreground AND once a day in
+  the background (WorkManager on Android; BGTaskScheduler app refresh
+  on iOS, so its timing rides the system's refresh budget) - a phone
+  left in a drawer heals without anyone opening the app. The daily job
+  is only scheduled while a login is stored: an installed-but-unpointed
+  app does no background work at all.
 
 ## Database
 
@@ -423,6 +499,16 @@ owner must unsubscribe first, or an admin can `DELETE /api/push/remove/<token>`.
 **Subscribe returns 503 "Push notifications not configured"**
 Either `config push-notifications;` is missing from sysmon.conf, or
 sysmon-web couldn't open `/var/lib/sysmon/push.db`. Check the logs.
+
+**One device shows "failed: token dead" and gets no alerts**
+FCM refused that device's token with `UNREGISTERED` — the token is
+gone for good (uninstall, cleared data, device restore, or the
+270-day inactivity purge). The subscription is flagged (red "token
+dead" badge on the admin page) and alert sends skip it. It heals
+itself the next time the app is opened on that device: the launch-time
+subscribe is answered with `token_status: "invalid"`, and the app
+mints a fresh token and re-registers. If the device is genuinely gone,
+kick the row via the admin page or `DELETE /api/push/remove/<token>`.
 
 **Test push sent but not received**
 - iOS: notification permissions in Settings > Notifications

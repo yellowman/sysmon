@@ -24,6 +24,13 @@ type fakeSysmond struct {
 	mu   sync.Mutex
 	dark bool     // stop answering, as a daemon that fell off the network does
 	live net.Conn // the connection it dialled in on
+	vers int      // how many times VERS has been asked
+}
+
+func (f *fakeSysmond) versCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.vers
 }
 
 func startFakeSysmond(t *testing.T, site string, objects ...string) *fakeSysmond {
@@ -89,6 +96,9 @@ func (f *fakeSysmond) session(conn net.Conn) {
 		cmd := strings.TrimSpace(line)
 		switch {
 		case cmd == "VERS":
+			f.mu.Lock()
+			f.vers++
+			f.mu.Unlock()
 			fmt.Fprintf(conn, "sysmond 0.99-test\r\n")
 		case cmd == "UPTIME":
 			fmt.Fprintf(conn, "Uptime = 3600 secs\r\n")
@@ -200,6 +210,38 @@ func TestUnreachableSiteGoesStaleNotRemoved(t *testing.T) {
 	}
 	if rev <= revBefore {
 		t.Error("going stale did not bump the revision, so clients would never see it")
+	}
+}
+
+// The process on the far end of a connection cannot change while the
+// connection lives, so its version is asked once per connection rather
+// than once per poll - and asked again on a reconnect, which may well
+// be a restarted (upgraded) daemon.
+func TestVersAskedOncePerConnection(t *testing.T) {
+	a := startFakeSysmond(t, "site-a", "gw")
+	svc := NewService()
+	connect(t, svc, a)
+
+	for i := 0; i < 3; i++ {
+		status, err := svc.fetchFleet()
+		if err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+		if status.Daemon.Version != "sysmond 0.99-test" {
+			t.Fatalf("poll %d reported version %q", i+1, status.Daemon.Version)
+		}
+	}
+	if got := a.versCount(); got != 1 {
+		t.Errorf("VERS asked %d times over 3 polls on one connection, want 1", got)
+	}
+
+	// The daemon reconnects - new socket, possibly a new binary.
+	connect(t, svc, a)
+	if _, err := svc.fetchFleet(); err != nil {
+		t.Fatalf("poll after reconnect: %v", err)
+	}
+	if got := a.versCount(); got != 2 {
+		t.Errorf("VERS asked %d times after a reconnect, want 2", got)
 	}
 }
 

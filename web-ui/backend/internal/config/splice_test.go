@@ -331,3 +331,78 @@ object after {
 		t.Errorf("second object is %q", got)
 	}
 }
+
+// The fleet save path splices the box's file set for two reasons that
+// are invisible until they bite: the model has no fields for the box's
+// `config aggregator` lines, so regenerating dropped them and the
+// uplink guard then refused every save; and the model's defaults are
+// not the daemon's, so regeneration injected `config queuetime 300;`
+// into configs that never set one, silently slowing every check 5x.
+// This is the round trip a structured fleet save performs.
+func TestApplyPreservesUplinkAndInjectsNothing(t *testing.T) {
+	const boxConf = `# managed box - this comment must survive
+root = "gw";
+config sitename "second";
+config aggregator "sysmon-web.example.net:1347";
+config aggregator-token "tok-abc123";
+
+object gw {
+	ip "10.9.0.1";
+	type ping;
+	desc "gateway";
+};
+`
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sysmon.conf")
+	if err := os.WriteFile(main, []byte(boxConf), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// What the structured editor does: parse into the model, edit the
+	// model, apply the model back.
+	cfg, err := ParseFile(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Hosts = append(cfg.Hosts, models.Host{
+		ID: "traphost", Hostname: "traphost", IP: "10.9.0.7", Type: "ping",
+	})
+
+	d, err := LoadDocument(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, changed, removed := d.Apply(cfg)
+	if added != 1 || changed != 0 || removed != 0 {
+		t.Fatalf("Apply = %d added, %d changed, %d removed; want 1,0,0",
+			added, changed, removed)
+	}
+	if err := d.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := os.ReadFile(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(out)
+	for _, keep := range []string{
+		`config aggregator "sysmon-web.example.net:1347";`,
+		`config aggregator-token "tok-abc123";`,
+		`config sitename "second";`,
+		"# managed box - this comment must survive",
+	} {
+		if !strings.Contains(text, keep) {
+			t.Errorf("splice lost %q:\n%s", keep, text)
+		}
+	}
+	if strings.Contains(text, "queuetime") {
+		t.Errorf("splice invented a queuetime the operator never wrote:\n%s", text)
+	}
+	if !strings.Contains(text, "traphost") {
+		t.Errorf("the added host is missing:\n%s", text)
+	}
+	if _, err := ParseFile(main); err != nil {
+		t.Errorf("spliced config no longer parses: %v", err)
+	}
+}
