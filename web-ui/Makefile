@@ -11,7 +11,11 @@ GO = go
 # Size breakdown: ~8MB code, ~377KB data, ~193KB bss
 # Main contributors: Go runtime, net/http, crypto/tls, encoding/xml, html/template
 # NOTE: crypto/tls (~2-3MB) is pulled in by net/http even though we don't use HTTPS
-GOFLAGS = -ldflags="-s -w"
+# -buildvcs=false: nothing in sysmon-web reads the VCS stamp, and asking
+# git for it fails in the situations people actually build in - root in
+# another user's checkout (git refuses the repo as dubious), or a
+# tarball with no .git at all.
+GOFLAGS = -buildvcs=false -ldflags="-s -w"
 
 .PHONY: all build build-small clean install uninstall dev css
 
@@ -38,7 +42,14 @@ clean:
 # replaced wholesale so removed files do not linger. Restart the service
 # after - templates parse at startup, so a running process keeps serving
 # whatever it started with.
-install: build
+#
+# install does NOT rebuild. The usual flow is "make" as yourself, then
+# "make install" as root - and a rebuild as root writes root-owned
+# artifacts into your checkout and trips git's dubious-ownership
+# refusal. Install copies what the build produced, or says to build.
+install:
+	@test -x backend/sysmon-web || \
+		{ echo "*** backend/sysmon-web is not built - run 'make' first (as your build user, not root)"; exit 1; }
 	install -d $(BINDIR)
 	install -m 755 backend/sysmon-web $(BINDIR)/sysmon-web
 	rm -rf $(LIBEXECDIR)/sysmon-web
