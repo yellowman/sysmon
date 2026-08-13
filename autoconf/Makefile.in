@@ -71,11 +71,18 @@ install:	all
 	-mkdir -p @sysconfdir@
 	@echo "installing ping helper into $(libexecdir)"
 	-mkdir -p $(libexecdir)
+# The helper is setuid root, so nobody but the daemon should be able to
+# run it: no world bits, and the group is the identity the daemon drops
+# to - sysmon_drop_user() takes "nobody" and falls back to "daemon", so
+# the group lookup here mirrors that order. chmod runs last because
+# chown/chgrp clear the setuid bit on most systems.
 	@if [ -f sysmon-ping-helper ]; then \
+		grp=`id -g nobody 2>/dev/null || id -g daemon 2>/dev/null || echo 0`; \
 		cp sysmon-ping-helper $(libexecdir)/sysmon-ping-helper; \
 		chown root $(libexecdir)/sysmon-ping-helper; \
-		chmod 4755 $(libexecdir)/sysmon-ping-helper; \
-		echo "sysmon-ping-helper installed setuid root at $(libexecdir)/sysmon-ping-helper"; \
+		chgrp $$grp $(libexecdir)/sysmon-ping-helper; \
+		chmod 4750 $(libexecdir)/sysmon-ping-helper; \
+		echo "sysmon-ping-helper installed setuid root, group $$grp, mode 4750 at $(libexecdir)/sysmon-ping-helper"; \
 	else \
 		echo "sysmon-ping-helper not built (optional - needed for privilege dropping with ICMP)"; \
 	fi
