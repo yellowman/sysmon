@@ -1,7 +1,7 @@
 # Deploying sysmon-web behind a web server
 
 `sysmon-web` speaks **FastCGI over a Unix domain socket**. It does not
-terminate TLS or serve HTTP to the world itself — you put nginx (Linux)
+terminate TLS or serve HTTP to the world itself - you put nginx (Linux)
 or httpd(8) (OpenBSD) in front of it. This document covers both, plus the
 two things that bite everyone: **socket ownership** and **daemonization**.
 
@@ -26,7 +26,7 @@ returns your shell prompt.
 | `sysmon-web -debug …` | Stays in the foreground, logs to **stderr**. Use this to find out why something won't start. |
 | `sysmon-web -foreground …` | Stays in the foreground, still silent. For process supervisors that track the PID themselves (systemd `Type=simple`, OpenBSD `rc.d`). Add `-debug` to also get logs. |
 
-Logs are **off unless `-debug`** is given — a daemon shouldn't chatter.
+Logs are **off unless `-debug`** is given - a daemon shouldn't chatter.
 If the service won't come up, the move is always: stop it, run it once
 in the foreground with `-debug`, read the error, fix, restart under the
 supervisor.
@@ -40,7 +40,7 @@ supervisor.
 ## 2. Privilege dropping and socket ownership
 
 `sysmon-web` is built to be **started as root and immediately drop
-privileges**. The only thing it does as root is the unavoidable part —
+privileges**. The only thing it does as root is the unavoidable part -
 bind the listening socket (a unix socket inside httpd's `/var/www`
 chroot, or a low TCP port) and hand that socket to the web server's user.
 Then, before opening any database or serving a single request, it:
@@ -62,13 +62,13 @@ to, it **refuses to run** rather than silently stay root. Create a
 
 If `sysmon-web` is started by something that has **already** dropped
 privileges (the systemd unit runs as `www-data`), it detects it isn't
-root and skips all of the above — the socket is simply created owned by
+root and skips all of the above - the socket is simply created owned by
 that user.
 
 > The socket is mode `0660` (owner+group read/write, world none), so only
 > the web server's user/group can connect. A `502` with
 > "connect() failed (13: Permission denied)" in the web-server log means
-> the socket is still owned by the wrong user — i.e. it was started as a
+> the socket is still owned by the wrong user - i.e. it was started as a
 > non-root, non-web user, or the resolved socket owner is wrong.
 
 For the unprivileged user to work, its data paths must be writable by it.
@@ -104,7 +104,7 @@ Restart=always
 ```
 
 Because it runs as `www-data`, the socket is already owned by nginx's
-user — no `-socket-*` flags needed. The `ExecStartPre` lines create
+user - no `-socket-*` flags needed. The `ExecStartPre` lines create
 `/var/www/run` (which `ProtectSystem=strict` also lists in
 `ReadWritePaths`). Add `-debug` to the `ExecStart` line temporarily to
 get logs in the journal (`journalctl -u sysmon-web -f`).
@@ -171,7 +171,7 @@ It runs `sysmon-web` as **root** just long enough to bind the socket
 inside the chroot and chown it to `www` (httpd's user); it then drops to
 `_sysmon` (or `nobody` if you haven't created `_sysmon`). The socket path,
 the `www` socket owner, and the `_sysmon` drop target are all defaults on
-OpenBSD, so the script doesn't need to spell them out — it only sets
+OpenBSD, so the script doesn't need to spell them out - it only sets
 `-foreground`, the paths, and the sysmond address.
 
 Create the unprivileged user so it doesn't fall back to `nobody`:
@@ -257,5 +257,5 @@ Once the web server can reach sysmon-web, browse to the site and log in
 with the auto-seeded admin account: **`admin` / `sysmon`**. Change the
 password immediately (Admin page → user list → key icon). Push
 notifications, if you use them, are configured entirely in the admin UI
-(Admin → Push Configuration) — not in `sysmon.conf`. See
+(Admin → Push Configuration) - not in `sysmon.conf`. See
 `docs/PUSH_NOTIFICATIONS.md`.

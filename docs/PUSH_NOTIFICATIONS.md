@@ -27,12 +27,12 @@ Every API call requires a valid user session. The mobile app:
 
 1. Logs in once with username/password → gets a session token
 2. Sends `Authorization: Bearer <token>` on all subsequent requests
-3. Token expires after 24 hours — app prompts for login again
+3. Token expires after 24 hours - app prompts for login again
 
 Two roles:
-- **admin** — full access including pushing test notifications to any
+- **admin** - full access including pushing test notifications to any
   device and removing any subscription
-- **user** — can manage their own push subscriptions only
+- **user** - can manage their own push subscriptions only
 
 A regular `user` account is fine for the mobile app. Each subscription
 is tied to the user account that registered it.
@@ -68,7 +68,7 @@ and refreshes them automatically.
 ### 2. APNs (iOS)
 
 Export your push certificate from the Apple Developer portal as `.p12`,
-then convert to PEM (locally — you'll upload, not deploy to disk):
+then convert to PEM (locally - you'll upload, not deploy to disk):
 
 ```sh
 openssl pkcs12 -in cert.p12 -out apns-cert.pem -clcerts -nokeys
@@ -86,13 +86,13 @@ The certificate is validated on upload; its Subject CN and expiry are
 shown in the panel.
 
 **With both FCM and APNs configured**, each iOS device still receives
-exactly one notification — there is one subscription row per device,
+exactly one notification - there is one subscription row per device,
 and the send path picks one transport per token. Which one is decided
 by the token itself: a raw APNs device token (64 hex chars, registered
 by app builds without a `GoogleService-Info.plist`) goes direct to
 APNs; anything else goes via FCM, which relays to APNs internally.
-This means a mixed fleet — some installs built with Firebase, some
-without — delivers correctly from one server, and neither transport
+This means a mixed fleet - some installs built with Firebase, some
+without - delivers correctly from one server, and neither transport
 is ever handed a token it can't deliver to.
 
 ### 3. Enable
@@ -187,7 +187,7 @@ Response:
 ```
 
 The `api_key` is a per-device fingerprint returned for the app's own
-record. It is NOT an authorization credential — all unsubscribe and
+record. It is NOT an authorization credential - all unsubscribe and
 test operations require a valid session that owns the device. The
 api_key is reserved for future use (e.g., letting the daemon mark
 device-specific delivery state).
@@ -205,9 +205,9 @@ response carries a verdict:
 }
 ```
 
-`token_status: "invalid"` is the app's cue to force a token rotation —
+`token_status: "invalid"` is the app's cue to force a token rotation -
 `deleteToken()` then `getToken()` on Android, `deleteToken()` then
-`token()` on iOS — and subscribe again with the fresh token. This
+`token()` on iOS - and subscribe again with the fresh token. This
 matters because FCM only ever reports a dead token to the *sender*: the
 Firebase SDK on the device keeps returning the dead token from its
 cache and `onNewToken` / the MessagingDelegate never fires, so without
@@ -254,7 +254,7 @@ Content-Type: application/json
 ```
 
 You can only unsubscribe a device that your account owns. Admins can
-unsubscribe any device. The `api_key` is NOT accepted as auth — it's
+unsubscribe any device. The `api_key` is NOT accepted as auth - it's
 just a per-device fingerprint, not an authorization credential.
 
 ### Send a test notification
@@ -334,12 +334,12 @@ checks quote latency/jitter against the configured limits and any
 probe loss, pktloss checks quote the loss percentage and counts, SNMP
 value checks quote the last reading against its threshold ("reading 52
 (max 45)" for a temperature check), and SNMP reboot checks quote the
-device's uptime — how long ago it came back. Plain ping/tcp checks
+device's uptime - how long ago it came back. Plain ping/tcp checks
 have nothing to measure, so their body stays as-is. Recoveries carry
 the current (healthy) figures too.
 
 The notification also quotes what the *other* objects watching the
-same box last measured — matched by hostname/address within the same
+same box last measured - matched by hostname/address within the same
 site. A ping object can only say down/up, but its siblings (the rtt
 object, the temperature check) hold the last readings the fleet has
 for that machine, so a ping-down body ends with e.g.
@@ -452,19 +452,19 @@ class SysmonMessagingService : FirebaseMessagingService() {
   token but the new device_token. A new `api_key` is issued. Optionally
   unsubscribe the old token.
 - **The transport declares the token dead**: FCM answers a send with
-  `UNREGISTERED`; direct APNs answers HTTP 410 `Unregistered` — the
+  `UNREGISTERED`; direct APNs answers HTTP 410 `Unregistered` - the
   same verdict in different clothes. It happens on app uninstall,
   cleared app data, restore to a new device, provider-side key
   rotations, or (FCM) after ~270 days of device inactivity. The
   verdict is permanent for that token string, and only the sender ever
-  sees it — the device's own push SDK keeps returning the dead token
+  sees it - the device's own push SDK keeps returning the dead token
   from cache. The server reacts identically for both transports:
   flagging the subscription (`unregistered`, shown on the admin page
   as "token dead"), skipping it during alert fan-outs (per the
   providers' guidance to stop sending to dead tokens), and answering
   the app's next subscribe of that token with
   `token_status: "invalid"`. The apps (Android and iOS alike) then
-  delete their cached token, mint a fresh one, and re-subscribe — the
+  delete their cached token, mint a fresh one, and re-subscribe - the
   flagged row is replaced and delivery resumes. The row is kept (not deleted) exactly
   so this handshake can happen; an admin can still remove it manually
   via `DELETE /api/push/remove/<token>`. A test push to a flagged
@@ -480,9 +480,9 @@ class SysmonMessagingService : FirebaseMessagingService() {
 
 bbolt at `/var/lib/sysmon/push.db`. Two buckets:
 
-- **subscriptions** — keyed by `device_token`, value is JSON Subscription
+- **subscriptions** - keyed by `device_token`, value is JSON Subscription
   (with owner field linking to auth user)
-- **push_log** — auto-incrementing sequence key, JSON log entry
+- **push_log** - auto-incrementing sequence key, JSON log entry
 
 Subscriptions persist across restarts. The push log grows over time
 and has no auto-cleanup yet (planned).
@@ -501,7 +501,7 @@ Either `config push-notifications;` is missing from sysmon.conf, or
 sysmon-web couldn't open `/var/lib/sysmon/push.db`. Check the logs.
 
 **One device shows "failed: token dead" and gets no alerts**
-FCM refused that device's token with `UNREGISTERED` — the token is
+FCM refused that device's token with `UNREGISTERED` - the token is
 gone for good (uninstall, cleared data, device restore, or the
 270-day inactivity purge). The subscription is flagged (red "token
 dead" badge on the admin page) and alert sends skip it. It heals

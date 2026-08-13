@@ -7,7 +7,7 @@
  * - Read one request from stdin (pipe from parent sysmond)
  * - Validate all fields before use
  * - Create raw socket, drop to real UID, then send
- * - Exit immediately — no loops, no interactive input
+ * - Exit immediately - no loops, no interactive input
  *
  * Exit codes:
  *   0 - Success
@@ -81,7 +81,7 @@ static void drop_to_real_uid(void)
 
 	/*
 	 * Drop supplementary groups before dropping gid/uid. Must be fatal
-	 * on failure — if it fails, we'd continue with supplementary groups
+	 * on failure - if it fails, we'd continue with supplementary groups
 	 * still in place even after setgid/setuid, defeating the cleanup.
 	 * Only root may call setgroups; we already checked geteuid()==0
 	 * above (the early-return covers the unprivileged-helper case).

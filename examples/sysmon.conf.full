@@ -441,7 +441,7 @@ object example-paused {
 # =============================================================================
 # Push notification settings (FCM credentials, APNs cert/key, bundle id,
 # enable flag) are configured in the sysmon-web admin UI and stored in
-# /var/lib/sysmon/settings.db — they are not sysmond's concern.
+# /var/lib/sysmon/settings.db - they are not sysmond's concern.
 
 
 # =============================================================================

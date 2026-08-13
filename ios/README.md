@@ -30,7 +30,7 @@ push notifications when hosts go down or recover.
 ## Releasing to the App Store
 
 Before archiving for App Store distribution, change `aps-environment` in
-`Sysmon.entitlements` from `development` to `production` — or remove the
+`Sysmon.entitlements` from `development` to `production` - or remove the
 file and let Xcode manage entitlements automatically through Signing &
 Capabilities.
 
@@ -46,11 +46,11 @@ On successful login, the app requests push notification permission
 and registers the device token with sysmon. From then on, you'll
 receive a push whenever a monitored host changes state.
 
-The registration repeats on every cold launch — and roughly once a day
+The registration repeats on every cold launch - and roughly once a day
 in the background via a BGTaskScheduler app-refresh task (its timing
-rides iOS's refresh budget, so it can slip) — and the server's reply
+rides iOS's refresh budget, so it can slip) - and the server's reply
 carries a verdict: if FCM/APNs has refused the token since the last
-check (reinstall, device restore, or the 270-day inactivity purge —
+check (reinstall, device restore, or the 270-day inactivity purge -
 the push SDK itself never finds out and keeps serving the dead token
 from cache), the app deletes the cached token, mints a fresh one, and
 re-registers automatically. No user action needed; even a phone that
@@ -58,14 +58,14 @@ sits unopened heals within about a day.
 
 ## Files
 
-- `SysmonApp.swift` — app entry, routes between login and main view
-- `AppDelegate.swift` — APNs token registration
-- `Session.swift` — auth state, Keychain storage, push registration
-- `API.swift` — typed HTTP client with Bearer auth and 401 handling
-- `Models.swift` — Codable types matching the sysmon-web JSON API
-- `LoginView.swift` — login form (server URL + username + password)
-- `MainView.swift` — tab bar with Alerts / Hosts / Settings
-- `SettingsView.swift` — account info, test push button, sign out
+- `SysmonApp.swift` - app entry, routes between login and main view
+- `AppDelegate.swift` - APNs token registration
+- `Session.swift` - auth state, Keychain storage, push registration
+- `API.swift` - typed HTTP client with Bearer auth and 401 handling
+- `Models.swift` - Codable types matching the sysmon-web JSON API
+- `LoginView.swift` - login form (server URL + username + password)
+- `MainView.swift` - tab bar with Alerts / Hosts / Settings
+- `SettingsView.swift` - account info, test push button, sign out
 
 ## Design
 
@@ -89,6 +89,6 @@ data values, minimal color palette. Matches the sysmon web UI's
   used in over 30 days. Log in again.
 
 **Server URL**
-- Scheme is optional — `sysmon.example.com` is accepted and resolved
+- Scheme is optional - `sysmon.example.com` is accepted and resolved
   to `https://sysmon.example.com`. Use `http://` explicitly only if
   your server is plain HTTP. Trailing slashes are stripped.
