@@ -135,11 +135,19 @@ func (r *Router) handleConfigRawSitePut(w http.ResponseWriter, req *http.Request
 
 	files[0].Content = []byte(data.Content)
 
-	user, _ := r.getUserInfo(req)
 	note := data.Comment
 	if note == "" {
 		note = "raw edit from the config page"
 	}
+	r.stageAndDeliver(w, req, site, files, note)
+}
+
+// stageAndDeliver is the shared back half of every site save: stage the
+// file set as a new generation, deliver it, and answer with what the
+// box is now running - or with its parser's own words when it refuses,
+// which costs the box nothing.
+func (r *Router) stageAndDeliver(w http.ResponseWriter, req *http.Request, site string, files []settings.GenFile, note string) {
+	user, _ := r.getUserInfo(req)
 	if _, _, err := r.monitoring.StageGeneration(site, files, user, note); err != nil {
 		r.sendError(w, http.StatusBadRequest, err.Error())
 		return
@@ -165,4 +173,61 @@ func (r *Router) handleConfigRawSitePut(w http.ResponseWriter, req *http.Request
 		out["warning"] = res.Warning
 	}
 	r.sendJSON(w, out)
+}
+
+// PUT /api/config?site=X - a structured save for a managed box. The
+// edited model is serialized by the same generator local saves use,
+// then staged and delivered exactly like a raw save - the box's own
+// parser validates before anything running is touched.
+//
+// Single-file configs only: the structured model has no notion of
+// which include a host came from, so generating it back flattens a
+// deliberately-split file set into one file. That is a surprise a save
+// must not spring on anyone; a multi-file box says so and points at
+// the raw editor, which edits the entry file in place.
+func (r *Router) handleConfigSitePut(w http.ResponseWriter, req *http.Request, site string) {
+	var update models.ConfigUpdate
+	if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	files, _, hash, err := r.monitoring.SiteConfigFiles(site)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if len(files) == 0 {
+		r.sendError(w, http.StatusServiceUnavailable, "the box sent no files")
+		return
+	}
+	if len(files) > 1 {
+		r.sendError(w, http.StatusBadRequest, fmt.Sprintf(
+			"%s's config is split across %d files, and a structured save would "+
+				"flatten them into one - edit this box in the raw editor instead",
+			site, len(files)))
+		return
+	}
+	if update.Version != "" && update.Version != hash {
+		w.WriteHeader(http.StatusConflict)
+		r.sendJSON(w, &models.VersionConflictError{
+			Expected: update.Version,
+			Actual:   hash,
+			Message:  "the box's config changed since this copy was loaded - reload and redo the edit",
+		})
+		return
+	}
+
+	content, err := config.Generate(&update.Config)
+	if err != nil {
+		r.sendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	files[0].Content = []byte(content)
+
+	note := update.Comment
+	if note == "" {
+		note = "structured edit from the config page"
+	}
+	r.stageAndDeliver(w, req, site, files, note)
 }

@@ -269,11 +269,7 @@ func (r *Router) handleConfig(w http.ResponseWriter, req *http.Request) {
 		case http.MethodGet:
 			r.handleConfigSiteGet(w, site)
 		case http.MethodPut:
-			// Structured editing needs the splice machinery pointed at
-			// the box's file set; until then a remote box is edited in
-			// the raw editor, which stages and delivers.
-			r.sendError(w, http.StatusBadRequest,
-				"structured saves are local-only for now - edit "+site+" in the raw editor")
+			r.handleConfigSitePut(w, req, site)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}

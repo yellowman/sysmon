@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"sysmon-web/internal/settings"
@@ -56,19 +57,22 @@ func TestRemoteConfigUnknownSiteIs503(t *testing.T) {
 	}
 }
 
-// Structured saves stay local-only: a remote site gets a clear refusal,
-// never a silent write to the local file.
-func TestRemoteStructuredSaveRefused(t *testing.T) {
+// A structured save for a remote site goes over the agent link. When
+// the site cannot be reached the answer is an error - never a silent
+// write to the local file, which is what this path once did from the
+// dependency map.
+func TestRemoteStructuredSaveNeedsTheSite(t *testing.T) {
 	handler, authSvc, cleanup := testRouter(t)
 	defer cleanup()
 	token := sessionFor(t, authSvc, "rc-admin2", "rc-pass-123", "admin")
 
-	req := httptest.NewRequest(http.MethodPut, "/api/config?site=metro", nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/config?site=metro",
+		strings.NewReader(`{"config":{"hosts":[]},"comment":"t"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("PUT /api/config?site=metro: got %d, want 400", w.Code)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("PUT /api/config?site=metro: got %d, want 503 (site unreachable)", w.Code)
 	}
 }
 

@@ -213,7 +213,7 @@
                 <button @click="reloadStructured()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
                     <i class="fas fa-sync mr-2"></i>Reload
                 </button>
-                <button @click="saveConfigStructured()" :disabled="savingStructured" x-show="!site" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                <button @click="saveConfigStructured()" :disabled="savingStructured" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                     <i class="fas fa-save mr-2"></i>
                     <span x-text="savingStructured ? 'Saving...' : 'Save Changes'"></span>
                 </button>
@@ -1647,17 +1647,17 @@ function unifiedConfigPage() {
         },
 
         async saveConfigStructured() {
-            if (this.site) {
-                alert('Structured saves are local-only for now - edit ' + this.siteLabel() + ' in the raw editor, which stages and delivers.');
-                return;
-            }
             if (!this.validateConfigStructured()) {
                 return;
             }
 
             this.savingStructured = true;
             try {
-                const response = await authFetch('/api/config', {
+                // With a site selected the save is staged and delivered
+                // over the agent link; the box's own parser validates
+                // before anything running is touched, and a refusal
+                // comes back with its words.
+                const response = await authFetch('/api/config' + this.siteQ(), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1672,7 +1672,9 @@ function unifiedConfigPage() {
                     if (result.version) this.structuredConfigVersion = result.version;
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
                     this.structuredHasChanges = false;
-                    this.showSuccess('Configuration saved successfully! Reload sysmon to apply changes.');
+                    this.showSuccess(this.site
+                        ? 'Delivered to ' + this.siteLabel() + ' - it validated the config and reloaded.'
+                        : 'Configuration saved successfully! Reload sysmon to apply changes.');
                 } else if (response.status === 401) {
                     window.location.href = '/login.html';
                 } else {
