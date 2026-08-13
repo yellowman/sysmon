@@ -27,12 +27,16 @@ clean:
 	rm -f src/defines.h
 	rm -f config.status config.log config.cache confdefs.h
 
+## The web UI half installs whatever "make" already built - it never
+## rebuilds, because install is typically run as root in a checkout
+## owned by somebody else, where go refuses to stamp VCS status.
 install: src/Makefile
 	(cd src; make install)
-	@if command -v go >/dev/null 2>&1; then \
+	@if [ -x web-ui/backend/sysmon-web ]; then \
 		(cd web-ui && make install); \
 	else \
-		echo "*** No go toolchain found - the web UI was not installed."; \
+		echo "*** web-ui/backend/sysmon-web is not built - the web UI was not installed."; \
+		echo "*** Build it first with: make web  (as your build user), then rerun make install."; \
 	fi
 
 install-web:

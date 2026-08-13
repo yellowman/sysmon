@@ -335,9 +335,12 @@ cp examples/sysmon.conf.dist /usr/local/etc/sysmon.conf   # then edit
 sysmond -f /usr/local/etc/sysmon.conf
 ```
 
-`make install` is what puts `sysmon-ping-helper` in place setuid root.
-Without it the daemon still runs, but it has no fallback if the kernel
-refuses to send on a raw socket after dropping privileges.
+`make install` is what puts `sysmon-ping-helper` in place setuid root,
+mode 4750, group-owned by the identity the daemon drops to (nobody,
+or daemon as the fallback) - so only the daemon can run it, not every
+local user. Without it the daemon still runs, but it has no fallback
+if the kernel refuses to send on a raw socket after dropping
+privileges.
 
 `examples/` also has `sysmon.conf.full`, which shows every directive, and
 `sysmon.conf.fleet` - the 500-object wireless ISP in the screenshots
