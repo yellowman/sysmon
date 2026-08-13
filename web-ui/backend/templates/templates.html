@@ -179,7 +179,7 @@ function templatesPage() {
             if (c.rtt_samples) bits.push(c.rtt_samples + ' probes');
             if (c.rtt_interval) bits.push(c.rtt_interval + 'ms apart');
             if (c.pktloss_tolerance) bits.push(c.pktloss_tolerance + ' lost allowed');
-            return bits.join(' · ') || '—';
+            return bits.join(' · ') || '-';
         },
 
         say(msg, bad) { this.notice = msg; this.noticeBad = !!bad; },

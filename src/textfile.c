@@ -207,7 +207,7 @@ dump_to_file(char *filename, int html, time_t now)
 			 * Cross-device rename (statustempdir is on another
 			 * filesystem than the status file). Copy into a temp
 			 * file *in the destination directory* and rename that
-			 * onto the target — the second rename is same-filesystem
+			 * onto the target - the second rename is same-filesystem
 			 * so it's atomic, and readers never see a partially
 			 * written status file.
 			 */
