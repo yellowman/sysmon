@@ -114,22 +114,8 @@ func (r *Router) handleConfigRawSitePut(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	files, _, hash, err := r.monitoring.SiteConfigFiles(site)
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	if len(files) == 0 {
-		r.sendError(w, http.StatusServiceUnavailable, "the box sent no files")
-		return
-	}
-	if data.Version != "" && data.Version != hash {
-		w.WriteHeader(http.StatusConflict)
-		r.sendJSON(w, &models.VersionConflictError{
-			Expected: data.Version,
-			Actual:   hash,
-			Message:  "the box's config changed since this copy was loaded - reload and redo the edit",
-		})
+	files := r.siteFilesForEdit(w, site, data.Version)
+	if files == nil {
 		return
 	}
 
@@ -140,6 +126,32 @@ func (r *Router) handleConfigRawSitePut(w http.ResponseWriter, req *http.Request
 		note = "raw edit from the config page"
 	}
 	r.stageAndDeliver(w, req, site, files, note)
+}
+
+// siteFilesForEdit is the shared front half of every site save: fetch
+// the box's current file set and check the caller's copy of it is still
+// current. Answers the request and returns nil when anything
+// disqualifies the save.
+func (r *Router) siteFilesForEdit(w http.ResponseWriter, site, version string) []settings.GenFile {
+	files, _, hash, err := r.monitoring.SiteConfigFiles(site)
+	if err != nil {
+		r.sendError(w, http.StatusServiceUnavailable, err.Error())
+		return nil
+	}
+	if len(files) == 0 {
+		r.sendError(w, http.StatusServiceUnavailable, "the box sent no files")
+		return nil
+	}
+	if version != "" && version != hash {
+		w.WriteHeader(http.StatusConflict)
+		r.sendJSON(w, &models.VersionConflictError{
+			Expected: version,
+			Actual:   hash,
+			Message:  "the box's config changed since this copy was loaded - reload and redo the edit",
+		})
+		return nil
+	}
+	return files
 }
 
 // stageAndDeliver is the shared back half of every site save: stage the
@@ -175,16 +187,17 @@ func (r *Router) stageAndDeliver(w http.ResponseWriter, req *http.Request, site 
 	r.sendJSON(w, out)
 }
 
-// PUT /api/config?site=X - a structured save for a managed box. The
-// edited model is serialized by the same generator local saves use,
-// then staged and delivered exactly like a raw save - the box's own
-// parser validates before anything running is touched.
+// PUT /api/config?site=X - a structured save for a managed box.
 //
-// Single-file configs only: the structured model has no notion of
-// which include a host came from, so generating it back flattens a
-// deliberately-split file set into one file. That is a surprise a save
-// must not spring on anyone; a multi-file box says so and points at
-// the raw editor, which edits the entry file in place.
+// The box's file set is SPLICED, never regenerated. The model cannot
+// carry comments, include structure, or directives it has no fields
+// for - the box's own aggregator lines above all, which the uplink
+// guard in StageGeneration would (rightly) refuse to see vanish. So
+// the edit is applied the way the local path applies it: only the
+// objects that actually changed are rewritten, in the file they live
+// in, and every other byte of the set survives untouched. Then the
+// same stage-and-deliver as a raw save - the box's own parser
+// validates before anything running is touched.
 func (r *Router) handleConfigSitePut(w http.ResponseWriter, req *http.Request, site string) {
 	var update models.ConfigUpdate
 	if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
@@ -192,38 +205,54 @@ func (r *Router) handleConfigSitePut(w http.ResponseWriter, req *http.Request, s
 		return
 	}
 
-	files, _, hash, err := r.monitoring.SiteConfigFiles(site)
-	if err != nil {
-		r.sendError(w, http.StatusServiceUnavailable, err.Error())
+	// The site's reachability is judged before the payload: a save for
+	// a box that cannot be reached is answered as such whatever the
+	// body says.
+	files := r.siteFilesForEdit(w, site, update.Version)
+	if files == nil {
 		return
 	}
-	if len(files) == 0 {
-		r.sendError(w, http.StatusServiceUnavailable, "the box sent no files")
-		return
-	}
-	if len(files) > 1 {
-		r.sendError(w, http.StatusBadRequest, fmt.Sprintf(
-			"%s's config is split across %d files, and a structured save would "+
-				"flatten them into one - edit this box in the raw editor instead",
-			site, len(files)))
-		return
-	}
-	if update.Version != "" && update.Version != hash {
-		w.WriteHeader(http.StatusConflict)
-		r.sendJSON(w, &models.VersionConflictError{
-			Expected: update.Version,
-			Actual:   hash,
-			Message:  "the box's config changed since this copy was loaded - reload and redo the edit",
-		})
-		return
-	}
-
-	content, err := config.Generate(&update.Config)
-	if err != nil {
+	if err := config.Validate(&update.Config); err != nil {
 		r.sendError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	files[0].Content = []byte(content)
+
+	// The splice machinery works on paths; give it the file set laid
+	// out the way a generation directory lays it out - flat names in
+	// one directory - exactly as parseSiteFiles does for reads.
+	dir, err := os.MkdirTemp("", "sysmon-site-edit-*")
+	if err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer os.RemoveAll(dir)
+	for _, f := range files {
+		name := filepath.Base(f.Name)
+		if err := os.WriteFile(filepath.Join(dir, name), f.Content, 0600); err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	doc, err := config.LoadDocument(filepath.Join(dir, filepath.Base(files[0].Name)))
+	if err != nil {
+		r.sendError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("%s's config fetched but did not load here: %v", site, err))
+		return
+	}
+	doc.Apply(&update.Config)
+	if err := doc.Save(); err != nil {
+		r.sendError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i := range files {
+		b, err := os.ReadFile(filepath.Join(dir, filepath.Base(files[i].Name)))
+		if err != nil {
+			r.sendError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		files[i].Content = b
+	}
 
 	note := update.Comment
 	if note == "" {

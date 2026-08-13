@@ -1999,6 +1999,10 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			wakeup_checks(now_t);
 			do_tree_periodic(now_t);
 			needssleep(now_t);
+			/* Paused is not stopped: checks in flight still finish
+			   and pages still record, and a pause can last hours -
+			   the checkpoint keeps its schedule through it. */
+			checkpoint_state(now_t, path_savestate);
 		}
 
 		/* Checkpoint check state every so often. Saving only at

@@ -68,9 +68,8 @@
     <div x-show="site" x-cloak class="mb-6 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
         <i class="fas fa-satellite-dish mr-2"></i>
         Editing <span class="font-semibold" x-text="siteLabel()"></span> over the agent link<span x-show="remoteGeneration"> - running generation <span x-text="remoteGeneration"></span></span>.
-        Raw saves are staged, delivered, and validated by the box itself before its running
-        config is touched. The structured view is read-only for a remote box; backups and
-        Reload live on the box.
+        Saves - raw and structured alike - are staged, delivered, and validated by the box
+        itself before its running config is touched. Backups and Reload live on the box.
     </div>
 
     <!-- MAP MODE: one implementation lives on the Map page (view-first,
