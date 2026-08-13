@@ -684,9 +684,26 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 }
 
 // handleSites lists the fleet, so a site picker can offer names rather
-// than asking someone to type one.
+// than asking someone to type one. minted counts the boxes with tokens
+// here at all - connected or not. The editors use it to decide whether
+// an unselected page may take the only box for granted: one minted box
+// is unambiguous, several are a question, even when just one happens
+// to be online.
 func (r *Router) handleSites(w http.ResponseWriter, req *http.Request) {
-	r.sendJSON(w, map[string]interface{}{"sites": r.monitoring.Sites()})
+	minted := 0
+	if r.settings != nil {
+		if tokens, err := r.settings.ListAgentTokens(); err == nil {
+			for _, t := range tokens {
+				if !t.Revoked {
+					minted++
+				}
+			}
+		}
+	}
+	r.sendJSON(w, map[string]interface{}{
+		"sites":  r.monitoring.Sites(),
+		"minted": minted,
+	})
 }
 
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {

@@ -40,6 +40,7 @@
                 <select @change="pickSite($event.target.value)" :disabled="!sitePickerSites.length"
                         class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white max-w-[18rem] disabled:text-gray-400">
                     <option x-show="!sitePickerSites.length" value="">No connected sysmond</option>
+                    <option x-show="sitePickerSites.length && !site" value="" :selected="!site">Choose a box&#8230;</option>
                     <template x-for="s in sitePickerSites" :key="s.site">
                         <option :value="s.site" :selected="site === s.site"
                                 x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
@@ -68,7 +69,26 @@
         </a>
     </div>
 
-    <div x-show="!sitesLoaded || sitePickerSites.length">
+    <!-- Several boxes are minted and none is chosen: which box an edit
+         is aimed at is a question, not a guess. Nothing is loaded or
+         shown until it is answered. -->
+    <div x-show="sitesLoaded && sitePickerSites.length && !site" x-cloak class="card p-10 text-center">
+        <i class="fas fa-satellite-dish text-4xl text-gray-300 mb-4"></i>
+        <h2 class="text-lg font-semibold text-gray-900 mb-2">Which box?</h2>
+        <p class="text-sm text-gray-500 max-w-lg mx-auto mb-5">
+            More than one monitoring box is minted here, so this page will
+            not guess which one you mean. Pick the box to edit.
+        </p>
+        <div class="flex flex-wrap justify-center gap-2">
+            <template x-for="s in sitePickerSites" :key="s.site">
+                <button @click="pickSite(s.site)"
+                        class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800"
+                        x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></button>
+            </template>
+        </div>
+    </div>
+
+    <div x-show="!sitesLoaded || site">
     <!-- Which box this page is editing, when it is not the local file -->
     <div x-show="site" x-cloak class="mb-6 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
         <i class="fas fa-satellite-dish mr-2"></i>
@@ -1366,6 +1386,7 @@ function unifiedConfigPage() {
         // Empty means the local sysmon.conf.
         site: localStorage.getItem('sysmon-site') || '',
         sitePickerSites: [],
+        mintedCount: 0,
         sitesLoaded: false,
         remoteGeneration: 0,
         pickerError: '',
@@ -1379,6 +1400,7 @@ function unifiedConfigPage() {
             try {
                 const r = await (await authFetch('/api/sites')).json();
                 this.sitePickerSites = r.sites || [];
+                this.mintedCount = r.minted ?? this.sitePickerSites.length;
             } catch (e) {
                 this.sitePickerSites = [];
                 this.pickerError = 'site list unavailable';
@@ -1389,10 +1411,13 @@ function unifiedConfigPage() {
                 this.sitePickerSites.push({ site: this.site,
                     description: this.site + ' (no longer in the fleet)', reachable: false });
             }
-            // No selection yet: default to the first connected site, but
-            // do not write it to storage - the nav's "All sites" stays
-            // what the operator chose for the status pages.
-            if (!this.site && this.sitePickerSites.length) {
+            // No selection yet: take the box for granted only when just
+            // ONE is minted - minted, not connected, is what measures
+            // ambiguity. Three minted boxes with one online must still
+            // ask, or an edit lands on whichever box happened to be up.
+            // The auto-pick is not written to storage - the nav's "All
+            // sites" stays what the operator chose for the status pages.
+            if (!this.site && this.sitePickerSites.length && this.mintedCount <= 1) {
                 this.site = this.sitePickerSites[0].site;
             }
             this.sitesLoaded = true;
@@ -1465,6 +1490,10 @@ function unifiedConfigPage() {
             // Sites first: the fetches below need to know which box.
             await this.loadSitesForPicker();
             if (!this.sitePickerSites.length) { this.loadingStructured = false; return; }
+            // Several boxes minted, none chosen: load nothing. Which box
+            // an edit is aimed at is a question, not a guess - pickSite
+            // reloads the page once it is answered.
+            if (!this.site) { this.loadingStructured = false; return; }
             this.fetchConfigRaw();
             this.loadConfigStructured();
 
