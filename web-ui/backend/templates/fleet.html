@@ -138,6 +138,58 @@
         </table>
     </div>
 
+    <!-- Alerters: alert-only peers on the same listener. Never part of
+         the fleet - no config, no hosts - just things with something to
+         say, using the same push pipeline. Hidden until one has ever
+         connected, so single-purpose fleets don't carry an empty card. -->
+    <div x-show="alerters.length" x-cloak class="mt-6">
+        <h2 class="text-sm font-bold text-gray-900 mb-1">Alerters</h2>
+        <p class="text-xs text-gray-400 mb-2">
+            Alert-only peers - not monitoring boxes. They send alerts through the
+            same push pipeline; see <span class="mono">docs/ALERTERS.md</span>.
+        </p>
+        <div class="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Shows as</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">From</th>
+                        <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Alerts</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last alert</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="a in alerters" :key="a.name">
+                        <tr class="border-t border-gray-100">
+                            <td class="px-3 py-2 mono" x-text="a.name"></td>
+                            <td class="px-3 py-2 text-xs text-gray-600">
+                                <!-- What alerts display: the admin's nickname wins,
+                                     else what the application calls itself. -->
+                                <span x-text="a.nickname || a.application || a.name"></span>
+                                <span x-show="a.nickname && a.application" class="text-gray-400"
+                                      x-text="' (' + a.application + ')'"></span>
+                                <button @click="renameAlerter(a)" title="Set nickname"
+                                        class="ml-1 text-gray-300 hover:text-gray-600">
+                                    <i class="fas fa-pen text-[10px]"></i>
+                                </button>
+                            </td>
+                            <td class="px-3 py-2">
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                      :class="a.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-500'"
+                                      x-text="a.connected ? 'connected' : 'gone'"></span>
+                            </td>
+                            <td class="px-3 py-2 mono text-xs text-gray-500" x-text="a.addr"></td>
+                            <td class="px-3 py-2 text-right mono" x-text="a.alerts"></td>
+                            <td class="px-3 py-2 text-xs text-gray-600" x-text="a.last_alert || '-'"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- Rollouts -->
     <div x-show="rollouts.length" x-cloak class="mt-6">
         <h2 class="text-sm font-bold text-gray-900 mb-2">Rollouts</h2>
@@ -178,6 +230,7 @@ function fleetPage() {
     return {
         sites: [],
         rollouts: [],
+        alerters: [],
         selected: [],
         watchSeconds: 120,
         busy: false,
@@ -195,12 +248,31 @@ function fleetPage() {
             this.timer = setInterval(() => this.load(), 5000);
         },
 
+        async renameAlerter(a) {
+            const nick = prompt('Nickname for ' + a.name +
+                ' (shown in alerts; empty uses what the application calls itself):',
+                a.nickname || '');
+            if (nick === null) return;
+            try {
+                await apiCall('/api/alerters/nickname', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: a.name, nickname: nick.trim() })
+                });
+                await this.load();
+            } catch (e) {
+                alert('Rename failed: ' + (e.message || e));
+            }
+        },
+
         async load() {
             try {
                 const r = await apiCall('/api/config/fleet');
                 this.sites = r.sites || [];
                 const ro = await apiCall('/api/config/rollout');
                 this.rollouts = ro.rollouts || [];
+                const al = await apiCall('/api/alerters');
+                this.alerters = al.alerters || [];
                 this.loadFails = 0;
                 this.staleError = '';
             } catch (e) {

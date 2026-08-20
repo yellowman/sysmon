@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"sysmon-web/internal/settings"
 )
 
 // Daemons that dial in.
@@ -114,8 +116,8 @@ func (a *AgentListener) handshake(conn net.Conn) {
 	}
 
 	fields := strings.Fields(strings.TrimSpace(line))
-	if len(fields) < 2 || fields[0] != "HELLO" {
-		fmt.Fprintf(conn, "444 expected HELLO <site> <token>\r\n")
+	if len(fields) < 2 || (fields[0] != "HELLO" && fields[0] != "ALERTER") {
+		fmt.Fprintf(conn, "444 expected HELLO <site> <token> or ALERTER <name> <token>\r\n")
 		conn.Close()
 		log.Printf("agents: %s did not greet us properly", remote)
 		return
@@ -146,6 +148,32 @@ func (a *AgentListener) handshake(conn net.Conn) {
 		return
 	}
 	conn.SetDeadline(time.Time{}) // long-lived from here
+
+	// An alerter is not a monitoring box: nothing is polled, nothing is
+	// adopted, it just sends alerts down this socket - see alerters.go.
+	// The kind is recorded either way, so pages that count boxes can
+	// tell a sysmond's token from an alerter's.
+	if fields[0] == "ALERTER" {
+		if st := a.svc.Generations(); st != nil {
+			st.SetAgentKind(site, settings.KindAlerter)
+		}
+		// Anything after the token is what the application calls
+		// itself - free text, shown beside the name on the Fleet page
+		// and in the alerts it sends.
+		app := ""
+		if len(fields) >= 4 {
+			app = strings.Join(fields[3:], " ")
+			if len(app) > 128 {
+				app = app[:128]
+			}
+		}
+		log.Printf("agents: alerter %s connected from %s", site, remote)
+		a.svc.runAlerter(site, app, remote, conn, reader)
+		return
+	}
+	if st := a.svc.Generations(); st != nil {
+		st.SetAgentKind(site, settings.KindSysmond)
+	}
 
 	a.svc.adoptAgent(site, remote, conn, reader)
 	log.Printf("agents: site %s connected from %s", site, remote)

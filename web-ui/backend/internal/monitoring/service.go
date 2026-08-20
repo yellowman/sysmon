@@ -104,6 +104,13 @@ type Service struct {
 	daemons    []*daemon
 	sessionLog *SessionLogger
 
+	// Alerters: alert-only peers on the agent listener. Not part of the
+	// fleet - see alerters.go.
+	alertersMu  sync.Mutex
+	alerters    map[string]*alerter
+	alertSinkMu sync.Mutex
+	alertSink   func(source, display, object, status, text string)
+
 	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.
 	history *HistoryStore

@@ -252,6 +252,39 @@ var errRandom = json.Unmarshal([]byte("x"), &struct{}{})
 
 func i64(v int64) *int64 { return &v }
 
+// Alerter alerts ride the same fan-out as host transitions, honoring the
+// master enable switch, and show the sender's display name.
+func TestExternalAlert(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "push.db")
+	svc, err := NewService(Config{Enabled: true}, dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	defer svc.Stop()
+
+	fake := newFakeFCM()
+	svc.fcm = fcmClientFor(t, fake)
+	if _, _, err := svc.Subscribe("tok-phone", PlatformAndroid, "pixel", "chris", "", ""); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	svc.ExternalAlert("backupd", "Nightly Backups", "tape", "CRITICAL", "jam in drive 2")
+	if got := fake.sendCount("tok-phone"); got != 1 {
+		t.Fatalf("alert reached %d devices, want 1", got)
+	}
+	subs := svc.ListSubscriptions()
+	if len(subs) != 1 || subs[0].LastPushStatus != "ok" || subs[0].PushCount != 1 {
+		t.Errorf("delivery not recorded: %+v", subs)
+	}
+
+	// The push switch is the master: disabled means dropped, not queued.
+	svc.Reconfigure(Config{Enabled: false})
+	svc.ExternalAlert("backupd", "Nightly Backups", "tape", "OK", "cleared")
+	if got := fake.sendCount("tok-phone"); got != 1 {
+		t.Errorf("a disabled service still delivered (%d sends)", got)
+	}
+}
+
 func TestCheckDetail(t *testing.T) {
 	cases := []struct {
 		name string
