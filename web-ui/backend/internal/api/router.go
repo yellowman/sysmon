@@ -761,13 +761,16 @@ func (r *Router) handleAlerterNickname(w http.ResponseWriter, req *http.Request)
 		r.sendError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
-	if _, ok := r.settings.GetAgentToken(body.Name); !ok {
+	// Only a token an alerter has actually claimed is renameable here.
+	// A sysmond's token answering to this endpoint would let its Label
+	// (which other pages use for other things) be edited under the
+	// guise of an alerter nickname.
+	tok, ok := r.settings.GetAgentToken(body.Name)
+	if !ok || tok.Kind != settings.KindAlerter {
 		r.sendError(w, http.StatusNotFound, "no such alerter")
 		return
 	}
-	if len(body.Nickname) > 128 {
-		body.Nickname = body.Nickname[:128]
-	}
+	body.Nickname = monitoring.TruncateRunes(body.Nickname, 128)
 	r.settings.SetAgentLabel(body.Name, body.Nickname)
 	r.sendJSON(w, map[string]string{"name": body.Name, "nickname": body.Nickname})
 }

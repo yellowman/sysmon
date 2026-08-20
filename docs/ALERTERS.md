@@ -39,8 +39,10 @@ connection attempt.
 
 ## Protocol
 
-Text lines, terminated by `\n` (a trailing `\r` is tolerated). Every
-reply is one line starting `333 ` (success) or `444 ` (refusal).
+Text lines, terminated by `\n` (a trailing `\r` is tolerated). One
+line may carry at most 4096 bytes; anything past that on the same
+line is discarded, not buffered. Every reply is one line starting
+`333 ` (success) or `444 ` (refusal).
 
 ### Handshake (first line, within 20 seconds of connecting)
 
@@ -49,6 +51,9 @@ reply is one line starting `333 ` (success) or `444 ` (refusal).
 - `333 welcome` - authenticated; send alerts from here on.
 - `444 rejected` - bad name/token pair, or the token is revoked. The
   socket closes; back off before retrying.
+- `444 this token belongs to a sysmond` - the token was minted for (and
+  first used by) a monitoring box; a token keeps the kind of its first
+  handshake forever. Mint a separate token for the alerter.
 
 Everything after the token is what the application calls itself -
 free text up to 128 characters, e.g. `Bacula 15.0 nightly backups`.

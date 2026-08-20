@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"sysmon-web/internal/settings"
 )
@@ -14,6 +15,22 @@ import (
 // A captured sink call.
 type sunkAlert struct {
 	source, display, object, status, text string
+}
+
+// waitFor polls cond until it holds or the test gives up. Delivery to
+// the sink is asynchronous by design - the 333 comes back before the
+// push pipeline runs - so every assertion about the sink has to wait,
+// not look.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }
 
 // The alerter protocol, driven end to end over a pipe: handshake is the
@@ -40,6 +57,11 @@ func TestAlerterSession(t *testing.T) {
 		sunk = append(sunk, sunkAlert{source, display, object, status, text})
 		mu.Unlock()
 	})
+	sunkLen := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(sunk)
+	}
 
 	server, client := net.Pipe()
 	done := make(chan struct{})
@@ -81,10 +103,8 @@ func TestAlerterSession(t *testing.T) {
 		t.Errorf("ALERT after a 444 answered %q", got)
 	}
 
+	waitFor(t, "two alerts to reach the sink", func() bool { return sunkLen() == 2 })
 	mu.Lock()
-	if len(sunk) != 2 {
-		t.Fatalf("sink saw %d alerts, want 2: %+v", len(sunk), sunk)
-	}
 	first := sunk[0]
 	mu.Unlock()
 	if first.source != "backupd" || first.object != "tape" ||
@@ -106,12 +126,16 @@ func TestAlerterSession(t *testing.T) {
 	if !strings.Contains(list[0].LastAlert, "OK tape") {
 		t.Errorf("LastAlert = %q", list[0].LastAlert)
 	}
+	if list[0].LastSeen == nil || list[0].LastAlertAt == nil {
+		t.Errorf("LastSeen/LastAlertAt = %v/%v, want both set", list[0].LastSeen, list[0].LastAlertAt)
+	}
 
 	// An admin nickname beats the application name from the next alert on.
 	store.SetAgentLabel("backupd", "Nightly Backups")
 	if got := send("ALERT WARNING tape drive temperature high"); got != "333 ok" {
 		t.Errorf("ALERT answered %q", got)
 	}
+	waitFor(t, "the third alert to reach the sink", func() bool { return sunkLen() == 3 })
 	mu.Lock()
 	last := sunk[len(sunk)-1]
 	mu.Unlock()
@@ -128,8 +152,8 @@ func TestAlerterSession(t *testing.T) {
 	}
 
 	// The token record learned its kind at handshake time in the real
-	// path; SetAgentKind is what the listener calls - prove it sticks
-	// and that labels round-trip beside it.
+	// path; SetAgentKind is what claimKind calls - prove it sticks and
+	// that labels round-trip beside it.
 	store.SetAgentKind("backupd", settings.KindAlerter)
 	tokens, err := store.ListAgentTokens()
 	if err != nil || len(tokens) != 1 {
@@ -137,5 +161,180 @@ func TestAlerterSession(t *testing.T) {
 	}
 	if tokens[0].Kind != settings.KindAlerter || tokens[0].Label != "Nightly Backups" {
 		t.Errorf("token record = %+v", tokens[0])
+	}
+}
+
+// A reconnect replaces the old connection on the shared record; when the
+// replaced connection's goroutine finally notices its read failing, it
+// must not mark the record disconnected - that would show the live
+// replacement as gone until its next alert.
+func TestAlerterReconnectKeepsNewConnection(t *testing.T) {
+	svc := NewService()
+
+	server1, _ := net.Pipe()
+	done1 := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "apcupsd", "pipe-1", server1, bufio.NewReader(server1))
+		close(done1)
+	}()
+	waitFor(t, "the first connection to register", func() bool {
+		l := svc.Alerters()
+		return len(l) == 1 && l[0].Connected
+	})
+
+	// Same name dials in again: the registry closes the old socket,
+	// which is what makes the first goroutine exit.
+	server2, client2 := net.Pipe()
+	done2 := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "apcupsd", "pipe-2", server2, bufio.NewReader(server2))
+		close(done2)
+	}()
+
+	select {
+	case <-done1:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replaced connection's goroutine never exited")
+	}
+	// The old goroutine has fully torn down; the record must still say
+	// connected, because the connection it tore down was not the
+	// record's current one.
+	if l := svc.Alerters(); len(l) != 1 || !l[0].Connected || l[0].Addr != "pipe-2" {
+		t.Errorf("after replacement, Alerters() = %+v, want connected via pipe-2", l)
+	}
+
+	// And the replacement really is live.
+	r := bufio.NewReader(client2)
+	if _, err := client2.Write([]byte("PING\n")); err != nil {
+		t.Fatalf("write on replacement: %v", err)
+	}
+	if reply, err := r.ReadString('\n'); err != nil || strings.TrimSpace(reply) != "333 pong" {
+		t.Fatalf("replacement PING = %q, %v", strings.TrimSpace(reply), err)
+	}
+	client2.Close()
+	<-done2
+	if l := svc.Alerters(); len(l) != 1 || l[0].Connected {
+		t.Errorf("after the replacement dropped, Alerters() = %+v, want disconnected", l)
+	}
+}
+
+// One hostile line must cost at most its own truncation: the reader
+// holds no more than maxLineBytes of it, the alert text is cut to
+// maxAlertText runes, and the connection survives to serve the next
+// line.
+func TestAlerterOverlongLine(t *testing.T) {
+	svc := NewService()
+
+	var mu sync.Mutex
+	var texts []string
+	svc.SetAlertSink(func(_, _, _, _ string, text string) {
+		mu.Lock()
+		texts = append(texts, text)
+		mu.Unlock()
+	})
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("chatty", "", "pipe", server, bufio.NewReader(server))
+		close(done)
+	}()
+
+	// Four times the line bound, no newline until the end.
+	long := "ALERT CRITICAL disk " + strings.Repeat("x", 4*maxLineBytes) + "\n"
+	go func() {
+		// net.Pipe writes block until read; feed it from the side.
+		client.Write([]byte(long))
+	}()
+	r := bufio.NewReader(client)
+	reply, err := r.ReadString('\n')
+	if err != nil || strings.TrimSpace(reply) != "333 ok" {
+		t.Fatalf("overlong ALERT = %q, %v, want 333 ok", strings.TrimSpace(reply), err)
+	}
+
+	waitFor(t, "the truncated alert to reach the sink", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(texts) == 1
+	})
+	mu.Lock()
+	text := texts[0]
+	mu.Unlock()
+	if got := len([]rune(text)); got > maxAlertText {
+		t.Errorf("alert text is %d runes, want at most %d", got, maxAlertText)
+	}
+
+	// The line after the flood still parses - nothing of the overflow
+	// leaked into the next read.
+	if _, err := client.Write([]byte("PING\n")); err != nil {
+		t.Fatalf("write after flood: %v", err)
+	}
+	if reply, err := r.ReadString('\n'); err != nil || strings.TrimSpace(reply) != "333 pong" {
+		t.Fatalf("PING after flood = %q, %v", strings.TrimSpace(reply), err)
+	}
+	client.Close()
+	<-done
+}
+
+// TruncateRunes must never split a multi-byte rune - that is its whole
+// reason to exist over a byte slice.
+func TestTruncateRunes(t *testing.T) {
+	if got := TruncateRunes("hello", 10); got != "hello" {
+		t.Errorf("short string changed: %q", got)
+	}
+	if got := TruncateRunes("hello", 3); got != "hel" {
+		t.Errorf("ASCII cut = %q", got)
+	}
+	// Each of these is one rune, several bytes.
+	s := strings.Repeat("é世\U0001f600", 4) // é 世 😀
+	got := TruncateRunes(s, 5)
+	if n := len([]rune(got)); n != 5 {
+		t.Errorf("cut to %d runes, want 5", n)
+	}
+	if !strings.HasPrefix(s, got) {
+		t.Errorf("cut %q is not a prefix of the input", got)
+	}
+}
+
+// claimKind: the greeting verb claims what a token's peer is, first
+// claim wins forever, and the other class is refused - a sysmond's
+// token cannot quietly become an alerter or the reverse.
+func TestClaimKind(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.NewAgentToken("box1", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	if got := svc.claimKind("box1", settings.KindSysmond); got != "" {
+		t.Errorf("first claim refused: %q", got)
+	}
+	if tok, _ := store.GetAgentToken("box1"); tok.Kind != settings.KindSysmond {
+		t.Errorf("kind after first claim = %q", tok.Kind)
+	}
+	if got := svc.claimKind("box1", settings.KindSysmond); got != "" {
+		t.Errorf("reclaim of the same kind refused: %q", got)
+	}
+	if got := svc.claimKind("box1", settings.KindAlerter); !strings.Contains(got, "sysmond") {
+		t.Errorf("cross-kind claim answered %q, want a refusal naming the owner", got)
+	}
+	if tok, _ := store.GetAgentToken("box1"); tok.Kind != settings.KindSysmond {
+		t.Errorf("kind after refused claim = %q, must be unchanged", tok.Kind)
+	}
+
+	// No record: not claimKind's problem (the handshake authenticated
+	// already; only a concurrent revoke gets here).
+	if got := svc.claimKind("ghost", settings.KindAlerter); got != "" {
+		t.Errorf("claim without a record refused: %q", got)
+	}
+	// No store at all: same.
+	if got := NewService().claimKind("box1", settings.KindAlerter); got != "" {
+		t.Errorf("claim without a store refused: %q", got)
 	}
 }

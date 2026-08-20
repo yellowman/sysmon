@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Alerters: peers that are not sysmond.
@@ -24,10 +26,29 @@ import (
 // The protocol is documented for implementors in docs/ALERTERS.md; the
 // two files must agree.
 
-// maxAlertText bounds what one line can put into a push notification and
-// the logs. Anything longer is truncated, not refused - the alert still
-// matters even when its author was verbose.
+// maxAlertText bounds what one alert can put into a push notification
+// and the logs, in runes. Anything longer is truncated, not refused -
+// the alert still matters even when its author was verbose.
 const maxAlertText = 512
+
+// maxLineBytes bounds one protocol line. An alerter is deliberately the
+// lower-trust peer class, and a line is read before it is parsed - so
+// the read itself must not be a way to spend this server's memory.
+const maxLineBytes = 4096
+
+// alertQueueDepth is how many alerts may wait on the push pipeline
+// before new ones are dropped (loudly). Alerts are rare and the queue
+// exists only to keep the protocol reply from waiting on FCM/APNs.
+const alertQueueDepth = 64
+
+// TruncateRunes cuts s to at most n runes, never splitting one - a cut
+// at a byte offset turns multi-byte text into U+FFFD garbage downstream.
+func TruncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
+}
 
 // AlerterInfo is one alert-only peer, as the UI shows it.
 type AlerterInfo struct {
@@ -43,16 +64,24 @@ type AlerterInfo struct {
 	Addr        string    `json:"addr"`
 	Connected   bool      `json:"connected"`
 	ConnectedAt time.Time `json:"connected_at"`
-	LastSeen    time.Time `json:"last_seen,omitempty"`
-	LastAlertAt time.Time `json:"last_alert_at,omitempty"`
-	LastAlert   string    `json:"last_alert,omitempty"` // "CRITICAL tape: jam in drive 2"
-	Alerts      uint64    `json:"alerts"`
+	// Pointers, not values: omitempty never omits a struct, and a
+	// year-1 timestamp on an alerter that has not alerted yet is worse
+	// than no field.
+	LastSeen    *time.Time `json:"last_seen,omitempty"`
+	LastAlertAt *time.Time `json:"last_alert_at,omitempty"`
+	LastAlert   string     `json:"last_alert,omitempty"` // "CRITICAL tape: jam in drive 2"
+	Alerts      uint64     `json:"alerts"`
 }
 
 type alerter struct {
 	mu   sync.Mutex
 	info AlerterInfo
 	conn net.Conn
+}
+
+// pendingAlert is one parsed alert waiting on the push pipeline.
+type pendingAlert struct {
+	source, display, object, status, text string
 }
 
 // alerterDisplayName is what an alert shows as its sender: the
@@ -91,9 +120,9 @@ func (s *Service) alertSinkFn() func(source, display, object, status, text strin
 	return s.alertSink
 }
 
-// Alerters lists every alerter seen since this process started, newest
-// connection first. Disconnected ones stay listed: "it was here and
-// left" is information, and the record is only memory.
+// Alerters lists every alerter seen since this process started, by
+// name. Disconnected ones stay listed: "it was here and left" is
+// information, and the record is only memory.
 func (s *Service) Alerters() []AlerterInfo {
 	s.alertersMu.Lock()
 	defer s.alertersMu.Unlock()
@@ -103,13 +132,32 @@ func (s *Service) Alerters() []AlerterInfo {
 		out = append(out, a.info)
 		a.mu.Unlock()
 	}
-	// Stable order for the page: by name.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].Name < out[j-1].Name; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// readLineBounded returns the next line, holding at most maxLineBytes
+// of it in memory - the rest of an overlong line is read and discarded,
+// never buffered. One hostile line costs at most its own truncation,
+// not the server's memory.
+func readLineBounded(r *bufio.Reader) (string, error) {
+	var buf []byte
+	for {
+		chunk, isPrefix, err := r.ReadLine()
+		if err != nil {
+			return "", err
+		}
+		if len(buf) < maxLineBytes {
+			take := maxLineBytes - len(buf)
+			if take > len(chunk) {
+				take = len(chunk)
+			}
+			buf = append(buf, chunk[:take]...)
+		}
+		if !isPrefix {
+			return string(buf), nil
 		}
 	}
-	return out
 }
 
 // runAlerter owns an authenticated alerter connection until it drops.
@@ -127,18 +175,47 @@ func (s *Service) Alerters() []AlerterInfo {
 //
 // Anything else answers 444 without closing the connection - one bad
 // line should not cost an alerter its link.
+//
+// Delivery is decoupled from the reply: a push fan-out can take tens of
+// seconds against a slow provider, and holding the 333 back that long
+// makes a well-behaved client time out, reconnect, and resend the same
+// page. One dispatcher goroutine per connection keeps alerts in order;
+// it drains what is queued even after the connection drops.
 func (s *Service) runAlerter(name, application, remote string, conn net.Conn, reader *bufio.Reader) {
 	a := s.registerAlerter(name, application, remote, conn)
+
+	pending := make(chan pendingAlert, alertQueueDepth)
+	go func() {
+		for p := range pending {
+			if sink := s.alertSinkFn(); sink != nil {
+				sink(p.source, p.display, p.object, p.status, p.text)
+			} else {
+				log.Printf("agents: alerter %s sent %s %s with no push service configured - dropped",
+					p.source, p.status, p.object)
+			}
+		}
+	}()
+
 	defer func() {
 		conn.Close()
+		close(pending)
+		// A reconnect replaces this connection on the shared record
+		// before this goroutine notices its read failing - only the
+		// record's CURRENT connection may declare it disconnected, or
+		// the replacement is immediately (and permanently) shown gone.
 		a.mu.Lock()
-		a.info.Connected = false
+		mine := a.conn == conn
+		if mine {
+			a.info.Connected = false
+		}
 		a.mu.Unlock()
-		log.Printf("agents: alerter %s (%s) disconnected", name, remote)
+		if mine {
+			log.Printf("agents: alerter %s (%s) disconnected", name, remote)
+		}
 	}()
 
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := readLineBounded(reader)
 		if err != nil {
 			return
 		}
@@ -147,8 +224,9 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 			continue
 		}
 
+		now := time.Now().UTC()
 		a.mu.Lock()
-		a.info.LastSeen = time.Now().UTC()
+		a.info.LastSeen = &now
 		a.mu.Unlock()
 
 		verb := line
@@ -162,7 +240,7 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 			fmt.Fprintf(conn, "333 bye\r\n")
 			return
 		case "ALERT":
-			if msg := s.handleAlertLine(a, name, line); msg == "" {
+			if msg := s.handleAlertLine(a, name, line, pending); msg == "" {
 				fmt.Fprintf(conn, "333 ok\r\n")
 			} else {
 				fmt.Fprintf(conn, "444 %s\r\n", msg)
@@ -173,9 +251,9 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 	}
 }
 
-// handleAlertLine parses "ALERT <status> <object> <text...>" and hands it
-// to the sink. Returns "" on success, else the complaint for the 444.
-func (s *Service) handleAlertLine(a *alerter, name, line string) string {
+// handleAlertLine parses "ALERT <status> <object> <text...>" and queues
+// it for delivery. Returns "" on success, else the complaint for the 444.
+func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- pendingAlert) string {
 	fields := strings.SplitN(line, " ", 4)
 	if len(fields) < 3 {
 		return "usage: ALERT <CRITICAL|WARNING|OK> <object> <text>"
@@ -192,25 +270,33 @@ func (s *Service) handleAlertLine(a *alerter, name, line string) string {
 	}
 	text := ""
 	if len(fields) == 4 {
-		text = strings.TrimSpace(fields[3])
-	}
-	if len(text) > maxAlertText {
-		text = text[:maxAlertText] + "…"
+		text = TruncateRunes(strings.TrimSpace(fields[3]), maxAlertText)
 	}
 	if text == "" {
 		text = fmt.Sprintf("%s reports %s %s", name, object, status)
 	}
 
+	now := time.Now().UTC()
 	a.mu.Lock()
 	a.info.Alerts++
-	a.info.LastAlertAt = time.Now().UTC()
+	a.info.LastAlertAt = &now
 	a.info.LastAlert = fmt.Sprintf("%s %s: %s", status, object, text)
 	a.mu.Unlock()
 
-	if sink := s.alertSinkFn(); sink != nil {
-		sink(name, s.alerterDisplayName(a), object, status, text)
-	} else {
-		log.Printf("agents: alerter %s sent %s %s with no push service configured - dropped", name, status, object)
+	p := pendingAlert{
+		source:  name,
+		display: s.alerterDisplayName(a),
+		object:  object,
+		status:  status,
+		text:    text,
+	}
+	select {
+	case pending <- p:
+	default:
+		// The push pipeline is badly backed up. Dropping the newest
+		// (loudly) beats blocking the protocol - the client's resend
+		// on reconnect would duplicate everything anyway.
+		log.Printf("agents: alerter %s: delivery queue full - dropping %s %s", name, status, object)
 	}
 	return ""
 }

@@ -143,6 +143,22 @@ func (a *AgentListener) handshake(conn net.Conn) {
 		return
 	}
 
+	// The verb the peer greeted with claims what kind of thing it is. A
+	// token that already belongs to the other class is refused: letting
+	// a sysmond's token greet as an alerter (or the reverse) would flip
+	// how every page counts and treats the site, on the say-so of
+	// whoever holds the token.
+	kind := settings.KindSysmond
+	if fields[0] == "ALERTER" {
+		kind = settings.KindAlerter
+	}
+	if refusal := a.svc.claimKind(site, kind); refusal != "" {
+		fmt.Fprintf(conn, "444 %s\r\n", refusal)
+		conn.Close()
+		log.Printf("agents: refused %s greeting as %s for site %q: %s", remote, kind, site, refusal)
+		return
+	}
+
 	if _, err := fmt.Fprintf(conn, "333 welcome\r\n"); err != nil {
 		conn.Close()
 		return
@@ -151,28 +167,17 @@ func (a *AgentListener) handshake(conn net.Conn) {
 
 	// An alerter is not a monitoring box: nothing is polled, nothing is
 	// adopted, it just sends alerts down this socket - see alerters.go.
-	// The kind is recorded either way, so pages that count boxes can
-	// tell a sysmond's token from an alerter's.
 	if fields[0] == "ALERTER" {
-		if st := a.svc.Generations(); st != nil {
-			st.SetAgentKind(site, settings.KindAlerter)
-		}
 		// Anything after the token is what the application calls
 		// itself - free text, shown beside the name on the Fleet page
 		// and in the alerts it sends.
 		app := ""
 		if len(fields) >= 4 {
-			app = strings.Join(fields[3:], " ")
-			if len(app) > 128 {
-				app = app[:128]
-			}
+			app = TruncateRunes(strings.Join(fields[3:], " "), 128)
 		}
 		log.Printf("agents: alerter %s connected from %s", site, remote)
 		a.svc.runAlerter(site, app, remote, conn, reader)
 		return
-	}
-	if st := a.svc.Generations(); st != nil {
-		st.SetAgentKind(site, settings.KindSysmond)
 	}
 
 	a.svc.adoptAgent(site, remote, conn, reader)
@@ -203,6 +208,32 @@ func ValidSiteName(s string) bool {
 		}
 	}
 	return true
+}
+
+// claimKind records what a token's peer identified as at handshake and
+// refuses a token that already belongs to the other class. Returns ""
+// to proceed, else the complaint for the 444. The write is skipped when
+// the recorded kind already matches - it is a fact that never changes,
+// and every reconnect should not cost a settings write to restate it.
+func (s *Service) claimKind(site, kind string) string {
+	st := s.Generations()
+	if st == nil {
+		return ""
+	}
+	tok, ok := st.GetAgentToken(site)
+	if !ok {
+		// Authenticated but no record: only a concurrent revoke gets
+		// here, and the next line it sends will fail on its own.
+		return ""
+	}
+	if tok.Kind == kind {
+		return ""
+	}
+	if tok.Kind != "" {
+		return "this token belongs to a " + tok.Kind
+	}
+	st.SetAgentKind(site, kind)
+	return ""
 }
 
 // adoptAgent puts a dialled-in daemon into the fleet.

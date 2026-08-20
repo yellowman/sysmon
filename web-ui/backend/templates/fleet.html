@@ -266,21 +266,26 @@ function fleetPage() {
         },
 
         async load() {
-            try {
-                const r = await apiCall('/api/config/fleet');
-                this.sites = r.sites || [];
-                const ro = await apiCall('/api/config/rollout');
-                this.rollouts = ro.rollouts || [];
-                const al = await apiCall('/api/alerters');
-                this.alerters = al.alerters || [];
+            // Three independent endpoints, fetched together: sequential
+            // awaits meant one early failure also blanked the sections
+            // whose endpoints were fine.
+            const [fl, ro, al] = await Promise.allSettled([
+                apiCall('/api/config/fleet'),
+                apiCall('/api/config/rollout'),
+                apiCall('/api/alerters'),
+            ]);
+            if (fl.status === 'fulfilled') this.sites = fl.value.sites || [];
+            if (ro.status === 'fulfilled') this.rollouts = ro.value.rollouts || [];
+            if (al.status === 'fulfilled') this.alerters = al.value.alerters || [];
+            const failed = [fl, ro, al].find(x => x.status === 'rejected');
+            if (!failed) {
                 this.loadFails = 0;
                 this.staleError = '';
-            } catch (e) {
-                // One miss is a blip; a second means the page is now
-                // showing old state and has to say so.
-                if (++this.loadFails >= 2) {
-                    this.staleError = 'Refresh is failing (' + (e.message || e) + ') - this page shows the last state it saw.';
-                }
+            } else if (++this.loadFails >= 2) {
+                // One miss is a blip; a second means part of this page is
+                // now showing old state and has to say so.
+                const e = failed.reason;
+                this.staleError = 'Refresh is failing (' + ((e && e.message) || e) + ') - parts of this page show the last state they saw.';
             }
         },
 
