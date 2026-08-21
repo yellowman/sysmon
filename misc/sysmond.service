@@ -1,0 +1,40 @@
+[Unit]
+Description=sysmond network monitoring daemon
+Documentation=https://github.com/yellowman/sysmon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# -d keeps sysmond in the foreground so systemd supervises the real
+# process instead of a fork parent that exits immediately.
+#
+# No User= line, deliberately: sysmond must start as root (raw ICMP
+# sockets, creating /var/db/sysmon and handing it over) and drops to
+# nobody (or daemon) by itself once that work is done. Setting User=
+# here would break the drop, not harden it.
+#
+# Config somewhere other than the compiled-in default: add the same
+# "-f /path/to/sysmon.conf" to both Exec lines below.
+Type=exec
+ExecStartPre=/usr/local/bin/sysmond -t
+ExecStart=/usr/local/bin/sysmond -d
+# "sysmond reload" re-parses the config and only HUPs the daemon if it
+# passes, so a typo cannot take down a running fleet.
+ExecReload=/usr/local/bin/sysmond reload
+Restart=on-failure
+RestartSec=5
+
+# Hardening, within what the design allows. NoNewPrivileges is absent
+# on purpose: the setuid sysmon-ping-helper is the fallback if the
+# kernel refuses raw-socket sends after the privilege drop, and
+# NoNewPrivileges would stop it elevating exactly when it is needed.
+PrivateTmp=true
+ProtectHome=true
+# ProtectSystem=full keeps /usr, /boot and /etc read-only. The seed
+# config being unwritable is by design; everything sysmond writes
+# (state, pidfile, config generations) lives under /var/db/sysmon,
+# and /var stays writable.
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

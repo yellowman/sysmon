@@ -1,8 +1,11 @@
 [Unit]
 Description=Sysmon Web Configuration Manager
-Documentation=file:///usr/local/libexec/sysmon-web/README.md
-After=network.target sysmond.service
-Requires=sysmond.service
+Documentation=https://github.com/yellowman/sysmon/blob/main/docs/WEB_DEPLOYMENT.md
+# No dependency on sysmond.service: monitoring boxes dial in to this
+# process over the agent port, so the usual deployment has no sysmond
+# on this host at all. Running one locally works with or without an
+# ordering between the two.
+After=network.target
 
 [Service]
 Type=simple
@@ -21,7 +24,6 @@ ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
   -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
-  -sysmon localhost:3333 \
   -templates /usr/local/libexec/sysmon-web/templates \
   -backups /var/backups/sysmon \
   -audit /var/log/sysmon-web-audit.log
@@ -35,8 +37,10 @@ ProtectSystem=strict
 ProtectHome=true
 # /var/lib/sysmon holds the bbolt stores (auth.db, push.db, settings.db);
 # /var/www/run holds the FastCGI socket. Both must be writable under
-# ProtectSystem=strict.
-ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log /etc/sysmon.conf
+# ProtectSystem=strict. /etc/sysmon.conf is only writable so the config
+# editor can save; the "-" makes it optional, since an aggregator-only
+# host has no local sysmon.conf and the unit must still start.
+ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log -/etc/sysmon.conf
 StateDirectory=sysmon
 
 [Install]
