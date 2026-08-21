@@ -100,6 +100,10 @@
 function historyPage() {
     return {
         events: [],
+        // Whether any event belongs to a named site - controls the Box
+        // column's existence. Computed once per fetch, not per rendered
+        // cell: a getter here is re-evaluated by every row's x-show.
+        anySite: false,
         available: true,
         loading: true,
         filter: 'all',
@@ -129,12 +133,6 @@ function historyPage() {
         // not just to data changes.
         age(ts) { this.now; return formatRelativeTime(ts); },
 
-        // The Box column only exists when some event actually belongs to
-        // a named site; a single-box install keeps the old four columns.
-        get anySite() {
-            return this.events.some(ev => hostSite(ev));
-        },
-
         get filtered() {
             return this.events.filter(ev => {
                 if (this.filter === 'downs' && ev.new_status === 'OK') return false;
@@ -159,6 +157,8 @@ function historyPage() {
             try {
                 const r = await apiCall('/api/monitoring/history?limit=500&window=' + this.window);
                 this.events = r.events || [];
+                // A single-box install keeps the old four-column table.
+                this.anySite = this.events.some(ev => hostSite(ev));
                 this.available = r.available !== false;
                 this.loadFails = 0;
                 this.staleError = '';

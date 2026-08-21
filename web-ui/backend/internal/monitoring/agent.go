@@ -109,7 +109,11 @@ func (a *AgentListener) handshake(conn net.Conn) {
 	conn.SetDeadline(time.Now().Add(20 * time.Second))
 	reader := bufio.NewReader(conn)
 
-	line, err := reader.ReadString('\n')
+	// Bounded, not ReadString: this line arrives BEFORE any token
+	// check, so an unauthenticated peer streaming a newline-free flood
+	// must cost at most maxLineBytes of memory, not everything it can
+	// push before the deadline.
+	line, err := readLineBounded(reader)
 	if err != nil {
 		conn.Close()
 		return
@@ -212,27 +216,18 @@ func ValidSiteName(s string) bool {
 
 // claimKind records what a token's peer identified as at handshake and
 // refuses a token that already belongs to the other class. Returns ""
-// to proceed, else the complaint for the 444. The write is skipped when
-// the recorded kind already matches - it is a fact that never changes,
-// and every reconnect should not cost a settings write to restate it.
+// to proceed, else the complaint for the 444. The check and the write
+// happen in one store transaction (ClaimAgentKind), so two concurrent
+// first handshakes cannot both claim a fresh token as different kinds;
+// a reconnect whose kind already matches costs no write at all.
 func (s *Service) claimKind(site, kind string) string {
 	st := s.Generations()
 	if st == nil {
 		return ""
 	}
-	tok, ok := st.GetAgentToken(site)
-	if !ok {
-		// Authenticated but no record: only a concurrent revoke gets
-		// here, and the next line it sends will fail on its own.
-		return ""
+	if owner := st.ClaimAgentKind(site, kind); owner != "" {
+		return "this token belongs to a " + owner
 	}
-	if tok.Kind == kind {
-		return ""
-	}
-	if tok.Kind != "" {
-		return "this token belongs to a " + tok.Kind
-	}
-	st.SetAgentKind(site, kind)
 	return ""
 }
 

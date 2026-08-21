@@ -37,10 +37,18 @@ ProtectSystem=strict
 ProtectHome=true
 # /var/lib/sysmon holds the bbolt stores (auth.db, push.db, settings.db);
 # /var/www/run holds the FastCGI socket. Both must be writable under
-# ProtectSystem=strict. /etc/sysmon.conf is only writable so the config
-# editor can save; the "-" makes it optional, since an aggregator-only
-# host has no local sysmon.conf and the unit must still start.
-ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log -/etc/sysmon.conf
+# ProtectSystem=strict.
+#
+# Deliberately NOT carved out: /etc. Reading /etc/sysmon.conf needs no
+# exception, and editing per-box configs goes over the agent link and
+# never touches this host's /etc. Saving the LOCAL config from the
+# editor is the one thing this hardened unit cannot do - the save
+# writes /etc/sysmon.conf.tmp and renames, which needs a writable /etc
+# directory (a file-level ReadWritePaths entry cannot provide that,
+# and www-data cannot write root-owned /etc anyway). To allow it,
+# add a drop-in with "ReadWritePaths=-/etc" and give www-data write
+# access to the file and directory - or edit the file outside the UI.
+ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log
 StateDirectory=sysmon
 
 [Install]

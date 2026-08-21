@@ -1825,7 +1825,9 @@ void revoke_root_if_necessary()
 	 * the fallback actually needs is setuid root plus an execute bit
 	 * that reaches the user we are about to become - the install puts
 	 * it at 4750 root:<drop group>, so group-exec counts only when the
-	 * group matches, world-exec always does.
+	 * group matches, world-exec always does. The drop below clears
+	 * supplementary groups to exactly pw_gid, so the primary gid is
+	 * the whole story and this check matches post-drop reality.
 	 */
 	if (!disable_icmp)
 	{
@@ -1860,6 +1862,21 @@ void revoke_root_if_necessary()
 	{
 		print_err(0, "revoke_root: Dropping privileges from root (uid=0) to user '%s' (uid=%d)",
 			drop_user, pw->pw_uid);
+	}
+
+	/*
+	 * Supplementary groups first, while still root: setgid/setuid do
+	 * not touch them, and a process that keeps root's supplementary
+	 * groups after "dropping" root has not dropped much. Clearing them
+	 * also makes the helper probe above honest - from here on, pw_gid
+	 * really is the only group this process holds, so a helper the
+	 * probe called unusable genuinely is.
+	 */
+	if (setgroups(1, &pw->pw_gid) != 0)
+	{
+		perror("revoke_root: setgroups");
+		print_err(1, "WARNING: Failed to drop supplementary groups");
+		return;
 	}
 
 	/* Drop privileges */

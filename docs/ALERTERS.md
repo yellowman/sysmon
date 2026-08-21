@@ -75,6 +75,9 @@ does the talking.
   plain "name reports object STATUS" is generated.
 - Reply is `333 ok` once accepted, or `444 <reason>` for a malformed
   line. A `444` never closes the connection; fix the line and carry on.
+- `444 busy - ...` means the server's delivery pipeline is backed up
+  and the alert was **not** accepted. Retry the same line after a short
+  delay; `333 ok` is the only reply that means the alert was taken.
 
 Semantics, identical to a sysmond's transitions:
 

@@ -311,7 +311,9 @@
                         }"
                         @click="selectHost(host)">
                         <td class="cel mono font-medium text-gray-900">
-                            <span x-text="hostKey(host)" :title="host.hostname"></span>
+                            <span x-text="hostLabel(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></span>
+                            <span x-show="hostSite(host)" class="ml-1 text-[10px] font-normal text-gray-400"
+                                  x-text="hostSite(host)"></span>
                             <i x-show="host.stale" class="fas fa-plug-circle-xmark ml-1 text-gray-500"
                                :title="'site ' + (host.site || '?') + ' is not answering - showing its last report'"></i>
                         </td>
@@ -423,7 +425,11 @@
                     <!-- Modal Header -->
                     <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
                         <div class="flex-1">
-                            <h2 class="text-2xl font-bold text-gray-900" x-text="hostKey(selectedHost)"></h2>
+                            <h2 class="text-2xl font-bold text-gray-900">
+                                <span x-text="hostLabel(selectedHost)"></span>
+                                <span x-show="hostSite(selectedHost)" class="ml-2 align-middle px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-sm font-normal mono"
+                                      x-text="hostSite(selectedHost)"></span>
+                            </h2>
                             <div class="mt-1 flex items-center space-x-4 text-sm">
                                 <span :class="{
                                     'text-green-600': selectedHost.overall_status === 'OK',

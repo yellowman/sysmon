@@ -110,6 +110,54 @@ func (s *Store) SetAgentKind(site, kind string) {
 	})
 }
 
+// ClaimAgentKind records what a token's peer identified as, first
+// claim wins forever: read, check and write happen inside one bolt
+// transaction, so two concurrent first handshakes with the same fresh
+// token cannot both succeed as different kinds. Returns "" when the
+// claim stands (recorded now, already recorded, or no record to claim
+// against - the handshake already authenticated, so a missing record
+// only races a concurrent revoke), else the kind the token already
+// belongs to.
+func (s *Store) ClaimAgentKind(site, kind string) string {
+	owner := ""
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		if b == nil {
+			return nil
+		}
+		blob := b.Get([]byte(site))
+		if blob == nil {
+			return nil
+		}
+		var stored map[string]json.RawMessage
+		if json.Unmarshal(blob, &stored) != nil {
+			return nil
+		}
+		existing := ""
+		if raw, ok := stored["kind"]; ok {
+			_ = json.Unmarshal(raw, &existing)
+		}
+		if existing == kind {
+			return nil // steady state: no write, no refusal
+		}
+		if existing != "" {
+			owner = existing
+			return nil
+		}
+		enc, err := json.Marshal(kind)
+		if err != nil {
+			return nil
+		}
+		stored["kind"] = enc
+		updated, err := json.Marshal(stored)
+		if err != nil {
+			return nil
+		}
+		return b.Put([]byte(site), updated)
+	})
+	return owner
+}
+
 // GetAgentToken returns the record for a site, without the secret.
 // Used to tell "this site has no token yet" from "this site has a live
 // token that something in the field is using".

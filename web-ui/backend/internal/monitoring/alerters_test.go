@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
@@ -151,10 +152,12 @@ func TestAlerterSession(t *testing.T) {
 		t.Errorf("after QUIT, Alerters() = %+v, want the record kept but disconnected", list)
 	}
 
-	// The token record learned its kind at handshake time in the real
-	// path; SetAgentKind is what claimKind calls - prove it sticks and
-	// that labels round-trip beside it.
-	store.SetAgentKind("backupd", settings.KindAlerter)
+	// The token record learns its kind at handshake time in the real
+	// path (claimKind -> ClaimAgentKind) - prove the recorded kind
+	// sticks and that labels round-trip beside it.
+	if got := store.ClaimAgentKind("backupd", settings.KindAlerter); got != "" {
+		t.Errorf("ClaimAgentKind refused a fresh token: %q", got)
+	}
 	tokens, err := store.ListAgentTokens()
 	if err != nil || len(tokens) != 1 {
 		t.Fatalf("ListAgentTokens: %v, %d", err, len(tokens))
@@ -336,5 +339,110 @@ func TestClaimKind(t *testing.T) {
 	// No store at all: same.
 	if got := NewService().claimKind("box1", settings.KindAlerter); got != "" {
 		t.Errorf("claim without a store refused: %q", got)
+	}
+}
+
+// A full delivery queue must refuse the alert, not acknowledge it:
+// "333 ok" is a delivery promise, and a compliant client only resends
+// what was refused. Refused alerts also must not count as sent.
+func TestAlerterQueueFullRefuses(t *testing.T) {
+	svc := NewService()
+
+	release := make(chan struct{})
+	starts := make(chan struct{}, alertQueueDepth+8)
+	svc.SetAlertSink(func(_, _, _, _, _ string) {
+		starts <- struct{}{}
+		<-release // hold the dispatcher so the queue backs up
+	})
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("floody", "", "pipe", server, bufio.NewReader(server))
+		close(done)
+	}()
+
+	r := bufio.NewReader(client)
+	send := func(line string) string {
+		t.Helper()
+		if _, err := client.Write([]byte(line + "\n")); err != nil {
+			t.Fatalf("write %q: %v", line, err)
+		}
+		reply, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no reply to %q: %v", line, err)
+		}
+		return strings.TrimSpace(reply)
+	}
+
+	// The first alert occupies the dispatcher (wait until it is held in
+	// the sink, so the queue is empty again)...
+	if got := send("ALERT OK disk zero"); got != "333 ok" {
+		t.Fatalf("first alert answered %q", got)
+	}
+	<-starts
+	// ...then exactly alertQueueDepth more fill the buffer.
+	for i := 0; i < alertQueueDepth; i++ {
+		if got := send("ALERT OK disk filler"); got != "333 ok" {
+			t.Fatalf("filler %d answered %q", i, got)
+		}
+	}
+	// The next one has nowhere to go: it must be a 444, not a false ok.
+	if got := send("ALERT CRITICAL disk the one that matters"); !strings.HasPrefix(got, "444 busy") {
+		t.Fatalf("overflow alert answered %q, want a 444 busy refusal", got)
+	}
+
+	// Unblock delivery, let the backlog drain, and the same line is
+	// accepted on retry - the connection survived the refusal.
+	close(release)
+	for i := 0; i < alertQueueDepth; i++ {
+		<-starts
+	}
+	if got := send("ALERT CRITICAL disk the one that matters"); got != "333 ok" {
+		t.Fatalf("retry after drain answered %q", got)
+	}
+
+	// Only accepted alerts counted: 1 + depth + 1, not the refusal.
+	want := uint64(alertQueueDepth + 2)
+	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != want {
+		t.Errorf("Alerts = %d, want %d (refused alerts must not count)", list[0].Alerts, want)
+	}
+
+	client.Close()
+	<-done
+}
+
+// Two first-use handshakes racing with the same fresh token must not
+// both win: the claim is one store transaction, so exactly one side
+// records its kind and the other is refused.
+func TestClaimKindConcurrentFirstUse(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	for i := 0; i < 10; i++ {
+		site := fmt.Sprintf("box%d", i)
+		if _, err := store.NewAgentToken(site, ""); err != nil {
+			t.Fatal(err)
+		}
+		results := make(chan string, 2)
+		go func() { results <- svc.claimKind(site, settings.KindSysmond) }()
+		go func() { results <- svc.claimKind(site, settings.KindAlerter) }()
+		a, b := <-results, <-results
+		refused := 0
+		if a != "" {
+			refused++
+		}
+		if b != "" {
+			refused++
+		}
+		if refused != 1 {
+			t.Fatalf("site %s: %d refusals (%q / %q), want exactly one winner", site, refused, a, b)
+		}
 	}
 }

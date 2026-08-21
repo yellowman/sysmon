@@ -37,8 +37,9 @@ const maxAlertText = 512
 const maxLineBytes = 4096
 
 // alertQueueDepth is how many alerts may wait on the push pipeline
-// before new ones are dropped (loudly). Alerts are rare and the queue
-// exists only to keep the protocol reply from waiting on FCM/APNs.
+// before new ones are refused with "444 busy" so the client knows to
+// retry. Alerts are rare and the queue exists only to keep the
+// protocol reply from waiting on FCM/APNs.
 const alertQueueDepth = 64
 
 // TruncateRunes cuts s to at most n runes, never splitting one - a cut
@@ -276,13 +277,6 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- 
 		text = fmt.Sprintf("%s reports %s %s", name, object, status)
 	}
 
-	now := time.Now().UTC()
-	a.mu.Lock()
-	a.info.Alerts++
-	a.info.LastAlertAt = &now
-	a.info.LastAlert = fmt.Sprintf("%s %s: %s", status, object, text)
-	a.mu.Unlock()
-
 	p := pendingAlert{
 		source:  name,
 		display: s.alerterDisplayName(a),
@@ -293,11 +287,24 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- 
 	select {
 	case pending <- p:
 	default:
-		// The push pipeline is badly backed up. Dropping the newest
-		// (loudly) beats blocking the protocol - the client's resend
-		// on reconnect would duplicate everything anyway.
-		log.Printf("agents: alerter %s: delivery queue full - dropping %s %s", name, status, object)
+		// The push pipeline is badly backed up. The alert is NOT
+		// accepted, and the client must hear that: a 333 here would
+		// tell a compliant alerter its page was delivered when it was
+		// dropped, and the one page that matters would be lost with
+		// only a server-side log line to show for it. 444 never
+		// closes the connection, so the client just retries.
+		log.Printf("agents: alerter %s: delivery queue full - refusing %s %s", name, status, object)
+		return "busy - delivery queue is full, retry shortly"
 	}
+
+	// Bookkeeping counts accepted alerts only; a refused one never
+	// happened as far as the Fleet page is concerned.
+	now := time.Now().UTC()
+	a.mu.Lock()
+	a.info.Alerts++
+	a.info.LastAlertAt = &now
+	a.info.LastAlert = fmt.Sprintf("%s %s: %s", status, object, text)
+	a.mu.Unlock()
 	return ""
 }
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -206,7 +207,12 @@ private fun HistoryRow(ev: HistoryEvent, clock: Long) {
                             text = ev.displayName,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // fill=false: take only what the name needs, but
+                            // never more than leaves the site tag visible - a
+                            // long name must ellipsize, not shove the tag out.
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         if (ev.siteTag.isNotEmpty()) {
                             SiteTag(ev.siteTag)
