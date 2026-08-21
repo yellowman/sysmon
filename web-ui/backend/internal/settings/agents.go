@@ -82,11 +82,13 @@ func (s *Store) SetAgentLabel(site, label string) error {
 	})
 }
 
-// SetAgentKind records what a token's peer identified as at handshake.
-// Idempotent; a missing record is left missing (the handshake already
-// authenticated against it, so this only races a concurrent revoke).
-func (s *Store) SetAgentKind(site, kind string) {
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+// SetAgentKind overwrites a record's kind. Minting sets the kind
+// atomically (NewAgentToken) and the handshake claims it for legacy
+// records (ClaimAgentKind); this raw setter exists for migrations and
+// tests - simulating a pre-kind record takes writing an empty kind.
+// Missing records are left missing.
+func (s *Store) SetAgentKind(site, kind string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketAgents)
 		if b == nil {
 			return nil
@@ -96,17 +98,17 @@ func (s *Store) SetAgentKind(site, kind string) {
 			return nil
 		}
 		var stored map[string]json.RawMessage
-		if json.Unmarshal(blob, &stored) != nil {
-			return nil
+		if err := json.Unmarshal(blob, &stored); err != nil {
+			return fmt.Errorf("agent record %s is unreadable: %w", site, err)
 		}
 		enc, err := json.Marshal(kind)
 		if err != nil {
-			return nil
+			return err
 		}
 		stored["kind"] = enc
 		updated, err := json.Marshal(stored)
 		if err != nil {
-			return nil
+			return err
 		}
 		return b.Put([]byte(site), updated)
 	})
@@ -196,7 +198,19 @@ func (s *Store) GetAgentToken(site string) (AgentToken, bool) {
 // and only once - it is stored hashed, so a leaked database does not leak
 // the fleet's credentials, and "show me the token again" is deliberately
 // impossible rather than merely discouraged.
-func (s *Store) NewAgentToken(site, label string) (string, error) {
+//
+// Kind is part of the record from the first write: hash, label and kind
+// commit in one transaction, so the caller never holds a plaintext token
+// whose stored type failed to stick - a token claiming to be an
+// alerter's while the record says nothing would let the next greeting
+// choose its type after all.
+func (s *Store) NewAgentToken(site, label, kind string) (string, error) {
+	switch kind {
+	case KindSysmond, KindAlerter:
+	default:
+		return "", fmt.Errorf("kind must be %q or %q", KindSysmond, KindAlerter)
+	}
+
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -206,6 +220,7 @@ func (s *Store) NewAgentToken(site, label string) (string, error) {
 	rec := AgentToken{
 		Site:    site,
 		Label:   label,
+		Kind:    kind,
 		Created: time.Now().UTC(),
 	}
 	blob, err := json.Marshal(struct {

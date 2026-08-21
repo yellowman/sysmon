@@ -1,14 +1,14 @@
 {{template "base" .}}
 
-{{define "title"}}Monitoring boxes{{end}}
+{{define "title"}}Agents & alerters{{end}}
 
 {{define "content"}}
 <div x-data="agentsPage()">
     <div class="flex flex-wrap items-center justify-between mb-4 gap-3">
         <div>
-            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Monitoring boxes</h1>
+            <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Agents &amp; alerters</h1>
             <p class="text-xs text-gray-400 mt-1 tracking-wide">
-                Every sysmond that reports here, and the credential it uses
+                Every credential this server has minted - monitoring boxes and alert-only peers alike
             </p>
         </div>
         <div class="flex items-center gap-2">
@@ -24,7 +24,7 @@
             </a>
             <button @click="showAdd = !showAdd"
                     class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
-                <i class="fas fa-plus mr-1"></i>Add a box
+                <i class="fas fa-plus mr-1"></i>Add credential
             </button>
         </div>
     </div>
@@ -126,7 +126,7 @@
          :class="noticeBad ? 'bg-red-50 border border-red-200 text-red-900' : 'bg-emerald-50 border border-emerald-200 text-emerald-900'"
          x-text="notice"></div>
 
-    <!-- Add a box -->
+    <!-- Mint a credential -->
     <div x-show="showAdd" x-cloak class="card mb-4 p-4">
         <div class="flex flex-wrap gap-3 items-end">
             <div>
@@ -211,8 +211,8 @@
                     </tr>
                 </template>
                 <tr x-show="!agents.length">
-                    <td colspan="6" class="px-3 py-8 text-center text-gray-400 text-sm">
-                        No boxes yet. Add one, then put the token and the certificate on it.
+                    <td colspan="7" class="px-3 py-8 text-center text-gray-400 text-sm">
+                        No credentials yet. Mint one, then put the token and the certificate on the box or alerter.
                     </td>
                 </tr>
             </tbody>
@@ -220,8 +220,8 @@
     </div>
 
     <p class="text-[11px] text-gray-400 mt-3">
-        A token proves a box to this server; the certificate proves this server
-        to the box. Both are needed. Only an administrator sees this page.
+        A token proves a box or alerter to this server; the certificate proves
+        this server to it. Both are needed. Only an administrator sees this page.
         The same jobs from a terminal:
         <span class="mono">sysmon-web -mint-agent &lt;site&gt;</span>,
         <span class="mono">-list-agents</span>,
@@ -357,10 +357,13 @@ function agentsPage() {
         // and when it last reported.
         async remint(a) {
             const when = this.seen(a);
+            const what = a.kind === 'alerter'
+                ? 'The alerter using the current one is disconnected and cannot ' +
+                  'send alerts until you give it the new token.'
+                : 'The box using the current one stops reporting until you put ' +
+                  'the new token on it. It keeps monitoring and paging.';
             if (!await uiConfirm('Mint a new token for ' + a.site + '?\n\n' +
-                         'The box using the current one stops reporting until you put ' +
-                         'the new token on it. It keeps monitoring and paging.\n\n' +
-                         'Last seen: ' + when)) return;
+                         what + '\n\nLast seen: ' + when)) return;
             // A replacement keeps the credential's recorded type.
             this.newAgent = {site: a.site, label: a.label || '',
                              kind: a.kind === 'alerter' ? 'alerter' : 'sysmond'};
@@ -368,9 +371,11 @@ function agentsPage() {
         },
 
         async revoke(a) {
-            if (!await uiConfirm('Revoke the token for ' + a.site + '?\n\n' +
-                         'That box stops reporting here at once. It keeps monitoring ' +
-                         'and paging.')) return;
+            const what = a.kind === 'alerter'
+                ? 'That alerter is disconnected at once and cannot send alerts here.'
+                : 'That box stops reporting here at once. It keeps monitoring and paging.';
+            if (!await uiConfirm('Revoke the token for ' + a.site + '?\n\n' + what,
+                         {danger: true, okText: 'Revoke'})) return;
             try {
                 await this.post('/api/settings/agents/revoke/' + encodeURIComponent(a.site));
                 this.say(a.site + ': token revoked');

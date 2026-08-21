@@ -6,15 +6,20 @@ info:
     real-time monitoring data, administrative commands, and bulk operations.
 
     ## Rate Limiting
-    All API endpoints are rate limited to 60 requests per minute per IP address.
-    Rate limit information is returned in response headers:
+    Requests are limited per client IP: 10 per minute for `/api/auth/login`,
+    300 per minute for everything else. `/api/auth/logout` is never limited -
+    it needs a valid session, and refusing a logout helps nobody. Rate limit
+    information is returned in response headers:
     - `X-RateLimit-Limit`: Maximum requests allowed in the time window
     - `X-RateLimit-Remaining`: Number of requests remaining in current window
     - `X-RateLimit-Reset`: Unix timestamp when the rate limit resets
 
     ## Authentication
-    Most write operations and all admin endpoints require authentication via the `X-Auth-Key` header.
-    The auth key must match the key configured in the sysmon daemon.
+    Session-based: log in via `POST /api/auth/login` to receive a session
+    token, then present it either as `Authorization: Bearer <token>` or in
+    the `sysmon_session` cookie (the browser UI uses the cookie). Sessions
+    renew on use with a 30-day sliding expiry. Admin-only endpoints
+    additionally require the session's user to hold the admin role.
   version: 1.0.0
   contact:
     name: Sysmon API Support
@@ -110,7 +115,8 @@ paths:
       summary: Reload daemon configuration
       description: Sends SIGHUP to sysmond to reload configuration
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: Reload triggered successfully
@@ -272,7 +278,8 @@ paths:
       summary: Acknowledge host alert
       description: Acknowledges an alert for a specific host
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       parameters:
         - name: hostname
           in: path
@@ -302,7 +309,8 @@ paths:
       summary: Update host status note
       description: Updates the status note for a host
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       parameters:
         - name: hostname
           in: path
@@ -346,7 +354,8 @@ paths:
       summary: Toggle trace for host
       description: Enables or disables debug tracing for a host
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       parameters:
         - name: hostname
           in: path
@@ -377,7 +386,8 @@ paths:
       summary: Acknowledge multiple hosts
       description: Acknowledges alerts for multiple hosts in a single request
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -408,7 +418,8 @@ paths:
       summary: Update multiple hosts
       description: Updates status note for multiple hosts with the same message
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -448,7 +459,8 @@ paths:
       summary: Toggle trace for multiple hosts
       description: Enables or disables tracing for multiple hosts
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -504,7 +516,8 @@ paths:
       summary: Restore configuration backup
       description: Restores configuration from a backup file
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       parameters:
         - name: filename
           in: path
@@ -530,7 +543,8 @@ paths:
       summary: Get daemon version
       description: Returns the sysmon daemon version
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: Version retrieved
@@ -548,7 +562,8 @@ paths:
       summary: Toggle debug mode
       description: Toggles debug logging in the daemon
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: Debug mode toggled
@@ -566,7 +581,8 @@ paths:
       summary: Toggle SNMP debug
       description: Toggles SNMP debug logging
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: SNMP debug toggled
@@ -584,7 +600,8 @@ paths:
       summary: Expire DNS cache
       description: Forces expiration of the DNS cache
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: DNS cache expired
@@ -602,7 +619,8 @@ paths:
       summary: Print check queue
       description: Returns the current check queue status
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: Queue status retrieved
@@ -620,7 +638,8 @@ paths:
       summary: Get next file descriptor info
       description: Returns next file descriptor allocation info (debugging)
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: FD info retrieved
@@ -638,7 +657,8 @@ paths:
       summary: Shutdown daemon
       description: Gracefully shuts down the sysmon daemon
       security:
-        - ApiKeyAuth: []
+        - SessionAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: Shutdown initiated
@@ -699,6 +719,111 @@ paths:
       responses:
         '200':
           description: Nickname stored
+
+  /api/settings/agents:
+    get:
+      tags: [Admin]
+      summary: List agent credentials
+      description: Every minted credential - monitoring boxes and alerters - without the secrets (tokens are stored hashed).
+      security:
+        - SessionAuth: []
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Credential list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentToken'
+    post:
+      tags: [Admin]
+      summary: Mint an agent credential
+      description: |
+        Mints a token for a site. The credential's kind is part of the record
+        from the first write - a sysmond credential gets a sysmon.conf block
+        in the response, an alerter credential gets the ALERTER greeting line.
+        The plaintext token appears in this response once and is never
+        recoverable afterwards. Re-minting with replace=true disconnects
+        whatever currently holds the old token.
+      security:
+        - SessionAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site]
+              properties:
+                site:
+                  type: string
+                  description: Letters, digits, - and _ only; max 64
+                label:
+                  type: string
+                  description: Human label; for alerters, also the display nickname
+                kind:
+                  type: string
+                  enum: [sysmond, alerter]
+                  description: Credential type; defaults to sysmond
+                replace:
+                  type: boolean
+                  description: Required to replace a live token
+      responses:
+        '200':
+          description: The credential, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  site: { type: string }
+                  token: { type: string }
+                  kind: { type: string }
+                  config:
+                    type: string
+                    description: sysmon.conf block (sysmond credentials only)
+                  greeting:
+                    type: string
+                    description: ALERTER greeting line (alerter credentials only)
+                  dial:
+                    type: string
+                    description: host:port the peer dials (alerter credentials only)
+                  note: { type: string }
+        '409':
+          description: Site already has a live token and replace was not set
+
+  /api/settings/agents/revoke/{site}:
+    post:
+      tags: [Admin]
+      summary: Revoke an agent credential
+      description: Marks the token revoked and closes the credential's live connection, daemon or alerter.
+      security:
+        - SessionAuth: []
+        - CookieAuth: []
+      parameters:
+        - name: site
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  site: { type: string }
+                  revoked: { type: boolean }
+                  disconnected:
+                    type: boolean
+                    description: Whether a live connection was closed now
 
   /api/admin/session-log:
     get:
@@ -766,13 +891,31 @@ paths:
 
 components:
   securitySchemes:
-    ApiKeyAuth:
+    SessionAuth:
+      type: http
+      scheme: bearer
+      description: Session token from POST /api/auth/login, as Authorization Bearer
+    CookieAuth:
       type: apiKey
-      in: header
-      name: X-Auth-Key
-      description: Authentication key for protected endpoints
+      in: cookie
+      name: sysmon_session
+      description: The same session token, as the browser UI's cookie
 
   schemas:
+    AgentToken:
+      type: object
+      properties:
+        site: { type: string }
+        label: { type: string }
+        kind:
+          type: string
+          enum: [sysmond, alerter]
+          description: Set at mint; legacy blank-kind records take the kind of their first greeting
+        created: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        last_addr: { type: string }
+        revoked: { type: boolean }
+
     Config:
       type: object
       properties:

@@ -14,9 +14,9 @@ its own "Alerters" section; the config editor and the map never see it.
 
 ## Getting a token
 
-**Admin -> Monitoring boxes -> Add a box**, with the credential type
-set to **External alerter** - the panel then shows the greeting line
-below instead of sysmond config. Mint the token under the name the
+**Admin -> Agents & alerters -> Add credential**, with the credential
+type set to **External alerter** - the panel then shows the greeting
+line below instead of sysmond config. Mint the token under the name the
 alerter will use (letters, digits, `-`, `_`; max 64 chars). The name
 is the alerter's identity - it appears in notifications and on the
 Fleet page - so name the thing, not the machine: `backupd`, not
@@ -48,8 +48,10 @@ the live connection is closed and the next attempt is refused.
 Text lines, terminated by `\n` (a trailing `\r` is tolerated). One
 line may carry at most 4096 bytes; a longer line is refused with
 `444 line too long` rather than processed as something shorter than
-what was sent (the connection survives). Every reply is one line
-starting `333 ` (success) or `444 ` (refusal).
+what was sent. After authentication the connection survives the
+refusal; an overlong (or otherwise malformed) **greeting** gets the
+444 and then the socket closes, like any other failed handshake.
+Every reply is one line starting `333 ` (success) or `444 ` (refusal).
 
 ### Handshake (first line, within 20 seconds of connecting)
 

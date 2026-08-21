@@ -15,7 +15,7 @@
             <a x-show="$store.auth.role === 'admin'"
                href="/agents.html"
                class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
-                <i class="fas fa-plus mr-1"></i>Add a box
+                <i class="fas fa-plus mr-1"></i>Add credential
             </a>
             <label class="text-xs text-gray-500">Watch window</label>
             <input type="number" x-model.number="watchSeconds" min="0" step="30"
@@ -131,7 +131,7 @@
                     <td colspan="7" class="px-3 py-8 text-center text-gray-400 text-sm">
                         No daemons have connected yet. sysmond dials out; give each box
                         <span class="mono">config aggregator</span>, plus a token and the CA
-                        certificate from <a href="/agents.html" class="text-blue-600 hover:underline">Add a box</a>.
+                        certificate from <a href="/agents.html" class="text-blue-600 hover:underline">Add credential</a>.
                     </td>
                 </tr>
             </tbody>

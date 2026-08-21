@@ -1782,7 +1782,15 @@ void confgen_prepare_as_root(void)
 	confgen_prepare(pw->pw_uid, pw->pw_gid);
 }
 
-void revoke_root_if_necessary()
+/*
+ * Drop root, entirely, or say so. Returns 0 when the process is no
+ * longer root (or never was); -1 when a root-started process could not
+ * complete the drop - identity missing, setgroups, setgid or setuid
+ * refused. The CALLER treats -1 as fatal: a monitoring daemon that was
+ * asked to shed root and cannot must not start monitoring as root
+ * instead, and a warning in a log nobody is reading yet is not consent.
+ */
+int revoke_root_if_necessary(void)
 {
 	uid_t current_uid;
 	uid_t current_euid;
@@ -1799,15 +1807,15 @@ void revoke_root_if_necessary()
 		{
 			print_err(0, "revoke_root: Not running as root (euid=%d), no privileges to drop", current_euid);
 		}
-		return;
+		return 0;
 	}
 
 	pw = sysmon_drop_user();
 	if (pw == NULL)
 	{
-		print_err(1, "WARNING: Cannot drop root privileges - neither "
+		print_err(1, "CRITICAL: Cannot drop root privileges - neither "
 			"'nobody' nor 'daemon' exists");
-		return;
+		return -1;
 	}
 	drop_user = pw->pw_name;
 
@@ -1872,33 +1880,31 @@ void revoke_root_if_necessary()
 	 * really is the only group this process holds, so a helper the
 	 * probe called unusable genuinely is.
 	 *
-	 * On failure, warn and CARRY ON to setgid/setuid: a uid/gid drop
-	 * with stale supplementary groups is a partial drop, but bailing
-	 * out here would keep the daemon fully root, which is strictly
-	 * worse. (The one side effect: a retained group could keep the
-	 * ping helper usable after the probe called it unusable - the
-	 * conservative direction, and only on this rare failure.)
+	 * Any failure from here on is fatal to the caller: a partial drop
+	 * (uid shed, a group kept, or the reverse) leaves the daemon with
+	 * privileges nobody chose, and monitoring must not start on top of
+	 * that.
 	 */
 	if (setgroups(1, &pw->pw_gid) != 0)
 	{
 		perror("revoke_root: setgroups");
-		print_err(1, "WARNING: Failed to drop supplementary groups; "
-			"continuing with the uid/gid drop");
+		print_err(1, "CRITICAL: Failed to drop supplementary groups");
+		return -1;
 	}
 
 	/* Drop privileges */
 	if (setgid(pw->pw_gid) != 0)
 	{
 		perror("revoke_root: setgid");
-		print_err(1, "WARNING: Failed to drop group privileges to gid=%d", pw->pw_gid);
-		return;
+		print_err(1, "CRITICAL: Failed to drop group privileges to gid=%d", pw->pw_gid);
+		return -1;
 	}
 
 	if (setuid(pw->pw_uid) != 0)
 	{
 		perror("revoke_root: setuid");
-		print_err(1, "WARNING: Failed to drop user privileges to uid=%d", pw->pw_uid);
-		return;
+		print_err(1, "CRITICAL: Failed to drop user privileges to uid=%d", pw->pw_uid);
+		return -1;
 	}
 
 	/* Verify privileges were actually dropped */
@@ -1906,12 +1912,12 @@ void revoke_root_if_necessary()
 	{
 		print_err(1, "CRITICAL: Failed to drop root privileges! Still running as root (uid=%d, euid=%d)",
 			getuid(), geteuid());
-		print_err(1, "CRITICAL: This is a security risk. Exiting.");
-		exit(1);
+		return -1;
 	}
 
 	print_err(0, "Successfully dropped root privileges to user '%s' (uid=%d, gid=%d)",
 		drop_user, getuid(), getgid());
+	return 0;
 }
 
 /*
@@ -1973,7 +1979,12 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 	 */
 	confgen_prepare_as_root();
 	write_pid_file();
-	revoke_root_if_necessary();
+	if (revoke_root_if_necessary() != 0)
+	{
+		print_err(1, "CRITICAL: cannot drop root privileges - refusing to monitor as root. Exiting.");
+		unlink(sysmon_pidfile());
+		exit(1);
+	}
 
 	while (1)
 	{

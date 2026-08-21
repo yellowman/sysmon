@@ -402,14 +402,15 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		token, err := r.settings.NewAgentToken(body.Site, body.Label)
+		// Kind commits with the hash in one transaction: the plaintext
+		// token is never handed out claiming a type the record failed
+		// to store, and a mistaken first greeting can never claim the
+		// credential's type.
+		token, err := r.settings.NewAgentToken(body.Site, body.Label, kind)
 		if err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		// Recorded now, not at first handshake: a mistaken first greeting
-		// must not get to claim the credential's type forever.
-		r.settings.SetAgentKind(body.Site, kind)
 		// A replaced token's current holder is cut off now. Waiting for
 		// its next reconnect means never for a link that stays up.
 		if body.Replace && r.monitoring != nil {

@@ -138,7 +138,10 @@ func mintAgent(store *settings.Store, site, label string, replace bool, agentNam
 		return 1
 	}
 
-	token, err := store.NewAgentToken(site, label)
+	// The CLI mints sysmond credentials - it prints a sysmon.conf block,
+	// so that is what the caller is provisioning. Alerter credentials
+	// come from the web UI, where the panel shows the ALERTER greeting.
+	token, err := store.NewAgentToken(site, label, settings.KindSysmond)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sysmon-web: %v\n", err)
 		return 1

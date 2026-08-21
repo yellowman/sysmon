@@ -44,7 +44,7 @@ func TestAlerterSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := store.NewAgentToken("backupd", ""); err != nil {
+	if _, err := store.NewAgentToken("backupd", "", settings.KindAlerter); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,11 +152,11 @@ func TestAlerterSession(t *testing.T) {
 		t.Errorf("after QUIT, Alerters() = %+v, want the record kept but disconnected", list)
 	}
 
-	// The token record learns its kind at handshake time in the real
-	// path (claimKind -> ClaimAgentKind) - prove the recorded kind
-	// sticks and that labels round-trip beside it.
+	// The kind was minted into the record; the handshake's claim of the
+	// same kind is the steady state - prove it stands and that labels
+	// round-trip beside it.
 	if got, err := store.ClaimAgentKind("backupd", settings.KindAlerter); got != "" || err != nil {
-		t.Errorf("ClaimAgentKind refused a fresh token: %q, %v", got, err)
+		t.Errorf("ClaimAgentKind refused the minted kind: %q, %v", got, err)
 	}
 	tokens, err := store.ListAgentTokens()
 	if err != nil || len(tokens) != 1 {
@@ -304,7 +304,12 @@ func TestClaimKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := store.NewAgentToken("box1", ""); err != nil {
+	if _, err := store.NewAgentToken("box1", "", settings.KindSysmond); err != nil {
+		t.Fatal(err)
+	}
+	// Minting records the kind now; blank it to simulate a record from
+	// before kinds existed, whose first greeting claims it.
+	if err := store.SetAgentKind("box1", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -423,7 +428,12 @@ func TestClaimKindConcurrentFirstUse(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		site := fmt.Sprintf("box%d", i)
-		if _, err := store.NewAgentToken(site, ""); err != nil {
+		if _, err := store.NewAgentToken(site, "", settings.KindSysmond); err != nil {
+			t.Fatal(err)
+		}
+		// The race only exists for records without a kind - which since
+		// mint-time kinds means legacy records; simulate one.
+		if err := store.SetAgentKind(site, ""); err != nil {
 			t.Fatal(err)
 		}
 		results := make(chan string, 2)
@@ -653,7 +663,7 @@ func TestStorageFailureFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.NewAgentToken("box1", ""); err != nil {
+	if _, err := store.NewAgentToken("box1", "", settings.KindSysmond); err != nil {
 		t.Fatal(err)
 	}
 
