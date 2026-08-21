@@ -269,6 +269,9 @@ struct HostRow: View {
                     Text(host.hostname)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Theme.ink)
+                    if !host.siteTag.isEmpty {
+                        SiteTag(name: host.siteTag)
+                    }
                     if host.isPaused {
                         Text("PAUSED")
                             .font(.system(size: 8, weight: .bold))

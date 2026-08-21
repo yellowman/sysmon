@@ -1,0 +1,33 @@
+#!/bin/ksh
+#
+# OpenBSD rc.d(8) script for sysmond.
+# Install as /etc/rc.d/sysmond (chmod 555), then:
+#   rcctl enable sysmond
+#   rcctl start sysmond
+# Config somewhere other than the compiled-in default:
+#   rcctl set sysmond flags -f /etc/sysmon.conf
+#
+# sysmond starts as root - raw ICMP sockets, and /var/db/sysmon has to
+# be created and handed over before the drop - and revokes root on its
+# own once that is done (nobody, or daemon as the fallback). That is why
+# there is no daemon_user here. It also forks into the background by
+# itself, so rc_bg stays off; the forked child keeps the same argv, so
+# rc.subr's pgrep check finds it.
+
+daemon="/usr/local/bin/sysmond"
+
+. /etc/rc.d/rc.subr
+
+# Refuse to start with a config that does not parse. Better to fail the
+# rcctl start loudly than to come up monitoring nothing.
+rc_pre() {
+	${daemon} -t ${daemon_flags}
+}
+
+# "sysmond reload" re-parses the config and only HUPs the running
+# daemon if it passes - safer than rc.subr's default blind pkill -HUP.
+rc_reload() {
+	${daemon} reload ${daemon_flags}
+}
+
+rc_cmd $1

@@ -342,6 +342,13 @@ local user. Without it the daemon still runs, but it has no fallback
 if the kernel refuses to send on a raw socket after dropping
 privileges.
 
+To start at boot: `misc/sysmond.service` (systemd) and
+`misc/rc.d/sysmond` (OpenBSD rc.d) are ready to copy into place; the
+web UI's counterparts are `web-ui/sysmon-web.service` and
+`web-ui/rc.d/sysmon_web`. The comments at the top of each say where it
+goes and what to enable. sysmond's files set no user on purpose: it
+must start as root (raw ICMP sockets) and drops privileges on its own.
+
 `examples/` also has `sysmon.conf.full`, which shows every directive, and
 `sysmon.conf.fleet` - the 500-object wireless ISP in the screenshots
 above. The fleet file is addressed entirely on loopback, so

@@ -21,7 +21,6 @@ daemon="/usr/local/bin/sysmon-web"
 daemon_flags="-foreground \
   -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
-  -sysmon 127.0.0.1:1345 \
   -templates /usr/local/libexec/sysmon-web/templates \
   -backups /var/backups/sysmon \
   -audit /var/log/sysmon-web-audit.log"

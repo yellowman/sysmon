@@ -104,6 +104,13 @@ type Service struct {
 	daemons    []*daemon
 	sessionLog *SessionLogger
 
+	// Alerters: alert-only peers on the agent listener. Not part of the
+	// fleet - see alerters.go.
+	alertersMu  sync.Mutex
+	alerters    map[string]*alerter
+	alertSinkMu sync.Mutex
+	alertSink   func(source, display, object, status, text string)
+
 	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.
 	history *HistoryStore
@@ -668,6 +675,8 @@ func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) []HistoryEven
 			if old, ok := prev[hostKey(h)]; ok && old != h.OverallStatus {
 				transitions = append(transitions, HistoryEvent{
 					ObjectName:  h.ObjectName,
+					Site:        h.Site,
+					LocalName:   h.LocalName,
 					Hostname:    h.Hostname,
 					Description: h.Description,
 					PrevStatus:  old,

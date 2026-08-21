@@ -115,6 +115,15 @@ systemctl daemon-reload
 systemctl enable --now sysmon-web
 ```
 
+One deliberate limitation: the shipped unit's `ProtectSystem=strict`
+sandbox leaves `/etc` read-only, so saving the **local**
+`/etc/sysmon.conf` from the config editor fails under it (the save
+writes `/etc/sysmon.conf.tmp` and renames, which needs a writable
+`/etc` directory). Editing per-box configs over the agent link - the
+normal fleet flow - is unaffected. If you want local editor saves on
+this host, add a drop-in with `ReadWritePaths=-/etc` and make the file
+and directory writable by `www-data`.
+
 ### 3.2 nginx server block
 
 See `web-ui/nginx.conf.example` for the full TLS version. Minimum:

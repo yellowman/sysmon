@@ -16,6 +16,11 @@ data class LoginResponse(
 @Serializable
 data class Host(
     @SerialName("object_name") val objectName: String = "",
+    // objectName's two halves: the bare name the owning daemon knows,
+    // and which daemon that is. Shown separately - a name and a small
+    // site tag - never re-joined into "site:host".
+    @SerialName("local_name") val localName: String = "",
+    val site: String = "",
     val hostname: String,
     val description: String = "",
     @SerialName("ipv4_address") val ipv4: String = "",
@@ -41,6 +46,8 @@ data class Host(
     val isDown: Boolean get() = overallStatus == "CRITICAL"
     val isWarning: Boolean get() = overallStatus == "WARNING"
     val isOK: Boolean get() = overallStatus == "OK"
+    // "local" is the single-box case, where naming the site says nothing.
+    val siteTag: String get() = if (site == "local") "" else site
 }
 
 /**
@@ -160,12 +167,19 @@ data class TestPushResponse(val status: String = "", val warning: String? = null
 data class HistoryEvent(
     val timestamp: String = "",
     @SerialName("object_name") val objectName: String = "",
+    @SerialName("local_name") val localName: String = "",
+    val site: String = "",
     val hostname: String = "",
     val description: String = "",
     @SerialName("prev_status") val prevStatus: String = "",
     @SerialName("new_status") val newStatus: String = "",
     @SerialName("prev_duration_seconds") val prevDuration: Long = 0
-)
+) {
+    // Bare name plus a separate site tag; the qualified objectName is
+    // only the fallback against a server that predates the split.
+    val displayName: String get() = localName.ifEmpty { objectName.ifEmpty { hostname } }
+    val siteTag: String get() = if (site == "local") "" else site
+}
 
 @Serializable
 data class HistoryResponse(

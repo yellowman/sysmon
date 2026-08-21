@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"sysmon-web/internal/settings"
 )
 
 // Daemons that dial in.
@@ -107,15 +109,19 @@ func (a *AgentListener) handshake(conn net.Conn) {
 	conn.SetDeadline(time.Now().Add(20 * time.Second))
 	reader := bufio.NewReader(conn)
 
-	line, err := reader.ReadString('\n')
+	// Bounded, not ReadString: this line arrives BEFORE any token
+	// check, so an unauthenticated peer streaming a newline-free flood
+	// must cost at most maxLineBytes of memory, not everything it can
+	// push before the deadline.
+	line, err := readLineBounded(reader)
 	if err != nil {
 		conn.Close()
 		return
 	}
 
 	fields := strings.Fields(strings.TrimSpace(line))
-	if len(fields) < 2 || fields[0] != "HELLO" {
-		fmt.Fprintf(conn, "444 expected HELLO <site> <token>\r\n")
+	if len(fields) < 2 || (fields[0] != "HELLO" && fields[0] != "ALERTER") {
+		fmt.Fprintf(conn, "444 expected HELLO <site> <token> or ALERTER <name> <token>\r\n")
 		conn.Close()
 		log.Printf("agents: %s did not greet us properly", remote)
 		return
@@ -141,11 +147,42 @@ func (a *AgentListener) handshake(conn net.Conn) {
 		return
 	}
 
+	// The verb the peer greeted with claims what kind of thing it is. A
+	// token that already belongs to the other class is refused: letting
+	// a sysmond's token greet as an alerter (or the reverse) would flip
+	// how every page counts and treats the site, on the say-so of
+	// whoever holds the token.
+	kind := settings.KindSysmond
+	if fields[0] == "ALERTER" {
+		kind = settings.KindAlerter
+	}
+	if refusal := a.svc.claimKind(site, kind); refusal != "" {
+		fmt.Fprintf(conn, "444 %s\r\n", refusal)
+		conn.Close()
+		log.Printf("agents: refused %s greeting as %s for site %q: %s", remote, kind, site, refusal)
+		return
+	}
+
 	if _, err := fmt.Fprintf(conn, "333 welcome\r\n"); err != nil {
 		conn.Close()
 		return
 	}
 	conn.SetDeadline(time.Time{}) // long-lived from here
+
+	// An alerter is not a monitoring box: nothing is polled, nothing is
+	// adopted, it just sends alerts down this socket - see alerters.go.
+	if fields[0] == "ALERTER" {
+		// Anything after the token is what the application calls
+		// itself - free text, shown beside the name on the Fleet page
+		// and in the alerts it sends.
+		app := ""
+		if len(fields) >= 4 {
+			app = TruncateRunes(strings.Join(fields[3:], " "), 128)
+		}
+		log.Printf("agents: alerter %s connected from %s", site, remote)
+		a.svc.runAlerter(site, app, remote, conn, reader)
+		return
+	}
 
 	a.svc.adoptAgent(site, remote, conn, reader)
 	log.Printf("agents: site %s connected from %s", site, remote)
@@ -175,6 +212,23 @@ func ValidSiteName(s string) bool {
 		}
 	}
 	return true
+}
+
+// claimKind records what a token's peer identified as at handshake and
+// refuses a token that already belongs to the other class. Returns ""
+// to proceed, else the complaint for the 444. The check and the write
+// happen in one store transaction (ClaimAgentKind), so two concurrent
+// first handshakes cannot both claim a fresh token as different kinds;
+// a reconnect whose kind already matches costs no write at all.
+func (s *Service) claimKind(site, kind string) string {
+	st := s.Generations()
+	if st == nil {
+		return ""
+	}
+	if owner := st.ClaimAgentKind(site, kind); owner != "" {
+		return "this token belongs to a " + owner
+	}
+	return ""
 }
 
 // adoptAgent puts a dialled-in daemon into the fleet.

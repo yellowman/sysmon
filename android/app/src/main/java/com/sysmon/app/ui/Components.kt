@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -342,6 +343,26 @@ fun StatsRow(stats: Stats?) {
     }
 }
 
+/**
+ * The owning sysmond's name as a small muted pill. Kept deliberately
+ * quiet - it is context, not the subject - and absent entirely on a
+ * single-box install, where the row looks exactly as it always did.
+ */
+@Composable
+fun SiteTag(name: String) {
+    Text(
+        text = name,
+        fontSize = 9.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 5.dp, vertical = 1.dp)
+    )
+}
+
 @Composable
 fun HostRow(host: Host, onClick: (() -> Unit)? = null) {
     Card {
@@ -359,8 +380,16 @@ fun HostRow(host: Host, onClick: (() -> Unit)? = null) {
                     Text(
                         text = host.hostname,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        // A long hostname ellipsizes rather than pushing the
+                        // site tag (and PAUSED pill) out of the row.
+                        modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (host.siteTag.isNotEmpty()) {
+                        SiteTag(host.siteTag)
+                    }
                     if (host.paused) {
                         Text(
                             text = "PAUSED",

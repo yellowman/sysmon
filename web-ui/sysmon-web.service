@@ -1,8 +1,11 @@
 [Unit]
 Description=Sysmon Web Configuration Manager
-Documentation=file:///usr/local/libexec/sysmon-web/README.md
-After=network.target sysmond.service
-Requires=sysmond.service
+Documentation=https://github.com/yellowman/sysmon/blob/main/docs/WEB_DEPLOYMENT.md
+# No dependency on sysmond.service: monitoring boxes dial in to this
+# process over the agent port, so the usual deployment has no sysmond
+# on this host at all. Running one locally works with or without an
+# ordering between the two.
+After=network.target
 
 [Service]
 Type=simple
@@ -21,7 +24,6 @@ ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
   -socket /var/www/run/sysmon-web.sock \
   -config /etc/sysmon.conf \
-  -sysmon localhost:3333 \
   -templates /usr/local/libexec/sysmon-web/templates \
   -backups /var/backups/sysmon \
   -audit /var/log/sysmon-web-audit.log
@@ -36,7 +38,17 @@ ProtectHome=true
 # /var/lib/sysmon holds the bbolt stores (auth.db, push.db, settings.db);
 # /var/www/run holds the FastCGI socket. Both must be writable under
 # ProtectSystem=strict.
-ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log /etc/sysmon.conf
+#
+# Deliberately NOT carved out: /etc. Reading /etc/sysmon.conf needs no
+# exception, and editing per-box configs goes over the agent link and
+# never touches this host's /etc. Saving the LOCAL config from the
+# editor is the one thing this hardened unit cannot do - the save
+# writes /etc/sysmon.conf.tmp and renames, which needs a writable /etc
+# directory (a file-level ReadWritePaths entry cannot provide that,
+# and www-data cannot write root-owned /etc anyway). To allow it,
+# add a drop-in with "ReadWritePaths=-/etc" and give www-data write
+# access to the file and directory - or edit the file outside the UI.
+ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log
 StateDirectory=sysmon
 
 [Install]

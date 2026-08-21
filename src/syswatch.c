@@ -1802,26 +1802,6 @@ void revoke_root_if_necessary()
 		return;
 	}
 
-	/*
-	 * ICMP needs no helper to survive the drop: the raw sockets were
-	 * opened while still root, a raw socket's privilege is checked at
-	 * creation rather than per send, and the descriptors keep working
-	 * after setuid. The setuid helper is registered only as a fallback
-	 * for a platform that refuses to send on them post-drop - which the
-	 * send path discovers from the send itself (EPERM/EACCES) rather
-	 * than assuming it here.
-	 */
-	if (!disable_icmp)
-	{
-		if (access(PING_HELPER_PATH, X_OK) == 0) {
-			use_ping_helper = 1;
-			print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop; %s stands by as the fallback", PING_HELPER_PATH);
-		} else {
-			print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop");
-			print_err(0, "revoke_root: no fallback helper at %s - only matters if this platform refuses raw-socket sends after a privilege drop", PING_HELPER_PATH);
-		}
-	}
-
 	pw = sysmon_drop_user();
 	if (pw == NULL)
 	{
@@ -1831,10 +1811,72 @@ void revoke_root_if_necessary()
 	}
 	drop_user = pw->pw_name;
 
+	/*
+	 * ICMP needs no helper to survive the drop: the raw sockets were
+	 * opened while still root, a raw socket's privilege is checked at
+	 * creation rather than per send, and the descriptors keep working
+	 * after setuid. The setuid helper is registered only as a fallback
+	 * for a platform that refuses to send on them post-drop - which the
+	 * send path discovers from the send itself (EPERM/EACCES) rather
+	 * than assuming it here.
+	 *
+	 * The probe cannot be access(X_OK): we are still root here, so that
+	 * answers yes for a helper the post-drop identity cannot run. What
+	 * the fallback actually needs is setuid root plus an execute bit
+	 * that reaches the user we are about to become - the install puts
+	 * it at 4750 root:<drop group>, so group-exec counts only when the
+	 * group matches, world-exec always does. The drop below clears
+	 * supplementary groups to exactly pw_gid, so the primary gid is
+	 * the whole story and this check matches post-drop reality.
+	 */
+	if (!disable_icmp)
+	{
+		struct stat hst;
+
+		if (stat(PING_HELPER_PATH, &hst) == 0)
+		{
+			if ((hst.st_mode & S_ISUID) && hst.st_uid == 0 &&
+			    ((hst.st_mode & S_IXOTH) ||
+			     ((hst.st_mode & S_IXGRP) && hst.st_gid == pw->pw_gid)))
+			{
+				use_ping_helper = 1;
+				print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop; %s stands by as the fallback", PING_HELPER_PATH);
+			}
+			else
+			{
+				print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop");
+				print_err(0, "revoke_root: helper at %s is not setuid root and executable as %s (mode %04o, gid %d) - only matters if this platform refuses raw-socket sends after a privilege drop",
+					PING_HELPER_PATH, drop_user,
+					(unsigned int)(hst.st_mode & 07777),
+					(int)hst.st_gid);
+			}
+		}
+		else
+		{
+			print_err(0, "revoke_root: ICMP raw sockets opened while root stay usable after the drop");
+			print_err(0, "revoke_root: no fallback helper at %s - only matters if this platform refuses raw-socket sends after a privilege drop", PING_HELPER_PATH);
+		}
+	}
+
 	if (debug)
 	{
 		print_err(0, "revoke_root: Dropping privileges from root (uid=0) to user '%s' (uid=%d)",
 			drop_user, pw->pw_uid);
+	}
+
+	/*
+	 * Supplementary groups first, while still root: setgid/setuid do
+	 * not touch them, and a process that keeps root's supplementary
+	 * groups after "dropping" root has not dropped much. Clearing them
+	 * also makes the helper probe above honest - from here on, pw_gid
+	 * really is the only group this process holds, so a helper the
+	 * probe called unusable genuinely is.
+	 */
+	if (setgroups(1, &pw->pw_gid) != 0)
+	{
+		perror("revoke_root: setgroups");
+		print_err(1, "WARNING: Failed to drop supplementary groups");
+		return;
 	}
 
 	/* Drop privileges */

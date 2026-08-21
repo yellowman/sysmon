@@ -24,8 +24,14 @@ const (
 // HistoryEvent is one observed host state transition - the raw material
 // of "what has been going up and down" over the last 48 hours.
 type HistoryEvent struct {
-	Timestamp   string `json:"timestamp"` // RFC3339
-	ObjectName  string `json:"object_name"`
+	Timestamp  string `json:"timestamp"` // RFC3339
+	ObjectName string `json:"object_name"`
+	// Site and LocalName are ObjectName's two halves, carried separately
+	// so no display ever has to render the "site:object" key itself -
+	// the UIs show the bare name with the site as its own minimized
+	// element. ObjectName stays the identity everywhere.
+	Site        string `json:"site,omitempty"`
+	LocalName   string `json:"local_name,omitempty"`
 	Hostname    string `json:"hostname"`
 	Description string `json:"description,omitempty"`
 	PrevStatus  string `json:"prev_status"`
@@ -160,6 +166,12 @@ func (h *HistoryStore) Recent(limit int, window time.Duration) []HistoryEvent {
 			var ev HistoryEvent
 			if json.Unmarshal(v, &ev) != nil {
 				continue
+			}
+			// Rows written before Site/LocalName existed carry only the
+			// qualified key; split it on the way out so every consumer
+			// sees the same shape regardless of the row's age.
+			if ev.LocalName == "" {
+				ev.Site, ev.LocalName = SplitQualified(ev.ObjectName)
 			}
 			t, err := time.Parse(time.RFC3339, ev.Timestamp)
 			if err != nil {

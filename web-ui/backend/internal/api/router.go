@@ -76,6 +76,12 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	if pushSvc != nil {
 		r.push.Store(pushSvc)
 	}
+	// Alerter traffic (alert-only peers on the agent listener) delivers
+	// through whatever push service is current; re-pointed whenever the
+	// service is hot-swapped (see reconfigurePush).
+	if pushSvc != nil {
+		mon.SetAlertSink(pushSvc.ExternalAlert)
+	}
 
 	// Configuration endpoints (admin only - config contains secrets)
 	r.mux.HandleFunc("/api/config", auth.RequireAdmin(r.handleConfig))
@@ -95,6 +101,8 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
 	r.mux.HandleFunc("/api/sites", r.handleSites)
+	r.mux.HandleFunc("/api/alerters", r.handleAlerters)
+	r.mux.HandleFunc("/api/alerters/nickname", auth.RequireAdmin(r.handleAlerterNickname))
 
 	// Config distribution. Everything that changes what a box runs is
 	// admin-only and POST, so no stale tab or link prefetch can deliver a
@@ -684,9 +692,87 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 }
 
 // handleSites lists the fleet, so a site picker can offer names rather
-// than asking someone to type one.
+// than asking someone to type one. minted counts the boxes with tokens
+// here at all - connected or not. The editors use it to decide whether
+// an unselected page may take the only box for granted: one minted box
+// is unambiguous, several are a question, even when just one happens
+// to be online.
 func (r *Router) handleSites(w http.ResponseWriter, req *http.Request) {
-	r.sendJSON(w, map[string]interface{}{"sites": r.monitoring.Sites()})
+	minted := 0
+	if r.settings != nil {
+		if tokens, err := r.settings.ListAgentTokens(); err == nil {
+			for _, t := range tokens {
+				// Alerters have no config to edit, so they do not
+				// count toward the pickers' ambiguity. A token nothing
+				// has used yet has no kind and counts conservatively.
+				if !t.Revoked && t.Kind != settings.KindAlerter {
+					minted++
+				}
+			}
+		}
+	}
+	r.sendJSON(w, map[string]interface{}{
+		"sites":  r.monitoring.Sites(),
+		"minted": minted,
+	})
+}
+
+// handleAlerters lists the alert-only peers seen since this process
+// started - connected or not. They are shown beside the fleet, never in
+// it: an alerter has no hosts, no config, no generations, just alerts.
+func (r *Router) handleAlerters(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only GET allowed")
+		return
+	}
+	list := r.monitoring.Alerters()
+	// The nickname lives on the minted token's record, where the admin
+	// edits it; joined in here so the card can show it.
+	if r.settings != nil {
+		for i := range list {
+			if tok, ok := r.settings.GetAgentToken(list[i].Name); ok {
+				list[i].Nickname = tok.Label
+			}
+		}
+	}
+	r.sendJSON(w, map[string]interface{}{
+		"alerters": list,
+		"count":    len(list),
+	})
+}
+
+// handleAlerterNickname sets (or clears, with an empty label) the
+// operator's nickname for an alerter - the name its alerts display in
+// place of whatever the application calls itself.
+func (r *Router) handleAlerterNickname(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPut {
+		r.sendError(w, http.StatusMethodNotAllowed, "Only PUT allowed")
+		return
+	}
+	if r.settings == nil {
+		r.sendError(w, http.StatusServiceUnavailable, "no settings store")
+		return
+	}
+	var body struct {
+		Name     string `json:"name"`
+		Nickname string `json:"nickname"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		r.sendError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+	// Only a token an alerter has actually claimed is renameable here.
+	// A sysmond's token answering to this endpoint would let its Label
+	// (which other pages use for other things) be edited under the
+	// guise of an alerter nickname.
+	tok, ok := r.settings.GetAgentToken(body.Name)
+	if !ok || tok.Kind != settings.KindAlerter {
+		r.sendError(w, http.StatusNotFound, "no such alerter")
+		return
+	}
+	body.Nickname = monitoring.TruncateRunes(body.Nickname, 128)
+	r.settings.SetAgentLabel(body.Name, body.Nickname)
+	r.sendJSON(w, map[string]string{"name": body.Name, "nickname": body.Nickname})
 }
 
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {
@@ -2305,6 +2391,10 @@ func (r *Router) reconfigurePush(pc settings.PushConfig) bool {
 		return false
 	}
 	r.push.Store(svc)
+	// The alerter sink must follow the swap or alerts keep flowing into
+	// the dead service (harmlessly - a stopped service drops them - but
+	// silently).
+	r.monitoring.SetAlertSink(svc.ExternalAlert)
 	return true
 }
 

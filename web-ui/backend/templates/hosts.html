@@ -140,7 +140,11 @@
                     <!-- Compact Header -->
                     <div class="px-2 py-1.5 pl-8">
                         <div class="flex items-center justify-between mb-1">
-                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="hostKey(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></h3>
+                            <!-- Bare name plus a minimized site tag, not the raw
+                                 "site:host" key - the key stays in the tooltip. -->
+                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="hostLabel(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></h3>
+                            <span x-show="hostSite(host)" class="text-[9px] text-gray-400 mono flex-shrink-0 ml-1"
+                                  x-text="hostSite(host)"></span>
                             <!-- Its site is not answering: what is shown is the last thing it said. -->
                             <i x-show="host.stale" class="fas fa-plug-circle-xmark text-xs text-gray-500 flex-shrink-0"
                                :title="'site ' + (host.site || '?') + ' is not answering - last seen ' + (host.stale_since || 'unknown')"></i>
@@ -219,7 +223,11 @@
 
                 <!-- Hover Tooltip -->
                 <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
-                    <div class="font-bold mb-2" x-text="hostKey(host)"></div>
+                    <div class="font-bold mb-2">
+                        <span x-text="hostLabel(host)"></span>
+                        <span x-show="hostSite(host)" class="ml-1 text-[10px] font-normal text-gray-400 mono"
+                              x-text="hostSite(host)"></span>
+                    </div>
                     <div class="text-xs text-gray-400 mb-2 -mt-1" x-text="host.hostname"></div>
                     <div class="space-y-1 text-xs">
                         <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>
@@ -303,7 +311,9 @@
                         }"
                         @click="selectHost(host)">
                         <td class="cel mono font-medium text-gray-900">
-                            <span x-text="hostKey(host)" :title="host.hostname"></span>
+                            <span x-text="hostLabel(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></span>
+                            <span x-show="hostSite(host)" class="ml-1 text-[10px] font-normal text-gray-400"
+                                  x-text="hostSite(host)"></span>
                             <i x-show="host.stale" class="fas fa-plug-circle-xmark ml-1 text-gray-500"
                                :title="'site ' + (host.site || '?') + ' is not answering - showing its last report'"></i>
                         </td>
@@ -415,7 +425,11 @@
                     <!-- Modal Header -->
                     <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
                         <div class="flex-1">
-                            <h2 class="text-2xl font-bold text-gray-900" x-text="hostKey(selectedHost)"></h2>
+                            <h2 class="text-2xl font-bold text-gray-900">
+                                <span x-text="hostLabel(selectedHost)"></span>
+                                <span x-show="hostSite(selectedHost)" class="ml-2 align-middle px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-sm font-normal mono"
+                                      x-text="hostSite(selectedHost)"></span>
+                            </h2>
                             <div class="mt-1 flex items-center space-x-4 text-sm">
                                 <span :class="{
                                     'text-green-600': selectedHost.overall_status === 'OK',
@@ -707,9 +721,9 @@ function hostsPage() {
                     `Tracing enabled for ${hostname}` :
                     `Tracing disabled for ${hostname}`;
 
-                alert(message);
+                uiAlert(message);
             } catch (e) {
-                alert(`Failed to toggle trace: ${e.message}`);
+                uiAlert(`Failed to toggle trace: ${e.message}`);
             }
         },
 
@@ -835,11 +849,11 @@ function hostsPage() {
 
         async bulkAcknowledge() {
             if (this.selectedHosts.length === 0) {
-                alert('No hosts selected');
+                uiAlert('No hosts selected');
                 return;
             }
 
-            const note = (prompt(`Acknowledge ${this.selectedHosts.length} host(s)?\n\nA note is required - one note covers the batch:`) || '').trim();
+            const note = (await uiPrompt(`Acknowledge ${this.selectedHosts.length} host(s)?\n\nA note is required - one note covers the batch:`) || '').trim();
             if (!note) return;
 
             try {
@@ -848,7 +862,7 @@ function hostsPage() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ hostnames: this.selectedHosts, note })
                 });
-                alert(`Acknowledged ${result.success_count} of ${result.total} host(s).\n` +
+                uiAlert(`Acknowledged ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
                 // Clear selection and refresh
@@ -856,16 +870,16 @@ function hostsPage() {
                 await this.fetchHosts();
             } catch (e) {
                 console.error('Bulk acknowledge failed:', e);
-                alert(`Error: ${e.message}`);
+                uiAlert(`Error: ${e.message}`);
             }
         },
 
         async bulkUnacknowledge() {
             if (this.selectedHosts.length === 0) {
-                alert('No hosts selected');
+                uiAlert('No hosts selected');
                 return;
             }
-            if (!confirm(`Un-acknowledge ${this.selectedHosts.length} host(s)? They go back on the active board.`)) {
+            if (!await uiConfirm(`Un-acknowledge ${this.selectedHosts.length} host(s)? They go back on the active board.`)) {
                 return;
             }
             let ok = 0, failed = 0;
@@ -873,19 +887,19 @@ function hostsPage() {
                 try { await apiCall(`/api/monitoring/unack/${h}`, { method: 'POST' }); ok++; }
                 catch (e) { failed++; }
             }
-            alert(`Un-acknowledged ${ok} host(s).` + (failed ? ` Failed: ${failed}` : ''));
+            uiAlert(`Un-acknowledged ${ok} host(s).` + (failed ? ` Failed: ${failed}` : ''));
             this.clearSelection();
             await this.fetchHosts();
         },
 
         async bulkUpdate() {
             if (this.selectedHosts.length === 0) {
-                alert('No hosts selected');
+                uiAlert('No hosts selected');
                 return;
             }
 
             if (!this.bulkNote) {
-                alert('Please enter a status note');
+                uiAlert('Please enter a status note');
                 return;
             }
 
@@ -895,7 +909,7 @@ function hostsPage() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ hostnames: this.selectedHosts, note: this.bulkNote })
                 });
-                alert(`Updated ${result.success_count} of ${result.total} host(s).\n` +
+                uiAlert(`Updated ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
                 // Clear form and selection
@@ -905,17 +919,17 @@ function hostsPage() {
                 await this.fetchHosts();
             } catch (e) {
                 console.error('Bulk update failed:', e);
-                alert(`Error: ${e.message}`);
+                uiAlert(`Error: ${e.message}`);
             }
         },
 
         async bulkToggleTrace() {
             if (this.selectedHosts.length === 0) {
-                alert('No hosts selected');
+                uiAlert('No hosts selected');
                 return;
             }
 
-            if (!confirm(`Toggle trace for ${this.selectedHosts.length} host(s)?`)) {
+            if (!await uiConfirm(`Toggle trace for ${this.selectedHosts.length} host(s)?`)) {
                 return;
             }
 
@@ -925,7 +939,7 @@ function hostsPage() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ hostnames: this.selectedHosts, enable: true })
                 });
-                alert(`Toggled trace for ${result.success_count} of ${result.total} host(s).\n` +
+                uiAlert(`Toggled trace for ${result.success_count} of ${result.total} host(s).\n` +
                       (result.failure_count > 0 ? `Failed: ${result.failure_count}` : ''));
 
                 // Clear selection and refresh
@@ -933,7 +947,7 @@ function hostsPage() {
                 await this.fetchHosts();
             } catch (e) {
                 console.error('Bulk trace failed:', e);
-                alert(`Error: ${e.message}`);
+                uiAlert(`Error: ${e.message}`);
             }
         }
     };

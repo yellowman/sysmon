@@ -158,7 +158,7 @@
                                     :title="user.role === 'admin' ? 'Demote to user' : 'Promote to admin'">
                                 <i :class="user.role === 'admin' ? 'fas fa-user-minus' : 'fas fa-user-shield'"></i>
                             </button>
-                            <button @click="if(confirm('Delete user ' + user.username + '?')) deleteUser(user.username)"
+                            <button @click="uiConfirm('Delete user ' + user.username + '?', {danger: true, okText: 'Delete'}).then(ok => { if (ok) deleteUser(user.username) })"
                                     class="px-2 py-1 text-red-500 hover:bg-red-50 rounded text-xs"
                                     x-show="user.username !== currentUser"
                                     title="Delete user">
@@ -823,9 +823,9 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/admin/debug', { method: 'POST' });
                 this.commandOutput = result?.response || 'No output received';
-                alert('Debug logging toggled. Response: ' + (result?.response || 'Success'));
+                uiAlert('Debug logging toggled. Response: ' + (result?.response || 'Success'));
             } catch (e) {
-                alert('Failed to toggle debug: ' + (e?.message || e));
+                uiAlert('Failed to toggle debug: ' + (e?.message || e));
             }
         },
 
@@ -833,23 +833,23 @@ function adminPage() {
             try {
                 const result = await apiCall('/api/admin/snmpd', { method: 'POST' });
                 this.commandOutput = result?.response || 'No output received';
-                alert('SNMP debug logging toggled. Response: ' + (result?.response || 'Success'));
+                uiAlert('SNMP debug logging toggled. Response: ' + (result?.response || 'Success'));
             } catch (e) {
-                alert('Failed to toggle SNMP debug: ' + (e?.message || e));
+                uiAlert('Failed to toggle SNMP debug: ' + (e?.message || e));
             }
         },
 
         async expireDNS() {
-            if (!confirm('This will force re-resolution of all hostnames. Continue?')) {
+            if (!await uiConfirm('This will force re-resolution of all hostnames. Continue?')) {
                 return;
             }
 
             try {
                 const result = await apiCall('/api/admin/expiredns', { method: 'POST' });
                 this.commandOutput = result?.response || 'DNS cache expired';
-                alert('DNS cache expired successfully');
+                uiAlert('DNS cache expired successfully');
             } catch (e) {
-                alert('Failed to expire DNS: ' + (e?.message || e));
+                uiAlert('Failed to expire DNS: ' + (e?.message || e));
             }
         },
 
@@ -859,7 +859,7 @@ function adminPage() {
                 this.commandOutput = result?.output || 'No queue data received';
                 this.revealCommandOutput();
             } catch (e) {
-                alert('Failed to get queue status: ' + (e?.message || e));
+                uiAlert('Failed to get queue status: ' + (e?.message || e));
             }
         },
 
@@ -869,7 +869,7 @@ function adminPage() {
                 this.commandOutput = result?.info || 'No FD info received';
                 this.revealCommandOutput();
             } catch (e) {
-                alert('Failed to get FD info: ' + (e?.message || e));
+                uiAlert('Failed to get FD info: ' + (e?.message || e));
             }
         },
 
@@ -884,20 +884,20 @@ function adminPage() {
 
         async killDaemon() {
             if (this.killitText !== 'SHUTDOWN') {
-                alert('You must type SHUTDOWN to confirm');
+                uiAlert('You must type SHUTDOWN to confirm');
                 return;
             }
 
             try {
                 const result = await apiCall('/api/admin/killit', { method: 'POST' });
                 this.commandOutput = result?.response || 'Shutdown initiated';
-                alert('Daemon shutdown initiated. The web UI will stop working shortly.');
+                uiAlert('Daemon shutdown initiated. The web UI will stop working shortly.');
 
                 // Reset confirmation
                 this.killitConfirm = false;
                 this.killitText = '';
             } catch (e) {
-                alert('Failed to shutdown daemon: ' + (e?.message || e));
+                uiAlert('Failed to shutdown daemon: ' + (e?.message || e));
             }
         },
 
@@ -915,7 +915,7 @@ function adminPage() {
 
         async createUser() {
             if (!this.newUser.username || !this.newUser.password) {
-                alert('Username and password required');
+                uiAlert('Username and password required');
                 return;
             }
             try {
@@ -928,7 +928,7 @@ function adminPage() {
                 this.showAddUser = false;
                 this.loadUsers();
             } catch (e) {
-                alert('Failed to create user: ' + e.message);
+                uiAlert('Failed to create user: ' + e.message);
             }
         },
 
@@ -937,20 +937,20 @@ function adminPage() {
                 await apiCall('/api/auth/users/' + encodeURIComponent(username), { method: 'DELETE' });
                 this.loadUsers();
             } catch (e) {
-                alert('Failed to delete user: ' + e.message);
+                uiAlert('Failed to delete user: ' + e.message);
             }
         },
 
         async resetPassword(username) {
-            const pw = prompt('New password for ' + username + ':');
+            const pw = await uiPrompt('New password for ' + username + ':');
             if (pw === null) return;
             if (pw.length < 8) {
-                alert('Password must be at least 8 characters.');
+                uiAlert('Password must be at least 8 characters.');
                 return;
             }
-            const confirm2 = prompt('Confirm new password:');
+            const confirm2 = await uiPrompt('Confirm new password:');
             if (confirm2 !== pw) {
-                alert('Passwords do not match.');
+                uiAlert('Passwords do not match.');
                 return;
             }
             try {
@@ -959,16 +959,16 @@ function adminPage() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ password: pw })
                 });
-                alert('Password updated for ' + username + '. Their existing sessions were revoked.');
+                uiAlert('Password updated for ' + username + '. Their existing sessions were revoked.');
             } catch (e) {
-                alert('Failed to reset password: ' + e.message);
+                uiAlert('Failed to reset password: ' + e.message);
             }
         },
 
         async toggleRole(user) {
             const newRole = user.role === 'admin' ? 'user' : 'admin';
             const verb = newRole === 'admin' ? 'Promote' : 'Demote';
-            if (!confirm(`${verb} ${user.username} to ${newRole}?`)) return;
+            if (!await uiConfirm(`${verb} ${user.username} to ${newRole}?`)) return;
             try {
                 await apiCall('/api/auth/users/' + encodeURIComponent(user.username), {
                     method: 'PUT',
@@ -977,7 +977,7 @@ function adminPage() {
                 });
                 this.loadUsers();
             } catch (e) {
-                alert('Failed to change role: ' + e.message);
+                uiAlert('Failed to change role: ' + e.message);
             }
         },
 
@@ -1099,7 +1099,7 @@ function adminPage() {
         },
 
         async deleteFCM() {
-            if (!confirm('Remove the stored FCM credentials? Android push will stop until you upload a new key.')) return;
+            if (!await uiConfirm('Remove the stored FCM credentials? Android push will stop until you upload a new key.')) return;
             this.pushBusy = true;
             try {
                 this.pushCfg = await apiCall('/api/settings/push/fcm-credentials', { method: 'DELETE' });
@@ -1130,7 +1130,7 @@ function adminPage() {
         },
 
         async deleteAPNs() {
-            if (!confirm('Remove the stored APNs certificate? iOS push will stop until you upload a new one.')) return;
+            if (!await uiConfirm('Remove the stored APNs certificate? iOS push will stop until you upload a new one.')) return;
             this.pushBusy = true;
             try {
                 this.pushCfg = await apiCall('/api/settings/push/apns', { method: 'DELETE' });
@@ -1165,7 +1165,7 @@ function adminPage() {
 
         async kickDevice(sub) {
             const name = sub.label || 'this device';
-            if (!confirm(`Remove ${name} (${sub.platform})?\n\nThis device will stop receiving push notifications immediately.`)) {
+            if (!await uiConfirm(`Remove ${name} (${sub.platform})?\n\nThis device will stop receiving push notifications immediately.`)) {
                 return;
             }
             try {
@@ -1174,7 +1174,7 @@ function adminPage() {
                 });
                 this.pushSubs = this.pushSubs.filter(s => s.device_token !== sub.device_token);
             } catch (e) {
-                alert('Failed to remove device: ' + e.message);
+                uiAlert('Failed to remove device: ' + e.message);
             }
         },
 

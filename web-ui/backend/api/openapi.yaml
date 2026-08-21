@@ -652,6 +652,54 @@ paths:
                   message:
                     type: string
 
+  /api/alerters:
+    get:
+      tags: [Monitoring]
+      summary: List alerters
+      description: Alert-only peers seen since this process started - connected or not. Never part of the fleet.
+      responses:
+        '200':
+          description: Alerters listed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerters:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        application: { type: string, description: What the peer says it is, from its handshake }
+                        nickname: { type: string, description: The admin's label; alerts prefer it }
+                        addr: { type: string }
+                        connected: { type: boolean }
+                        connected_at: { type: string, format: date-time }
+                        last_seen: { type: string, format: date-time }
+                        last_alert_at: { type: string, format: date-time }
+                        last_alert: { type: string }
+                        alerts: { type: integer }
+                  count:
+                    type: integer
+
+  /api/alerters/nickname:
+    put:
+      tags: [Admin]
+      summary: Set an alerter's nickname
+      description: The name its alerts display in place of what the application calls itself. Empty clears it.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                nickname: { type: string }
+      responses:
+        '200':
+          description: Nickname stored
+
   /api/admin/session-log:
     get:
       tags: [Admin]

@@ -22,6 +22,15 @@ func hashToken(t string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// What a token's peer turned out to be. A token is minted before its
+// box ever connects, so the kind is recorded at first handshake - a
+// sysmond says HELLO, an alerter says ALERTER - and stays empty for a
+// token nothing has used yet.
+const (
+	KindSysmond = "sysmond"
+	KindAlerter = "alerter"
+)
+
 // AgentToken is one monitoring box's credential.
 //
 // One per box, revocable here, is the whole reason daemons dial out rather
@@ -31,10 +40,122 @@ type AgentToken struct {
 	Site     string    `json:"site"`
 	Token    string    `json:"-"` // never leaves this process after creation
 	Label    string    `json:"label,omitempty"`
+	Kind     string    `json:"kind,omitempty"` // KindSysmond/KindAlerter, "" until first seen
 	Created  time.Time `json:"created"`
 	LastSeen time.Time `json:"last_seen,omitempty"`
 	LastAddr string    `json:"last_addr,omitempty"`
 	Revoked  bool      `json:"revoked,omitempty"`
+}
+
+// SetAgentLabel renames a token's human label - for alerters this is
+// the nickname alerts display. Missing records are left missing.
+func (s *Store) SetAgentLabel(site, label string) {
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		if b == nil {
+			return nil
+		}
+		blob := b.Get([]byte(site))
+		if blob == nil {
+			return nil
+		}
+		var stored map[string]json.RawMessage
+		if json.Unmarshal(blob, &stored) != nil {
+			return nil
+		}
+		enc, err := json.Marshal(label)
+		if err != nil {
+			return nil
+		}
+		if label == "" {
+			delete(stored, "label")
+		} else {
+			stored["label"] = enc
+		}
+		updated, err := json.Marshal(stored)
+		if err != nil {
+			return nil
+		}
+		return b.Put([]byte(site), updated)
+	})
+}
+
+// SetAgentKind records what a token's peer identified as at handshake.
+// Idempotent; a missing record is left missing (the handshake already
+// authenticated against it, so this only races a concurrent revoke).
+func (s *Store) SetAgentKind(site, kind string) {
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		if b == nil {
+			return nil
+		}
+		blob := b.Get([]byte(site))
+		if blob == nil {
+			return nil
+		}
+		var stored map[string]json.RawMessage
+		if json.Unmarshal(blob, &stored) != nil {
+			return nil
+		}
+		enc, err := json.Marshal(kind)
+		if err != nil {
+			return nil
+		}
+		stored["kind"] = enc
+		updated, err := json.Marshal(stored)
+		if err != nil {
+			return nil
+		}
+		return b.Put([]byte(site), updated)
+	})
+}
+
+// ClaimAgentKind records what a token's peer identified as, first
+// claim wins forever: read, check and write happen inside one bolt
+// transaction, so two concurrent first handshakes with the same fresh
+// token cannot both succeed as different kinds. Returns "" when the
+// claim stands (recorded now, already recorded, or no record to claim
+// against - the handshake already authenticated, so a missing record
+// only races a concurrent revoke), else the kind the token already
+// belongs to.
+func (s *Store) ClaimAgentKind(site, kind string) string {
+	owner := ""
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		if b == nil {
+			return nil
+		}
+		blob := b.Get([]byte(site))
+		if blob == nil {
+			return nil
+		}
+		var stored map[string]json.RawMessage
+		if json.Unmarshal(blob, &stored) != nil {
+			return nil
+		}
+		existing := ""
+		if raw, ok := stored["kind"]; ok {
+			_ = json.Unmarshal(raw, &existing)
+		}
+		if existing == kind {
+			return nil // steady state: no write, no refusal
+		}
+		if existing != "" {
+			owner = existing
+			return nil
+		}
+		enc, err := json.Marshal(kind)
+		if err != nil {
+			return nil
+		}
+		stored["kind"] = enc
+		updated, err := json.Marshal(stored)
+		if err != nil {
+			return nil
+		}
+		return b.Put([]byte(site), updated)
+	})
+	return owner
 }
 
 // GetAgentToken returns the record for a site, without the secret.

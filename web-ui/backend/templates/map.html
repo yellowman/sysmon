@@ -52,6 +52,7 @@
                 <select @change="pickSite($event.target.value)" :disabled="!sitePickerSites.length"
                         class="text-sm border border-gray-200 rounded px-2 py-1.5 bg-white max-w-[14rem] disabled:text-gray-400">
                     <option x-show="!sitePickerSites.length" value="">No connected sysmond</option>
+                    <option x-show="sitePickerSites.length && !site" value="" :selected="!site">Choose a box&#8230;</option>
                     <template x-for="s in sitePickerSites" :key="s.site">
                         <option :value="s.site" :selected="site === s.site"
                                 x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
@@ -431,6 +432,7 @@ function mapPage() {
         // site save is staged and delivered over the agent link.
         site: localStorage.getItem('sysmon-site') || '',
         sitePickerSites: [],
+        mintedCount: 0,
         siteLabel() {
             const s = this.sitePickerSites.find(x => x.site === this.site);
             return s ? (s.description || s.site) : this.site;
@@ -440,6 +442,7 @@ function mapPage() {
             try {
                 const r = await apiCall('/api/sites');
                 this.sitePickerSites = r.sites || [];
+                this.mintedCount = r.minted ?? this.sitePickerSites.length;
             } catch (e) {
                 this.sitePickerSites = [];
                 this.notice = 'The site list could not be loaded - the picker is empty, but the current selection still applies.';
@@ -448,7 +451,10 @@ function mapPage() {
                 this.sitePickerSites.push({ site: this.site,
                     description: this.site + ' (no longer in the fleet)', reachable: false });
             }
-            if (!this.site && this.sitePickerSites.length) {
+            // Only one box minted: no ambiguity, take it. More than one
+            // minted - connected or not - is a question the operator
+            // answers, not a guess this page makes.
+            if (!this.site && this.sitePickerSites.length && this.mintedCount <= 1) {
                 this.site = this.sitePickerSites[0].site;
             }
         },
@@ -511,6 +517,12 @@ function mapPage() {
             await this.loadSitesForPicker();
             if (!this.sitePickerSites.length) {
                 this.notice = 'No sysmond is connected over the agent link yet - there is nothing to draw. Add a box from the Fleet page.';
+                return;
+            }
+            // Several boxes minted, none chosen: draw nothing. Which
+            // box the map shows (and edits) is a question, not a guess.
+            if (!this.site) {
+                this.notice = 'More than one monitoring box is minted - pick which one to draw from the Site selector above.';
                 return;
             }
             // The map is drawn from the CONFIG, so paint as soon as that
@@ -701,7 +713,7 @@ function mapPage() {
         // what was saved) and go back to automatic placement. This one
         // does write, so it needs confirming.
         async resetPositions() {
-            if (!confirm('Discard every hand-placed position, including saved ones, and return to automatic layout?')) return;
+            if (!await uiConfirm('Discard every hand-placed position, including saved ones, and return to automatic layout?')) return;
             this.positions = {};
             await this.savePositions();
             this.layout();
@@ -1335,8 +1347,8 @@ function mapPage() {
         },
 
         enterEdit() { this.editMode = true; },
-        exitEdit() {
-            if (this.dirty && !confirm('Discard unsaved map changes?')) return;
+        async exitEdit() {
+            if (this.dirty && !await uiConfirm('Discard unsaved map changes?')) return;
             this.editMode = false;
             this.linking = null;
             this.discardDraft();
@@ -1375,10 +1387,10 @@ function mapPage() {
             this.layout();
         },
 
-        deleteHost(host) {
+        async deleteHost(host) {
             // An unnamed draft is not in the config yet - just drop it.
             if (this.draft && host === this.draft) { this.discardDraft(); return; }
-            if (!confirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
+            if (!await uiConfirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
             const i = this.hosts.indexOf(host);
             if (i >= 0) this.hosts.splice(i, 1);
             this.hosts.forEach(h => {

@@ -948,7 +948,13 @@ func (s *Service) notifyAll(title, subtitle, body string, data fcmData, prevStat
 	fcm, apns, _ := s.clients()
 	subs := s.ListSubscriptions()
 	sent := 0
+	// badge < 0 means "say nothing about the badge": alerter alerts
+	// have no view of the fleet's unacked count, and a badge of 0
+	// would wrongly clear the icon.
 	badgePtr := &badge
+	if badge < 0 {
+		badgePtr = nil
+	}
 
 	hostname, status, collapseKey := data.Hostname, data.Status, data.Object
 	for _, sub := range subs {
@@ -1020,6 +1026,45 @@ func (s *Service) notifyAll(title, subtitle, body string, data fcmData, prevStat
 		PrevStatus: prevStatus,
 		Recipients: sent,
 	})
+}
+
+// ExternalAlert fans out an alert from an alerter - a peer that is not
+// a sysmond but pages through the same pipeline with the same
+// priorities: CRITICAL is loud, everything else is quiet. source names
+// the alerter, object the thing it is alerting about; together they
+// form the collapse key, so a newer alert about the same thing replaces
+// the older one on the phones, exactly as host transitions do. Honors
+// the master enable switch the same way the state watcher does.
+// display is what the alert SHOWS as its sender - the operator's
+// nickname, or what the application calls itself, falling back to
+// source. source alone is identity: it keys the collapse and the logs,
+// so a rename never re-keys anything.
+func (s *Service) ExternalAlert(source, display, object, status, text string) {
+	if !s.Enabled() {
+		log.Printf("push: alerter %s sent %s %s but push is disabled - not delivered", source, status, object)
+		return
+	}
+	status = strings.ToUpper(status)
+	title := fmt.Sprintf("%s %s", object, status)
+	critical := status == "CRITICAL"
+	collapse := source + ":" + object
+	if display == "" {
+		display = source
+	}
+	// The sender's name rides in the body so Android shows it too;
+	// subtitles only render on iOS.
+	body := text
+	if display != object {
+		body = display + ": " + text
+	}
+
+	log.Printf("push: alerter %s: %s %s - notifying subscribers", source, status, object)
+	s.notifyAll(title, display, body, fcmData{
+		Hostname: object,
+		Object:   collapse,
+		Status:   status,
+		Type:     "alerter",
+	}, "", -1, critical)
 }
 
 func (s *Service) watchLoop() {

@@ -302,6 +302,123 @@
         function hostLabel(h) { return h.local_name || h.object_name || h.hostname; }
         function hostSite(h) { return h.site && h.site !== 'local' ? h.site : ''; }
 
+        // In-page dialogs, replacing window.alert/confirm/prompt across
+        // the UI. The native ones look like the browser, not this page,
+        // and block the event loop; these draw a card styled like the
+        // rest of the UI and return promises:
+        //   uiAlert(msg)            resolves when dismissed
+        //   uiConfirm(msg, opts)    resolves true/false
+        //   uiPrompt(msg, initial)  resolves the string, or null on cancel
+        // opts: title, okText, cancelText, danger (red confirm button).
+        // Calls queue: a dialog opened while one is up waits its turn.
+        const uiDialog = (() => {
+            let chain = Promise.resolve();
+
+            function show(kind, message, opts) {
+                opts = opts || {};
+                return new Promise(resolve => {
+                    const overlay = document.createElement('div');
+                    overlay.className = 'fixed inset-0 z-50 bg-gray-900 bg-opacity-40 flex items-center justify-center p-4';
+
+                    const card = document.createElement('div');
+                    card.className = 'bg-white rounded-lg shadow-xl border border-gray-200 w-full max-w-md';
+                    overlay.appendChild(card);
+
+                    const title = document.createElement('div');
+                    title.className = 'px-5 pt-4 text-base font-semibold text-gray-900';
+                    title.textContent = opts.title ||
+                        (kind === 'confirm' ? 'Please confirm' : kind === 'prompt' ? 'Input needed' : 'Notice');
+                    card.appendChild(title);
+
+                    const body = document.createElement('div');
+                    body.className = 'px-5 py-3 text-sm text-gray-700 whitespace-pre-line break-words';
+                    body.textContent = message == null ? '' : String(message);
+                    card.appendChild(body);
+
+                    let input = null;
+                    if (kind === 'prompt') {
+                        input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = opts.value != null ? String(opts.value) : '';
+                        input.placeholder = opts.placeholder || '';
+                        input.className = 'mx-5 mb-2 block px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+                        input.style.width = 'calc(100% - 2.5rem)';
+                        card.appendChild(input);
+                    }
+
+                    const footer = document.createElement('div');
+                    footer.className = 'px-5 py-3 mt-2 bg-gray-50 rounded-b-lg flex justify-end gap-2';
+                    card.appendChild(footer);
+
+                    const cancelValue = kind === 'prompt' ? null : kind === 'confirm' ? false : undefined;
+                    function close(result) {
+                        document.removeEventListener('keydown', onKey, true);
+                        overlay.remove();
+                        resolve(result);
+                    }
+
+                    if (kind !== 'alert') {
+                        const cancelBtn = document.createElement('button');
+                        cancelBtn.type = 'button';
+                        cancelBtn.textContent = opts.cancelText || 'Cancel';
+                        cancelBtn.className = 'px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100';
+                        cancelBtn.addEventListener('click', () => close(cancelValue));
+                        footer.appendChild(cancelBtn);
+                    }
+
+                    const okBtn = document.createElement('button');
+                    okBtn.type = 'button';
+                    okBtn.textContent = opts.okText || 'OK';
+                    okBtn.className = 'px-4 py-2 text-sm rounded-lg text-white ' +
+                        (opts.danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700');
+                    okBtn.addEventListener('click', () =>
+                        close(kind === 'prompt' ? input.value : kind === 'confirm' ? true : undefined));
+                    footer.appendChild(okBtn);
+
+                    // The backdrop is a cancel, like clicking away from a menu.
+                    overlay.addEventListener('mousedown', e => {
+                        if (e.target === overlay) close(cancelValue);
+                    });
+
+                    function onKey(e) {
+                        if (e.key === 'Escape') {
+                            e.preventDefault(); e.stopPropagation();
+                            close(cancelValue);
+                        } else if (e.key === 'Enter' && (kind !== 'prompt' || e.target === input)) {
+                            e.preventDefault(); e.stopPropagation();
+                            okBtn.click();
+                        }
+                    }
+                    document.addEventListener('keydown', onKey, true);
+
+                    document.body.appendChild(overlay);
+                    (input || okBtn).focus();
+                    if (input) input.select();
+                });
+            }
+
+            function queued(kind, message, opts) {
+                const run = chain.then(() => show(kind, message, opts));
+                chain = run.then(() => {}, () => {});
+                return run;
+            }
+
+            return {
+                alert: (m, o) => queued('alert', m, o),
+                confirm: (m, o) => queued('confirm', m, o),
+                prompt: (m, o) => queued('prompt', m, o),
+            };
+        })();
+        function uiAlert(message, opts) { return uiDialog.alert(message, opts); }
+        function uiConfirm(message, opts) { return uiDialog.confirm(message, opts); }
+        // Second argument mirrors native prompt(msg, initial); an options
+        // object also works.
+        function uiPrompt(message, valueOrOpts) {
+            const opts = (valueOrOpts !== null && typeof valueOrOpts === 'object')
+                ? valueOrOpts : { value: valueOrOpts };
+            return uiDialog.prompt(message, opts);
+        }
+
         // The site filter as a query parameter, for pages that fetch.
         function siteQuery(sep) {
             const v = localStorage.getItem('sysmon-site') || '';
@@ -460,7 +577,7 @@
                 sessionStorage.clear();
                 window.location.href = '/login.html';
             } else {
-                alert('Logout failed: the server did not confirm the session was ended.');
+                uiAlert('Logout failed: the server did not confirm the session was ended.');
             }
         }
 

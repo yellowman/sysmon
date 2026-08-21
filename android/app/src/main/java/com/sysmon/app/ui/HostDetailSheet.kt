@@ -58,6 +58,9 @@ fun HostDetailSheet(host: Host, onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onBackground
                 )
+                if (host.siteTag.isNotEmpty()) {
+                    SiteTag(host.siteTag)
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

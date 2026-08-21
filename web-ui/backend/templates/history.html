@@ -55,6 +55,10 @@
             <thead class="bg-gray-50">
                 <tr>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">When</th>
+                    <!-- The owning sysmond, in its own (deliberately small) column
+                         instead of overloading the host name as "site:host".
+                         Absent entirely on a single-box install. -->
+                    <th x-show="anySite" class="px-2 py-3 text-left text-[10px] font-medium text-gray-400 uppercase w-px">Box</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Host</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transition</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Was in previous state</th>
@@ -67,12 +71,11 @@
                             <div class="text-sm text-gray-900" x-text="age(ev.timestamp)"></div>
                             <div class="text-xs text-gray-400" x-text="formatTime(ev.timestamp)"></div>
                         </td>
+                        <td x-show="anySite" class="px-2 py-3 whitespace-nowrap w-px">
+                            <span class="text-[11px] text-gray-400 mono" x-text="hostSite(ev)"></span>
+                        </td>
                         <td class="px-4 py-3">
-                            <div class="text-sm font-medium text-gray-900 mono">
-                                <span x-text="hostLabel(ev)"></span>
-                                <span x-show="hostSite(ev)" class="ml-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-xs"
-                                      x-text="hostSite(ev)"></span>
-                            </div>
+                            <div class="text-sm font-medium text-gray-900 mono" x-text="hostLabel(ev)"></div>
                             <div class="text-xs text-gray-400" x-text="ev.description || ev.hostname"></div>
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap">
@@ -97,6 +100,10 @@
 function historyPage() {
     return {
         events: [],
+        // Whether any event belongs to a named site - controls the Box
+        // column's existence. Computed once per fetch, not per rendered
+        // cell: a getter here is re-evaluated by every row's x-show.
+        anySite: false,
         available: true,
         loading: true,
         filter: 'all',
@@ -150,6 +157,8 @@ function historyPage() {
             try {
                 const r = await apiCall('/api/monitoring/history?limit=500&window=' + this.window);
                 this.events = r.events || [];
+                // A single-box install keeps the old four-column table.
+                this.anySite = this.events.some(ev => hostSite(ev));
                 this.available = r.available !== false;
                 this.loadFails = 0;
                 this.staleError = '';

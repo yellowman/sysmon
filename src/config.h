@@ -12,6 +12,7 @@
 #include <netdb.h>
 #include <string.h>
 #include <pwd.h>
+#include <grp.h>
 #include <limits.h>
 #if (defined(__svr4__) || defined(unixware))   /* slo-laris */
 #include <sys/filio.h>
