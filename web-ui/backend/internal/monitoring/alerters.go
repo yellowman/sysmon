@@ -78,6 +78,16 @@ type alerter struct {
 	mu   sync.Mutex
 	info AlerterInfo
 	conn net.Conn
+	// pending is this identity's one delivery queue, drained by one
+	// goroutine for the life of the process. It belongs to the NAME,
+	// not the socket: when the alerter reconnects, the replacement
+	// connection feeds the same queue, so an OK sent after a reconnect
+	// can never overtake a CRITICAL accepted before it - with one
+	// queue and one dispatcher per socket, two dispatchers raced and
+	// the collapse key could leave the phone stuck on the stale state.
+	// It also caps the identity at one queue's worth of backlog, where
+	// per-connection queues let every reconnect abandon another 64.
+	pending chan pendingAlert
 }
 
 // pendingAlert is one parsed alert waiting on the push pipeline.
@@ -107,11 +117,21 @@ func (s *Service) alerterDisplayName(a *alerter) string {
 
 // SetAlertSink names the function alerter traffic is delivered to -
 // in practice push.Service.ExternalAlert, re-pointed whenever the push
-// service is hot-swapped. Nil means alerts are acknowledged and dropped,
-// which is correct for a deployment that has not configured push.
+// service is hot-swapped.
 func (s *Service) SetAlertSink(fn func(source, display, object, status, text string)) {
 	s.alertSinkMu.Lock()
 	s.alertSink = fn
+	s.alertSinkMu.Unlock()
+}
+
+// SetAlertGate names a function that says whether an alert accepted now
+// actually has somewhere to go - "" for yes, else the refusal reason.
+// Without it (or without a sink at all), ALERT lines are refused rather
+// than acknowledged into the void: for a paging interface, "444 <why>"
+// beats a 333 for a page that was never going to be sent.
+func (s *Service) SetAlertGate(fn func() string) {
+	s.alertSinkMu.Lock()
+	s.alertGate = fn
 	s.alertSinkMu.Unlock()
 }
 
@@ -119,6 +139,22 @@ func (s *Service) alertSinkFn() func(source, display, object, status, text strin
 	s.alertSinkMu.Lock()
 	defer s.alertSinkMu.Unlock()
 	return s.alertSink
+}
+
+// alertRefusal is why an ALERT cannot be accepted right now, or "".
+func (s *Service) alertRefusal() string {
+	s.alertSinkMu.Lock()
+	sink, gate := s.alertSink, s.alertGate
+	s.alertSinkMu.Unlock()
+	if sink == nil {
+		return "no push delivery is configured on this server"
+	}
+	if gate != nil {
+		if reason := gate(); reason != "" {
+			return reason
+		}
+	}
+	return ""
 }
 
 // Alerters lists every alerter seen since this process started, by
@@ -139,14 +175,16 @@ func (s *Service) Alerters() []AlerterInfo {
 
 // readLineBounded returns the next line, holding at most maxLineBytes
 // of it in memory - the rest of an overlong line is read and discarded,
-// never buffered. One hostile line costs at most its own truncation,
-// not the server's memory.
-func readLineBounded(r *bufio.Reader) (string, error) {
+// never buffered, and the caller is told it happened. One hostile line
+// costs at most its own truncation, not the server's memory; and a
+// protocol line the server did not read in full must be refused, not
+// silently processed as something shorter than what was sent.
+func readLineBounded(r *bufio.Reader) (line string, truncated bool, err error) {
 	var buf []byte
 	for {
-		chunk, isPrefix, err := r.ReadLine()
-		if err != nil {
-			return "", err
+		chunk, isPrefix, rerr := r.ReadLine()
+		if rerr != nil {
+			return "", false, rerr
 		}
 		if len(buf) < maxLineBytes {
 			take := maxLineBytes - len(buf)
@@ -154,9 +192,14 @@ func readLineBounded(r *bufio.Reader) (string, error) {
 				take = len(chunk)
 			}
 			buf = append(buf, chunk[:take]...)
+			if take < len(chunk) {
+				truncated = true
+			}
+		} else if len(chunk) > 0 {
+			truncated = true
 		}
 		if !isPrefix {
-			return string(buf), nil
+			return string(buf), truncated, nil
 		}
 	}
 }
@@ -180,26 +223,13 @@ func readLineBounded(r *bufio.Reader) (string, error) {
 // Delivery is decoupled from the reply: a push fan-out can take tens of
 // seconds against a slow provider, and holding the 333 back that long
 // makes a well-behaved client time out, reconnect, and resend the same
-// page. One dispatcher goroutine per connection keeps alerts in order;
-// it drains what is queued even after the connection drops.
+// page. The queue and its dispatcher belong to the alerter's identity
+// (see registerAlerter), so a reconnect keeps one ordered stream.
 func (s *Service) runAlerter(name, application, remote string, conn net.Conn, reader *bufio.Reader) {
 	a := s.registerAlerter(name, application, remote, conn)
 
-	pending := make(chan pendingAlert, alertQueueDepth)
-	go func() {
-		for p := range pending {
-			if sink := s.alertSinkFn(); sink != nil {
-				sink(p.source, p.display, p.object, p.status, p.text)
-			} else {
-				log.Printf("agents: alerter %s sent %s %s with no push service configured - dropped",
-					p.source, p.status, p.object)
-			}
-		}
-	}()
-
 	defer func() {
 		conn.Close()
-		close(pending)
 		// A reconnect replaces this connection on the shared record
 		// before this goroutine notices its read failing - only the
 		// record's CURRENT connection may declare it disconnected, or
@@ -216,9 +246,16 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 	}()
 
 	for {
-		line, err := readLineBounded(reader)
+		line, truncated, err := readLineBounded(reader)
 		if err != nil {
 			return
+		}
+		if truncated {
+			// The server did not read what the peer sent; processing
+			// the readable prefix would silently accept a different
+			// message. Refuse it and keep the connection.
+			fmt.Fprintf(conn, "444 line too long - maximum %d bytes\r\n", maxLineBytes)
+			continue
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -241,7 +278,7 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 			fmt.Fprintf(conn, "333 bye\r\n")
 			return
 		case "ALERT":
-			if msg := s.handleAlertLine(a, name, line, pending); msg == "" {
+			if msg := s.handleAlertLine(a, name, line); msg == "" {
 				fmt.Fprintf(conn, "333 ok\r\n")
 			} else {
 				fmt.Fprintf(conn, "444 %s\r\n", msg)
@@ -254,7 +291,7 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 
 // handleAlertLine parses "ALERT <status> <object> <text...>" and queues
 // it for delivery. Returns "" on success, else the complaint for the 444.
-func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- pendingAlert) string {
+func (s *Service) handleAlertLine(a *alerter, name, line string) string {
 	fields := strings.SplitN(line, " ", 4)
 	if len(fields) < 3 {
 		return "usage: ALERT <CRITICAL|WARNING|OK> <object> <text>"
@@ -277,6 +314,13 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- 
 		text = fmt.Sprintf("%s reports %s %s", name, object, status)
 	}
 
+	// An alert with no delivery path is refused, not acknowledged into
+	// the void - the sender is the one party that can do something
+	// about it (log locally, page some other way).
+	if reason := s.alertRefusal(); reason != "" {
+		return reason + " - alert not accepted"
+	}
+
 	p := pendingAlert{
 		source:  name,
 		display: s.alerterDisplayName(a),
@@ -285,7 +329,7 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- 
 		text:    text,
 	}
 	select {
-	case pending <- p:
+	case a.pending <- p:
 	default:
 		// The push pipeline is badly backed up. The alert is NOT
 		// accepted, and the client must hear that: a 333 here would
@@ -310,7 +354,10 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, pending chan<- 
 
 // registerAlerter puts a connection into the registry. A name
 // reconnecting replaces its old link rather than adding a second, the
-// same rule adoptAgent applies to daemons.
+// same rule adoptAgent applies to daemons. The first sight of a name
+// also starts its dispatcher: one goroutine per identity, for the life
+// of the process, so every connection that ever speaks for this name
+// feeds one ordered queue.
 func (s *Service) registerAlerter(name, application, remote string, conn net.Conn) *alerter {
 	s.alertersMu.Lock()
 	defer s.alertersMu.Unlock()
@@ -331,7 +378,8 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 		return old
 	}
 	a := &alerter{
-		conn: conn,
+		conn:    conn,
+		pending: make(chan pendingAlert, alertQueueDepth),
 		info: AlerterInfo{
 			Name:        name,
 			Application: application,
@@ -341,5 +389,23 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 		},
 	}
 	s.alerters[name] = a
+	go s.dispatchAlerts(a)
 	return a
+}
+
+// dispatchAlerts is an alerter identity's one delivery worker. It never
+// exits: the registry keeps the record (and this goroutine) for the
+// life of the process, and the count of identities is bounded by the
+// count of minted tokens.
+func (s *Service) dispatchAlerts(a *alerter) {
+	for p := range a.pending {
+		if sink := s.alertSinkFn(); sink != nil {
+			sink(p.source, p.display, p.object, p.status, p.text)
+		} else {
+			// Only reachable if the sink was unset between accept and
+			// dispatch; the accept-time gate refuses the common case.
+			log.Printf("agents: alerter %s sent %s %s with no push service configured - dropped",
+				p.source, p.status, p.object)
+		}
+	}
 }

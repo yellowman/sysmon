@@ -48,9 +48,11 @@ type AgentToken struct {
 }
 
 // SetAgentLabel renames a token's human label - for alerters this is
-// the nickname alerts display. Missing records are left missing.
-func (s *Store) SetAgentLabel(site, label string) {
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+// the nickname alerts display. Missing records are left missing; a
+// storage failure is the caller's to report, not to swallow - the UI
+// must never confirm a rename the disk refused.
+func (s *Store) SetAgentLabel(site, label string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketAgents)
 		if b == nil {
 			return nil
@@ -60,12 +62,12 @@ func (s *Store) SetAgentLabel(site, label string) {
 			return nil
 		}
 		var stored map[string]json.RawMessage
-		if json.Unmarshal(blob, &stored) != nil {
-			return nil
+		if err := json.Unmarshal(blob, &stored); err != nil {
+			return fmt.Errorf("agent record %s is unreadable: %w", site, err)
 		}
 		enc, err := json.Marshal(label)
 		if err != nil {
-			return nil
+			return err
 		}
 		if label == "" {
 			delete(stored, "label")
@@ -74,7 +76,7 @@ func (s *Store) SetAgentLabel(site, label string) {
 		}
 		updated, err := json.Marshal(stored)
 		if err != nil {
-			return nil
+			return err
 		}
 		return b.Put([]byte(site), updated)
 	})
@@ -113,14 +115,16 @@ func (s *Store) SetAgentKind(site, kind string) {
 // ClaimAgentKind records what a token's peer identified as, first
 // claim wins forever: read, check and write happen inside one bolt
 // transaction, so two concurrent first handshakes with the same fresh
-// token cannot both succeed as different kinds. Returns "" when the
-// claim stands (recorded now, already recorded, or no record to claim
-// against - the handshake already authenticated, so a missing record
-// only races a concurrent revoke), else the kind the token already
-// belongs to.
-func (s *Store) ClaimAgentKind(site, kind string) string {
+// token cannot both succeed as different kinds. Returns ("", nil) when
+// the claim stands (recorded now, already recorded, or no record to
+// claim against - the handshake already authenticated, so a missing
+// record only races a concurrent revoke), the owning kind when the
+// token already belongs to the other class, and a non-nil error when
+// storage failed - in which case the claim did NOT stick and the
+// caller must fail closed rather than admit an unbound peer.
+func (s *Store) ClaimAgentKind(site, kind string) (string, error) {
 	owner := ""
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketAgents)
 		if b == nil {
 			return nil
@@ -130,8 +134,8 @@ func (s *Store) ClaimAgentKind(site, kind string) string {
 			return nil
 		}
 		var stored map[string]json.RawMessage
-		if json.Unmarshal(blob, &stored) != nil {
-			return nil
+		if err := json.Unmarshal(blob, &stored); err != nil {
+			return fmt.Errorf("agent record %s is unreadable: %w", site, err)
 		}
 		existing := ""
 		if raw, ok := stored["kind"]; ok {
@@ -146,16 +150,19 @@ func (s *Store) ClaimAgentKind(site, kind string) string {
 		}
 		enc, err := json.Marshal(kind)
 		if err != nil {
-			return nil
+			return err
 		}
 		stored["kind"] = enc
 		updated, err := json.Marshal(stored)
 		if err != nil {
-			return nil
+			return err
 		}
 		return b.Put([]byte(site), updated)
 	})
-	return owner
+	if err != nil {
+		return "", err
+	}
+	return owner, nil
 }
 
 // GetAgentToken returns the record for a site, without the secret.
@@ -222,15 +229,17 @@ func (s *Store) NewAgentToken(site, label string) (string, error) {
 }
 
 // CheckAgentToken reports whether a token may claim a site, and records
-// the sighting when it may.
-func (s *Store) CheckAgentToken(site, token, addr string) bool {
+// the sighting when it may. A storage failure fails closed: an
+// authenticator that cannot read or update its own store must refuse,
+// not guess.
+func (s *Store) CheckAgentToken(site, token, addr string) (bool, error) {
 	var stored struct {
 		AgentToken
 		Hash string `json:"hash"`
 	}
 
 	ok := false
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketAgents)
 		if b == nil {
 			return nil
@@ -240,7 +249,7 @@ func (s *Store) CheckAgentToken(site, token, addr string) bool {
 			return nil
 		}
 		if err := json.Unmarshal(blob, &stored); err != nil {
-			return nil
+			return fmt.Errorf("agent record %s is unreadable: %w", site, err)
 		}
 		if stored.Revoked {
 			return nil
@@ -256,11 +265,14 @@ func (s *Store) CheckAgentToken(site, token, addr string) bool {
 		stored.LastAddr = addr
 		updated, err := json.Marshal(stored)
 		if err != nil {
-			return nil
+			return err
 		}
 		return b.Put([]byte(site), updated)
 	})
-	return ok
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
 }
 
 // ListAgentTokens returns what is known about each box, without the

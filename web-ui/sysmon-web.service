@@ -12,14 +12,23 @@ Type=simple
 User=www-data
 Group=www-data
 # -foreground: don't self-daemonize, so systemd (Type=simple) tracks the
-#   process directly. sysmon-web daemonizes by default when run by hand.
-# Add -debug to send logs to the journal while troubleshooting.
+#   process directly, and normal logs flow to the journal. -debug adds
+#   verbose diagnostics on top; it is not the price of having logs.
 # Running as User/Group=www-data means the socket is already owned by the
 # web server's user, so -socket-user/-socket-group aren't needed here.
-# The ExecStartPre lines (run as root via "+") create the socket's parent
-# directory, since www-data can't mkdir under root-owned /var/www.
+#
+# The ExecStartPre lines (run as root via "+") prepare every path the
+# unprivileged process cannot create for itself. The binary's own
+# root-time directory preparation runs only when it STARTS as root;
+# under User=www-data it never does, so the unit has to do it:
+#   /var/www/run                     the FastCGI socket's directory
+#   /var/backups/sysmon              config backups
+#   /var/log/sysmon-web-audit.log    the audit log
+# (/var/lib/sysmon is StateDirectory= below, which systemd owns.)
 ExecStartPre=+/bin/mkdir -p /var/www/run
 ExecStartPre=+/bin/chown www-data:www-data /var/www/run
+ExecStartPre=+/usr/bin/install -d -o www-data -g www-data /var/backups/sysmon
+ExecStartPre=+/bin/sh -c 'touch /var/log/sysmon-web-audit.log && chown www-data:www-data /var/log/sysmon-web-audit.log'
 ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
   -socket /var/www/run/sysmon-web.sock \
@@ -48,7 +57,9 @@ ProtectHome=true
 # and www-data cannot write root-owned /etc anyway). To allow it,
 # add a drop-in with "ReadWritePaths=-/etc" and give www-data write
 # access to the file and directory - or edit the file outside the UI.
-ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log
+# The audit log alone, not all of /var/log: this service has no
+# business writing anyone else's logs.
+ReadWritePaths=/var/www/run /var/lib/sysmon /var/backups/sysmon /var/log/sysmon-web-audit.log
 StateDirectory=sysmon
 
 [Install]

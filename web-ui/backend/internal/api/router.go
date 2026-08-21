@@ -81,6 +81,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// service is hot-swapped (see reconfigurePush).
 	if pushSvc != nil {
 		mon.SetAlertSink(pushSvc.ExternalAlert)
+		mon.SetAlertGate(pushSvc.DeliveryGate)
 	}
 
 	// Configuration endpoints (admin only - config contains secrets)
@@ -771,7 +772,11 @@ func (r *Router) handleAlerterNickname(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	body.Nickname = monitoring.TruncateRunes(body.Nickname, 128)
-	r.settings.SetAgentLabel(body.Name, body.Nickname)
+	if err := r.settings.SetAgentLabel(body.Name, body.Nickname); err != nil {
+		// Never confirm a rename the disk refused.
+		r.sendError(w, http.StatusInternalServerError, "could not store the nickname: "+err.Error())
+		return
+	}
 	r.sendJSON(w, map[string]string{"name": body.Name, "nickname": body.Nickname})
 }
 
@@ -2395,6 +2400,7 @@ func (r *Router) reconfigurePush(pc settings.PushConfig) bool {
 	// the dead service (harmlessly - a stopped service drops them - but
 	// silently).
 	r.monitoring.SetAlertSink(svc.ExternalAlert)
+	r.monitoring.SetAlertGate(svc.DeliveryGate)
 	return true
 }
 

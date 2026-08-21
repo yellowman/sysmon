@@ -48,11 +48,13 @@
             <div class="flex items-start justify-between gap-3 border-b border-gray-100 p-4">
                 <div>
                     <h2 class="text-base font-bold text-gray-900">
-                        Site <span class="mono" x-text="fresh.site"></span> is ready
+                        <span x-text="fresh.kind === 'alerter' ? 'Alerter' : 'Site'"></span>
+                        <span class="mono" x-text="fresh.site"></span> is ready
                     </h2>
-                    <p class="text-xs text-gray-500 mt-1">
-                        Do these two things on the box, then start sysmond.
-                    </p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="fresh.kind === 'alerter'
+                           ? 'Give your alerter the greeting below and the CA certificate.'
+                           : 'Do these two things on the box, then start sysmond.'"></p>
                 </div>
                 <button @click="closeFresh()" class="text-gray-400 hover:text-gray-700 text-sm px-2 py-1">
                     <i class="fas fa-times"></i>
@@ -69,9 +71,10 @@
 
                 <div>
                     <div class="flex items-center justify-between gap-2 mb-1">
-                        <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                            1. Put these lines in /etc/sysmon.conf
-                        </h3>
+                        <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500"
+                            x-text="fresh.kind === 'alerter'
+                                ? '1. Greet with this line (protocol: docs/ALERTERS.md)'
+                                : '1. Put these lines in /etc/sysmon.conf'"></h3>
                         <button @click="copySnippet()"
                                 class="px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 whitespace-nowrap">
                             <i class="fas fa-copy mr-1"></i><span x-text="copied ? 'Copied' : 'Copy all'"></span>
@@ -99,13 +102,14 @@
                     </p>
                 </div>
 
-                <div class="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                <div x-show="fresh.kind !== 'alerter'"
+                     class="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
                     <i class="fas fa-bell mr-1"></i>
-                    Not a sysmond? The same token and CA serve an
-                    <span class="font-semibold">alert-only peer</span>: skip the
-                    sysmon.conf lines and greet with
-                    <span class="mono">ALERTER &lt;name&gt; &lt;token&gt;</span>
-                    instead - see <span class="mono">docs/ALERTERS.md</span>.
+                    Alert-only peers get their own credential type - mint with
+                    <span class="font-semibold">External alerter</span> selected
+                    and this panel shows the
+                    <span class="mono">ALERTER</span> greeting instead.
+                    See <span class="mono">docs/ALERTERS.md</span>.
                 </div>
             </div>
 
@@ -139,7 +143,22 @@
                 <input type="text" x-model="newAgent.label" placeholder="Metro Station - rack 4"
                        class="px-3 py-1.5 border border-gray-200 rounded text-sm w-full">
                 <p class="text-[10px] text-gray-400 mt-1">
-                    For people. Write down which machine this is - nothing else records it.
+                    For people. Which machine this is - and for an alerter, the
+                    name its alerts display.
+                </p>
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Credential type</label>
+                <div class="flex rounded border border-gray-200 overflow-hidden text-xs">
+                    <button type="button" @click="newAgent.kind = 'sysmond'"
+                            :class="newAgent.kind !== 'alerter' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                            class="px-3 py-2">Monitoring box</button>
+                    <button type="button" @click="newAgent.kind = 'alerter'"
+                            :class="newAgent.kind === 'alerter' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                            class="px-3 py-2">External alerter</button>
+                </div>
+                <p class="text-[10px] text-gray-400 mt-1">
+                    Decided here, not by whoever connects first.
                 </p>
             </div>
             <button @click="mint(false)" :disabled="!newAgent.site || busy"
@@ -154,6 +173,7 @@
             <thead class="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                 <tr>
                     <th class="px-3 py-2 text-left">Site</th>
+                    <th class="px-3 py-2 text-left">Type</th>
                     <th class="px-3 py-2 text-left">Label</th>
                     <th class="px-3 py-2 text-left">Last address</th>
                     <th class="px-3 py-2 text-left">Last seen</th>
@@ -165,6 +185,8 @@
                 <template x-for="a in agents" :key="a.site">
                     <tr class="border-t border-gray-100" :class="a.revoked ? 'opacity-50' : ''">
                         <td class="px-3 py-2 mono font-medium" x-text="a.site"></td>
+                        <td class="px-3 py-2 text-xs"
+                            x-text="a.kind === 'alerter' ? 'alerter' : (a.kind === 'sysmond' ? 'box' : '-')"></td>
                         <td class="px-3 py-2 text-gray-600" x-text="a.label || ''"></td>
                         <td class="px-3 py-2 mono text-xs" x-text="a.last_addr || '-'"></td>
                         <td class="px-3 py-2 text-xs" x-text="seen(a)"></td>
@@ -212,7 +234,7 @@ function agentsPage() {
     return {
         agents: [],
         showAdd: false,
-        newAgent: { site: '', label: '' },
+        newAgent: { site: '', label: '', kind: 'sysmond' },
         fresh: {},
         copied: false,
         copiedOnce: false,
@@ -258,6 +280,14 @@ function agentsPage() {
             // Alpine evaluates this while the modal is hidden and fresh
             // is {}, so an empty answer has to come first.
             if (!this.fresh.token) return '';
+            if (this.fresh.kind === 'alerter') {
+                // The greeting line, plus where to send it. The server
+                // supplies both; the fallback builds them the same way.
+                return (this.fresh.greeting ||
+                        'ALERTER ' + this.fresh.site + ' ' + this.fresh.token + ' [application name...]') +
+                       '\n\n# TLS to ' + (this.fresh.dial || (window.location.hostname + ':1347')) +
+                       ', verified against aggregator-ca.pem';
+            }
             if (this.fresh.config) return this.fresh.config;
             const label = (this.fresh.label || this.fresh.site || '')
                 .replace(/"/g, "'").replace(/;/g, ',').replace(/[\x00-\x1f\x7f]/g, ' ');
@@ -308,14 +338,16 @@ function agentsPage() {
         async mint(replace) {
             const site = (this.newAgent.site || '').trim();
             const label = (this.newAgent.label || '').trim();
+            const kind = this.newAgent.kind === 'alerter' ? 'alerter' : 'sysmond';
             try {
                 const d = await this.post('/api/settings/agents',
-                                          {site: site, label: label, replace: !!replace});
+                                          {site: site, label: label, kind: kind, replace: !!replace});
                 this.fresh = {site: d.site, token: d.token, label: label,
+                              kind: d.kind, greeting: d.greeting, dial: d.dial,
                               config: d.config};
                 this.copiedOnce = false;
                 this.showAdd = false;
-                this.newAgent = {site: '', label: ''};
+                this.newAgent = {site: '', label: '', kind: 'sysmond'};
                 this.say('');
             } catch (e) { this.say(e.message, true); }
         },
@@ -329,7 +361,9 @@ function agentsPage() {
                          'The box using the current one stops reporting until you put ' +
                          'the new token on it. It keeps monitoring and paging.\n\n' +
                          'Last seen: ' + when)) return;
-            this.newAgent = {site: a.site, label: a.label || ''};
+            // A replacement keeps the credential's recorded type.
+            this.newAgent = {site: a.site, label: a.label || '',
+                             kind: a.kind === 'alerter' ? 'alerter' : 'sysmond'};
             await this.mint(true);
         },
 

@@ -1039,8 +1039,21 @@ func (s *Service) notifyAll(title, subtitle, body string, data fcmData, prevStat
 // nickname, or what the application calls itself, falling back to
 // source. source alone is identity: it keys the collapse and the logs,
 // so a rename never re-keys anything.
+// DeliveryGate is why an external alert accepted right now would go
+// nowhere, or "". Wired into the monitoring service's ALERT gate so the
+// protocol refuses (444) what this service would drop, instead of the
+// sender getting a 333 for a page nobody will receive.
+func (s *Service) DeliveryGate() string {
+	if !s.Enabled() {
+		return "push delivery is disabled on this server"
+	}
+	return ""
+}
+
 func (s *Service) ExternalAlert(source, display, object, status, text string) {
 	if !s.Enabled() {
+		// The gate refuses this case at accept time; only a disable
+		// racing an in-flight alert lands here.
 		log.Printf("push: alerter %s sent %s %s but push is disabled - not delivered", source, status, object)
 		return
 	}
@@ -1059,8 +1072,11 @@ func (s *Service) ExternalAlert(source, display, object, status, text string) {
 	}
 
 	log.Printf("push: alerter %s: %s %s - notifying subscribers", source, status, object)
+	// Hostname is what the push log records; the qualified name keeps
+	// two alerters that both report an object called "disk" apart there,
+	// the same way host alerts log as "site:host".
 	s.notifyAll(title, display, body, fcmData{
-		Hostname: object,
+		Hostname: collapse,
 		Object:   collapse,
 		Status:   status,
 		Type:     "alerter",

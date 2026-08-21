@@ -14,14 +14,20 @@ its own "Alerters" section; the config editor and the map never see it.
 
 ## Getting a token
 
-Same as a monitoring box: **Admin -> Monitoring boxes -> Add a box**.
-Mint a token under the name the alerter will use (letters, digits,
-`-`, `_`; max 64 chars). The name is the alerter's identity - it
-appears in notifications and on the Fleet page - so name the thing,
-not the machine: `backupd`, not `server3`.
+**Admin -> Monitoring boxes -> Add a box**, with the credential type
+set to **External alerter** - the panel then shows the greeting line
+below instead of sysmond config. Mint the token under the name the
+alerter will use (letters, digits, `-`, `_`; max 64 chars). The name
+is the alerter's identity - it appears in notifications and on the
+Fleet page - so name the thing, not the machine: `backupd`, not
+`server3`.
 
-Revoking the token on the same page cuts the alerter off at its next
-connection attempt.
+The type is part of the credential: a token minted for an alerter is
+refused if something greets with it as a sysmond, and the other way
+around.
+
+Revoking the token on the same page cuts the alerter off immediately -
+the live connection is closed and the next attempt is refused.
 
 ## Connecting
 
@@ -40,9 +46,10 @@ connection attempt.
 ## Protocol
 
 Text lines, terminated by `\n` (a trailing `\r` is tolerated). One
-line may carry at most 4096 bytes; anything past that on the same
-line is discarded, not buffered. Every reply is one line starting
-`333 ` (success) or `444 ` (refusal).
+line may carry at most 4096 bytes; a longer line is refused with
+`444 line too long` rather than processed as something shorter than
+what was sent (the connection survives). Every reply is one line
+starting `333 ` (success) or `444 ` (refusal).
 
 ### Handshake (first line, within 20 seconds of connecting)
 
@@ -78,6 +85,19 @@ does the talking.
 - `444 busy - ...` means the server's delivery pipeline is backed up
   and the alert was **not** accepted. Retry the same line after a short
   delay; `333 ok` is the only reply that means the alert was taken.
+- `444 push delivery is disabled ...` means the server currently has
+  nowhere to send alerts (push switched off, or never configured). The
+  alert was not accepted; page some other way or retry later.
+
+What `333 ok` promises, exactly: the alert was accepted for immediate
+delivery through the server's push pipeline, in order with everything
+else this alerter has sent. It is **not** a durable receipt - alerts
+are not written to disk, so what was queued but not yet sent when the
+server dies is lost. Anything that cannot be refused (an alert the
+server accepted and then failed to deliver because a provider was
+down) appears in the server log and the admin Push Log. If an alert
+matters enough to survive that, keep it on your side until the
+condition clears and re-send OK/CRITICAL transitions as they happen.
 
 Semantics, identical to a sysmond's transitions:
 
@@ -89,8 +109,8 @@ Semantics, identical to a sysmond's transitions:
   second notification, because `<alerter>:<object>` is the collapse
   key, exactly as host alerts collapse per host.
 - Delivery honors the master push switch in the admin UI; alerts sent
-  while push is disabled are acknowledged and dropped, and the server
-  log says so.
+  while push is disabled are refused with `444 push delivery is
+  disabled ...`, never silently dropped.
 
 ### Keepalive and goodbye
 
@@ -143,17 +163,25 @@ to be a monitored host on a sysmond, not an alerter.
 ## Example: Python
 
 ```python
-import socket, ssl, time
+import os, socket, ssl, time
 
 HOST, PORT = "sysmon-web.example.net", 1347
-NAME, TOKEN = "backupd", "tok-abc123..."
+NAME = "backupd"
+# A credential stays out of source and argv: a mode-0600 file or the
+# environment of the service unit that runs this.
+TOKEN = os.environ["SYSMON_TOKEN"]
 
+# Verify the certificate AND its name. sysmon-web puts the names the
+# daemons dial it by into its generated certificate (the -agent-names
+# flag); start it with the name you use here in that list. Only fall
+# back to ctx.check_hostname = False against an old certificate that
+# carries no usable name - it weakens the check to "any holder of a
+# CA-signed cert", so regenerate the certificate instead if you can.
 ctx = ssl.create_default_context(cafile="aggregator-ca.pem")
-ctx.check_hostname = False  # self-signed cert carries no hostname
 
 def connect():
     raw = socket.create_connection((HOST, PORT), timeout=20)
-    tls = ctx.wrap_socket(raw)
+    tls = ctx.wrap_socket(raw, server_hostname=HOST)
     f = tls.makefile("rw", newline="\n")
     f.write(f"ALERTER {NAME} {TOKEN} Bacula 15.0 nightly backups\n"); f.flush()
     if not f.readline().startswith("333"):

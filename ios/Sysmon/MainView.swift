@@ -266,9 +266,15 @@ struct HostRow: View {
             StatusDot(status: host.overallStatus, pulse: host.isDown && !host.isPaused)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    // A long hostname ellipsizes rather than wrapping or
+                    // squeezing the tags out of the row; layoutPriority
+                    // makes the badges yield space before the name does.
                     Text(host.hostname)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
                     if !host.siteTag.isEmpty {
                         SiteTag(name: host.siteTag)
                     }

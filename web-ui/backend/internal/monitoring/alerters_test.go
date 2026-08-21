@@ -155,8 +155,8 @@ func TestAlerterSession(t *testing.T) {
 	// The token record learns its kind at handshake time in the real
 	// path (claimKind -> ClaimAgentKind) - prove the recorded kind
 	// sticks and that labels round-trip beside it.
-	if got := store.ClaimAgentKind("backupd", settings.KindAlerter); got != "" {
-		t.Errorf("ClaimAgentKind refused a fresh token: %q", got)
+	if got, err := store.ClaimAgentKind("backupd", settings.KindAlerter); got != "" || err != nil {
+		t.Errorf("ClaimAgentKind refused a fresh token: %q, %v", got, err)
 	}
 	tokens, err := store.ListAgentTokens()
 	if err != nil || len(tokens) != 1 {
@@ -251,30 +251,26 @@ func TestAlerterOverlongLine(t *testing.T) {
 	}()
 	r := bufio.NewReader(client)
 	reply, err := r.ReadString('\n')
-	if err != nil || strings.TrimSpace(reply) != "333 ok" {
-		t.Fatalf("overlong ALERT = %q, %v, want 333 ok", strings.TrimSpace(reply), err)
-	}
-
-	waitFor(t, "the truncated alert to reach the sink", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(texts) == 1
-	})
-	mu.Lock()
-	text := texts[0]
-	mu.Unlock()
-	if got := len([]rune(text)); got > maxAlertText {
-		t.Errorf("alert text is %d runes, want at most %d", got, maxAlertText)
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(reply), "444 line too long") {
+		t.Fatalf("overlong ALERT = %q, %v, want a 444 line too long refusal", strings.TrimSpace(reply), err)
 	}
 
 	// The line after the flood still parses - nothing of the overflow
-	// leaked into the next read.
+	// leaked into the next read, and the refusal did not cost the
+	// connection.
 	if _, err := client.Write([]byte("PING\n")); err != nil {
 		t.Fatalf("write after flood: %v", err)
 	}
 	if reply, err := r.ReadString('\n'); err != nil || strings.TrimSpace(reply) != "333 pong" {
 		t.Fatalf("PING after flood = %q, %v", strings.TrimSpace(reply), err)
 	}
+	// Nothing of the refused line reached delivery: the server must not
+	// silently accept a different message than the sender transmitted.
+	mu.Lock()
+	if len(texts) != 0 {
+		t.Errorf("sink saw %d alerts from a refused line, want 0", len(texts))
+	}
+	mu.Unlock()
 	client.Close()
 	<-done
 }
@@ -444,5 +440,224 @@ func TestClaimKindConcurrentFirstUse(t *testing.T) {
 		if refused != 1 {
 			t.Fatalf("site %s: %d refusals (%q / %q), want exactly one winner", site, refused, a, b)
 		}
+	}
+}
+
+// The queue and dispatcher belong to the alerter's identity, not the
+// socket: an OK accepted after a reconnect must never reach the sink
+// before a CRITICAL accepted earlier on the old connection - two
+// per-connection dispatchers raced exactly that way, and the shared
+// collapse key then left the phones stuck on the stale CRITICAL.
+func TestAlerterReconnectPreservesOrder(t *testing.T) {
+	svc := NewService()
+
+	release := make(chan struct{})
+	starts := make(chan struct{}, 8)
+	var mu sync.Mutex
+	var order []string
+	svc.SetAlertSink(func(_, _, _, status, _ string) {
+		starts <- struct{}{}
+		<-release // delivery is stuck (slow provider) until released
+		mu.Lock()
+		order = append(order, status)
+		mu.Unlock()
+	})
+
+	// Connection one accepts two alerts: the first occupies the
+	// dispatcher (stuck in the sink), the second waits in the queue.
+	server1, client1 := net.Pipe()
+	done1 := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "apcupsd", "pipe-1", server1, bufio.NewReader(server1))
+		close(done1)
+	}()
+	r1 := bufio.NewReader(client1)
+	send := func(c net.Conn, r *bufio.Reader, line string) string {
+		t.Helper()
+		if _, err := c.Write([]byte(line + "\n")); err != nil {
+			t.Fatalf("write %q: %v", line, err)
+		}
+		reply, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no reply to %q: %v", line, err)
+		}
+		return strings.TrimSpace(reply)
+	}
+	if got := send(client1, r1, "ALERT WARNING battery on battery power"); got != "333 ok" {
+		t.Fatalf("first alert answered %q", got)
+	}
+	<-starts // dispatcher is now holding WARNING inside the sink
+	if got := send(client1, r1, "ALERT CRITICAL battery battery low"); got != "333 ok" {
+		t.Fatalf("second alert answered %q", got)
+	}
+
+	// The alerter reconnects and reports the recovery on the new link.
+	server2, client2 := net.Pipe()
+	done2 := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "apcupsd", "pipe-2", server2, bufio.NewReader(server2))
+		close(done2)
+	}()
+	<-done1 // old connection fully torn down
+	r2 := bufio.NewReader(client2)
+	if got := send(client2, r2, "ALERT OK battery mains power restored"); got != "333 ok" {
+		t.Fatalf("post-reconnect alert answered %q", got)
+	}
+
+	close(release)
+	waitFor(t, "all three alerts to be delivered", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(order) == 3
+	})
+	mu.Lock()
+	got := strings.Join(order, ",")
+	mu.Unlock()
+	if got != "WARNING,CRITICAL,OK" {
+		t.Fatalf("delivery order = %s, want WARNING,CRITICAL,OK", got)
+	}
+
+	client2.Close()
+	<-done2
+}
+
+// An alert with no delivery path is refused, not acknowledged into the
+// void: no sink at all, or a gate that says push is off, both answer
+// 444 - and the sender's retry after the path comes back succeeds.
+func TestAlerterRefusedWithoutDeliveryPath(t *testing.T) {
+	svc := NewService()
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("lonely", "", "pipe", server, bufio.NewReader(server))
+		close(done)
+	}()
+	r := bufio.NewReader(client)
+	send := func(line string) string {
+		t.Helper()
+		if _, err := client.Write([]byte(line + "\n")); err != nil {
+			t.Fatalf("write %q: %v", line, err)
+		}
+		reply, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no reply to %q: %v", line, err)
+		}
+		return strings.TrimSpace(reply)
+	}
+
+	// No sink configured at all.
+	if got := send("ALERT CRITICAL disk full"); !strings.HasPrefix(got, "444") {
+		t.Fatalf("ALERT with no sink answered %q, want a 444", got)
+	}
+
+	// A sink, but the gate says push is disabled.
+	var mu sync.Mutex
+	delivered := 0
+	svc.SetAlertSink(func(_, _, _, _, _ string) { mu.Lock(); delivered++; mu.Unlock() })
+	gateReason := "push delivery is disabled on this server"
+	svc.SetAlertGate(func() string { return gateReason })
+	if got := send("ALERT CRITICAL disk full"); !strings.HasPrefix(got, "444 push delivery is disabled") {
+		t.Fatalf("ALERT with a closed gate answered %q", got)
+	}
+
+	// Path restored: the same line is now taken, and counted.
+	gateReason = ""
+	if got := send("ALERT CRITICAL disk full"); got != "333 ok" {
+		t.Fatalf("ALERT with an open gate answered %q", got)
+	}
+	waitFor(t, "the accepted alert to be delivered", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return delivered == 1
+	})
+	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != 1 {
+		t.Errorf("Alerts = %d, want 1 (refused alerts must not count)", list[0].Alerts)
+	}
+
+	client.Close()
+	<-done
+}
+
+// Revoking or re-minting a token must cut the live connection, not just
+// the next one: both registries - daemons and alerters - answer to
+// DisconnectSite.
+func TestDisconnectSiteCutsLiveConnections(t *testing.T) {
+	svc := NewService()
+
+	// An alerter with its socket up.
+	aServer, aClient := net.Pipe()
+	aDone := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe-a", aServer, bufio.NewReader(aServer))
+		close(aDone)
+	}()
+	waitFor(t, "the alerter to register", func() bool {
+		l := svc.Alerters()
+		return len(l) == 1 && l[0].Connected
+	})
+
+	// A daemon with its socket up.
+	dServer, dClient := net.Pipe()
+	svc.adoptAgent("branch2", "pipe-d", dServer, bufio.NewReader(dServer))
+
+	if !svc.DisconnectSite("backupd") {
+		t.Error("DisconnectSite(backupd) found nothing to close")
+	}
+	select {
+	case <-aDone: // read loop died with the closed socket
+	case <-time.After(5 * time.Second):
+		t.Fatal("alerter connection survived DisconnectSite")
+	}
+	if l := svc.Alerters(); len(l) != 1 || l[0].Connected {
+		t.Errorf("after DisconnectSite, Alerters() = %+v, want disconnected", l)
+	}
+
+	if !svc.DisconnectSite("branch2") {
+		t.Error("DisconnectSite(branch2) found nothing to close")
+	}
+	// The daemon's socket really is dead: its far end reads EOF.
+	dClient.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := dClient.Read(make([]byte, 1)); err == nil {
+		t.Error("daemon connection still readable after DisconnectSite")
+	}
+
+	if svc.DisconnectSite("ghost") {
+		t.Error("DisconnectSite(ghost) claimed to close something")
+	}
+	aClient.Close()
+	dClient.Close()
+}
+
+// A broken credential store must fail closed: a kind claim that cannot
+// be read or written refuses the handshake instead of admitting a peer
+// whose kind never stuck, and label writes report their failure.
+func TestStorageFailureFailsClosed(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.NewAgentToken("box1", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	// Sanity: works while the store is healthy.
+	if got := svc.claimKind("box1", settings.KindSysmond); got != "" {
+		t.Fatalf("healthy claim refused: %q", got)
+	}
+
+	store.Close() // the "disk failure": every transaction now errors
+
+	if got := svc.claimKind("box1", settings.KindAlerter); got == "" {
+		t.Error("claimKind admitted a peer over a dead store")
+	}
+	if err := store.SetAgentLabel("box1", "new name"); err == nil {
+		t.Error("SetAgentLabel reported success against a dead store")
+	}
+	if _, err := store.CheckAgentToken("box1", "whatever", "addr"); err == nil {
+		t.Error("CheckAgentToken reported a verdict without an error against a dead store")
 	}
 }

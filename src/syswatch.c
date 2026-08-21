@@ -2033,8 +2033,12 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			statuschanged = FALSE;
 		}
 
-		/* */
-		while (paused && (!gotsighup))
+		/* stop_daemon must break this loop too: SIGTERM during a
+		   pause otherwise sets the flag and then waits for an unpause
+		   or a SIGHUP that may never come, and the supervisor's
+		   graceful stop times out into a SIGKILL - skipping the very
+		   state save a graceful stop exists for. */
+		while (paused && !gotsighup && !stop_daemon)
 		{
 			time(&now_t);
 			service_checks(now_t);

@@ -110,6 +110,9 @@ type Service struct {
 	alerters    map[string]*alerter
 	alertSinkMu sync.Mutex
 	alertSink   func(source, display, object, status, text string)
+	// alertGate says whether an accepted alert has a live delivery
+	// path right now ("" = yes, else the refusal for the 444).
+	alertGate func() string
 
 	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.

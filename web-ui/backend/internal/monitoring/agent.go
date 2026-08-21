@@ -113,9 +113,15 @@ func (a *AgentListener) handshake(conn net.Conn) {
 	// check, so an unauthenticated peer streaming a newline-free flood
 	// must cost at most maxLineBytes of memory, not everything it can
 	// push before the deadline.
-	line, err := readLineBounded(reader)
+	line, truncated, err := readLineBounded(reader)
 	if err != nil {
 		conn.Close()
+		return
+	}
+	if truncated {
+		fmt.Fprintf(conn, "444 line too long - maximum %d bytes\r\n", maxLineBytes)
+		conn.Close()
+		log.Printf("agents: %s sent an overlong greeting", remote)
 		return
 	}
 
@@ -225,10 +231,60 @@ func (s *Service) claimKind(site, kind string) string {
 	if st == nil {
 		return ""
 	}
-	if owner := st.ClaimAgentKind(site, kind); owner != "" {
+	owner, err := st.ClaimAgentKind(site, kind)
+	if err != nil {
+		// Fail closed: a peer admitted while its kind claim silently
+		// failed to stick is a peer of no recorded kind - the exact
+		// state this check exists to prevent.
+		log.Printf("agents: kind claim for %s failed: %v", site, err)
+		return "temporary credential-store failure - try again"
+	}
+	if owner != "" {
 		return "this token belongs to a " + owner
 	}
 	return ""
+}
+
+// DisconnectSite closes whatever live connection the named identity
+// holds - daemon or alerter - and reports whether one was closed.
+//
+// Authentication happens once, at the greeting, and the connection is
+// long-lived by design; without this, revoking or re-minting a token
+// changes nothing for a peer that simply never hangs up. The revoke and
+// re-mint paths call it after the store is updated, so the next
+// connection attempt fails authentication and the current one dies now.
+// (A CLI revoke runs in its own process and cannot reach in here; the
+// running server still cuts the link at its next protocol exchange
+// failure or restart.)
+func (s *Service) DisconnectSite(site string) bool {
+	closed := false
+
+	s.fleetMu.Lock()
+	for _, d := range s.daemons {
+		d.mu.Lock()
+		if d.site == site && d.conn != nil {
+			d.conn.Close()
+			closed = true
+		}
+		d.mu.Unlock()
+	}
+	s.fleetMu.Unlock()
+
+	s.alertersMu.Lock()
+	if a, ok := s.alerters[site]; ok {
+		a.mu.Lock()
+		if a.conn != nil && a.info.Connected {
+			a.conn.Close()
+			closed = true
+		}
+		a.mu.Unlock()
+	}
+	s.alertersMu.Unlock()
+
+	if closed {
+		log.Printf("agents: disconnected %s (token revoked or replaced)", site)
+	}
+	return closed
 }
 
 // adoptAgent puts a dialled-in daemon into the fleet.
