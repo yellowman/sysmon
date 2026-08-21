@@ -173,7 +173,8 @@
                 <div class="flex justify-between items-center">
                     <div>
                         <p class="text-sm text-gray-600">Version: <code class="text-xs bg-gray-100 px-2 py-1 rounded" x-text="currentVersion"></code></p>
-                        <p class="text-xs text-gray-500 mt-1" x-show="modified">Unsaved changes</p>
+                        <p class="text-xs font-semibold text-amber-600 mt-1" x-show="modified" x-cloak>
+                            <i class="fas fa-pen mr-1"></i>Unsaved changes</p>
                     </div>
                     <input type="text" x-model="comment" placeholder="Change comment (optional)"
                            class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
@@ -233,15 +234,32 @@
             <h1 class="text-2xl font-bold text-gray-900">
                 <i class="fas fa-cog mr-2"></i>Configuration - Structured Editor
             </h1>
-            <div class="flex space-x-3">
+            <div class="flex items-center space-x-3">
+                <!-- Edits only live in this tab until Save; say so where
+                     the eye already is, next to the button that fixes it. -->
+                <span x-show="structuredHasChanges" x-cloak
+                      class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold whitespace-nowrap">
+                    <i class="fas fa-pen mr-1"></i>Unsaved changes
+                </span>
                 <button @click="reloadStructured()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
                     <i class="fas fa-sync mr-2"></i>Reload
                 </button>
-                <button @click="saveConfigStructured()" :disabled="savingStructured" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                <button @click="saveConfigStructured()" :disabled="savingStructured || !structuredHasChanges"
+                        class="px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50"
+                        :class="structuredHasChanges ? 'bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300' : 'bg-blue-600'">
                     <i class="fas fa-save mr-2"></i>
                     <span x-text="savingStructured ? 'Saving...' : 'Save Changes'"></span>
                 </button>
             </div>
+        </div>
+
+        <!-- Validation failures, spelled out: which hosts, what is
+             missing on each. The bad rows are also sorted to the top of
+             the host list and tinted red. -->
+        <div x-show="validationError" x-cloak
+             class="mb-6 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+            <i class="fas fa-triangle-exclamation mr-1"></i>
+            <span x-text="validationError"></span>
         </div>
 
         <!-- Loading State -->
@@ -679,7 +697,7 @@
             </div>
 
             <!-- Hosts Section -->
-            <div class="bg-white rounded-lg shadow-md">
+            <div id="hosts-card" class="bg-white rounded-lg shadow-md">
                 <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
                      @click="sections.hosts = !sections.hosts">
                     <h2 class="text-xl font-semibold text-gray-900">
@@ -730,18 +748,25 @@
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                                 <template x-for="item in filteredHosts" :key="item.host.hostname || 'host-' + item.originalIndex">
-                                    <tr class="hover:bg-gray-50 transition-colors">
+                                    <tr class="transition-colors"
+                                        :class="invalidHosts[item.originalIndex] ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-gray-50'">
                                         <td class="px-4 py-3 whitespace-nowrap">
                                             <div class="text-sm font-medium text-gray-900" x-text="item.host.hostname || 'Not set'"></div>
+                                            <div x-show="invalidHosts[item.originalIndex]" x-cloak
+                                                 class="text-xs text-red-600 font-medium"
+                                                 x-text="'Missing ' + invalidHosts[item.originalIndex] + ' - edit to fix'"></div>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <div class="text-sm text-gray-600" x-text="item.host.ip || '-'"></div>
+                                            <div class="text-sm" :class="!item.host.ip && invalidHosts[item.originalIndex] ? 'text-red-600 font-semibold' : 'text-gray-600'"
+                                                 x-text="item.host.ip || '-'"></div>
                                         </td>
                                         <td class="px-4 py-3">
                                             <div class="text-sm text-gray-900 truncate max-w-md" x-text="item.host.notes || '-'"></div>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded" x-text="item.host.type || 'ping'"></span>
+                                            <span x-show="item.host.type" class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded" x-text="item.host.type"></span>
+                                            <span x-show="!item.host.type" class="px-2 py-1 text-xs rounded"
+                                                  :class="invalidHosts[item.originalIndex] ? 'bg-red-100 text-red-700 font-semibold' : 'bg-gray-100 text-gray-500'">none</span>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                                             <button @click="editHost(item.originalIndex)" class="text-blue-600 hover:text-blue-900 mr-3">
@@ -1429,6 +1454,10 @@ function unifiedConfigPage() {
 
         originalStructuredConfig: null,
         structuredHasChanges: false,
+        // Failed-save state: originalIndex -> "IP address and check type",
+        // plus the banner text. Live-updated as the user fixes hosts.
+        invalidHosts: {},
+        validationError: '',
 
         // Raw editor state
         activeTab: 'editor',
@@ -1508,6 +1537,15 @@ function unifiedConfigPage() {
             this.$watch('structuredConfig', () => {
                 this.checkStructuredChanges();
             }, { deep: true });
+
+            // Leaving the page with unsaved edits (either editor) gets
+            // the browser's are-you-sure prompt instead of silent loss.
+            window.addEventListener('beforeunload', (e) => {
+                if (this.structuredHasChanges || this.modified) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            });
         },
 
         checkStructuredChanges() {
@@ -1516,6 +1554,17 @@ function unifiedConfigPage() {
             const current = JSON.stringify(this.structuredConfig);
             const original = JSON.stringify(this.originalStructuredConfig);
             this.structuredHasChanges = current !== original;
+
+            // While a failed save is on screen, keep its marks honest:
+            // fixing a host clears its red row immediately, and fixing
+            // the last one clears the banner - live feedback instead of
+            // save-and-see.
+            if (this.validationError) {
+                this.invalidHosts = this.findInvalidHosts();
+                if (Object.keys(this.invalidHosts).length === 0) {
+                    this.validationError = '';
+                }
+            }
         },
 
         async onSwitchToRaw() {
@@ -1721,16 +1770,52 @@ function unifiedConfigPage() {
             this.savingStructured = false;
         },
 
+        // What a row is called in a message: the best identity it has.
+        hostRef(host, index) {
+            return host.hostname || host.ip || ('host #' + (index + 1));
+        },
+
+        // Recompute which hosts cannot be saved and why. Returns the
+        // invalid map; shared by save-time validation and the live
+        // re-check that clears marks as the user fixes rows.
+        findInvalidHosts() {
+            const bad = {};
+            (this.structuredConfig.hosts || []).forEach((host, index) => {
+                const missing = [];
+                if (!host.ip) missing.push('IP address');
+                if (!host.type) missing.push('check type');
+                if (missing.length) bad[index] = missing.join(' and ');
+            });
+            return bad;
+        },
+
         validateConfigStructured() {
-            // Validate hosts
-            for (const host of this.structuredConfig.hosts) {
-                if (!host.ip || !host.type) {
-                    alert('All hosts must have IP address and check type specified');
-                    return false;
-                }
-                // Hostname defaults to IP if not set (this is done on save/backend)
+            // Hostname defaults to IP if not set (done on save/backend),
+            // so only IP and check type can actually block a save.
+            const bad = this.findInvalidHosts();
+            this.invalidHosts = bad;
+            const indexes = Object.keys(bad);
+            if (indexes.length === 0) {
+                this.validationError = '';
+                return true;
             }
-            return true;
+            // Name the offenders, not just the rule. The rows are also
+            // sorted to the top of the list and tinted red.
+            const names = indexes.slice(0, 8).map(i =>
+                this.hostRef(this.structuredConfig.hosts[i], Number(i)) + ' (missing ' + bad[i] + ')');
+            const more = indexes.length > 8 ? ', and ' + (indexes.length - 8) + ' more' : '';
+            this.validationError = 'Not saved: ' + indexes.length +
+                (indexes.length === 1 ? ' host is' : ' hosts are') +
+                ' missing required fields - ' + names.join(', ') + more +
+                '. They are highlighted in red at the top of the host list; edit each to fill in what is missing.';
+            // Make sure the highlighted rows can actually be seen: open
+            // the section, drop any filter hiding them, and go there.
+            this.sections.hosts = true;
+            this.hostSearch = '';
+            this.$nextTick(() => {
+                document.getElementById('hosts-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            return false;
         },
 
         addSpawn() {
@@ -1766,13 +1851,22 @@ function unifiedConfigPage() {
             }
         },
 
+        // Invalid rows float to the top while a failed save is being
+        // fixed, so "highlighted in red at the top" is literally true.
+        sortInvalidFirst(list) {
+            if (Object.keys(this.invalidHosts).length === 0) return list;
+            return list.slice().sort((a, b) =>
+                (this.invalidHosts[b.originalIndex] ? 1 : 0) - (this.invalidHosts[a.originalIndex] ? 1 : 0));
+        },
+
         get filteredHosts() {
             if (!this.hostSearch || this.hostSearch.trim() === '') {
-                return (this.structuredConfig.hosts || []).map((host, index) => ({ host, originalIndex: index }));
+                return this.sortInvalidFirst(
+                    (this.structuredConfig.hosts || []).map((host, index) => ({ host, originalIndex: index })));
             }
 
             const search = this.hostSearch.toLowerCase().trim();
-            return (this.structuredConfig.hosts || [])
+            return this.sortInvalidFirst((this.structuredConfig.hosts || [])
                 .map((host, index) => ({ host, originalIndex: index }))
                 .filter(({ host }) => {
                     const hostname = (host.hostname || '').toLowerCase();
@@ -1782,7 +1876,7 @@ function unifiedConfigPage() {
                     return hostname.includes(search) ||
                            ip.includes(search) ||
                            description.includes(search);
-                });
+                }));
         },
 
         addHost() {
@@ -1873,8 +1967,11 @@ function unifiedConfigPage() {
         },
 
         saveHostModal() {
-            if (!this.editingHost.ip || !this.editingHost.type) {
-                alert('IP address and check type are required');
+            const missing = [];
+            if (!this.editingHost.ip) missing.push('an IP address');
+            if (!this.editingHost.type) missing.push('a check type');
+            if (missing.length) {
+                alert('This host still needs ' + missing.join(' and ') + '.');
                 return;
             }
 
