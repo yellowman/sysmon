@@ -356,6 +356,11 @@ func TestClaimKind(t *testing.T) {
 // "333 ok" is a delivery promise, and a compliant client only resends
 // what was refused. Refused alerts also must not count as sent.
 func TestAlerterPushQueueFullStillRecordsAndAccepts(t *testing.T) {
+	// This test's flood is deliberate; park the ingestion limit.
+	oldBurst, oldRate := alertRateBurst, alertRatePerSec
+	alertRateBurst, alertRatePerSec = 100000, 100000
+	defer func() { alertRateBurst, alertRatePerSec = oldBurst, oldRate }()
+
 	svc := NewService()
 	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
 	if err != nil {
@@ -419,7 +424,7 @@ func TestAlerterPushQueueFullStillRecordsAndAccepts(t *testing.T) {
 	// Every accepted alert is in history - including the one whose
 	// phone delivery was skipped - and the counter agrees.
 	total := alertQueueDepth + 2
-	events := hist.Recent(total+10, 0)
+	events, _ := hist.Recent(total+10, 0)
 	if len(events) != total {
 		t.Fatalf("history holds %d events, want %d", len(events), total)
 	}
@@ -616,7 +621,7 @@ func TestAlerterHistoryIsADeliveryPath(t *testing.T) {
 	// Recorded like host transitions: keyed source:object with the
 	// halves split out, the text as the description, and the second
 	// row knowing what the object changed from.
-	events := hist.Recent(10, 0)
+	events, _ := hist.Recent(10, 0)
 	if len(events) != 2 {
 		t.Fatalf("history holds %d events, want 2: %+v", len(events), events)
 	}
@@ -662,7 +667,7 @@ func TestDisconnectSiteCutsLiveConnections(t *testing.T) {
 
 	// A daemon with its socket up.
 	dServer, dClient := net.Pipe()
-	svc.adoptAgent("branch2", "pipe-d", dServer, bufio.NewReader(dServer))
+	svc.adoptAgent("branch2", "pipe-d", "", dServer, bufio.NewReader(dServer))
 
 	if !svc.DisconnectSite("backupd") {
 		t.Error("DisconnectSite(backupd) found nothing to close")
@@ -810,7 +815,7 @@ func TestAlerterRetryAfterHistoryFailurePreservesPreviousStatus(t *testing.T) {
 	if got := send("ALERT CRITICAL battery low"); got != "333 ok" {
 		t.Fatalf("retry answered %q", got)
 	}
-	events := hist.Recent(10, 0)
+	events, _ := hist.Recent(10, 0)
 	if len(events) != 1 {
 		t.Fatalf("history holds %d events, want 1", len(events))
 	}
@@ -873,7 +878,7 @@ func TestAlerterReconnectRejectsParsedEventFromObsoleteConnection(t *testing.T) 
 
 	// History holds only the replacement's OK; the stale CRITICAL never
 	// landed after it.
-	events := hist.Recent(10, 0)
+	events, _ := hist.Recent(10, 0)
 	if len(events) != 1 || events[0].NewStatus != "OK" {
 		t.Fatalf("history = %+v, want only the OK", events)
 	}
@@ -881,10 +886,11 @@ func TestAlerterReconnectRejectsParsedEventFromObsoleteConnection(t *testing.T) 
 	<-done2
 }
 
-// A credential revoked between authentication and registration is
-// caught by the post-registration re-check: register first, re-check
-// second, so whichever of the admin's write and this handshake finishes
-// last sees the other.
+// A credential revoked before registration never touches the registry;
+// one revoked BETWEEN registration and the post-registration re-check
+// (the barrier pins exactly that window) is caught by the re-check.
+// Together with DisconnectSite's own sweep, whichever of the admin's
+// write and this handshake finishes last sees the other.
 func TestRevokeDuringHandshakeCannotRegister(t *testing.T) {
 	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
 	if err != nil {
@@ -899,12 +905,12 @@ func TestRevokeDuringHandshakeCannotRegister(t *testing.T) {
 	svc := NewService()
 	svc.SetGenerations(store)
 
-	// The revoke lands after authentication (the epoch is already in
-	// hand) but before the connection registers.
+	// Case 1: the revoke lands after authentication but before
+	// registration. The in-lock pre-check refuses without ever
+	// creating a registry record.
 	if err := store.RevokeAgentToken("backupd"); err != nil {
 		t.Fatal(err)
 	}
-
 	server, client := net.Pipe()
 	done := make(chan struct{})
 	go func() {
@@ -912,16 +918,53 @@ func TestRevokeDuringHandshakeCannotRegister(t *testing.T) {
 		close(done)
 	}()
 	select {
-	case <-done: // dropped immediately by the re-check
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("revoked-before-registration connection was admitted")
+	}
+	if l := svc.Alerters(); len(l) != 0 {
+		t.Errorf("Alerters() = %+v, want nothing registered", l)
+	}
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Error("connection still open after pre-registration revocation")
+	}
+
+	// Case 2: the revoke lands in the window between registration and
+	// the re-check - the barrier holds the handshake exactly there.
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, true); err != nil {
+		t.Fatal(err)
+	}
+	tok2, _ := store.GetAgentToken("backupd")
+
+	registered := make(chan struct{})
+	proceed := make(chan struct{})
+	testHookAfterRegister = func(string) {
+		close(registered)
+		<-proceed
+	}
+	server2, client2 := net.Pipe()
+	done2 := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe-2", tok2.CredentialID, server2, bufio.NewReader(server2))
+		close(done2)
+	}()
+	<-registered // the connection is in the registry, re-check not yet run
+	if err := store.RevokeAgentToken("backupd"); err != nil {
+		t.Fatal(err)
+	}
+	close(proceed)
+	select {
+	case <-done2:
 	case <-time.After(5 * time.Second):
 		t.Fatal("revoked-mid-handshake connection was admitted")
 	}
+	testHookAfterRegister = nil
 	if l := svc.Alerters(); len(l) != 1 || l[0].Connected {
 		t.Errorf("Alerters() = %+v, want the record disconnected", l)
 	}
-	// The peer's side is dead too.
-	client.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := client.Read(make([]byte, 1)); err == nil {
+	client2.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := client2.Read(make([]byte, 1)); err == nil {
 		t.Error("connection still open after mid-handshake revocation")
 	}
 }
@@ -1014,4 +1057,225 @@ func TestMintAgentTokenAtomicConflict(t *testing.T) {
 	if won != 1 {
 		t.Fatalf("%d concurrent first mints succeeded, want exactly 1", won)
 	}
+}
+
+// The revocation race the acceptance lock exists for: a line is read
+// and parsed, the goroutine stalls, the admin revokes and
+// DisconnectSite returns - and the stalled event must then be refused,
+// not committed after the revoke API reported success. The barrier
+// holds the goroutine exactly between parse and acceptance.
+func TestRevokeAfterLineReadBeforeAcceptanceCannotCommit(t *testing.T) {
+	svc := NewService()
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
+
+	parsed := make(chan struct{})
+	proceed := make(chan struct{})
+	testHookAfterParse = func(string) {
+		close(parsed)
+		<-proceed
+	}
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe", "", server, bufio.NewReader(server))
+		close(done)
+	}()
+	if _, err := client.Write([]byte("ALERT CRITICAL disk full\n")); err != nil {
+		t.Fatal(err)
+	}
+	<-parsed // the line is parsed and validated; acceptance has not begun
+
+	// The admin's revocation completes: store write, then the sweep.
+	if !svc.DisconnectSite("backupd") {
+		t.Fatal("DisconnectSite found nothing to close")
+	}
+
+	close(proceed) // the stalled goroutine resumes
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection goroutine never exited")
+	}
+	testHookAfterParse = nil
+
+	// The already-read event did NOT land after the revocation.
+	if events, _ := hist.Recent(10, 0); len(events) != 0 {
+		t.Fatalf("history = %+v, want empty - the event committed after revocation returned", events)
+	}
+	if l := svc.Alerters(); len(l) != 1 || l[0].Connected || l[0].Alerts != 0 {
+		t.Errorf("Alerters() = %+v, want disconnected with zero alerts", l)
+	}
+	client.Close()
+}
+
+// A stale-epoch handshake must not evict the legitimate current-epoch
+// connection on its way to being refused: the epoch is checked inside
+// the registry lock, before the current connection is touched.
+func TestStaleAlerterHandshakeDoesNotEvictCurrentEpoch(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, false); err != nil {
+		t.Fatal(err)
+	}
+	oldTok, _ := store.GetAgentToken("backupd")
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, true); err != nil {
+		t.Fatal(err)
+	}
+	newTok, _ := store.GetAgentToken("backupd")
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	// The legitimate new-epoch connection is up and answering.
+	serverB, clientB := net.Pipe()
+	doneB := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe-B", newTok.CredentialID, serverB, bufio.NewReader(serverB))
+		close(doneB)
+	}()
+	rB := bufio.NewReader(clientB)
+	if _, err := clientB.Write([]byte("PING\n")); err != nil {
+		t.Fatal(err)
+	}
+	if reply, _ := rB.ReadString('\n'); strings.TrimSpace(reply) != "333 pong" {
+		t.Fatalf("epoch-B PING answered %q", strings.TrimSpace(reply))
+	}
+
+	// The stale epoch-A handshake resumes now. It must be refused
+	// without touching the epoch-B connection.
+	serverA, _ := net.Pipe()
+	doneA := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe-A", oldTok.CredentialID, serverA, bufio.NewReader(serverA))
+		close(doneA)
+	}()
+	select {
+	case <-doneA:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stale handshake never exited")
+	}
+
+	// Epoch B is still the registered, answering connection.
+	if l := svc.Alerters(); len(l) != 1 || !l[0].Connected || l[0].Addr != "pipe-B" {
+		t.Errorf("Alerters() = %+v, want epoch B still connected", l)
+	}
+	if _, err := clientB.Write([]byte("PING\n")); err != nil {
+		t.Fatalf("epoch-B write after stale handshake: %v", err)
+	}
+	if reply, _ := rB.ReadString('\n'); strings.TrimSpace(reply) != "333 pong" {
+		t.Fatalf("epoch-B PING after stale handshake answered %q", strings.TrimSpace(reply))
+	}
+	clientB.Close()
+	<-doneB
+}
+
+// The daemon registry has the same guarantee: a stale-epoch adoptAgent
+// returns false without closing the current connection or wiping its
+// sequence state.
+func TestStaleDaemonHandshakeDoesNotEvictCurrentEpoch(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.MintAgentToken("branch2", "", settings.KindSysmond, false); err != nil {
+		t.Fatal(err)
+	}
+	oldTok, _ := store.GetAgentToken("branch2")
+	if _, err := store.MintAgentToken("branch2", "", settings.KindSysmond, true); err != nil {
+		t.Fatal(err)
+	}
+	newTok, _ := store.GetAgentToken("branch2")
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	serverB, clientB := net.Pipe()
+	if !svc.adoptAgent("branch2", "pipe-B", newTok.CredentialID, serverB, bufio.NewReader(serverB)) {
+		t.Fatal("current-epoch adoption refused")
+	}
+
+	serverA, _ := net.Pipe()
+	if svc.adoptAgent("branch2", "pipe-A", oldTok.CredentialID, serverA, bufio.NewReader(serverA)) {
+		t.Fatal("stale-epoch adoption succeeded")
+	}
+
+	// The B connection was never closed: its far end still times out on
+	// read (an eviction would have delivered EOF immediately).
+	clientB.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	buf := make([]byte, 1)
+	if _, err := clientB.Read(buf); err == nil {
+		t.Error("unexpected data on the epoch-B daemon connection")
+	} else if !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "deadline") {
+		t.Errorf("epoch-B daemon connection is dead: %v", err)
+	}
+	clientB.Close()
+}
+
+// The ingestion limit: a flooding alerter is refused with a 444 before
+// anything commits, so it cannot churn the fleet's shared history.
+func TestAlerterRateLimited(t *testing.T) {
+	svc := NewService()
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("cronjob", "", "pipe", "", server, bufio.NewReader(server))
+		close(done)
+	}()
+	r := bufio.NewReader(client)
+	send := func(line string) string {
+		t.Helper()
+		if _, err := client.Write([]byte(line + "\n")); err != nil {
+			t.Fatalf("write %q: %v", line, err)
+		}
+		reply, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no reply to %q: %v", line, err)
+		}
+		return strings.TrimSpace(reply)
+	}
+
+	// The burst is accepted; the flood beyond it is refused. A little
+	// slack on the boundary allows for bucket refill during the run.
+	accepted, refused := 0, 0
+	for i := 0; i < int(alertRateBurst)+10; i++ {
+		got := send("ALERT CRITICAL backup failed")
+		switch {
+		case got == "333 ok":
+			accepted++
+		case strings.HasPrefix(got, "444 rate limited"):
+			refused++
+		default:
+			t.Fatalf("alert %d answered %q", i, got)
+		}
+	}
+	if refused == 0 {
+		t.Fatal("the flood was never rate limited")
+	}
+	if accepted < int(alertRateBurst) {
+		t.Errorf("only %d alerts accepted, want at least the burst of %d", accepted, int(alertRateBurst))
+	}
+	// History holds exactly what was accepted - refusals committed
+	// nothing.
+	if events, _ := hist.Recent(1000, 0); len(events) != accepted {
+		t.Errorf("history holds %d events, accepted %d", len(events), accepted)
+	}
+	client.Close()
+	<-done
 }

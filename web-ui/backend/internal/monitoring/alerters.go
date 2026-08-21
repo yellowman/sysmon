@@ -36,11 +36,32 @@ const maxAlertText = 512
 // the read itself must not be a way to spend this server's memory.
 const maxLineBytes = 4096
 
-// alertQueueDepth is how many alerts may wait on the push pipeline
-// before new ones are refused with "444 busy" so the client knows to
-// retry. Alerts are rare and the queue exists only to keep the
-// protocol reply from waiting on FCM/APNs.
+// alertQueueDepth is how many alerts may wait on the push pipeline.
+// Once an alert is committed to history it is accepted - so a full
+// queue skips the phone delivery (logged) rather than refusing.
+// Alerts are rare and the queue exists only to keep the protocol reply
+// from waiting on FCM/APNs.
 const alertQueueDepth = 64
+
+// The ingestion rate limit: a token bucket per alerter identity. The
+// history store is shared with the hosts' transitions and bounded, so
+// one broken cron script looping "ALERT CRITICAL backup failed" must
+// not be able to churn the whole fleet's history out of it. The burst
+// covers any honest storm (a UPS narrating an outage); the refill is
+// far above what a well-behaved alerter sends.
+var (
+	alertRateBurst  = 30.0
+	alertRatePerSec = 1.0
+)
+
+// Test barriers. Nil in production; a test sets one to pin an
+// interleaving that scheduling luck (and -race) cannot force - each is
+// called with the alerter's name at the boundary it names. Set before
+// the connection goroutine starts and cleared after it is joined.
+var (
+	testHookAfterParse    func(name string) // parsed + validated, before acceptance
+	testHookAfterRegister func(name string) // registered, before the epoch recheck
+)
 
 // TruncateRunes cuts s to at most n runes, never splitting one - a cut
 // at a byte offset turns multi-byte text into U+FFFD garbage downstream.
@@ -100,6 +121,13 @@ type alerter struct {
 	// history row for an alert can say what it changed FROM - the same
 	// transition shape host history has. Guarded by mu.
 	lastStatus map[string]string
+	// credID is the credential epoch the current connection
+	// authenticated under; kept so registration can refuse a stale
+	// epoch before touching the connection. Guarded by mu.
+	credID string
+	// The ingestion token bucket (see alertRateBurst). Guarded by mu.
+	rateTokens float64
+	rateStamp  time.Time
 }
 
 // pendingAlert is one parsed alert waiting on the push pipeline.
@@ -216,7 +244,14 @@ func readLineBounded(r *bufio.Reader) (line string, truncated bool, err error) {
 // re-check second - see credentialCurrent for why that order closes
 // the revoke-during-handshake race).
 func (s *Service) runAlerter(name, application, remote, credID string, conn net.Conn, reader *bufio.Reader) {
-	a := s.registerAlerter(name, application, remote, conn)
+	a, ok := s.registerAlerter(name, application, remote, credID, conn)
+	if !ok {
+		// Stale epoch: refused before the registry was touched, so the
+		// legitimate current connection (if any) was never disturbed.
+		conn.Close()
+		log.Printf("agents: alerter %s (%s): credential revoked or replaced during handshake - dropping", name, remote)
+		return
+	}
 
 	defer func() {
 		conn.Close()
@@ -235,6 +270,13 @@ func (s *Service) runAlerter(name, application, remote, credID string, conn net.
 		}
 	}()
 
+	// Registered; re-check the credential for a store write that landed
+	// between the in-lock check and here. The defer detaches only if
+	// this connection is still the record's current one, so a stale
+	// handshake failing here can never tear down a later connection.
+	if hook := testHookAfterRegister; hook != nil {
+		hook(name)
+	}
 	if !s.credentialCurrent(name, credID) {
 		log.Printf("agents: alerter %s (%s): credential revoked or replaced during handshake - dropping", name, remote)
 		return
@@ -323,19 +365,41 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, conn net.Conn) 
 		return "alert history unavailable on this server - alert not accepted"
 	}
 
-	// Acceptance and connection replacement are serialized: a replaced
-	// connection that already parsed a line either commits it here
-	// BEFORE the reconnect swaps it out (it was still current when it
-	// was accepted) or finds itself superseded and is refused - never
-	// commits a stale event after the replacement's newer one.
+	if hook := testHookAfterParse; hook != nil {
+		hook(name)
+	}
+
+	// Acceptance is serialized against connection replacement AND
+	// administrative disconnection (revoke/re-mint), both of which take
+	// the same lock and invalidate a.conn: a connection that already
+	// parsed a line either commits it here before it was replaced or
+	// cut off, or finds itself no longer current and is refused - never
+	// commits after a revocation has returned or after a replacement's
+	// newer event.
 	a.acceptMu.Lock()
 	defer a.acceptMu.Unlock()
 	a.mu.Lock()
 	current := a.conn == conn
 	prev := a.lastStatus[object]
+	// The ingestion bucket refills continuously up to the burst; an
+	// empty bucket refuses BEFORE anything commits, so a flooding
+	// alerter cannot churn the fleet's shared history out of the store.
+	now := time.Now()
+	a.rateTokens += now.Sub(a.rateStamp).Seconds() * alertRatePerSec
+	if a.rateTokens > alertRateBurst {
+		a.rateTokens = alertRateBurst
+	}
+	a.rateStamp = now
+	allowed := a.rateTokens >= 1
+	if allowed && current {
+		a.rateTokens--
+	}
 	a.mu.Unlock()
 	if !current {
 		return "connection superseded by a newer one - alert not accepted"
+	}
+	if !allowed {
+		return "rate limited - too many alerts, slow down"
 	}
 
 	if err := hist.Append([]HistoryEvent{{
@@ -355,11 +419,11 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, conn net.Conn) 
 
 	// Committed: everything after this honors the 333 rather than
 	// gating it. Bookkeeping counts accepted alerts only.
-	now := time.Now().UTC()
+	acceptedAt := time.Now().UTC()
 	a.mu.Lock()
 	a.lastStatus[object] = status
 	a.info.Alerts++
-	a.info.LastAlertAt = &now
+	a.info.LastAlertAt = &acceptedAt
 	a.info.LastAlert = fmt.Sprintf("%s %s: %s", status, object, text)
 	a.mu.Unlock()
 
@@ -391,9 +455,19 @@ func (s *Service) handleAlertLine(a *alerter, name, line string, conn net.Conn) 
 // also starts its dispatcher: one goroutine per identity, for the life
 // of the process, so every connection that ever speaks for this name
 // feeds one ordered queue.
-func (s *Service) registerAlerter(name, application, remote string, conn net.Conn) *alerter {
+//
+// The credential epoch is checked INSIDE the registry lock, before the
+// current connection is touched: a handshake that authenticated under
+// an old epoch and then slept through a re-mint must not get to evict
+// the legitimate new-epoch connection on its way to being refused.
+// Registrations are serialized by alertersMu, so the check and the
+// install are one step relative to any competing registration.
+func (s *Service) registerAlerter(name, application, remote, credID string, conn net.Conn) (*alerter, bool) {
 	s.alertersMu.Lock()
 	defer s.alertersMu.Unlock()
+	if !s.credentialCurrent(name, credID) {
+		return nil, false
+	}
 	if s.alerters == nil {
 		s.alerters = make(map[string]*alerter)
 	}
@@ -407,18 +481,22 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 			old.conn.Close()
 		}
 		old.conn = conn
+		old.credID = credID
 		old.info.Application = application
 		old.info.Addr = remote
 		old.info.Connected = true
 		old.info.ConnectedAt = time.Now().UTC()
 		old.mu.Unlock()
 		old.acceptMu.Unlock()
-		return old
+		return old, true
 	}
 	a := &alerter{
 		conn:       conn,
+		credID:     credID,
 		pending:    make(chan pendingAlert, alertQueueDepth),
 		lastStatus: make(map[string]string),
+		rateTokens: alertRateBurst,
+		rateStamp:  time.Now(),
 		info: AlerterInfo{
 			Name:        name,
 			Application: application,
@@ -429,7 +507,7 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 	}
 	s.alerters[name] = a
 	go s.dispatchAlerts(a)
-	return a
+	return a, true
 }
 
 // dispatchAlerts is an alerter identity's one delivery worker. It never
@@ -441,9 +519,10 @@ func (s *Service) dispatchAlerts(a *alerter) {
 		if sink := s.alertSinkFn(); sink != nil {
 			sink(p.source, p.display, p.object, p.status, p.text)
 		} else {
-			// Only reachable if the sink was unset between accept and
-			// dispatch; the accept-time gate refuses the common case.
-			log.Printf("agents: alerter %s sent %s %s with no push service configured - dropped",
+			// The alert is already committed to history; only its
+			// phone delivery is lost, because the sink was unset
+			// between accept and dispatch.
+			log.Printf("agents: alerter %s sent %s %s with no push service configured - phone delivery skipped",
 				p.source, p.status, p.object)
 		}
 	}

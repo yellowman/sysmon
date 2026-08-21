@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 
 private enum class HistoryFilter(val label: String) {
     ALL("ALL"),
-    DOWNS("DOWNS"),
+    DOWNS("PROBLEMS"),
     RECOVERIES("RECOVERIES")
 }
 
@@ -177,7 +177,10 @@ fun HistoryScreen() {
                     else "No events match the filter"
                 )
             }
-            else -> itemsIndexed(filtered) { _, ev ->
+            else -> itemsIndexed(
+                filtered,
+                key = { idx, ev -> if (ev.id != 0L) ev.id else "row-" + idx }
+            ) { _, ev ->
                 HistoryRow(ev, clock)
             }
         }
@@ -226,20 +229,35 @@ private fun HistoryRow(ev: HistoryEvent, clock: Long) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                // The alert's own message (an alerter's text), when there
+                // is one - it is the payload, not decoration.
+                if (ev.description.isNotEmpty()) {
+                    Text(
+                        text = ev.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = ev.prevStatus,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = statusColor(ev.prevStatus)
-                    )
-                    Text(
-                        text = "→",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // An object's first-ever event has no previous state:
+                    // no empty badge, no dangling arrow.
+                    if (ev.prevStatus.isNotEmpty()) {
+                        Text(
+                            text = ev.prevStatus,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = statusColor(ev.prevStatus)
+                        )
+                        Text(
+                            text = "→",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         text = ev.newStatus,
                         style = MaterialTheme.typography.labelMedium,

@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Alert history: every host state transition the server has observed,
-// newest first, with All / Downs / Recoveries filtering.
+// newest first, with All / Problems / Recoveries filtering.
 struct HistoryView: View {
     @EnvironmentObject var session: Session
     @State private var events: [HistoryEvent] = []
@@ -17,7 +17,7 @@ struct HistoryView: View {
 
     enum HistoryFilter: String, CaseIterable {
         case all = "All"
-        case downs = "Downs"
+        case downs = "Problems"
         case recoveries = "Recoveries"
     }
 
@@ -128,20 +128,32 @@ struct HistoryRow: View {
                         .font(.system(size: 11))
                         .foregroundColor(Theme.subtle)
                 }
+                // The alert's own message (an alerter's text) is the
+                // payload - show it, not just the transition.
+                if let desc = event.description, !desc.isEmpty {
+                    Text(desc)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.subtle)
+                        .lineLimit(2)
+                }
                 HStack(spacing: 6) {
-                    Text(event.prevStatus)
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundColor(statusColor(event.prevStatus))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(Theme.faint)
+                    // An object's first-ever event has no previous state:
+                    // no empty badge, no dangling arrow.
+                    if !event.prevStatus.isEmpty {
+                        Text(event.prevStatus)
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundColor(statusColor(event.prevStatus))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundColor(Theme.faint)
+                    }
                     Text(event.newStatus)
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.5)
                         .foregroundColor(statusColor(event.newStatus))
                     Spacer()
-                    if let dur = event.prevDuration, dur > 0 {
+                    if let dur = event.prevDuration, dur > 0, !event.prevStatus.isEmpty {
                         Text("was \(event.prevStatus.lowercased()) \(formatUptime(dur))")
                             .font(.system(size: 10))
                             .foregroundColor(Theme.subtle)

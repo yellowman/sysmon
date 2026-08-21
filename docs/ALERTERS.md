@@ -96,12 +96,20 @@ the History page, surviving server restarts - and, when push is
 enabled, queued for immediate phone delivery in order with everything
 else this alerter has sent. The history record is the delivery
 guarantee; push is the extra channel on top, attempted only after the
-history commit. Phone-side delivery is best-effort (a provider outage
-or a saturated push queue after acceptance shows in the server log
-and the admin Push Log, not on the wire - never as a refusal, which
-would invite a retry that duplicates the recorded event), so if an
-alert matters, keep re-sending transitions as the condition changes
-rather than treating one 333 as the end of the story.
+history commit. Phone-side delivery is best-effort and its failures
+never appear on the wire (a refusal would invite a retry that
+duplicates the recorded event): a provider outage after acceptance
+shows in the server log and the admin Push Log, a saturated push
+queue in the server log. If an alert matters, keep re-sending
+transitions as the condition changes rather than treating one 333 as
+the end of the story.
+
+Ingestion is rate limited per alerter: a burst of 30 alerts, refilling
+at one per second. Past that, `444 rate limited - ...` refuses the
+line before anything is recorded - the alert history is shared with
+the fleet's host transitions and bounded, and a looping script must
+not be able to churn it. Back off and retry; a well-behaved alerter
+sending state *transitions* never notices this limit.
 
 Semantics, identical to a sysmond's transitions:
 

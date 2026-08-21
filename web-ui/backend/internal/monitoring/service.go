@@ -59,6 +59,10 @@ type daemon struct {
 	version  string
 	versConn net.Conn
 
+	// credID is the credential epoch this connection authenticated
+	// under (see settings.AgentToken.CredentialID).
+	credID string
+
 	// Incremental fetch state.
 	//
 	// confSeq is the highest object sequence this daemon has reported. It

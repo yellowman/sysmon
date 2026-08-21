@@ -23,10 +23,11 @@ func hashToken(t string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// What a token's peer turned out to be. A token is minted before its
-// box ever connects, so the kind is recorded at first handshake - a
-// sysmond says HELLO, an alerter says ALERTER - and stays empty for a
-// token nothing has used yet.
+// What a token's peer is. Recorded at mint time (MintAgentToken) - the
+// admin chooses whether a credential belongs to a monitoring box or an
+// alert-only peer, and the greeting verb must match. Only records
+// minted before kinds existed are empty, and those take the kind of
+// their first successful greeting (ClaimAgentKind).
 const (
 	KindSysmond = "sysmond"
 	KindAlerter = "alerter"
@@ -41,7 +42,7 @@ type AgentToken struct {
 	Site  string `json:"site"`
 	Token string `json:"-"` // never leaves this process after creation
 	Label string `json:"label,omitempty"`
-	Kind  string `json:"kind,omitempty"` // KindSysmond/KindAlerter, "" until first seen
+	Kind  string `json:"kind,omitempty"` // KindSysmond/KindAlerter; "" only on pre-kind records
 	// CredentialID is this mint's epoch: a random value regenerated
 	// every time the site's token is minted. A connection remembers the
 	// ID it authenticated under and re-checks it after registering, so
