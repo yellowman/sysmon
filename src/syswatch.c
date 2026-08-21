@@ -1871,12 +1871,19 @@ void revoke_root_if_necessary()
 	 * also makes the helper probe above honest - from here on, pw_gid
 	 * really is the only group this process holds, so a helper the
 	 * probe called unusable genuinely is.
+	 *
+	 * On failure, warn and CARRY ON to setgid/setuid: a uid/gid drop
+	 * with stale supplementary groups is a partial drop, but bailing
+	 * out here would keep the daemon fully root, which is strictly
+	 * worse. (The one side effect: a retained group could keep the
+	 * ping helper usable after the probe called it unusable - the
+	 * conservative direction, and only on this rare failure.)
 	 */
 	if (setgroups(1, &pw->pw_gid) != 0)
 	{
 		perror("revoke_root: setgroups");
-		print_err(1, "WARNING: Failed to drop supplementary groups");
-		return;
+		print_err(1, "WARNING: Failed to drop supplementary groups; "
+			"continuing with the uid/gid drop");
 	}
 
 	/* Drop privileges */
