@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"net"
 	"regexp"
 	"sort"
@@ -110,9 +111,6 @@ type Service struct {
 	alerters    map[string]*alerter
 	alertSinkMu sync.Mutex
 	alertSink   func(source, display, object, status, text string)
-	// alertGate says whether an accepted alert has a live delivery
-	// path right now ("" = yes, else the refusal for the 444).
-	alertGate func() string
 
 	cacheMu sync.Mutex
 	// history, when set, receives every observed host status transition.
@@ -616,7 +614,9 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		s.cacheMu.Unlock()
 
 		if hist != nil {
-			hist.Append(events)
+			if err := hist.Append(events); err != nil {
+				log.Printf("history: recording transitions failed: %v", err)
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -654,7 +654,9 @@ func (s *Service) Refresh() {
 	s.cacheMu.Unlock()
 
 	if hist != nil {
-		hist.Append(events)
+		if err := hist.Append(events); err != nil {
+			log.Printf("history: recording transitions failed: %v", err)
+		}
 	}
 }
 

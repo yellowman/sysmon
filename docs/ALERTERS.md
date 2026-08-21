@@ -85,19 +85,16 @@ does the talking.
 - `444 busy - ...` means the server's delivery pipeline is backed up
   and the alert was **not** accepted. Retry the same line after a short
   delay; `333 ok` is the only reply that means the alert was taken.
-- `444 push delivery is disabled ...` means the server currently has
-  nowhere to send alerts (push switched off, or never configured). The
-  alert was not accepted; page some other way or retry later.
-
-What `333 ok` promises, exactly: the alert was accepted for immediate
-delivery through the server's push pipeline, in order with everything
-else this alerter has sent. It is **not** a durable receipt - alerts
-are not written to disk, so what was queued but not yet sent when the
-server dies is lost. Anything that cannot be refused (an alert the
-server accepted and then failed to deliver because a provider was
-down) appears in the server log and the admin Push Log. If an alert
-matters enough to survive that, keep it on your side until the
-condition clears and re-send OK/CRITICAL transitions as they happen.
+What `333 ok` promises, exactly: the alert is recorded in the web
+UI's **alert history** - written to disk before the reply, visible on
+the History page, surviving server restarts - and, when push is
+enabled, queued for immediate phone delivery in order with everything
+else this alerter has sent. The history record is the delivery
+guarantee; push is the extra channel on top. Phone-side delivery is
+best-effort (a provider outage after acceptance shows in the server
+log and the admin Push Log, not on the wire), so if an alert matters,
+keep re-sending transitions as the condition changes rather than
+treating one 333 as the end of the story.
 
 Semantics, identical to a sysmond's transitions:
 
@@ -108,9 +105,10 @@ Semantics, identical to a sysmond's transitions:
   replaces the earlier alert on the phones rather than stacking a
   second notification, because `<alerter>:<object>` is the collapse
   key, exactly as host alerts collapse per host.
-- Delivery honors the master push switch in the admin UI; alerts sent
-  while push is disabled are refused with `444 push delivery is
-  disabled ...`, never silently dropped.
+- The master push switch in the admin UI only governs the phones:
+  alerts sent while push is disabled are still accepted, recorded, and
+  shown in the web UI - they just page nobody, and the server log says
+  so.
 
 ### Keepalive and goodbye
 
@@ -134,17 +132,22 @@ logs, the registry - so renaming a nickname never re-keys anything.
 
 ## What the web UI does with alerts
 
+- Records each alert in the **History** page's log, alongside host
+  transitions, as `<alerter>:<object>` - with the status it changed
+  from and how long the previous state lasted, once this server has
+  seen the object before.
 - Push notifications to every subscribed phone, with the priority
-  routing above.
+  routing above, when push is enabled.
 - The admin **Push Log** records each fan-out like any other.
 - The **Fleet page** shows the alerter: connected or gone, what it
   shows as (nickname or application name), its address, how many
   alerts it has sent, and the last one.
 
-Alerts are fire-and-forget by design: they are not stored as host
-state, do not appear on the dashboard, and are not replayed to phones
-that subscribe later. If a thing needs its state *tracked*, it wants
-to be a monitored host on a sysmond, not an alerter.
+Alerts are events, not tracked state: they do not appear on the
+dashboard's host board and are not replayed to phones that subscribe
+later. If a thing needs its state *tracked* - polled, colored,
+acknowledged - it wants to be a monitored host on a sysmond, not an
+alerter.
 
 ## Example: shell
 

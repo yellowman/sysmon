@@ -81,7 +81,6 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	// service is hot-swapped (see reconfigurePush).
 	if pushSvc != nil {
 		mon.SetAlertSink(pushSvc.ExternalAlert)
-		mon.SetAlertGate(pushSvc.DeliveryGate)
 	}
 
 	// Configuration endpoints (admin only - config contains secrets)
@@ -2400,7 +2399,6 @@ func (r *Router) reconfigurePush(pc settings.PushConfig) bool {
 	// the dead service (harmlessly - a stopped service drops them - but
 	// silently).
 	r.monitoring.SetAlertSink(svc.ExternalAlert)
-	r.monitoring.SetAlertGate(svc.DeliveryGate)
 	return true
 }
 

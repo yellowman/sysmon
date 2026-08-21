@@ -521,16 +521,16 @@ func TestAlerterReconnectPreservesOrder(t *testing.T) {
 	<-done2
 }
 
-// An alert with no delivery path is refused, not acknowledged into the
-// void: no sink at all, or a gate that says push is off, both answer
-// 444 - and the sender's retry after the path comes back succeeds.
-func TestAlerterRefusedWithoutDeliveryPath(t *testing.T) {
+// The 333 is honored by either delivery path: the alert history alone
+// is enough (push off or absent - the alert still shows in the web UI),
+// and only a server with neither history nor push refuses.
+func TestAlerterHistoryIsADeliveryPath(t *testing.T) {
 	svc := NewService()
 
 	server, client := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		svc.runAlerter("lonely", "", "pipe", server, bufio.NewReader(server))
+		svc.runAlerter("backupd", "", "pipe", server, bufio.NewReader(server))
 		close(done)
 	}()
 	r := bufio.NewReader(client)
@@ -546,33 +546,49 @@ func TestAlerterRefusedWithoutDeliveryPath(t *testing.T) {
 		return strings.TrimSpace(reply)
 	}
 
-	// No sink configured at all.
+	// Neither history nor push: genuinely nowhere to go, so refuse.
 	if got := send("ALERT CRITICAL disk full"); !strings.HasPrefix(got, "444") {
-		t.Fatalf("ALERT with no sink answered %q, want a 444", got)
+		t.Fatalf("ALERT with nowhere to go answered %q, want a 444", got)
 	}
 
-	// A sink, but the gate says push is disabled.
-	var mu sync.Mutex
-	delivered := 0
-	svc.SetAlertSink(func(_, _, _, _, _ string) { mu.Lock(); delivered++; mu.Unlock() })
-	gateReason := "push delivery is disabled on this server"
-	svc.SetAlertGate(func() string { return gateReason })
-	if got := send("ALERT CRITICAL disk full"); !strings.HasPrefix(got, "444 push delivery is disabled") {
-		t.Fatalf("ALERT with a closed gate answered %q", got)
+	// A history store alone (no push at all) accepts and records.
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
+
+	if got := send("ALERT CRITICAL tape jam in drive 2"); got != "333 ok" {
+		t.Fatalf("ALERT with history only answered %q", got)
+	}
+	if got := send("ALERT OK tape cleared by operator"); got != "333 ok" {
+		t.Fatalf("second ALERT answered %q", got)
 	}
 
-	// Path restored: the same line is now taken, and counted.
-	gateReason = ""
-	if got := send("ALERT CRITICAL disk full"); got != "333 ok" {
-		t.Fatalf("ALERT with an open gate answered %q", got)
+	// Recorded like host transitions: keyed source:object with the
+	// halves split out, the text as the description, and the second
+	// row knowing what the object changed from.
+	events := hist.Recent(10, 0)
+	if len(events) != 2 {
+		t.Fatalf("history holds %d events, want 2: %+v", len(events), events)
 	}
-	waitFor(t, "the accepted alert to be delivered", func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return delivered == 1
-	})
-	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != 1 {
-		t.Errorf("Alerts = %d, want 1 (refused alerts must not count)", list[0].Alerts)
+	newest, oldest := events[0], events[1]
+	if oldest.ObjectName != "backupd:tape" || oldest.Site != "backupd" ||
+		oldest.LocalName != "tape" || oldest.NewStatus != "CRITICAL" ||
+		oldest.PrevStatus != "" || oldest.Description != "jam in drive 2" {
+		t.Errorf("first recorded alert = %+v", oldest)
+	}
+	if newest.NewStatus != "OK" || newest.PrevStatus != "CRITICAL" {
+		t.Errorf("second recorded alert = %+v, want OK from CRITICAL", newest)
+	}
+	// The transition duration machinery applies to alerter objects too.
+	if newest.PrevDuration < 0 {
+		t.Errorf("PrevDuration = %d", newest.PrevDuration)
+	}
+
+	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != 2 {
+		t.Errorf("Alerts = %d, want 2 (the refused alert must not count)", list[0].Alerts)
 	}
 
 	client.Close()

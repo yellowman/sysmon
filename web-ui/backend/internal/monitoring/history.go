@@ -72,16 +72,18 @@ func (h *HistoryStore) Close() error {
 }
 
 // Append records a batch of transitions, filling in how long each host
-// had been in its previous state where we know it.
-func (h *HistoryStore) Append(events []HistoryEvent) {
+// had been in its previous state where we know it. The returned error
+// matters to callers that promised the record to someone - the alerter
+// protocol acks against it - and is advisory for the poller.
+func (h *HistoryStore) Append(events []HistoryEvent) error {
 	if len(events) == 0 {
-		return
+		return nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	now := time.Now().UTC()
-	h.db.Update(func(tx *bolt.Tx) error {
+	err := h.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketHistoryEvents)
 		for i := range events {
 			ev := &events[i]
@@ -104,6 +106,7 @@ func (h *HistoryStore) Append(events []HistoryEvent) {
 
 	// Transitions are rare, so pruning on every append is cheap.
 	h.prune(now)
+	return err
 }
 
 // PruneNow ages the store on a clock. Append prunes too, but a system

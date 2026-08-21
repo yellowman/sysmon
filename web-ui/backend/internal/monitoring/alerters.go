@@ -88,6 +88,10 @@ type alerter struct {
 	// It also caps the identity at one queue's worth of backlog, where
 	// per-connection queues let every reconnect abandon another 64.
 	pending chan pendingAlert
+	// lastStatus remembers each object's previous status, so the
+	// history row for an alert can say what it changed FROM - the same
+	// transition shape host history has. Guarded by mu.
+	lastStatus map[string]string
 }
 
 // pendingAlert is one parsed alert waiting on the push pipeline.
@@ -124,37 +128,10 @@ func (s *Service) SetAlertSink(fn func(source, display, object, status, text str
 	s.alertSinkMu.Unlock()
 }
 
-// SetAlertGate names a function that says whether an alert accepted now
-// actually has somewhere to go - "" for yes, else the refusal reason.
-// Without it (or without a sink at all), ALERT lines are refused rather
-// than acknowledged into the void: for a paging interface, "444 <why>"
-// beats a 333 for a page that was never going to be sent.
-func (s *Service) SetAlertGate(fn func() string) {
-	s.alertSinkMu.Lock()
-	s.alertGate = fn
-	s.alertSinkMu.Unlock()
-}
-
 func (s *Service) alertSinkFn() func(source, display, object, status, text string) {
 	s.alertSinkMu.Lock()
 	defer s.alertSinkMu.Unlock()
 	return s.alertSink
-}
-
-// alertRefusal is why an ALERT cannot be accepted right now, or "".
-func (s *Service) alertRefusal() string {
-	s.alertSinkMu.Lock()
-	sink, gate := s.alertSink, s.alertGate
-	s.alertSinkMu.Unlock()
-	if sink == nil {
-		return "no push delivery is configured on this server"
-	}
-	if gate != nil {
-		if reason := gate(); reason != "" {
-			return reason
-		}
-	}
-	return ""
 }
 
 // Alerters lists every alerter seen since this process started, by
@@ -314,31 +291,61 @@ func (s *Service) handleAlertLine(a *alerter, name, line string) string {
 		text = fmt.Sprintf("%s reports %s %s", name, object, status)
 	}
 
-	// An alert with no delivery path is refused, not acknowledged into
-	// the void - the sender is the one party that can do something
-	// about it (log locally, page some other way).
-	if reason := s.alertRefusal(); reason != "" {
-		return reason + " - alert not accepted"
+	// Delivery is two paths, either of which honors the 333: the alert
+	// history (durable, on the History page) always, and the push
+	// pipeline additionally when configured. Only a server with
+	// neither - no history store AND no push service - refuses, because
+	// there an accepted alert genuinely goes nowhere.
+	sink := s.alertSinkFn()
+	hist := s.History()
+	if sink == nil && hist == nil {
+		return "this server has nowhere to record or deliver alerts - alert not accepted"
 	}
 
-	p := pendingAlert{
-		source:  name,
-		display: s.alerterDisplayName(a),
-		object:  object,
-		status:  status,
-		text:    text,
+	if sink != nil {
+		p := pendingAlert{
+			source:  name,
+			display: s.alerterDisplayName(a),
+			object:  object,
+			status:  status,
+			text:    text,
+		}
+		select {
+		case a.pending <- p:
+		default:
+			// The push pipeline is badly backed up. The alert is NOT
+			// accepted (and not recorded - a retry after this 444 must
+			// not duplicate a history row): a 333 here would tell a
+			// compliant alerter its page went out when it was dropped.
+			// 444 never closes the connection; the client retries.
+			log.Printf("agents: alerter %s: delivery queue full - refusing %s %s", name, status, object)
+			return "busy - delivery queue is full, retry shortly"
+		}
 	}
-	select {
-	case a.pending <- p:
-	default:
-		// The push pipeline is badly backed up. The alert is NOT
-		// accepted, and the client must hear that: a 333 here would
-		// tell a compliant alerter its page was delivered when it was
-		// dropped, and the one page that matters would be lost with
-		// only a server-side log line to show for it. 444 never
-		// closes the connection, so the client just retries.
-		log.Printf("agents: alerter %s: delivery queue full - refusing %s %s", name, status, object)
-		return "busy - delivery queue is full, retry shortly"
+
+	// The web UI's record: the alert lands in the same history the
+	// hosts' transitions do, keyed source:object, with the status it
+	// changed from when this process has seen the object before.
+	a.mu.Lock()
+	prev := a.lastStatus[object]
+	a.lastStatus[object] = status
+	a.mu.Unlock()
+	if hist != nil {
+		if err := hist.Append([]HistoryEvent{{
+			ObjectName:  name + ":" + object,
+			Site:        name,
+			LocalName:   object,
+			Description: text,
+			PrevStatus:  prev,
+			NewStatus:   status,
+		}}); err != nil {
+			// Push (if any) still carries it; say so where the operator
+			// can find out why the page shows nothing.
+			log.Printf("agents: alerter %s: recording %s %s to history failed: %v", name, status, object, err)
+			if sink == nil {
+				return "could not record the alert - try again"
+			}
+		}
 	}
 
 	// Bookkeeping counts accepted alerts only; a refused one never
@@ -378,8 +385,9 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 		return old
 	}
 	a := &alerter{
-		conn:    conn,
-		pending: make(chan pendingAlert, alertQueueDepth),
+		conn:       conn,
+		pending:    make(chan pendingAlert, alertQueueDepth),
+		lastStatus: make(map[string]string),
 		info: AlerterInfo{
 			Name:        name,
 			Application: application,
