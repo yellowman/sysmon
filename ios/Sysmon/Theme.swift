@@ -71,6 +71,23 @@ extension View {
     }
 }
 
+// The owning sysmond's name as a small muted capsule. Deliberately
+// quiet - it is context, not the subject - and callers skip it entirely
+// on a single-box install, where rows look exactly as they always did.
+struct SiteTag: View {
+    let name: String
+
+    var body: some View {
+        Text(name)
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundColor(Theme.subtle)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Theme.surfaceSubtle))
+            .lineLimit(1)
+    }
+}
+
 // Status dot with a soft glow halo; pulses when the status is CRITICAL
 // so a down host is impossible to miss at a glance.
 struct StatusDot: View {

@@ -675,6 +675,8 @@ func (s *Service) storeSnapshotLocked(status *models.SysmonStatus) []HistoryEven
 			if old, ok := prev[hostKey(h)]; ok && old != h.OverallStatus {
 				transitions = append(transitions, HistoryEvent{
 					ObjectName:  h.ObjectName,
+					Site:        h.Site,
+					LocalName:   h.LocalName,
 					Hostname:    h.Hostname,
 					Description: h.Description,
 					PrevStatus:  old,

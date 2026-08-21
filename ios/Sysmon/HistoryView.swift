@@ -114,9 +114,15 @@ struct HistoryRow: View {
             StatusDot(status: event.newStatus)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(event.objectName.isEmpty ? event.hostname : event.objectName)
+                    // Bare name with the owning box as its own quiet tag,
+                    // not the overloaded "site:host" string.
+                    Text(event.displayName)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Theme.ink)
+                        .lineLimit(1)
+                    if !event.siteTag.isEmpty {
+                        SiteTag(name: event.siteTag)
+                    }
                     Spacer()
                     Text(relativeTime(event.timestamp))
                         .font(.system(size: 11))

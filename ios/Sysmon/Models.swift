@@ -25,6 +25,11 @@ struct SubscribeResponse: Codable {
 
 struct Host: Codable, Identifiable, Equatable {
     let objectName: String?
+    // objectName's two halves: the bare name the owning daemon knows,
+    // and which daemon that is. Shown separately - a name and a small
+    // site tag - never re-joined into "site:host".
+    let localName: String?
+    let site: String?
     let hostname: String
     let description: String?
     let ipv4Address: String?
@@ -55,9 +60,16 @@ struct Host: Codable, Identifiable, Equatable {
     var isDown: Bool { overallStatus == "CRITICAL" }
     var isWarning: Bool { overallStatus == "WARNING" }
     var isOK: Bool { overallStatus == "OK" }
+    // "local" is the single-box case, where naming the site says nothing.
+    var siteTag: String {
+        let s = site ?? ""
+        return s == "local" ? "" : s
+    }
 
     enum CodingKeys: String, CodingKey {
         case objectName = "object_name"
+        case localName = "local_name"
+        case site
         case hostname
         case description
         case ipv4Address = "ipv4_address"
@@ -202,6 +214,8 @@ struct StatusDelta: Codable {
 struct HistoryEvent: Codable, Identifiable, Equatable {
     let timestamp: String
     let objectName: String
+    let localName: String?
+    let site: String?
     let hostname: String
     let description: String?
     let prevStatus: String
@@ -210,9 +224,22 @@ struct HistoryEvent: Codable, Identifiable, Equatable {
 
     var id: String { timestamp + objectName + prevStatus + newStatus }
 
+    // Bare name plus a separate site tag; the qualified objectName is
+    // only the fallback against a server that predates the split.
+    var displayName: String {
+        if let n = localName, !n.isEmpty { return n }
+        return objectName.isEmpty ? hostname : objectName
+    }
+    var siteTag: String {
+        let s = site ?? ""
+        return s == "local" ? "" : s
+    }
+
     enum CodingKeys: String, CodingKey {
         case timestamp
         case objectName = "object_name"
+        case localName = "local_name"
+        case site
         case hostname
         case description
         case prevStatus = "prev_status"

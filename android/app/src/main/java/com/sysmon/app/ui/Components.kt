@@ -342,6 +342,26 @@ fun StatsRow(stats: Stats?) {
     }
 }
 
+/**
+ * The owning sysmond's name as a small muted pill. Kept deliberately
+ * quiet - it is context, not the subject - and absent entirely on a
+ * single-box install, where the row looks exactly as it always did.
+ */
+@Composable
+fun SiteTag(name: String) {
+    Text(
+        text = name,
+        fontSize = 9.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 5.dp, vertical = 1.dp)
+    )
+}
+
 @Composable
 fun HostRow(host: Host, onClick: (() -> Unit)? = null) {
     Card {
@@ -361,6 +381,9 @@ fun HostRow(host: Host, onClick: (() -> Unit)? = null) {
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
+                    if (host.siteTag.isNotEmpty()) {
+                        SiteTag(host.siteTag)
+                    }
                     if (host.paused) {
                         Text(
                             text = "PAUSED",

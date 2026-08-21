@@ -140,7 +140,11 @@
                     <!-- Compact Header -->
                     <div class="px-2 py-1.5 pl-8">
                         <div class="flex items-center justify-between mb-1">
-                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="hostKey(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></h3>
+                            <!-- Bare name plus a minimized site tag, not the raw
+                                 "site:host" key - the key stays in the tooltip. -->
+                            <h3 class="text-xs font-bold text-gray-900 truncate" x-text="hostLabel(host)" :title="hostKey(host) + ' (' + host.hostname + ')'"></h3>
+                            <span x-show="hostSite(host)" class="text-[9px] text-gray-400 mono flex-shrink-0 ml-1"
+                                  x-text="hostSite(host)"></span>
                             <!-- Its site is not answering: what is shown is the last thing it said. -->
                             <i x-show="host.stale" class="fas fa-plug-circle-xmark text-xs text-gray-500 flex-shrink-0"
                                :title="'site ' + (host.site || '?') + ' is not answering - last seen ' + (host.stale_since || 'unknown')"></i>
@@ -219,7 +223,11 @@
 
                 <!-- Hover Tooltip -->
                 <div class="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 -top-2 left-full ml-2 w-64">
-                    <div class="font-bold mb-2" x-text="hostKey(host)"></div>
+                    <div class="font-bold mb-2">
+                        <span x-text="hostLabel(host)"></span>
+                        <span x-show="hostSite(host)" class="ml-1 text-[10px] font-normal text-gray-400 mono"
+                              x-text="hostSite(host)"></span>
+                    </div>
                     <div class="text-xs text-gray-400 mb-2 -mt-1" x-text="host.hostname"></div>
                     <div class="space-y-1 text-xs">
                         <div x-show="host.description"><span class="text-gray-400">Description:</span> <span x-text="host.description"></span></div>

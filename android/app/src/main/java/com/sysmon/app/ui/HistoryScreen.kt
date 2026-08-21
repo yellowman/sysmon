@@ -196,12 +196,22 @@ private fun HistoryRow(ev: HistoryEvent, clock: Long) {
             StatusDot(ev.newStatus)
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = ev.objectName.ifEmpty { ev.hostname },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.weight(1f)
-                    )
+                    // Bare name with the owning box as its own quiet tag,
+                    // not the overloaded "site:host" string.
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = ev.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1
+                        )
+                        if (ev.siteTag.isNotEmpty()) {
+                            SiteTag(ev.siteTag)
+                        }
+                    }
                     Text(
                         // clock in the expression makes the age
                         // recompose on the ticker, not only on new data.
