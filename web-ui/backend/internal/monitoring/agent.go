@@ -27,8 +27,10 @@ import (
 
 // AgentAuth decides whether a token may claim a site. Returning false
 // closes the connection; the daemon backs off and tries again, so a
-// revoked token costs the fleet nothing but that one box.
-type AgentAuth func(site, token, remoteAddr string) bool
+// revoked token costs the fleet nothing but that one box. On success it
+// also names the credential epoch the token matched (the record's
+// CredentialID), which the connection re-checks after registering.
+type AgentAuth func(site, token, remoteAddr string) (ok bool, credentialID string)
 
 // AgentListener accepts daemons dialling in over TLS.
 type AgentListener struct {
@@ -146,7 +148,14 @@ func (a *AgentListener) handshake(conn net.Conn) {
 		return
 	}
 
-	if a.auth == nil || !a.auth(site, token, remote) {
+	if a.auth == nil {
+		fmt.Fprintf(conn, "444 rejected\r\n")
+		conn.Close()
+		log.Printf("agents: rejected %s claiming site %q", remote, site)
+		return
+	}
+	ok, credID := a.auth(site, token, remote)
+	if !ok {
 		fmt.Fprintf(conn, "444 rejected\r\n")
 		conn.Close()
 		log.Printf("agents: rejected %s claiming site %q", remote, site)
@@ -186,11 +195,21 @@ func (a *AgentListener) handshake(conn net.Conn) {
 			app = TruncateRunes(strings.Join(fields[3:], " "), 128)
 		}
 		log.Printf("agents: alerter %s connected from %s", site, remote)
-		a.svc.runAlerter(site, app, remote, conn, reader)
+		a.svc.runAlerter(site, app, remote, credID, conn, reader)
 		return
 	}
 
 	a.svc.adoptAgent(site, remote, conn, reader)
+	// Register first, THEN re-check the credential. An admin's revoke
+	// or re-mint writes the store and then closes registered
+	// connections; this order guarantees one side always sees the
+	// other - if their write beat this check, the check fails here,
+	// and if this registration beat their sweep, the sweep finds it.
+	if !a.svc.credentialCurrent(site, credID) {
+		conn.Close()
+		log.Printf("agents: site %s (%s): credential revoked or replaced during handshake - dropping", site, remote)
+		return
+	}
 	log.Printf("agents: site %s connected from %s", site, remote)
 
 	// The operator who put this box's token in its sysmon.conf already
@@ -243,6 +262,27 @@ func (s *Service) claimKind(site, kind string) string {
 		return "this token belongs to a " + owner
 	}
 	return ""
+}
+
+// credentialCurrent reports whether the site's stored credential still
+// matches the epoch a connection authenticated under. Called AFTER the
+// connection registers, which is what closes the revoke-mid-handshake
+// race: revocation/re-mint writes the store first and sweeps registered
+// connections second, so a handshake either registers early enough for
+// the sweep to find it, or checks late enough to see the write. A
+// missing or revoked record fails; a record whose CredentialID changed
+// (re-mint) fails; a legacy record with no epoch matches only the empty
+// epoch its authentication returned.
+func (s *Service) credentialCurrent(site, credID string) bool {
+	st := s.Generations()
+	if st == nil {
+		return true // no credential store: nothing to be current against
+	}
+	tok, ok := st.GetAgentToken(site)
+	if !ok || tok.Revoked {
+		return false
+	}
+	return tok.CredentialID == credID
 }
 
 // DisconnectSite closes whatever live connection the named identity

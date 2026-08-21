@@ -83,26 +83,38 @@ func (h *HistoryStore) Append(events []HistoryEvent) error {
 	defer h.mu.Unlock()
 
 	now := time.Now().UTC()
+	// Durations are read here; the lastChange clock only advances after
+	// the transaction commits - a rolled-back append must not move it,
+	// or the retry's duration measures against a write that never was.
+	for i := range events {
+		ev := &events[i]
+		ev.Timestamp = now.Format(time.RFC3339)
+		if last, ok := h.lastChange[ev.ObjectName]; ok {
+			ev.PrevDuration = int64(now.Sub(last).Seconds())
+		}
+	}
 	err := h.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketHistoryEvents)
 		for i := range events {
-			ev := &events[i]
-			ev.Timestamp = now.Format(time.RFC3339)
-			if last, ok := h.lastChange[ev.ObjectName]; ok {
-				ev.PrevDuration = int64(now.Sub(last).Seconds())
-			}
-			h.lastChange[ev.ObjectName] = now
-			data, err := json.Marshal(ev)
+			data, err := json.Marshal(&events[i])
 			if err != nil {
-				continue
+				return err
 			}
-			id, _ := b.NextSequence()
+			id, err := b.NextSequence()
+			if err != nil {
+				return err
+			}
 			if err := b.Put([]byte(fmt.Sprintf("%012d", id)), data); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	if err == nil {
+		for i := range events {
+			h.lastChange[events[i].ObjectName] = now
+		}
+	}
 
 	// Transitions are rare, so pruning on every append is cheap.
 	h.prune(now)

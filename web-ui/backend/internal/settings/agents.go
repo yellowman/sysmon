@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,15 +38,26 @@ const (
 // than being dialled: the alternative has this process holding a key to
 // every box in the fleet, so compromising the UI compromises the lot.
 type AgentToken struct {
-	Site     string    `json:"site"`
-	Token    string    `json:"-"` // never leaves this process after creation
-	Label    string    `json:"label,omitempty"`
-	Kind     string    `json:"kind,omitempty"` // KindSysmond/KindAlerter, "" until first seen
-	Created  time.Time `json:"created"`
-	LastSeen time.Time `json:"last_seen,omitempty"`
-	LastAddr string    `json:"last_addr,omitempty"`
-	Revoked  bool      `json:"revoked,omitempty"`
+	Site  string `json:"site"`
+	Token string `json:"-"` // never leaves this process after creation
+	Label string `json:"label,omitempty"`
+	Kind  string `json:"kind,omitempty"` // KindSysmond/KindAlerter, "" until first seen
+	// CredentialID is this mint's epoch: a random value regenerated
+	// every time the site's token is minted. A connection remembers the
+	// ID it authenticated under and re-checks it after registering, so
+	// a revoke or re-mint that lands mid-handshake still catches the
+	// connection - whichever side finishes second sees the other.
+	// Empty on records minted before the field existed.
+	CredentialID string    `json:"credential_id,omitempty"`
+	Created      time.Time `json:"created"`
+	LastSeen     time.Time `json:"last_seen,omitempty"`
+	LastAddr     string    `json:"last_addr,omitempty"`
+	Revoked      bool      `json:"revoked,omitempty"`
 }
+
+// ErrTokenExists is MintAgentToken's refusal to silently invalidate a
+// live credential: the site already has one and replace was not asked.
+var ErrTokenExists = errors.New("site already has a live token")
 
 // SetAgentLabel renames a token's human label - for alerters this is
 // the nickname alerts display. Missing records are left missing; a
@@ -194,17 +206,17 @@ func (s *Store) GetAgentToken(site string) (AgentToken, bool) {
 	return stored.AgentToken, found
 }
 
-// NewAgentToken mints a credential for a site. The token is returned once
-// and only once - it is stored hashed, so a leaked database does not leak
-// the fleet's credentials, and "show me the token again" is deliberately
-// impossible rather than merely discouraged.
+// MintAgentToken mints a credential for a site. The token is returned
+// once and only once - it is stored hashed, so a leaked database does
+// not leak the fleet's credentials, and "show me the token again" is
+// deliberately impossible rather than merely discouraged.
 //
-// Kind is part of the record from the first write: hash, label and kind
-// commit in one transaction, so the caller never holds a plaintext token
-// whose stored type failed to stick - a token claiming to be an
-// alerter's while the record says nothing would let the next greeting
-// choose its type after all.
-func (s *Store) NewAgentToken(site, label, kind string) (string, error) {
+// The whole mint is one transaction: the does-a-live-token-exist check
+// and the write of hash, label, kind and credential epoch commit
+// together, so two racing first mints cannot both hand out a token
+// (exactly one wins; the other gets ErrTokenExists), and the caller
+// never holds a plaintext token whose stored type failed to stick.
+func (s *Store) MintAgentToken(site, label, kind string, replace bool) (string, error) {
 	switch kind {
 	case KindSysmond, KindAlerter:
 	default:
@@ -216,12 +228,17 @@ func (s *Store) NewAgentToken(site, label, kind string) (string, error) {
 		return "", err
 	}
 	token := hex.EncodeToString(raw)
+	epoch := make([]byte, 8)
+	if _, err := rand.Read(epoch); err != nil {
+		return "", err
+	}
 
 	rec := AgentToken{
-		Site:    site,
-		Label:   label,
-		Kind:    kind,
-		Created: time.Now().UTC(),
+		Site:         site,
+		Label:        label,
+		Kind:         kind,
+		CredentialID: hex.EncodeToString(epoch),
+		Created:      time.Now().UTC(),
 	}
 	blob, err := json.Marshal(struct {
 		AgentToken
@@ -236,6 +253,14 @@ func (s *Store) NewAgentToken(site, label, kind string) (string, error) {
 		if err != nil {
 			return err
 		}
+		if existing := b.Get([]byte(site)); existing != nil && !replace {
+			var old AgentToken
+			// An unreadable record blocks a silent overwrite too: the
+			// caller asked to create, not to destroy whatever this is.
+			if json.Unmarshal(existing, &old) != nil || !old.Revoked {
+				return ErrTokenExists
+			}
+		}
 		return b.Put([]byte(site), blob)
 	}); err != nil {
 		return "", err
@@ -244,10 +269,12 @@ func (s *Store) NewAgentToken(site, label, kind string) (string, error) {
 }
 
 // CheckAgentToken reports whether a token may claim a site, and records
-// the sighting when it may. A storage failure fails closed: an
-// authenticator that cannot read or update its own store must refuse,
-// not guess.
-func (s *Store) CheckAgentToken(site, token, addr string) (bool, error) {
+// the sighting when it may. On success it also returns the credential
+// epoch the token authenticated under, which the connection re-checks
+// after registering (see AgentToken.CredentialID). A storage failure
+// fails closed: an authenticator that cannot read or update its own
+// store must refuse, not guess.
+func (s *Store) CheckAgentToken(site, token, addr string) (bool, string, error) {
 	var stored struct {
 		AgentToken
 		Hash string `json:"hash"`
@@ -285,9 +312,12 @@ func (s *Store) CheckAgentToken(site, token, addr string) (bool, error) {
 		return b.Put([]byte(site), updated)
 	})
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	return ok, nil
+	if !ok {
+		return false, "", nil
+	}
+	return true, stored.CredentialID, nil
 }
 
 // ListAgentTokens returns what is known about each box, without the

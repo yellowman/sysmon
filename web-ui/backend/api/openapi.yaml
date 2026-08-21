@@ -32,6 +32,12 @@ servers:
   - url: https://api.sysmon.example.com
     description: Production server
 
+# Every endpoint requires a session unless it explicitly opts out
+# (login does; it is how a session is obtained).
+security:
+  - SessionAuth: []
+  - CookieAuth: []
+
 tags:
   - name: Configuration
     description: Configuration file management
@@ -47,6 +53,52 @@ tags:
     description: Raw XML data access (legacy)
 
 paths:
+  /api/auth/login:
+    post:
+      tags: [Admin]
+      summary: Log in
+      description: |
+        Exchanges credentials for a session token. Rate limited to 10
+        requests per minute per IP. The token goes in either the
+        Authorization Bearer header or the sysmon_session cookie on
+        every later request; sessions renew on use with a 30-day
+        sliding expiry.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  username: { type: string }
+                  role: { type: string }
+        '401':
+          description: Bad credentials
+        '429':
+          description: Rate limited
+
+  /api/auth/logout:
+    post:
+      tags: [Admin]
+      summary: Log out
+      description: Ends the presented session. Never rate limited.
+      responses:
+        '200':
+          description: Session ended
+
   # Configuration endpoints
   /api/config:
     get:
@@ -327,8 +379,6 @@ paths:
                 note:
                   type: string
                   example: Investigating connectivity issue
-                auth_key:
-                  type: string
               required:
                 - note
       responses:
@@ -400,8 +450,6 @@ paths:
                   items:
                     type: string
                   example: ["web1", "web2", "db1"]
-                auth_key:
-                  type: string
               required:
                 - hostnames
       responses:
@@ -435,8 +483,6 @@ paths:
                 note:
                   type: string
                   example: Maintenance window - planned outage
-                auth_key:
-                  type: string
               required:
                 - hostnames
                 - note
@@ -476,8 +522,6 @@ paths:
                 enable:
                   type: boolean
                   example: true
-                auth_key:
-                  type: string
               required:
                 - hostnames
                 - enable

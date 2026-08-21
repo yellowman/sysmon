@@ -44,12 +44,21 @@ func TestAlerterSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := store.NewAgentToken("backupd", "", settings.KindAlerter); err != nil {
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, false); err != nil {
 		t.Fatal(err)
 	}
+	// The connection carries the credential epoch it authenticated
+	// under; the real handshake gets it from CheckAgentToken.
+	tok, _ := store.GetAgentToken("backupd")
 
 	svc := NewService()
 	svc.SetGenerations(store)
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
 
 	var mu sync.Mutex
 	var sunk []sunkAlert
@@ -67,7 +76,7 @@ func TestAlerterSession(t *testing.T) {
 	server, client := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		svc.runAlerter("backupd", "Bacula 15.0 nightly backups", "pipe", server, bufio.NewReader(server))
+		svc.runAlerter("backupd", "Bacula 15.0 nightly backups", "pipe", tok.CredentialID, server, bufio.NewReader(server))
 		close(done)
 	}()
 
@@ -177,7 +186,7 @@ func TestAlerterReconnectKeepsNewConnection(t *testing.T) {
 	server1, _ := net.Pipe()
 	done1 := make(chan struct{})
 	go func() {
-		svc.runAlerter("upsd", "apcupsd", "pipe-1", server1, bufio.NewReader(server1))
+		svc.runAlerter("upsd", "apcupsd", "pipe-1", "", server1, bufio.NewReader(server1))
 		close(done1)
 	}()
 	waitFor(t, "the first connection to register", func() bool {
@@ -190,7 +199,7 @@ func TestAlerterReconnectKeepsNewConnection(t *testing.T) {
 	server2, client2 := net.Pipe()
 	done2 := make(chan struct{})
 	go func() {
-		svc.runAlerter("upsd", "apcupsd", "pipe-2", server2, bufio.NewReader(server2))
+		svc.runAlerter("upsd", "apcupsd", "pipe-2", "", server2, bufio.NewReader(server2))
 		close(done2)
 	}()
 
@@ -239,7 +248,7 @@ func TestAlerterOverlongLine(t *testing.T) {
 	server, client := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		svc.runAlerter("chatty", "", "pipe", server, bufio.NewReader(server))
+		svc.runAlerter("chatty", "", "pipe", "", server, bufio.NewReader(server))
 		close(done)
 	}()
 
@@ -304,7 +313,7 @@ func TestClaimKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := store.NewAgentToken("box1", "", settings.KindSysmond); err != nil {
+	if _, err := store.MintAgentToken("box1", "", settings.KindSysmond, false); err != nil {
 		t.Fatal(err)
 	}
 	// Minting records the kind now; blank it to simulate a record from
@@ -346,8 +355,14 @@ func TestClaimKind(t *testing.T) {
 // A full delivery queue must refuse the alert, not acknowledge it:
 // "333 ok" is a delivery promise, and a compliant client only resends
 // what was refused. Refused alerts also must not count as sent.
-func TestAlerterQueueFullRefuses(t *testing.T) {
+func TestAlerterPushQueueFullStillRecordsAndAccepts(t *testing.T) {
 	svc := NewService()
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
 
 	release := make(chan struct{})
 	starts := make(chan struct{}, alertQueueDepth+8)
@@ -359,7 +374,7 @@ func TestAlerterQueueFullRefuses(t *testing.T) {
 	server, client := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		svc.runAlerter("floody", "", "pipe", server, bufio.NewReader(server))
+		svc.runAlerter("floody", "", "pipe", "", server, bufio.NewReader(server))
 		close(done)
 	}()
 
@@ -388,25 +403,37 @@ func TestAlerterQueueFullRefuses(t *testing.T) {
 			t.Fatalf("filler %d answered %q", i, got)
 		}
 	}
-	// The next one has nowhere to go: it must be a 444, not a false ok.
-	if got := send("ALERT CRITICAL disk the one that matters"); !strings.HasPrefix(got, "444 busy") {
-		t.Fatalf("overflow alert answered %q, want a 444 busy refusal", got)
+	// The next one finds the push queue full - but history committed,
+	// so it is STILL a 333: a 444 would make the client retry and
+	// duplicate the durable record. The skipped phone delivery is a
+	// logged delivery failure, not an acceptance failure.
+	if got := send("ALERT CRITICAL disk the one that matters"); got != "333 ok" {
+		t.Fatalf("overflow alert answered %q, want 333 (recorded; push skipped)", got)
 	}
 
-	// Unblock delivery, let the backlog drain, and the same line is
-	// accepted on retry - the connection survived the refusal.
 	close(release)
 	for i := 0; i < alertQueueDepth; i++ {
 		<-starts
 	}
-	if got := send("ALERT CRITICAL disk the one that matters"); got != "333 ok" {
-		t.Fatalf("retry after drain answered %q", got)
-	}
 
-	// Only accepted alerts counted: 1 + depth + 1, not the refusal.
-	want := uint64(alertQueueDepth + 2)
-	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != want {
-		t.Errorf("Alerts = %d, want %d (refused alerts must not count)", list[0].Alerts, want)
+	// Every accepted alert is in history - including the one whose
+	// phone delivery was skipped - and the counter agrees.
+	total := alertQueueDepth + 2
+	events := hist.Recent(total+10, 0)
+	if len(events) != total {
+		t.Fatalf("history holds %d events, want %d", len(events), total)
+	}
+	if events[0].NewStatus != "CRITICAL" || events[0].LocalName != "disk" {
+		t.Errorf("newest history row = %+v, want the overflow CRITICAL", events[0])
+	}
+	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != uint64(total) {
+		t.Errorf("Alerts = %d, want %d", list[0].Alerts, total)
+	}
+	// The sink saw everything except the skipped one.
+	select {
+	case <-starts:
+		t.Error("sink saw the skipped alert")
+	default:
 	}
 
 	client.Close()
@@ -428,7 +455,7 @@ func TestClaimKindConcurrentFirstUse(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		site := fmt.Sprintf("box%d", i)
-		if _, err := store.NewAgentToken(site, "", settings.KindSysmond); err != nil {
+		if _, err := store.MintAgentToken(site, "", settings.KindSysmond, false); err != nil {
 			t.Fatal(err)
 		}
 		// The race only exists for records without a kind - which since
@@ -460,6 +487,12 @@ func TestClaimKindConcurrentFirstUse(t *testing.T) {
 // collapse key then left the phones stuck on the stale CRITICAL.
 func TestAlerterReconnectPreservesOrder(t *testing.T) {
 	svc := NewService()
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
 
 	release := make(chan struct{})
 	starts := make(chan struct{}, 8)
@@ -478,7 +511,7 @@ func TestAlerterReconnectPreservesOrder(t *testing.T) {
 	server1, client1 := net.Pipe()
 	done1 := make(chan struct{})
 	go func() {
-		svc.runAlerter("upsd", "apcupsd", "pipe-1", server1, bufio.NewReader(server1))
+		svc.runAlerter("upsd", "apcupsd", "pipe-1", "", server1, bufio.NewReader(server1))
 		close(done1)
 	}()
 	r1 := bufio.NewReader(client1)
@@ -505,7 +538,7 @@ func TestAlerterReconnectPreservesOrder(t *testing.T) {
 	server2, client2 := net.Pipe()
 	done2 := make(chan struct{})
 	go func() {
-		svc.runAlerter("upsd", "apcupsd", "pipe-2", server2, bufio.NewReader(server2))
+		svc.runAlerter("upsd", "apcupsd", "pipe-2", "", server2, bufio.NewReader(server2))
 		close(done2)
 	}()
 	<-done1 // old connection fully torn down
@@ -536,11 +569,15 @@ func TestAlerterReconnectPreservesOrder(t *testing.T) {
 // and only a server with neither history nor push refuses.
 func TestAlerterHistoryIsADeliveryPath(t *testing.T) {
 	svc := NewService()
+	// A push sink exists from the start: it must NOT be enough. The
+	// history store is the acceptance boundary, and a 333 backed by
+	// nothing durable is the lie this design exists to prevent.
+	svc.SetAlertSink(func(_, _, _, _, _ string) {})
 
 	server, client := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		svc.runAlerter("backupd", "", "pipe", server, bufio.NewReader(server))
+		svc.runAlerter("backupd", "", "pipe", "", server, bufio.NewReader(server))
 		close(done)
 	}()
 	r := bufio.NewReader(client)
@@ -556,12 +593,12 @@ func TestAlerterHistoryIsADeliveryPath(t *testing.T) {
 		return strings.TrimSpace(reply)
 	}
 
-	// Neither history nor push: genuinely nowhere to go, so refuse.
-	if got := send("ALERT CRITICAL disk full"); !strings.HasPrefix(got, "444") {
-		t.Fatalf("ALERT with nowhere to go answered %q, want a 444", got)
+	// Push alone: refused - there is nothing durable to ack against.
+	if got := send("ALERT CRITICAL disk full"); !strings.HasPrefix(got, "444 alert history unavailable") {
+		t.Fatalf("ALERT with push but no history answered %q, want a 444", got)
 	}
 
-	// A history store alone (no push at all) accepts and records.
+	// With a history store the same line is accepted and recorded.
 	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -615,7 +652,7 @@ func TestDisconnectSiteCutsLiveConnections(t *testing.T) {
 	aServer, aClient := net.Pipe()
 	aDone := make(chan struct{})
 	go func() {
-		svc.runAlerter("backupd", "", "pipe-a", aServer, bufio.NewReader(aServer))
+		svc.runAlerter("backupd", "", "pipe-a", "", aServer, bufio.NewReader(aServer))
 		close(aDone)
 	}()
 	waitFor(t, "the alerter to register", func() bool {
@@ -663,7 +700,7 @@ func TestStorageFailureFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.NewAgentToken("box1", "", settings.KindSysmond); err != nil {
+	if _, err := store.MintAgentToken("box1", "", settings.KindSysmond, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -683,7 +720,298 @@ func TestStorageFailureFailsClosed(t *testing.T) {
 	if err := store.SetAgentLabel("box1", "new name"); err == nil {
 		t.Error("SetAgentLabel reported success against a dead store")
 	}
-	if _, err := store.CheckAgentToken("box1", "whatever", "addr"); err == nil {
+	if _, _, err := store.CheckAgentToken("box1", "whatever", "addr"); err == nil {
 		t.Error("CheckAgentToken reported a verdict without an error against a dead store")
+	}
+}
+
+// A history write failure refuses the alert even when push is
+// available: the 333 means "history committed", and a push-only
+// delivery cannot honor that.
+func TestAlerterHistoryFailureWithPushStillRefuses(t *testing.T) {
+	svc := NewService()
+	svc.SetAlertSink(func(_, _, _, _, _ string) {
+		t.Error("push sink ran for an alert whose history write failed")
+	})
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetHistory(hist)
+	hist.Close() // the "disk failure": every append now errors
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe", "", server, bufio.NewReader(server))
+		close(done)
+	}()
+	r := bufio.NewReader(client)
+	if _, err := client.Write([]byte("ALERT CRITICAL disk full\n")); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := r.ReadString('\n')
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(reply), "444 could not record") {
+		t.Fatalf("ALERT with a dead history store answered %q, %v", strings.TrimSpace(reply), err)
+	}
+	// Nothing was accepted: not counted, and push never ran.
+	if list := svc.Alerters(); len(list) != 1 || list[0].Alerts != 0 {
+		t.Errorf("Alerts = %d, want 0", list[0].Alerts)
+	}
+	client.Close()
+	<-done
+}
+
+// A failed write must not advance the object's remembered status: the
+// retry the 444 asks for has to record the same first-sighting (or
+// same-previous-status) transition the failed attempt tried to.
+func TestAlerterRetryAfterHistoryFailurePreservesPreviousStatus(t *testing.T) {
+	svc := NewService()
+	dead, err := OpenHistory(filepath.Join(t.TempDir(), "dead.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetHistory(dead)
+	dead.Close()
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "", "pipe", "", server, bufio.NewReader(server))
+		close(done)
+	}()
+	r := bufio.NewReader(client)
+	send := func(line string) string {
+		t.Helper()
+		if _, err := client.Write([]byte(line + "\n")); err != nil {
+			t.Fatalf("write %q: %v", line, err)
+		}
+		reply, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no reply to %q: %v", line, err)
+		}
+		return strings.TrimSpace(reply)
+	}
+
+	if got := send("ALERT CRITICAL battery low"); !strings.HasPrefix(got, "444") {
+		t.Fatalf("first attempt answered %q, want a 444", got)
+	}
+
+	// The store recovers; the retry must record a FIRST sighting - a
+	// failed write that had advanced lastStatus would make this row
+	// read CRITICAL -> CRITICAL.
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
+
+	if got := send("ALERT CRITICAL battery low"); got != "333 ok" {
+		t.Fatalf("retry answered %q", got)
+	}
+	events := hist.Recent(10, 0)
+	if len(events) != 1 {
+		t.Fatalf("history holds %d events, want 1", len(events))
+	}
+	if events[0].PrevStatus != "" || events[0].NewStatus != "CRITICAL" {
+		t.Errorf("retried row = prev %q new %q, want a first sighting", events[0].PrevStatus, events[0].NewStatus)
+	}
+	client.Close()
+	<-done
+}
+
+// A replaced connection that already parsed a line must not commit it
+// after the replacement's newer alert: acceptance re-checks that the
+// line's connection is still the record's current one, under the same
+// lock the reconnect swap takes.
+func TestAlerterReconnectRejectsParsedEventFromObsoleteConnection(t *testing.T) {
+	svc := NewService()
+	hist, err := OpenHistory(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hist.Close()
+	svc.SetHistory(hist)
+
+	server1, _ := net.Pipe()
+	done1 := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "", "pipe-1", "", server1, bufio.NewReader(server1))
+		close(done1)
+	}()
+	waitFor(t, "the first connection to register", func() bool {
+		l := svc.Alerters()
+		return len(l) == 1 && l[0].Connected
+	})
+
+	// The replacement arrives and accepts the recovery.
+	server2, client2 := net.Pipe()
+	done2 := make(chan struct{})
+	go func() {
+		svc.runAlerter("upsd", "", "pipe-2", "", server2, bufio.NewReader(server2))
+		close(done2)
+	}()
+	<-done1
+	r2 := bufio.NewReader(client2)
+	if _, err := client2.Write([]byte("ALERT OK battery mains restored\n")); err != nil {
+		t.Fatal(err)
+	}
+	if reply, _ := r2.ReadString('\n'); strings.TrimSpace(reply) != "333 ok" {
+		t.Fatalf("replacement's alert answered %q", strings.TrimSpace(reply))
+	}
+
+	// The old connection "resumes" with a line it parsed before it was
+	// replaced - modeled by calling the acceptance path directly with
+	// the obsolete connection, exactly what runAlerter would do.
+	svc.alertersMu.Lock()
+	a := svc.alerters["upsd"]
+	svc.alertersMu.Unlock()
+	if msg := svc.handleAlertLine(a, "upsd", "ALERT CRITICAL battery battery low", server1); msg == "" {
+		t.Fatal("stale event from the replaced connection was accepted")
+	}
+
+	// History holds only the replacement's OK; the stale CRITICAL never
+	// landed after it.
+	events := hist.Recent(10, 0)
+	if len(events) != 1 || events[0].NewStatus != "OK" {
+		t.Fatalf("history = %+v, want only the OK", events)
+	}
+	client2.Close()
+	<-done2
+}
+
+// A credential revoked between authentication and registration is
+// caught by the post-registration re-check: register first, re-check
+// second, so whichever of the admin's write and this handshake finishes
+// last sees the other.
+func TestRevokeDuringHandshakeCannotRegister(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, false); err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := store.GetAgentToken("backupd")
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	// The revoke lands after authentication (the epoch is already in
+	// hand) but before the connection registers.
+	if err := store.RevokeAgentToken("backupd"); err != nil {
+		t.Fatal(err)
+	}
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe", tok.CredentialID, server, bufio.NewReader(server))
+		close(done)
+	}()
+	select {
+	case <-done: // dropped immediately by the re-check
+	case <-time.After(5 * time.Second):
+		t.Fatal("revoked-mid-handshake connection was admitted")
+	}
+	if l := svc.Alerters(); len(l) != 1 || l[0].Connected {
+		t.Errorf("Alerters() = %+v, want the record disconnected", l)
+	}
+	// The peer's side is dead too.
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Error("connection still open after mid-handshake revocation")
+	}
+}
+
+// A re-mint changes the credential epoch, so a connection still holding
+// the OLD token's epoch cannot finish registering after the replacement
+// even though the record is not revoked.
+func TestRemintDuringHandshakeCannotRegisterOldToken(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, false); err != nil {
+		t.Fatal(err)
+	}
+	oldTok, _ := store.GetAgentToken("backupd")
+
+	// The re-mint lands mid-handshake.
+	if _, err := store.MintAgentToken("backupd", "", settings.KindAlerter, true); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService()
+	svc.SetGenerations(store)
+
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		svc.runAlerter("backupd", "", "pipe", oldTok.CredentialID, server, bufio.NewReader(server))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old-epoch connection was admitted after a re-mint")
+	}
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Error("connection still open after mid-handshake re-mint")
+	}
+}
+
+// The mint's exists-check and write are one transaction: a second
+// non-replacement mint is refused, and racing first mints produce
+// exactly one token.
+func TestMintAgentTokenAtomicConflict(t *testing.T) {
+	store, err := settings.NewStore(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if _, err := store.MintAgentToken("box1", "", settings.KindSysmond, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MintAgentToken("box1", "", settings.KindSysmond, false); err != settings.ErrTokenExists {
+		t.Fatalf("second mint = %v, want ErrTokenExists", err)
+	}
+	// replace:true still works, and revoked records may be re-minted
+	// without replace.
+	if _, err := store.MintAgentToken("box1", "", settings.KindSysmond, true); err != nil {
+		t.Fatalf("replace mint failed: %v", err)
+	}
+	if err := store.RevokeAgentToken("box1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MintAgentToken("box1", "", settings.KindSysmond, false); err != nil {
+		t.Fatalf("re-mint over a revoked record failed: %v", err)
+	}
+
+	// Ten racing first mints on a fresh site: exactly one wins.
+	var wg sync.WaitGroup
+	wins := make(chan struct{}, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := store.MintAgentToken("fresh", "", settings.KindSysmond, false); err == nil {
+				wins <- struct{}{}
+			}
+		}()
+	}
+	wg.Wait()
+	close(wins)
+	won := 0
+	for range wins {
+		won++
+	}
+	if won != 1 {
+		t.Fatalf("%d concurrent first mints succeeded, want exactly 1", won)
 	}
 }

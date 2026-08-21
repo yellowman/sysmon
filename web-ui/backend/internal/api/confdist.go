@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -376,8 +377,24 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 				"a site name is letters, digits, - and _ (no colon, which would make site:object ambiguous)")
 			return
 		}
-		if existing, held := r.settings.GetAgentToken(body.Site); held &&
-			!existing.Revoked && !body.Replace {
+		kind := body.Kind
+		switch kind {
+		case "":
+			kind = settings.KindSysmond
+		case settings.KindSysmond, settings.KindAlerter:
+		default:
+			r.sendError(w, http.StatusBadRequest, "kind must be sysmond or alerter")
+			return
+		}
+
+		// One transaction mints or refuses: the live-token check and
+		// the write of hash, label, kind and credential epoch commit
+		// together, so two racing first mints cannot both return 200,
+		// and the plaintext token is never handed out claiming a type
+		// the record failed to store.
+		token, err := r.settings.MintAgentToken(body.Site, body.Label, kind, body.Replace)
+		if errors.Is(err, settings.ErrTokenExists) {
+			existing, _ := r.settings.GetAgentToken(body.Site)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -391,22 +408,6 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 			})
 			return
 		}
-
-		kind := body.Kind
-		switch kind {
-		case "":
-			kind = settings.KindSysmond
-		case settings.KindSysmond, settings.KindAlerter:
-		default:
-			r.sendError(w, http.StatusBadRequest, "kind must be sysmond or alerter")
-			return
-		}
-
-		// Kind commits with the hash in one transaction: the plaintext
-		// token is never handed out claiming a type the record failed
-		// to store, and a mistaken first greeting can never claim the
-		// credential's type.
-		token, err := r.settings.NewAgentToken(body.Site, body.Label, kind)
 		if err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return

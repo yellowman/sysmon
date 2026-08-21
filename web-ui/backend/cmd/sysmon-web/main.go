@@ -534,16 +534,16 @@ func main() {
 
 			al, aerr := monitoring.ListenForAgents(*agentListen, certFile, keyFile,
 				monitoringService,
-				func(site, token, addr string) bool {
-					ok, err := settingsStore.CheckAgentToken(site, token, addr)
+				func(site, token, addr string) (bool, string) {
+					ok, credID, err := settingsStore.CheckAgentToken(site, token, addr)
 					if err != nil {
 						// Fail closed: an authenticator whose store is
 						// broken refuses, and says so where the operator
 						// can find it.
 						log.Printf("agents: token check for %s failed: %v", site, err)
-						return false
+						return false, ""
 					}
-					return ok
+					return ok, credID
 				})
 			if aerr != nil {
 				log.Printf("WARNING: %v", aerr)

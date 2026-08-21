@@ -78,6 +78,14 @@ type alerter struct {
 	mu   sync.Mutex
 	info AlerterInfo
 	conn net.Conn
+	// acceptMu serializes alert acceptance against connection
+	// replacement. An old connection that has already read a line could
+	// otherwise commit its (stale) alert after the replacement's newer
+	// one: acceptance takes this lock, checks its connection is still
+	// the record's current one, and only then commits - and a reconnect
+	// swaps the connection under the same lock, so there are exactly
+	// two outcomes: the old alert commits first, or it is refused.
+	acceptMu sync.Mutex
 	// pending is this identity's one delivery queue, drained by one
 	// goroutine for the life of the process. It belongs to the NAME,
 	// not the socket: when the alerter reconnects, the replacement
@@ -202,7 +210,12 @@ func readLineBounded(r *bufio.Reader) (line string, truncated bool, err error) {
 // makes a well-behaved client time out, reconnect, and resend the same
 // page. The queue and its dispatcher belong to the alerter's identity
 // (see registerAlerter), so a reconnect keeps one ordered stream.
-func (s *Service) runAlerter(name, application, remote string, conn net.Conn, reader *bufio.Reader) {
+//
+// credID is the credential epoch this connection authenticated under;
+// after registering, the credential is checked again (register first,
+// re-check second - see credentialCurrent for why that order closes
+// the revoke-during-handshake race).
+func (s *Service) runAlerter(name, application, remote, credID string, conn net.Conn, reader *bufio.Reader) {
 	a := s.registerAlerter(name, application, remote, conn)
 
 	defer func() {
@@ -221,6 +234,11 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 			log.Printf("agents: alerter %s (%s) disconnected", name, remote)
 		}
 	}()
+
+	if !s.credentialCurrent(name, credID) {
+		log.Printf("agents: alerter %s (%s): credential revoked or replaced during handshake - dropping", name, remote)
+		return
+	}
 
 	for {
 		line, truncated, err := readLineBounded(reader)
@@ -255,7 +273,7 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 			fmt.Fprintf(conn, "333 bye\r\n")
 			return
 		case "ALERT":
-			if msg := s.handleAlertLine(a, name, line); msg == "" {
+			if msg := s.handleAlertLine(a, name, line, conn); msg == "" {
 				fmt.Fprintf(conn, "333 ok\r\n")
 			} else {
 				fmt.Fprintf(conn, "444 %s\r\n", msg)
@@ -266,9 +284,14 @@ func (s *Service) runAlerter(name, application, remote string, conn net.Conn, re
 	}
 }
 
-// handleAlertLine parses "ALERT <status> <object> <text...>" and queues
-// it for delivery. Returns "" on success, else the complaint for the 444.
-func (s *Service) handleAlertLine(a *alerter, name, line string) string {
+// handleAlertLine parses "ALERT <status> <object> <text...>" and
+// accepts it: the history write IS the acceptance boundary - it must
+// commit before the 333, and push is attempted only afterwards, as the
+// optional extra channel it is. conn is the connection the line arrived
+// on; acceptance re-checks it is still the identity's current one, so a
+// replaced connection cannot commit a stale event after its
+// replacement's newer one. Returns "" on success, else the 444 text.
+func (s *Service) handleAlertLine(a *alerter, name, line string, conn net.Conn) string {
 	fields := strings.SplitN(line, " ", 4)
 	if len(fields) < 3 {
 		return "usage: ALERT <CRITICAL|WARNING|OK> <object> <text>"
@@ -291,18 +314,60 @@ func (s *Service) handleAlertLine(a *alerter, name, line string) string {
 		text = fmt.Sprintf("%s reports %s %s", name, object, status)
 	}
 
-	// Delivery is two paths, either of which honors the 333: the alert
-	// history (durable, on the History page) always, and the push
-	// pipeline additionally when configured. Only a server with
-	// neither - no history store AND no push service - refuses, because
-	// there an accepted alert genuinely goes nowhere.
-	sink := s.alertSinkFn()
+	// The history store is the acceptance boundary: 333 means, exactly,
+	// "committed to alert history". A server without one refuses -
+	// push alone cannot honor the promise, and an ack that a crash can
+	// erase is not an ack.
 	hist := s.History()
-	if sink == nil && hist == nil {
-		return "this server has nowhere to record or deliver alerts - alert not accepted"
+	if hist == nil {
+		return "alert history unavailable on this server - alert not accepted"
 	}
 
-	if sink != nil {
+	// Acceptance and connection replacement are serialized: a replaced
+	// connection that already parsed a line either commits it here
+	// BEFORE the reconnect swaps it out (it was still current when it
+	// was accepted) or finds itself superseded and is refused - never
+	// commits a stale event after the replacement's newer one.
+	a.acceptMu.Lock()
+	defer a.acceptMu.Unlock()
+	a.mu.Lock()
+	current := a.conn == conn
+	prev := a.lastStatus[object]
+	a.mu.Unlock()
+	if !current {
+		return "connection superseded by a newer one - alert not accepted"
+	}
+
+	if err := hist.Append([]HistoryEvent{{
+		ObjectName:  name + ":" + object,
+		Site:        name,
+		LocalName:   object,
+		Description: text,
+		PrevStatus:  prev,
+		NewStatus:   status,
+	}}); err != nil {
+		// Nothing was accepted, so nothing else may advance: the retry
+		// this 444 asks for must see the same prev status and must not
+		// duplicate anything.
+		log.Printf("agents: alerter %s: recording %s %s to history failed: %v", name, status, object, err)
+		return "could not record the alert - try again"
+	}
+
+	// Committed: everything after this honors the 333 rather than
+	// gating it. Bookkeeping counts accepted alerts only.
+	now := time.Now().UTC()
+	a.mu.Lock()
+	a.lastStatus[object] = status
+	a.info.Alerts++
+	a.info.LastAlertAt = &now
+	a.info.LastAlert = fmt.Sprintf("%s %s: %s", status, object, text)
+	a.mu.Unlock()
+
+	// Push is the optional extra channel, attempted only after the
+	// commit. A saturated queue cannot refuse an accepted alert - the
+	// retry would duplicate the history row - so the skipped phone
+	// delivery is a logged delivery failure instead.
+	if sink := s.alertSinkFn(); sink != nil {
 		p := pendingAlert{
 			source:  name,
 			display: s.alerterDisplayName(a),
@@ -313,49 +378,10 @@ func (s *Service) handleAlertLine(a *alerter, name, line string) string {
 		select {
 		case a.pending <- p:
 		default:
-			// The push pipeline is badly backed up. The alert is NOT
-			// accepted (and not recorded - a retry after this 444 must
-			// not duplicate a history row): a 333 here would tell a
-			// compliant alerter its page went out when it was dropped.
-			// 444 never closes the connection; the client retries.
-			log.Printf("agents: alerter %s: delivery queue full - refusing %s %s", name, status, object)
-			return "busy - delivery queue is full, retry shortly"
+			log.Printf("agents: alerter %s: push queue full - %s %s is recorded in history but phone delivery was skipped",
+				name, status, object)
 		}
 	}
-
-	// The web UI's record: the alert lands in the same history the
-	// hosts' transitions do, keyed source:object, with the status it
-	// changed from when this process has seen the object before.
-	a.mu.Lock()
-	prev := a.lastStatus[object]
-	a.lastStatus[object] = status
-	a.mu.Unlock()
-	if hist != nil {
-		if err := hist.Append([]HistoryEvent{{
-			ObjectName:  name + ":" + object,
-			Site:        name,
-			LocalName:   object,
-			Description: text,
-			PrevStatus:  prev,
-			NewStatus:   status,
-		}}); err != nil {
-			// Push (if any) still carries it; say so where the operator
-			// can find out why the page shows nothing.
-			log.Printf("agents: alerter %s: recording %s %s to history failed: %v", name, status, object, err)
-			if sink == nil {
-				return "could not record the alert - try again"
-			}
-		}
-	}
-
-	// Bookkeeping counts accepted alerts only; a refused one never
-	// happened as far as the Fleet page is concerned.
-	now := time.Now().UTC()
-	a.mu.Lock()
-	a.info.Alerts++
-	a.info.LastAlertAt = &now
-	a.info.LastAlert = fmt.Sprintf("%s %s: %s", status, object, text)
-	a.mu.Unlock()
 	return ""
 }
 
@@ -372,6 +398,10 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 		s.alerters = make(map[string]*alerter)
 	}
 	if old, ok := s.alerters[name]; ok {
+		// The swap holds the acceptance lock: an alert the old
+		// connection already parsed either commits before this point
+		// or sees itself superseded after it - see alerter.acceptMu.
+		old.acceptMu.Lock()
 		old.mu.Lock()
 		if old.conn != nil && old.info.Connected {
 			old.conn.Close()
@@ -382,6 +412,7 @@ func (s *Service) registerAlerter(name, application, remote string, conn net.Con
 		old.info.Connected = true
 		old.info.ConnectedAt = time.Now().UTC()
 		old.mu.Unlock()
+		old.acceptMu.Unlock()
 		return old
 	}
 	a := &alerter{

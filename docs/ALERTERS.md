@@ -60,9 +60,10 @@ Every reply is one line starting `333 ` (success) or `444 ` (refusal).
 - `333 welcome` - authenticated; send alerts from here on.
 - `444 rejected` - bad name/token pair, or the token is revoked. The
   socket closes; back off before retrying.
-- `444 this token belongs to a sysmond` - the token was minted for (and
-  first used by) a monitoring box; a token keeps the kind of its first
-  handshake forever. Mint a separate token for the alerter.
+- `444 this token belongs to a sysmond` - the token was minted for a
+  monitoring box. New credentials are permanently typed when minted;
+  only legacy records with no stored kind are claimed by their first
+  successful greeting. Mint a separate alerter credential.
 
 Everything after the token is what the application calls itself -
 free text up to 128 characters, e.g. `Bacula 15.0 nightly backups`.
@@ -84,19 +85,23 @@ does the talking.
   plain "name reports object STATUS" is generated.
 - Reply is `333 ok` once accepted, or `444 <reason>` for a malformed
   line. A `444` never closes the connection; fix the line and carry on.
-- `444 busy - ...` means the server's delivery pipeline is backed up
-  and the alert was **not** accepted. Retry the same line after a short
-  delay; `333 ok` is the only reply that means the alert was taken.
+- `444 could not record the alert - ...` means the history write
+  failed and the alert was **not** accepted; retry after a short
+  delay. `444 alert history unavailable ...` means this server cannot
+  record alerts at all. `333 ok` is the only reply that means the
+  alert was taken.
 What `333 ok` promises, exactly: the alert is recorded in the web
 UI's **alert history** - written to disk before the reply, visible on
 the History page, surviving server restarts - and, when push is
 enabled, queued for immediate phone delivery in order with everything
 else this alerter has sent. The history record is the delivery
-guarantee; push is the extra channel on top. Phone-side delivery is
-best-effort (a provider outage after acceptance shows in the server
-log and the admin Push Log, not on the wire), so if an alert matters,
-keep re-sending transitions as the condition changes rather than
-treating one 333 as the end of the story.
+guarantee; push is the extra channel on top, attempted only after the
+history commit. Phone-side delivery is best-effort (a provider outage
+or a saturated push queue after acceptance shows in the server log
+and the admin Push Log, not on the wire - never as a refusal, which
+would invite a retry that duplicates the recorded event), so if an
+alert matters, keep re-sending transitions as the condition changes
+rather than treating one 333 as the end of the story.
 
 Semantics, identical to a sysmond's transitions:
 
