@@ -713,7 +713,7 @@ function mapPage() {
         // what was saved) and go back to automatic placement. This one
         // does write, so it needs confirming.
         async resetPositions() {
-            if (!confirm('Discard every hand-placed position, including saved ones, and return to automatic layout?')) return;
+            if (!await uiConfirm('Discard every hand-placed position, including saved ones, and return to automatic layout?')) return;
             this.positions = {};
             await this.savePositions();
             this.layout();
@@ -1347,8 +1347,8 @@ function mapPage() {
         },
 
         enterEdit() { this.editMode = true; },
-        exitEdit() {
-            if (this.dirty && !confirm('Discard unsaved map changes?')) return;
+        async exitEdit() {
+            if (this.dirty && !await uiConfirm('Discard unsaved map changes?')) return;
             this.editMode = false;
             this.linking = null;
             this.discardDraft();
@@ -1387,10 +1387,10 @@ function mapPage() {
             this.layout();
         },
 
-        deleteHost(host) {
+        async deleteHost(host) {
             // An unnamed draft is not in the config yet - just drop it.
             if (this.draft && host === this.draft) { this.discardDraft(); return; }
-            if (!confirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
+            if (!await uiConfirm('Delete "' + host.id + '"? Hosts depending on it become roots.')) return;
             const i = this.hosts.indexOf(host);
             if (i >= 0) this.hosts.splice(i, 1);
             this.hosts.forEach(h => {

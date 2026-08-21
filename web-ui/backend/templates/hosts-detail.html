@@ -470,11 +470,11 @@ function hostDetail() {
 
                 this.host.ObjectTraceEnabled = result.tracing_enabled ? 1 : 0;
 
-                alert(result.tracing_enabled ?
+                uiAlert(result.tracing_enabled ?
                     `Tracing enabled for ${this.hostname}` :
                     `Tracing disabled for ${this.hostname}`);
             } catch (e) {
-                alert(`Failed to toggle trace: ${e.message}`);
+                uiAlert(`Failed to toggle trace: ${e.message}`);
             }
         }
     };

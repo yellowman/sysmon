@@ -37,7 +37,7 @@
                      sysmond, so it is not offered; with an empty fleet
                      this whole header is hidden and the empty-state card
                      does the talking. -->
-                <select @change="pickSite($event.target.value)" :disabled="!sitePickerSites.length"
+                <select @change="pickSite($event.target.value, $event.target)" :disabled="!sitePickerSites.length"
                         class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white max-w-[18rem] disabled:text-gray-400">
                     <option x-show="!sitePickerSites.length" value="">No connected sysmond</option>
                     <option x-show="sitePickerSites.length && !site" value="" :selected="!site">Choose a box&#8230;</option>
@@ -1420,7 +1420,31 @@ function unifiedConfigPage() {
             const s = this.sitePickerSites.find(x => x.site === this.site);
             return s ? (s.description || s.site) : this.site;
         },
-        pickSite(v) { localStorage.setItem('sysmon-site', v); window.location.reload(); },
+        pickSite(v, el) {
+            const go = () => { localStorage.setItem('sysmon-site', v); window.location.reload(); };
+            if (this.structuredHasChanges || this.modified) {
+                this.confirmLeave(go).then(left => {
+                    // Staying: snap the select back to the box being edited.
+                    if (!left && el) el.value = this.site;
+                });
+                return;
+            }
+            go();
+        },
+
+        // The one question every way off this page funnels through,
+        // styled like the page. Resolves true when the user chose to go
+        // (and beforeunload is told not to ask a second time).
+        async confirmLeave(go) {
+            const ok = await uiConfirm(
+                'You have unsaved changes in the config editor. Leave this page and throw them away?',
+                { title: 'Unsaved changes', okText: 'Discard and leave', cancelText: 'Stay here', danger: true });
+            if (ok) {
+                this.allowLeave = true;
+                go();
+            }
+            return ok;
+        },
         async loadSitesForPicker() {
             try {
                 const r = await (await authFetch('/api/sites')).json();
@@ -1458,6 +1482,9 @@ function unifiedConfigPage() {
         // plus the banner text. Live-updated as the user fixes hosts.
         invalidHosts: {},
         validationError: '',
+        // Set once the styled leave dialog got a "discard" answer, so
+        // beforeunload does not ask the same question again.
+        allowLeave: false,
 
         // Raw editor state
         activeTab: 'editor',
@@ -1538,10 +1565,28 @@ function unifiedConfigPage() {
                 this.checkStructuredChanges();
             }, { deep: true });
 
-            // Leaving the page with unsaved edits (either editor) gets
-            // the browser's are-you-sure prompt instead of silent loss.
+            // In-app navigation with unsaved edits gets a real modal
+            // instead of silent loss. Capture phase, so it runs before
+            // the browser follows the link; modifier-clicks open a new
+            // tab and lose nothing, so they pass through.
+            document.addEventListener('click', (e) => {
+                if (!(this.structuredHasChanges || this.modified)) return;
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                const a = e.target.closest ? e.target.closest('a[href]') : null;
+                if (!a || a.target === '_blank') return;
+                const href = a.getAttribute('href');
+                if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                this.confirmLeave(() => { window.location.href = a.href; });
+            }, true);
+
+            // Tab close and browser navigation cannot show a custom
+            // modal (the platform only allows its own prompt), so the
+            // generic one stays as the backstop - suppressed when the
+            // styled dialog already got a "discard" answer.
             window.addEventListener('beforeunload', (e) => {
-                if (this.structuredHasChanges || this.modified) {
+                if (!this.allowLeave && (this.structuredHasChanges || this.modified)) {
                     e.preventDefault();
                     e.returnValue = '';
                 }
@@ -1588,12 +1633,12 @@ function unifiedConfigPage() {
                 if (data.generation) this.remoteGeneration = data.generation;
                 this.modified = false;
             } catch (e) {
-                alert('Failed to load configuration: ' + (e?.message || e));
+                uiAlert('Failed to load configuration: ' + (e?.message || e));
             }
         },
 
         async saveConfigRaw() {
-            if (!confirm('Save configuration changes?')) return;
+            if (!await uiConfirm('Save configuration changes?')) return;
 
             this.saving = true;
             this.versionConflict = false;
@@ -1627,7 +1672,7 @@ function unifiedConfigPage() {
                 this.fetchBackups();
             } catch (e) {
                 if (!this.versionConflict) {
-                    alert('Failed to save configuration: ' + e.message);
+                    uiAlert('Failed to save configuration: ' + e.message);
                 }
             } finally {
                 this.saving = false;
@@ -1635,7 +1680,7 @@ function unifiedConfigPage() {
         },
 
         async reloadRaw() {
-            if (!confirm('Reload sysmon daemon with current configuration?')) return;
+            if (!await uiConfirm('Reload sysmon daemon with current configuration?')) return;
 
             this.reloading = true;
             try {
@@ -1645,7 +1690,7 @@ function unifiedConfigPage() {
                 }
                 this.showSuccess('Sysmon reloaded successfully');
             } catch (e) {
-                alert('Failed to reload sysmon: ' + (e?.message || e));
+                uiAlert('Failed to reload sysmon: ' + (e?.message || e));
             } finally {
                 this.reloading = false;
             }
@@ -1664,7 +1709,7 @@ function unifiedConfigPage() {
         },
 
         async restoreBackup(filename) {
-            if (!confirm(`Restore backup ${filename}? This will replace the current configuration.`)) return;
+            if (!await uiConfirm(`Restore backup ${filename}? This will replace the current configuration.`)) return;
 
             try {
                 const response = await authFetch(`/api/backups/${filename}/restore`, { method: 'POST' });
@@ -1674,7 +1719,7 @@ function unifiedConfigPage() {
                 this.showSuccess('Backup restored successfully');
                 await this.fetchConfigRaw();
             } catch (e) {
-                alert('Failed to restore backup: ' + e.message);
+                uiAlert('Failed to restore backup: ' + e.message);
             }
         },
 
@@ -1713,17 +1758,17 @@ function unifiedConfigPage() {
                     this.originalStructuredConfig = JSON.parse(JSON.stringify(this.structuredConfig));
                     this.structuredHasChanges = false;
                 } else {
-                    alert('Failed to load configuration');
+                    uiAlert('Failed to load configuration');
                 }
             } catch (e) {
                 console.error('Failed to load config:', e);
-                alert('Error loading configuration: ' + e.message);
+                uiAlert('Error loading configuration: ' + e.message);
             }
             this.loadingStructured = false;
         },
 
         async reloadStructured() {
-            if (confirm('Reload configuration from file? Unsaved changes will be lost.')) {
+            if (await uiConfirm('Reload configuration from file? Unsaved changes will be lost.')) {
                 await this.loadConfigStructured();
             }
         },
@@ -1761,11 +1806,11 @@ function unifiedConfigPage() {
                     window.location.href = '/login.html';
                 } else {
                     const error = await response.text();
-                    alert('Failed to save configuration: ' + error);
+                    uiAlert('Failed to save configuration: ' + error);
                 }
             } catch (e) {
                 console.error('Failed to save config:', e);
-                alert('Error saving configuration: ' + e.message);
+                uiAlert('Error saving configuration: ' + e.message);
             }
             this.savingStructured = false;
         },
@@ -1820,7 +1865,7 @@ function unifiedConfigPage() {
 
         addSpawn() {
             if (!this.newSpawn.name || !this.newSpawn.command) {
-                alert('Spawn name and command are required');
+                uiAlert('Spawn name and command are required');
                 return;
             }
 
@@ -1833,20 +1878,20 @@ function unifiedConfigPage() {
             this.newSpawn.command = '';
         },
 
-        editSpawn(index) {
+        async editSpawn(index) {
             const spawn = this.structuredConfig.spawns[index];
-            const newName = prompt('Spawn name:', spawn.name);
+            const newName = await uiPrompt('Spawn name:', spawn.name);
             if (newName === null) return;
 
-            const newCommand = prompt('Spawn command:', spawn.command);
+            const newCommand = await uiPrompt('Spawn command:', spawn.command);
             if (newCommand === null) return;
 
             this.structuredConfig.spawns[index].name = newName;
             this.structuredConfig.spawns[index].command = newCommand;
         },
 
-        deleteSpawn(index) {
-            if (confirm('Delete this spawn command?')) {
+        async deleteSpawn(index) {
+            if (await uiConfirm('Delete this spawn command?')) {
                 this.structuredConfig.spawns.splice(index, 1);
             }
         },
@@ -1971,7 +2016,7 @@ function unifiedConfigPage() {
             if (!this.editingHost.ip) missing.push('an IP address');
             if (!this.editingHost.type) missing.push('a check type');
             if (missing.length) {
-                alert('This host still needs ' + missing.join(' and ') + '.');
+                uiAlert('This host still needs ' + missing.join(' and ') + '.');
                 return;
             }
 
@@ -2056,8 +2101,8 @@ function unifiedConfigPage() {
             this.dependencySuggestions[hostIndex] = [];
         },
 
-        deleteHost(index) {
-            if (confirm('Delete this host?')) {
+        async deleteHost(index) {
+            if (await uiConfirm('Delete this host?')) {
                 this.structuredConfig.hosts.splice(index, 1);
             }
         },

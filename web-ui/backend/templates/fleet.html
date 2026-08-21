@@ -249,7 +249,7 @@ function fleetPage() {
         },
 
         async renameAlerter(a) {
-            const nick = prompt('Nickname for ' + a.name +
+            const nick = await uiPrompt('Nickname for ' + a.name +
                 ' (shown in alerts; empty uses what the application calls itself):',
                 a.nickname || '');
             if (nick === null) return;
@@ -261,7 +261,7 @@ function fleetPage() {
                 });
                 await this.load();
             } catch (e) {
-                alert('Rename failed: ' + (e.message || e));
+                uiAlert('Rename failed: ' + (e.message || e));
             }
         },
 
@@ -355,7 +355,7 @@ function fleetPage() {
         },
 
         async rollback(site) {
-            if (!confirm('Roll ' + site + ' back to its previous config?')) return;
+            if (!await uiConfirm('Roll ' + site + ' back to its previous config?')) return;
             try {
                 const d = await this.post('/api/config/rollback/' + encodeURIComponent(site));
                 this.say(site + ': rolled back to generation ' + d.running_generation, false);
@@ -363,7 +363,7 @@ function fleetPage() {
         },
 
         async revert(site) {
-            if (!confirm('Stop managing ' + site + '?\n\nIt goes back to the config on the box itself. ' +
+            if (!await uiConfirm('Stop managing ' + site + '?\n\nIt goes back to the config on the box itself. ' +
                          'The generations delivered to it are kept, but nothing more is sent.')) return;
             try {
                 await this.post('/api/config/revert/' + encodeURIComponent(site));

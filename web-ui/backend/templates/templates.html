@@ -226,7 +226,7 @@ function templatesPage() {
         // Dropping the custom copy leaves the shipped one showing again.
         async revert() {
             if (!this.sel || this.sel.builtin) return;
-            if (!confirm('Drop the custom version of "' + this.sel.name + '"?\n\n' +
+            if (!await uiConfirm('Drop the custom version of "' + this.sel.name + '"?\n\n' +
                          'If sysmon ships a template with this id, that one comes back. ' +
                          'Devices already stamped out are not touched.')) return;
             const custom = this.list.filter(t => !t.builtin && t.id !== this.sel.id);

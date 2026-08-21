@@ -277,10 +277,10 @@ function agentsPage() {
         // The token cannot be shown again, so closing an uncopied panel
         // asks first. `copied` is the two-second button flash; copiedOnce
         // is the fact that matters here.
-        closeFresh() {
+        async closeFresh() {
             if (!this.fresh.token) return;
             if (!this.copiedOnce &&
-                !confirm('You did not copy the config. The token in it cannot ' +
+                !await uiConfirm('You did not copy the config. The token in it cannot ' +
                          'be shown again.\n\nClose anyway?')) return;
             this.fresh = {};
             this.copiedOnce = false;
@@ -325,7 +325,7 @@ function agentsPage() {
         // and when it last reported.
         async remint(a) {
             const when = this.seen(a);
-            if (!confirm('Mint a new token for ' + a.site + '?\n\n' +
+            if (!await uiConfirm('Mint a new token for ' + a.site + '?\n\n' +
                          'The box using the current one stops reporting until you put ' +
                          'the new token on it. It keeps monitoring and paging.\n\n' +
                          'Last seen: ' + when)) return;
@@ -334,7 +334,7 @@ function agentsPage() {
         },
 
         async revoke(a) {
-            if (!confirm('Revoke the token for ' + a.site + '?\n\n' +
+            if (!await uiConfirm('Revoke the token for ' + a.site + '?\n\n' +
                          'That box stops reporting here at once. It keeps monitoring ' +
                          'and paging.')) return;
             try {

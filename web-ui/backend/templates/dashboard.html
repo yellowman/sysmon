@@ -385,7 +385,7 @@ function dashboard() {
                 this.poller.invalidate();
                 setTimeout(() => this.fetchData(), 1000);
             } catch (e) {
-                alert(`Failed to acknowledge: ${e.message}`);
+                uiAlert(`Failed to acknowledge: ${e.message}`);
             }
         },
 
@@ -396,7 +396,7 @@ function dashboard() {
                 this.poller.invalidate();
                 setTimeout(() => this.fetchData(), 1000);
             } catch (e) {
-                alert(`Failed to un-acknowledge: ${e.message}`);
+                uiAlert(`Failed to un-acknowledge: ${e.message}`);
             }
         },
 
@@ -429,7 +429,7 @@ function dashboard() {
                 this.poller.invalidate();
                 setTimeout(() => this.fetchData(), 1000);
             } catch (e) {
-                alert(`Failed to update host: ${e.message}`);
+                uiAlert(`Failed to update host: ${e.message}`);
             }
         },
 
@@ -449,7 +449,7 @@ function dashboard() {
                 navigator.clipboard.writeText(xmlContent).then(() => {
                     this.showNotification('XML copied to clipboard!');
                 }).catch(err => {
-                    alert('Failed to copy XML: ' + err.message);
+                    uiAlert('Failed to copy XML: ' + err.message);
                 });
             }
         },
@@ -459,7 +459,7 @@ function dashboard() {
                 navigator.clipboard.writeText(responseText).then(() => {
                     this.showNotification(`Response '${command}' copied to clipboard!`);
                 }).catch(err => {
-                    alert('Failed to copy response: ' + err.message);
+                    uiAlert('Failed to copy response: ' + err.message);
                 });
             }
         }
