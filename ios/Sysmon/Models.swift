@@ -212,6 +212,11 @@ struct StatusDelta: Codable {
 
 // One observed host state transition, from /api/monitoring/history.
 struct HistoryEvent: Codable, Identifiable, Equatable {
+    // The store's immutable sequence number. Timestamps only carry
+    // second precision, so two same-status alerts within one second
+    // would collide as list identity without it. Absent on rows from
+    // servers that predate the field.
+    let eventID: UInt64?
     let timestamp: String
     let objectName: String
     let localName: String?
@@ -222,7 +227,10 @@ struct HistoryEvent: Codable, Identifiable, Equatable {
     let newStatus: String
     let prevDuration: Int64?
 
-    var id: String { timestamp + objectName + prevStatus + newStatus }
+    var id: String {
+        if let n = eventID { return String(n) }
+        return timestamp + objectName + prevStatus + newStatus
+    }
 
     // Bare name plus a separate site tag; the qualified objectName is
     // only the fallback against a server that predates the split.
@@ -236,6 +244,7 @@ struct HistoryEvent: Codable, Identifiable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case eventID = "id"
         case timestamp
         case objectName = "object_name"
         case localName = "local_name"

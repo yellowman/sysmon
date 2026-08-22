@@ -14,14 +14,20 @@ its own "Alerters" section; the config editor and the map never see it.
 
 ## Getting a token
 
-Same as a monitoring box: **Admin -> Monitoring boxes -> Add a box**.
-Mint a token under the name the alerter will use (letters, digits,
-`-`, `_`; max 64 chars). The name is the alerter's identity - it
-appears in notifications and on the Fleet page - so name the thing,
-not the machine: `backupd`, not `server3`.
+**Admin -> Agents & alerters -> Add credential**, with the credential
+type set to **External alerter** - the panel then shows the greeting
+line below instead of sysmond config. Mint the token under the name the
+alerter will use (letters, digits, `-`, `_`; max 64 chars). The name
+is the alerter's identity - it appears in notifications and on the
+Fleet page - so name the thing, not the machine: `backupd`, not
+`server3`.
 
-Revoking the token on the same page cuts the alerter off at its next
-connection attempt.
+The type is part of the credential: a token minted for an alerter is
+refused if something greets with it as a sysmond, and the other way
+around.
+
+Revoking the token on the same page cuts the alerter off immediately -
+the live connection is closed and the next attempt is refused.
 
 ## Connecting
 
@@ -40,9 +46,12 @@ connection attempt.
 ## Protocol
 
 Text lines, terminated by `\n` (a trailing `\r` is tolerated). One
-line may carry at most 4096 bytes; anything past that on the same
-line is discarded, not buffered. Every reply is one line starting
-`333 ` (success) or `444 ` (refusal).
+line may carry at most 4096 bytes; a longer line is refused with
+`444 line too long` rather than processed as something shorter than
+what was sent. After authentication the connection survives the
+refusal; an overlong (or otherwise malformed) **greeting** gets the
+444 and then the socket closes, like any other failed handshake.
+Every reply is one line starting `333 ` (success) or `444 ` (refusal).
 
 ### Handshake (first line, within 20 seconds of connecting)
 
@@ -51,9 +60,10 @@ line is discarded, not buffered. Every reply is one line starting
 - `333 welcome` - authenticated; send alerts from here on.
 - `444 rejected` - bad name/token pair, or the token is revoked. The
   socket closes; back off before retrying.
-- `444 this token belongs to a sysmond` - the token was minted for (and
-  first used by) a monitoring box; a token keeps the kind of its first
-  handshake forever. Mint a separate token for the alerter.
+- `444 this token belongs to a sysmond` - the token was minted for a
+  monitoring box. New credentials are permanently typed when minted;
+  only legacy records with no stored kind are claimed by their first
+  successful greeting. Mint a separate alerter credential.
 
 Everything after the token is what the application calls itself -
 free text up to 128 characters, e.g. `Bacula 15.0 nightly backups`.
@@ -75,9 +85,31 @@ does the talking.
   plain "name reports object STATUS" is generated.
 - Reply is `333 ok` once accepted, or `444 <reason>` for a malformed
   line. A `444` never closes the connection; fix the line and carry on.
-- `444 busy - ...` means the server's delivery pipeline is backed up
-  and the alert was **not** accepted. Retry the same line after a short
-  delay; `333 ok` is the only reply that means the alert was taken.
+- `444 could not record the alert - ...` means the history write
+  failed and the alert was **not** accepted; retry after a short
+  delay. `444 alert history unavailable ...` means this server cannot
+  record alerts at all. `333 ok` is the only reply that means the
+  alert was taken.
+What `333 ok` promises, exactly: the alert is recorded in the web
+UI's **alert history** - written to disk before the reply, visible on
+the History page, surviving server restarts - and, when push is
+enabled, queued for immediate phone delivery in order with everything
+else this alerter has sent. The history record is the delivery
+guarantee; push is the extra channel on top, attempted only after the
+history commit. Phone-side delivery is best-effort and its failures
+never appear on the wire (a refusal would invite a retry that
+duplicates the recorded event): a provider outage after acceptance
+shows in the server log and the admin Push Log, a saturated push
+queue in the server log. If an alert matters, keep re-sending
+transitions as the condition changes rather than treating one 333 as
+the end of the story.
+
+Ingestion is rate limited per alerter: a burst of 30 alerts, refilling
+at one per second. Past that, `444 rate limited - ...` refuses the
+line before anything is recorded - the alert history is shared with
+the fleet's host transitions and bounded, and a looping script must
+not be able to churn it. Back off and retry; a well-behaved alerter
+sending state *transitions* never notices this limit.
 
 Semantics, identical to a sysmond's transitions:
 
@@ -88,9 +120,10 @@ Semantics, identical to a sysmond's transitions:
   replaces the earlier alert on the phones rather than stacking a
   second notification, because `<alerter>:<object>` is the collapse
   key, exactly as host alerts collapse per host.
-- Delivery honors the master push switch in the admin UI; alerts sent
-  while push is disabled are acknowledged and dropped, and the server
-  log says so.
+- The master push switch in the admin UI only governs the phones:
+  alerts sent while push is disabled are still accepted, recorded, and
+  shown in the web UI - they just page nobody, and the server log says
+  so.
 
 ### Keepalive and goodbye
 
@@ -114,17 +147,22 @@ logs, the registry - so renaming a nickname never re-keys anything.
 
 ## What the web UI does with alerts
 
+- Records each alert in the **History** page's log, alongside host
+  transitions, as `<alerter>:<object>` - with the status it changed
+  from and how long the previous state lasted, once this server has
+  seen the object before.
 - Push notifications to every subscribed phone, with the priority
-  routing above.
+  routing above, when push is enabled.
 - The admin **Push Log** records each fan-out like any other.
 - The **Fleet page** shows the alerter: connected or gone, what it
   shows as (nickname or application name), its address, how many
   alerts it has sent, and the last one.
 
-Alerts are fire-and-forget by design: they are not stored as host
-state, do not appear on the dashboard, and are not replayed to phones
-that subscribe later. If a thing needs its state *tracked*, it wants
-to be a monitored host on a sysmond, not an alerter.
+Alerts are events, not tracked state: they do not appear on the
+dashboard's host board and are not replayed to phones that subscribe
+later. If a thing needs its state *tracked* - polled, colored,
+acknowledged - it wants to be a monitored host on a sysmond, not an
+alerter.
 
 ## Example: shell
 
@@ -143,17 +181,25 @@ to be a monitored host on a sysmond, not an alerter.
 ## Example: Python
 
 ```python
-import socket, ssl, time
+import os, socket, ssl, time
 
 HOST, PORT = "sysmon-web.example.net", 1347
-NAME, TOKEN = "backupd", "tok-abc123..."
+NAME = "backupd"
+# A credential stays out of source and argv: a mode-0600 file or the
+# environment of the service unit that runs this.
+TOKEN = os.environ["SYSMON_TOKEN"]
 
+# Verify the certificate AND its name. sysmon-web puts the names the
+# daemons dial it by into its generated certificate (the -agent-names
+# flag); start it with the name you use here in that list. Only fall
+# back to ctx.check_hostname = False against an old certificate that
+# carries no usable name - it weakens the check to "any holder of a
+# CA-signed cert", so regenerate the certificate instead if you can.
 ctx = ssl.create_default_context(cafile="aggregator-ca.pem")
-ctx.check_hostname = False  # self-signed cert carries no hostname
 
 def connect():
     raw = socket.create_connection((HOST, PORT), timeout=20)
-    tls = ctx.wrap_socket(raw)
+    tls = ctx.wrap_socket(raw, server_hostname=HOST)
     f = tls.makefile("rw", newline="\n")
     f.write(f"ALERTER {NAME} {TOKEN} Bacula 15.0 nightly backups\n"); f.flush()
     if not f.readline().startswith("333"):

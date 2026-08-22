@@ -1041,7 +1041,10 @@ func (s *Service) notifyAll(title, subtitle, body string, data fcmData, prevStat
 // so a rename never re-keys anything.
 func (s *Service) ExternalAlert(source, display, object, status, text string) {
 	if !s.Enabled() {
-		log.Printf("push: alerter %s sent %s %s but push is disabled - not delivered", source, status, object)
+		// Not a loss: the alert is already recorded in the web UI's
+		// alert history by the accept path - push is the additional
+		// channel, and it is switched off.
+		log.Printf("push: alerter %s sent %s %s but push is disabled - recorded in history only", source, status, object)
 		return
 	}
 	status = strings.ToUpper(status)
@@ -1059,8 +1062,11 @@ func (s *Service) ExternalAlert(source, display, object, status, text string) {
 	}
 
 	log.Printf("push: alerter %s: %s %s - notifying subscribers", source, status, object)
+	// Hostname is what the push log records; the qualified name keeps
+	// two alerters that both report an object called "disk" apart there,
+	// the same way host alerts log as "site:host".
 	s.notifyAll(title, display, body, fcmData{
-		Hostname: object,
+		Hostname: collapse,
 		Object:   collapse,
 		Status:   status,
 		Type:     "alerter",

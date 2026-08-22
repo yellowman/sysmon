@@ -165,6 +165,11 @@ data class TestPushResponse(val status: String = "", val warning: String? = null
 
 @Serializable
 data class HistoryEvent(
+    // The store's immutable sequence number; row identity for lists.
+    // Timestamps only carry second precision, so two same-status alerts
+    // in one second would collide without it. 0 on rows from servers
+    // that predate the field.
+    val id: Long = 0,
     val timestamp: String = "",
     @SerialName("object_name") val objectName: String = "",
     @SerialName("local_name") val localName: String = "",

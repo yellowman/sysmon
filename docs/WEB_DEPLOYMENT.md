@@ -22,14 +22,15 @@ returns your shell prompt.
 
 | Invocation | Behaviour |
 |---|---|
-| `sysmon-web …` | Daemonizes, **silent** (no logs). |
+| `sysmon-web …` | Daemonizes, **silent** (nothing is watching stderr). |
 | `sysmon-web -debug …` | Stays in the foreground, logs to **stderr**. Use this to find out why something won't start. |
-| `sysmon-web -foreground …` | Stays in the foreground, still silent. For process supervisors that track the PID themselves (systemd `Type=simple`, OpenBSD `rc.d`). Add `-debug` to also get logs. |
+| `sysmon-web -foreground …` | Stays in the foreground, logs to **stderr**. For process supervisors that track the PID themselves (systemd `Type=simple`, OpenBSD `rc.d`) - normal warnings and errors land in the journal / rc log, where an operator can find them. |
 
-Logs are **off unless `-debug`** is given - a daemon shouldn't chatter.
-If the service won't come up, the move is always: stop it, run it once
-in the foreground with `-debug`, read the error, fix, restart under the
-supervisor.
+Under a supervisor, ordinary logs are always on: a monitoring server
+that drops a page must not also drop the log line saying so. Only the
+self-daemonized mode is silent, because its stderr goes nowhere. If
+the service won't come up, run it once with `-debug`, read the error,
+fix, restart under the supervisor.
 
 > Under a supervisor you almost always want `-foreground`. If you let it
 > self-daemonize under `Type=simple`, systemd sees the parent exit
@@ -90,10 +91,13 @@ Use the shipped unit (`web-ui/sysmon-web.service`); the important bits:
 Type=simple
 User=www-data
 Group=www-data
-# www-data can't mkdir under root-owned /var/www, so create the socket
-# dir as root first (the "+" runs these as root despite User=www-data).
+# The binary prepares its own directories only when it starts as root;
+# under User=www-data it never does, so the unit prepares every path
+# the unprivileged process cannot create (the "+" runs these as root).
 ExecStartPre=+/bin/mkdir -p /var/www/run
 ExecStartPre=+/bin/chown www-data:www-data /var/www/run
+ExecStartPre=+/usr/bin/install -d -o www-data -g www-data /var/backups/sysmon
+ExecStartPre=+/bin/sh -c 'touch /var/log/sysmon-web-audit.log && chown www-data:www-data /var/log/sysmon-web-audit.log'
 ExecStart=/usr/local/bin/sysmon-web \
   -foreground \
   -socket /var/www/run/sysmon-web.sock \
@@ -105,9 +109,11 @@ Restart=always
 
 Because it runs as `www-data`, the socket is already owned by nginx's
 user - no `-socket-*` flags needed. The `ExecStartPre` lines create
-`/var/www/run` (which `ProtectSystem=strict` also lists in
-`ReadWritePaths`). Add `-debug` to the `ExecStart` line temporarily to
-get logs in the journal (`journalctl -u sysmon-web -f`).
+the socket directory, the backup directory, and the audit log, all
+owned by `www-data` (`/var/lib/sysmon` is `StateDirectory=`, which
+systemd itself prepares). With `-foreground`, normal logs already go
+to the journal (`journalctl -u sysmon-web -f`); `-debug` adds verbose
+diagnostics on top.
 
 ```sh
 cp web-ui/sysmon-web.service /etc/systemd/system/

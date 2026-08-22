@@ -81,10 +81,15 @@ struct SiteTag: View {
         Text(name)
             .font(.system(size: 9, design: .monospaced))
             .foregroundColor(Theme.subtle)
+            .lineLimit(1)
+            // Context, not the subject: rows give the name layout
+            // priority, so when space runs out it is this tag that
+            // shrinks - truncating in the middle keeps both ends of a
+            // long site name readable.
+            .truncationMode(.middle)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(Capsule().fill(Theme.surfaceSubtle))
-            .lineLimit(1)
     }
 }
 

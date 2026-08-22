@@ -24,6 +24,12 @@ const (
 // HistoryEvent is one observed host state transition - the raw material
 // of "what has been going up and down" over the last 48 hours.
 type HistoryEvent struct {
+	// ID is the store's sequence number: immutable, unique, assigned at
+	// append. Clients use it as row identity - timestamps only carry
+	// second precision, so two same-status alerts within one second
+	// would otherwise be indistinguishable. Zero on rows written before
+	// the field existed.
+	ID         uint64 `json:"id,omitempty"`
 	Timestamp  string `json:"timestamp"` // RFC3339
 	ObjectName string `json:"object_name"`
 	// Site and LocalName are ObjectName's two halves, carried separately
@@ -72,38 +78,54 @@ func (h *HistoryStore) Close() error {
 }
 
 // Append records a batch of transitions, filling in how long each host
-// had been in its previous state where we know it.
-func (h *HistoryStore) Append(events []HistoryEvent) {
+// had been in its previous state where we know it. The returned error
+// matters to callers that promised the record to someone - the alerter
+// protocol acks against it - and is advisory for the poller.
+func (h *HistoryStore) Append(events []HistoryEvent) error {
 	if len(events) == 0 {
-		return
+		return nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	now := time.Now().UTC()
-	h.db.Update(func(tx *bolt.Tx) error {
+	// Durations are read here; the lastChange clock only advances after
+	// the transaction commits - a rolled-back append must not move it,
+	// or the retry's duration measures against a write that never was.
+	for i := range events {
+		ev := &events[i]
+		ev.Timestamp = now.Format(time.RFC3339)
+		if last, ok := h.lastChange[ev.ObjectName]; ok {
+			ev.PrevDuration = int64(now.Sub(last).Seconds())
+		}
+	}
+	err := h.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketHistoryEvents)
 		for i := range events {
-			ev := &events[i]
-			ev.Timestamp = now.Format(time.RFC3339)
-			if last, ok := h.lastChange[ev.ObjectName]; ok {
-				ev.PrevDuration = int64(now.Sub(last).Seconds())
-			}
-			h.lastChange[ev.ObjectName] = now
-			data, err := json.Marshal(ev)
+			id, err := b.NextSequence()
 			if err != nil {
-				continue
+				return err
 			}
-			id, _ := b.NextSequence()
+			events[i].ID = id
+			data, err := json.Marshal(&events[i])
+			if err != nil {
+				return err
+			}
 			if err := b.Put([]byte(fmt.Sprintf("%012d", id)), data); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	if err == nil {
+		for i := range events {
+			h.lastChange[events[i].ObjectName] = now
+		}
+	}
 
 	// Transitions are rare, so pruning on every append is cheap.
 	h.prune(now)
+	return err
 }
 
 // PruneNow ages the store on a clock. Append prunes too, but a system
@@ -151,7 +173,12 @@ func (h *HistoryStore) prune(now time.Time) {
 // first. The age check happens here too, not just in prune, so a quiet
 // system never serves stale events between prunes. A window outside
 // (0, retention] is clamped to the default.
-func (h *HistoryStore) Recent(limit int, window time.Duration) []HistoryEvent {
+//
+// The error matters: history is the alerter protocol's delivery
+// guarantee, and a store that has become unreadable must say so - an
+// empty list with a swallowed error reads as "nothing happened", which
+// is the one thing a broken guarantee must never claim.
+func (h *HistoryStore) Recent(limit int, window time.Duration) ([]HistoryEvent, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -160,7 +187,7 @@ func (h *HistoryStore) Recent(limit int, window time.Duration) []HistoryEvent {
 	}
 	cutoff := time.Now().UTC().Add(-window)
 	out := make([]HistoryEvent, 0, limit)
-	h.db.View(func(tx *bolt.Tx) error {
+	err := h.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketHistoryEvents).Cursor()
 		for k, v := c.Last(); k != nil && len(out) < limit; k, v = c.Prev() {
 			var ev HistoryEvent
@@ -188,5 +215,5 @@ func (h *HistoryStore) Recent(limit int, window time.Duration) []HistoryEvent {
 		}
 		return nil
 	})
-	return out
+	return out, err
 }

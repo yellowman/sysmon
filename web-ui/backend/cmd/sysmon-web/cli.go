@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -124,12 +125,15 @@ func mintAgent(store *settings.Store, site, label string, replace bool, agentNam
 		return 1
 	}
 
-	// The same rule the API applies. One token per site, so a second mint
-	// stops the box holding the first, and that is not something to do
-	// because a script ran twice.
-	if existing, held := store.GetAgentToken(site); held && !existing.Revoked && !replace {
+	// The CLI mints sysmond credentials - it prints a sysmon.conf block,
+	// so that is what the caller is provisioning. Alerter credentials
+	// come from the web UI, where the panel shows the ALERTER greeting.
+	// The exists-check and the write are one store transaction, so a
+	// script that ran twice concurrently mints exactly one token.
+	token, err := store.MintAgentToken(site, label, settings.KindSysmond, replace)
+	if errors.Is(err, settings.ErrTokenExists) {
 		fmt.Fprintf(os.Stderr, "sysmon-web: %s already has a live token", site)
-		if !existing.LastSeen.IsZero() {
+		if existing, held := store.GetAgentToken(site); held && !existing.LastSeen.IsZero() {
 			fmt.Fprintf(os.Stderr, " (last seen %s from %s)",
 				existing.LastSeen.Format("2006-01-02 15:04:05"), existing.LastAddr)
 		}
@@ -137,8 +141,6 @@ func mintAgent(store *settings.Store, site, label string, replace bool, agentNam
 			"Add -replace-agent if that is what you want.\n")
 		return 1
 	}
-
-	token, err := store.NewAgentToken(site, label)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sysmon-web: %v\n", err)
 		return 1

@@ -227,10 +227,17 @@ func main() {
 
 	// Logging destination:
 	//   -debug                  -> stderr, verbose, stays (foreground).
+	//   -foreground             -> stderr. A supervisor is watching, so
+	//                              normal warnings and errors belong in
+	//                              the journal / rc log - a monitoring
+	//                              server that silently drops pages must
+	//                              not also silently drop the log line
+	//                              saying so. -debug is extra detail,
+	//                              not the price of having logs at all.
 	//   daemon child (startup)  -> the diag pipe, so the parent can relay
 	//                              a startup failure; signalReady() later
 	//                              silences us for the rest of the run.
-	//   everything else         -> discard (quiet).
+	//   self-daemonized         -> discard (nothing is watching stderr).
 	switch {
 	case *debug:
 		// leave log going to stderr
@@ -245,6 +252,8 @@ func main() {
 		} else {
 			log.SetOutput(io.Discard)
 		}
+	case *foreground:
+		// leave log going to stderr
 	default:
 		log.SetOutput(io.Discard)
 	}
@@ -525,8 +534,16 @@ func main() {
 
 			al, aerr := monitoring.ListenForAgents(*agentListen, certFile, keyFile,
 				monitoringService,
-				func(site, token, addr string) bool {
-					return settingsStore.CheckAgentToken(site, token, addr)
+				func(site, token, addr string) (bool, string) {
+					ok, credID, err := settingsStore.CheckAgentToken(site, token, addr)
+					if err != nil {
+						// Fail closed: an authenticator whose store is
+						// broken refuses, and says so where the operator
+						// can find it.
+						log.Printf("agents: token check for %s failed: %v", site, err)
+						return false, ""
+					}
+					return ok, credID
 				})
 			if aerr != nil {
 				log.Printf("WARNING: %v", aerr)

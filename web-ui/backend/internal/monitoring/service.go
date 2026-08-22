@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"net"
 	"regexp"
 	"sort"
@@ -57,6 +58,10 @@ type daemon struct {
 	// a reconnect arrives on a new socket and naturally re-asks.
 	version  string
 	versConn net.Conn
+
+	// credID is the credential epoch this connection authenticated
+	// under (see settings.AgentToken.CredentialID).
+	credID string
 
 	// Incremental fetch state.
 	//
@@ -613,7 +618,9 @@ func (s *Service) GetStatus() (*models.SysmonStatus, error) {
 		s.cacheMu.Unlock()
 
 		if hist != nil {
-			hist.Append(events)
+			if err := hist.Append(events); err != nil {
+				log.Printf("history: recording transitions failed: %v", err)
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -651,7 +658,9 @@ func (s *Service) Refresh() {
 	s.cacheMu.Unlock()
 
 	if hist != nil {
-		hist.Append(events)
+		if err := hist.Append(events); err != nil {
+			log.Printf("history: recording transitions failed: %v", err)
+		}
 	}
 }
 

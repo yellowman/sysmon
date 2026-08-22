@@ -33,7 +33,7 @@ func TestHistoryWindowAndRetention(t *testing.T) {
 	})
 
 	// Recent must not serve it even before any prune runs.
-	if got := h.Recent(10, 0); len(got) != 0 {
+	if got, _ := h.Recent(10, 0); len(got) != 0 {
 		t.Fatalf("expected stale event filtered from Recent, got %d events", len(got))
 	}
 
@@ -45,7 +45,7 @@ func TestHistoryWindowAndRetention(t *testing.T) {
 		NewStatus:  "WARNING",
 	}})
 
-	got := h.Recent(10, 0)
+	got, _ := h.Recent(10, 0)
 	if len(got) != 1 || got[0].ObjectName != "fresh-host" {
 		t.Fatalf("expected only the fresh event, got %+v", got)
 	}
@@ -81,10 +81,10 @@ func TestRecentWindow(t *testing.T) {
 		return b.Put(k, nv)
 	})
 
-	if got := h.Recent(10, 0); len(got) != 0 {
+	if got, _ := h.Recent(10, 0); len(got) != 0 {
 		t.Fatalf("default window served a 72h-old event: %d rows", len(got))
 	}
-	if got := h.Recent(10, 30*24*time.Hour); len(got) != 1 {
+	if got, _ := h.Recent(10, 30*24*time.Hour); len(got) != 1 {
 		t.Fatalf("30d window missed the 72h-old event: %d rows", len(got))
 	}
 }
@@ -127,7 +127,7 @@ func TestRecentBackfillsSiteAndLocalName(t *testing.T) {
 		NewStatus:  "OK",
 	}})
 
-	got := h.Recent(10, 0)
+	got, _ := h.Recent(10, 0)
 	if len(got) != 3 {
 		t.Fatalf("Recent returned %d events, want 3: %+v", len(got), got)
 	}

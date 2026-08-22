@@ -27,8 +27,10 @@ import (
 
 // AgentAuth decides whether a token may claim a site. Returning false
 // closes the connection; the daemon backs off and tries again, so a
-// revoked token costs the fleet nothing but that one box.
-type AgentAuth func(site, token, remoteAddr string) bool
+// revoked token costs the fleet nothing but that one box. On success it
+// also names the credential epoch the token matched (the record's
+// CredentialID), which the connection re-checks after registering.
+type AgentAuth func(site, token, remoteAddr string) (ok bool, credentialID string)
 
 // AgentListener accepts daemons dialling in over TLS.
 type AgentListener struct {
@@ -113,9 +115,15 @@ func (a *AgentListener) handshake(conn net.Conn) {
 	// check, so an unauthenticated peer streaming a newline-free flood
 	// must cost at most maxLineBytes of memory, not everything it can
 	// push before the deadline.
-	line, err := readLineBounded(reader)
+	line, truncated, err := readLineBounded(reader)
 	if err != nil {
 		conn.Close()
+		return
+	}
+	if truncated {
+		fmt.Fprintf(conn, "444 line too long - maximum %d bytes\r\n", maxLineBytes)
+		conn.Close()
+		log.Printf("agents: %s sent an overlong greeting", remote)
 		return
 	}
 
@@ -140,7 +148,14 @@ func (a *AgentListener) handshake(conn net.Conn) {
 		return
 	}
 
-	if a.auth == nil || !a.auth(site, token, remote) {
+	if a.auth == nil {
+		fmt.Fprintf(conn, "444 rejected\r\n")
+		conn.Close()
+		log.Printf("agents: rejected %s claiming site %q", remote, site)
+		return
+	}
+	ok, credID := a.auth(site, token, remote)
+	if !ok {
 		fmt.Fprintf(conn, "444 rejected\r\n")
 		conn.Close()
 		log.Printf("agents: rejected %s claiming site %q", remote, site)
@@ -180,11 +195,30 @@ func (a *AgentListener) handshake(conn net.Conn) {
 			app = TruncateRunes(strings.Join(fields[3:], " "), 128)
 		}
 		log.Printf("agents: alerter %s connected from %s", site, remote)
-		a.svc.runAlerter(site, app, remote, conn, reader)
+		a.svc.runAlerter(site, app, remote, credID, conn, reader)
 		return
 	}
 
-	a.svc.adoptAgent(site, remote, conn, reader)
+	if !a.svc.adoptAgent(site, remote, credID, conn, reader) {
+		// Stale epoch, refused before the registry was touched: the
+		// legitimate current connection was never disturbed.
+		conn.Close()
+		log.Printf("agents: site %s (%s): credential revoked or replaced during handshake - dropping", site, remote)
+		return
+	}
+	// Registered; re-check the credential for a store write that landed
+	// between the in-lock check and here. An admin's revoke or re-mint
+	// writes the store and then sweeps registered connections; this
+	// order guarantees one side always sees the other - if their write
+	// beat this check, the check fails, and if this registration beat
+	// their sweep, the sweep finds it. Detach conditionally: only this
+	// exact socket, never a connection that has since replaced it.
+	if !a.svc.credentialCurrent(site, credID) {
+		a.svc.detachDaemonConn(site, conn)
+		conn.Close()
+		log.Printf("agents: site %s (%s): credential revoked or replaced during handshake - dropping", site, remote)
+		return
+	}
 	log.Printf("agents: site %s connected from %s", site, remote)
 
 	// The operator who put this box's token in its sysmon.conf already
@@ -225,10 +259,101 @@ func (s *Service) claimKind(site, kind string) string {
 	if st == nil {
 		return ""
 	}
-	if owner := st.ClaimAgentKind(site, kind); owner != "" {
+	owner, err := st.ClaimAgentKind(site, kind)
+	if err != nil {
+		// Fail closed: a peer admitted while its kind claim silently
+		// failed to stick is a peer of no recorded kind - the exact
+		// state this check exists to prevent.
+		log.Printf("agents: kind claim for %s failed: %v", site, err)
+		return "temporary credential-store failure - try again"
+	}
+	if owner != "" {
 		return "this token belongs to a " + owner
 	}
 	return ""
+}
+
+// credentialCurrent reports whether the site's stored credential still
+// matches the epoch a connection authenticated under. Called AFTER the
+// connection registers, which is what closes the revoke-mid-handshake
+// race: revocation/re-mint writes the store first and sweeps registered
+// connections second, so a handshake either registers early enough for
+// the sweep to find it, or checks late enough to see the write. A
+// missing or revoked record fails; a record whose CredentialID changed
+// (re-mint) fails; a legacy record with no epoch matches only the empty
+// epoch its authentication returned.
+func (s *Service) credentialCurrent(site, credID string) bool {
+	st := s.Generations()
+	if st == nil {
+		return true // no credential store: nothing to be current against
+	}
+	tok, ok := st.GetAgentToken(site)
+	if !ok || tok.Revoked {
+		return false
+	}
+	return tok.CredentialID == credID
+}
+
+// DisconnectSite closes whatever live connection the named identity
+// holds - daemon or alerter - and reports whether one was closed.
+//
+// Authentication happens once, at the greeting, and the connection is
+// long-lived by design; without this, revoking or re-minting a token
+// changes nothing for a peer that simply never hangs up. The revoke and
+// re-mint paths call it after the store is updated, so the next
+// connection attempt fails authentication and the current one dies now.
+// (A CLI revoke runs in its own process and cannot reach in here; the
+// running server still cuts the link at its next protocol exchange
+// failure or restart.)
+func (s *Service) DisconnectSite(site string) bool {
+	closed := false
+
+	s.fleetMu.Lock()
+	for _, d := range s.daemons {
+		d.mu.Lock()
+		if d.site == site && d.conn != nil {
+			d.conn.Close()
+			// Detached, not just closed: nothing may keep treating
+			// this socket as the site's connection.
+			d.conn = nil
+			closed = true
+		}
+		d.mu.Unlock()
+	}
+	s.fleetMu.Unlock()
+
+	s.alertersMu.Lock()
+	a, ok := s.alerters[site]
+	s.alertersMu.Unlock()
+	if ok {
+		// The disconnect takes the acceptance lock and invalidates the
+		// connection UNDER it, exactly like a reconnect replacement.
+		// That gives revocation a real ordering against an alert the
+		// connection had already read: either the alert's acceptance
+		// held the lock first and its commit completes before this
+		// returns, or this wins and the alert finds its connection
+		// gone and is refused. Closing the socket alone left a.conn
+		// intact, and one already-parsed event could commit AFTER the
+		// revoke API had reported success.
+		a.acceptMu.Lock()
+		a.mu.Lock()
+		oldConn := a.conn
+		a.conn = nil
+		if a.info.Connected {
+			closed = true
+		}
+		a.info.Connected = false
+		a.mu.Unlock()
+		if oldConn != nil {
+			oldConn.Close()
+		}
+		a.acceptMu.Unlock()
+	}
+
+	if closed {
+		log.Printf("agents: disconnected %s (token revoked or replaced)", site)
+	}
+	return closed
 }
 
 // adoptAgent puts a dialled-in daemon into the fleet.
@@ -236,9 +361,20 @@ func (s *Service) claimKind(site, kind string) string {
 // A site reconnecting replaces its old entry rather than adding a second:
 // a daemon that restarted, or whose link dropped and came back, is the
 // same site, and two entries would double every host it reports.
-func (s *Service) adoptAgent(site, remote string, conn net.Conn, reader *bufio.Reader) {
+//
+// Like registerAlerter, the credential epoch is checked inside the
+// registry lock BEFORE the current connection is touched, and false is
+// returned without any mutation for a stale epoch: a handshake that
+// slept through a re-mint must not evict the legitimate new-epoch
+// daemon (and wipe its sequence state and host cache) on its way to
+// being refused.
+func (s *Service) adoptAgent(site, remote, credID string, conn net.Conn, reader *bufio.Reader) bool {
 	s.fleetMu.Lock()
 	defer s.fleetMu.Unlock()
+
+	if !s.credentialCurrent(site, credID) {
+		return false
+	}
 
 	for _, d := range s.daemons {
 		d.mu.Lock()
@@ -260,8 +396,9 @@ func (s *Service) adoptAgent(site, remote string, conn net.Conn, reader *bufio.R
 		// anything.
 		d.confSeq, d.trapSeq = 0, 0
 		d.hostCache = nil
+		d.credID = credID
 		d.mu.Unlock()
-		return
+		return true
 	}
 
 	s.daemons = append(s.daemons, &daemon{
@@ -269,5 +406,23 @@ func (s *Service) adoptAgent(site, remote string, conn net.Conn, reader *bufio.R
 		site:   site,
 		conn:   conn,
 		reader: reader,
+		credID: credID,
 	})
+	return true
+}
+
+// detachDaemonConn drops the site's connection only if it is still this
+// exact socket - the conditional matters: a stale handshake that lost
+// its post-registration recheck must not tear down a connection that
+// has since replaced it.
+func (s *Service) detachDaemonConn(site string, conn net.Conn) {
+	s.fleetMu.Lock()
+	defer s.fleetMu.Unlock()
+	for _, d := range s.daemons {
+		d.mu.Lock()
+		if d.site == site && d.conn == conn {
+			d.conn = nil
+		}
+		d.mu.Unlock()
+	}
 }

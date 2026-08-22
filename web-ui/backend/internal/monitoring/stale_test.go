@@ -141,7 +141,7 @@ func connect(t *testing.T, svc *Service, f *fakeSysmond) {
 	f.mu.Lock()
 	f.live = c
 	f.mu.Unlock()
-	svc.adoptAgent(f.site, c.RemoteAddr().String(), c, bufio.NewReader(c))
+	svc.adoptAgent(f.site, c.RemoteAddr().String(), "", c, bufio.NewReader(c))
 }
 
 func TestUnreachableSiteGoesStaleNotRemoved(t *testing.T) {

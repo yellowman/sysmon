@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -353,6 +354,11 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 		var body struct {
 			Site  string `json:"site"`
 			Label string `json:"label"`
+			// Kind decides at mint time whether this credential belongs
+			// to a monitoring box or an alert-only peer, instead of
+			// letting whoever holds it decide with their first greeting.
+			// Empty means sysmond, which keeps every existing caller.
+			Kind string `json:"kind"`
 			// Replace has to be asked for. One token per site, so minting
 			// again for a site that already has one silently stops the box
 			// holding the old token - it keeps monitoring and paging, and
@@ -371,8 +377,24 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 				"a site name is letters, digits, - and _ (no colon, which would make site:object ambiguous)")
 			return
 		}
-		if existing, held := r.settings.GetAgentToken(body.Site); held &&
-			!existing.Revoked && !body.Replace {
+		kind := body.Kind
+		switch kind {
+		case "":
+			kind = settings.KindSysmond
+		case settings.KindSysmond, settings.KindAlerter:
+		default:
+			r.sendError(w, http.StatusBadRequest, "kind must be sysmond or alerter")
+			return
+		}
+
+		// One transaction mints or refuses: the live-token check and
+		// the write of hash, label, kind and credential epoch commit
+		// together, so two racing first mints cannot both return 200,
+		// and the plaintext token is never handed out claiming a type
+		// the record failed to store.
+		token, err := r.settings.MintAgentToken(body.Site, body.Label, kind, body.Replace)
+		if errors.Is(err, settings.ErrTokenExists) {
+			existing, _ := r.settings.GetAgentToken(body.Site)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -386,23 +408,36 @@ func (r *Router) handleAgentTokens(w http.ResponseWriter, req *http.Request) {
 			})
 			return
 		}
-
-		token, err := r.settings.NewAgentToken(body.Site, body.Label)
 		if err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		// The whole config block, not just the token. The person doing
-		// this is setting up a box, and the next thing they need is the
-		// text that goes in its config - with the right server name and
-		// port in it, which only this process knows.
-		r.sendJSON(w, map[string]interface{}{
+		// A replaced token's current holder is cut off now. Waiting for
+		// its next reconnect means never for a link that stays up.
+		if body.Replace && r.monitoring != nil {
+			r.monitoring.DisconnectSite(body.Site)
+		}
+
+		resp := map[string]interface{}{
 			"site":  body.Site,
 			"token": token,
-			"config": monitoring.AgentConfigBlock(body.Site, body.Label,
-				monitoring.AgentDialTarget(), token),
-			"note": "copy this now - it is stored hashed and cannot be shown again",
-		})
+			"kind":  kind,
+			"note":  "copy this now - it is stored hashed and cannot be shown again",
+		}
+		if kind == settings.KindAlerter {
+			// An alerter needs the greeting line and the CA, not a
+			// sysmon.conf block.
+			resp["greeting"] = "ALERTER " + body.Site + " " + token + " [application name...]"
+			resp["dial"] = monitoring.AgentDialTarget()
+		} else {
+			// The whole config block, not just the token. The person
+			// doing this is setting up a box, and the next thing they
+			// need is the text that goes in its config - with the right
+			// server name and port in it, which only this process knows.
+			resp["config"] = monitoring.AgentConfigBlock(body.Site, body.Label,
+				monitoring.AgentDialTarget(), token)
+		}
+		r.sendJSON(w, resp)
 
 	default:
 		r.sendError(w, http.StatusMethodNotAllowed, "GET or POST")
@@ -431,7 +466,14 @@ func (r *Router) handleAgentRevoke(w http.ResponseWriter, req *http.Request) {
 		r.sendError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	r.sendJSON(w, map[string]interface{}{"site": site, "revoked": true})
+	// The revoked credential's live connection dies with it. Revocation
+	// that only bites at the next reconnect never bites a peer that
+	// keeps its socket up.
+	disconnected := false
+	if r.monitoring != nil {
+		disconnected = r.monitoring.DisconnectSite(site)
+	}
+	r.sendJSON(w, map[string]interface{}{"site": site, "revoked": true, "disconnected": disconnected})
 }
 
 // GET /api/settings/agents/ca

@@ -9,10 +9,10 @@
         <div>
             <h1 class="text-xl font-extrabold tracking-tight text-gray-900">Alert History</h1>
             <p class="text-xs text-gray-400 mt-1 tracking-wide"
-               x-text="'Host state transitions from the last ' + (window === '30d' ? '30 days' : '48 hours')"></p>
+               x-text="'Host and alerter transitions from the last ' + (window === '30d' ? '30 days' : '48 hours')"></p>
         </div>
         <div class="flex items-center gap-2">
-            <input type="text" x-model="search" placeholder="Filter by host..."
+            <input type="text" x-model="search" placeholder="Filter..."
                    class="px-3 py-1.5 border border-gray-200 rounded text-sm w-48">
             <select x-model="filter" class="px-2 py-1.5 border border-gray-200 rounded text-xs">
                 <option value="all">All events</option>
@@ -55,11 +55,12 @@
             <thead class="bg-gray-50">
                 <tr>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">When</th>
-                    <!-- The owning sysmond, in its own (deliberately small) column
-                         instead of overloading the host name as "site:host".
-                         Absent entirely on a single-box install. -->
-                    <th x-show="anySite" class="px-2 py-3 text-left text-[10px] font-medium text-gray-400 uppercase w-px">Box</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Host</th>
+                    <!-- Who reported it - the owning sysmond for hosts, the
+                         alerter for alerter events - in its own deliberately
+                         small column instead of overloading the name as
+                         "source:object". Absent on a single-box install. -->
+                    <th x-show="anySite" class="px-2 py-3 text-left text-[10px] font-medium text-gray-400 uppercase w-px">Source</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Object</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transition</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Was in previous state</th>
                 </tr>
@@ -79,9 +80,11 @@
                             <div class="text-xs text-gray-400" x-text="ev.description || ev.hostname"></div>
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap">
-                            <span class="px-1.5 py-0.5 rounded text-xs font-medium"
+                            <!-- An alerter's first word about an object has no
+                                 previous state; show just what it is now. -->
+                            <span x-show="ev.prev_status" class="px-1.5 py-0.5 rounded text-xs font-medium"
                                   :class="badgeClass(ev.prev_status)" x-text="ev.prev_status"></span>
-                            <i class="fas fa-arrow-right text-gray-300 text-xs mx-1"></i>
+                            <i x-show="ev.prev_status" class="fas fa-arrow-right text-gray-300 text-xs mx-1"></i>
                             <span class="px-1.5 py-0.5 rounded text-xs font-medium"
                                   :class="badgeClass(ev.new_status)" x-text="ev.new_status"></span>
                         </td>

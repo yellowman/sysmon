@@ -249,8 +249,8 @@ first start:
 sysmon-web -agent-names sysmon-web.example.net
 ```
 
-**2. Make a token for the site.** Open **Admin -> Monitoring boxes ->
-Add a box**. Give it a site name and a label. The page then shows the
+**2. Make a token for the site.** Open **Admin -> Agents & alerters ->
+Add credential**. Give it a site name and a label. The page then shows the
 complete set of config lines, with the token in them, and a button that
 copies them. The server keeps only a hash, so it shows the token one time.
 

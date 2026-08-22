@@ -771,7 +771,11 @@ func (r *Router) handleAlerterNickname(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	body.Nickname = monitoring.TruncateRunes(body.Nickname, 128)
-	r.settings.SetAgentLabel(body.Name, body.Nickname)
+	if err := r.settings.SetAgentLabel(body.Name, body.Nickname); err != nil {
+		// Never confirm a rename the disk refused.
+		r.sendError(w, http.StatusInternalServerError, "could not store the nickname: "+err.Error())
+		return
+	}
 	r.sendJSON(w, map[string]string{"name": body.Name, "nickname": body.Nickname})
 }
 
@@ -970,7 +974,14 @@ func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Reques
 	if req.URL.Query().Get("window") == "30d" {
 		window = 30 * 24 * time.Hour
 	}
-	events := hist.Recent(limit, window)
+	events, err := hist.Recent(limit, window)
+	if err != nil {
+		// A broken history store must not masquerade as an empty,
+		// healthy one - especially now that history is the alerter
+		// protocol's delivery guarantee.
+		r.sendError(w, http.StatusServiceUnavailable, "history store unreadable: "+err.Error())
+		return
+	}
 	r.sendJSON(w, map[string]interface{}{"events": events, "count": len(events), "available": true, "window": req.URL.Query().Get("window")})
 }
 
