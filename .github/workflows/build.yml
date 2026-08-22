@@ -51,7 +51,11 @@ jobs:
         run: cd web-ui/backend && go vet ./...
 
       - name: Test
-        run: cd web-ui/backend && go test ./...
+        # -race because the alerter and agent paths are deliberately
+        # concurrent and their regression tests pin interleavings;
+        # -count=1 because the restored build cache would otherwise
+        # replay cached passes instead of running anything.
+        run: cd web-ui/backend && go test -race -count=1 ./...
 
       - name: Build
         run: cd web-ui/backend && go build ./cmd/sysmon-web
