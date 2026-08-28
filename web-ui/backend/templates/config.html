@@ -553,7 +553,16 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Auth Key</label>
-                            <input type="password" autocomplete="new-password" x-model="structuredConfig.global.authkey" placeholder="secret_password"
+                            <!-- Masked text, not a password-type input: a password
+                                 control is the browser's cue that this page is a
+                                 login form, and no autocomplete value overrides
+                                 that - Firefox still offers to save the
+                                 "credentials" on leave. These are monitoring config
+                                 values, not logins. Same for every secret below in
+                                 this editor; a test enforces it. -->
+                            <input type="text" autocomplete="off" spellcheck="false" autocapitalize="none"
+                                   style="-webkit-text-security: disc;"
+                                   x-model="structuredConfig.global.authkey" placeholder="secret_password"
                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                             <p class="text-xs text-gray-500 mt-1">Client authentication password</p>
                         </div>
@@ -719,7 +728,7 @@
                                 <i class="fas fa-search text-gray-400"></i>
                             </div>
                             <input type="text"
-                                   x-model="hostSearch"
+                                   x-model.debounce.150ms="hostSearch"
                                    placeholder="Search by hostname, IP, or description..."
                                    class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
                             <div x-show="hostSearch" class="absolute inset-y-0 right-0 pr-3 flex items-center">
@@ -728,9 +737,9 @@
                                 </button>
                             </div>
                         </div>
-                        <div x-show="hostSearch && filteredHosts.length < structuredConfig.hosts?.length"
+                        <div x-show="hostSearch && hostMatches.length < structuredConfig.hosts?.length"
                              class="mt-2 text-sm text-gray-600">
-                            Showing <span x-text="filteredHosts.length"></span> of <span x-text="structuredConfig.hosts?.length || 0"></span> hosts
+                            Showing <span x-text="hostMatches.length"></span> of <span x-text="structuredConfig.hosts?.length || 0"></span> hosts
                         </div>
                     </div>
 
@@ -747,7 +756,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <template x-for="item in filteredHosts" :key="item.host.hostname || 'host-' + item.originalIndex">
+                                <template x-for="item in pagedHosts" :key="item.host.hostname || 'host-' + item.originalIndex">
                                     <tr class="transition-colors"
                                         :class="invalidHosts[item.originalIndex] ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-gray-50'">
                                         <td class="px-4 py-3 whitespace-nowrap">
@@ -781,6 +790,39 @@
                             </tbody>
                         </table>
 
+                        <!-- Pager. The table renders one bounded page: with
+                             thousands of hosts the pain was never the string
+                             scan, it was Alpine tearing down and rebuilding a
+                             reactive row per host on every keystroke. The
+                             status page already pages for the same reason.
+                             Deliberately no "All" option - these rows carry
+                             far more bindings than the status table's. -->
+                        <div x-show="hostMatches.length > hostsPerPage" x-cloak
+                             class="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm text-gray-600">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs text-gray-500">Rows per page</span>
+                                <select x-model.number="hostsPerPage" @change="hostPage = 1"
+                                        class="px-2 py-1.5 border border-gray-200 rounded text-xs">
+                                    <option value="100">100</option>
+                                    <option value="250">250</option>
+                                    <option value="500">500</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button @click="hostPage = Math.max(1, hostPage - 1)" :disabled="hostPage <= 1"
+                                        class="px-2 py-1"
+                                        :class="hostPage <= 1 ? 'text-gray-300' : 'text-blue-600 hover:text-blue-900'">
+                                    <i class="fas fa-chevron-left mr-1"></i>Previous
+                                </button>
+                                <span x-text="'Page ' + hostPage + ' of ' + totalHostPages"></span>
+                                <button @click="hostPage = Math.min(totalHostPages, hostPage + 1)" :disabled="hostPage >= totalHostPages"
+                                        class="px-2 py-1"
+                                        :class="hostPage >= totalHostPages ? 'text-gray-300' : 'text-blue-600 hover:text-blue-900'">
+                                    Next<i class="fas fa-chevron-right ml-1"></i>
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- No hosts message -->
                         <div x-show="structuredConfig.hosts?.length === 0" class="text-center py-12 text-gray-500">
                             <i class="fas fa-server text-6xl text-gray-300 mb-4"></i>
@@ -789,7 +831,7 @@
                         </div>
 
                         <!-- No search results message -->
-                        <div x-show="structuredConfig.hosts?.length > 0 && filteredHosts.length === 0" class="text-center py-12 text-gray-500">
+                        <div x-show="structuredConfig.hosts?.length > 0 && hostMatches.length === 0" class="text-center py-12 text-gray-500">
                             <i class="fas fa-search text-6xl text-gray-300 mb-4"></i>
                             <p class="text-lg mb-2">No hosts found</p>
                             <p class="text-sm">Try adjusting your search terms</p>
@@ -1068,7 +1110,8 @@
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                                    <input type="password" autocomplete="new-password" x-model="editingHost.password" placeholder=""
+                                                    <input type="text" autocomplete="off" spellcheck="false" autocapitalize="none"
+                                                           style="-webkit-text-security: disc;" x-model="editingHost.password" placeholder=""
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                                                 </div>
                                             </div>
@@ -1114,12 +1157,14 @@
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                                    <input type="password" autocomplete="new-password" x-model="editingHost.password" placeholder=""
+                                                    <input type="text" autocomplete="off" spellcheck="false" autocapitalize="none"
+                                                           style="-webkit-text-security: disc;" x-model="editingHost.password" placeholder=""
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                                                 </div>
                                                 <div class="md:col-span-2">
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">Shared Secret</label>
-                                                    <input type="password" autocomplete="new-password" x-model="editingHost.secret" placeholder=""
+                                                    <input type="text" autocomplete="off" spellcheck="false" autocapitalize="none"
+                                                           style="-webkit-text-security: disc;" x-model="editingHost.secret" placeholder=""
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                                                     <p class="text-xs text-gray-500 mt-1">RADIUS shared secret key</p>
                                                 </div>
@@ -1137,7 +1182,8 @@
                                                 </div>
                                                 <div>
                                                     <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                                    <input type="password" autocomplete="new-password" x-model="editingHost.password" placeholder=""
+                                                    <input type="text" autocomplete="off" spellcheck="false" autocapitalize="none"
+                                                           style="-webkit-text-security: disc;" x-model="editingHost.password" placeholder=""
                                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                                                 </div>
                                             </div>
@@ -1539,6 +1585,20 @@ function unifiedConfigPage() {
         editingHostIndex: -1,
         editingHost: null,
         hostSearch: '',
+        // The table renders pagedHosts: a slice of hostMatches, which is
+        // recomputed once per search or edit instead of on every render.
+        // filteredHosts used to be a getter feeding x-for directly, so
+        // with thousands of hosts every keystroke rescanned the fleet
+        // and had Alpine reconcile every matching row's DOM tree. See
+        // refreshHostMatches().
+        hostMatches: [],
+        hostPage: 1,
+        hostsPerPage: 100,
+        // Set when code clears the search as part of jumping to a saved
+        // row. Alpine runs $watch callbacks on a microtask AFTER the
+        // synchronous save code, so without this guard the watcher's
+        // reset-to-page-1 would stomp the page the save just computed.
+        searchJumping: false,
 
         successMessage: '',
 
@@ -1564,6 +1624,17 @@ function unifiedConfigPage() {
             this.$watch('structuredConfig', () => {
                 this.checkStructuredChanges();
             }, { deep: true });
+
+            // Search runs once per debounced keystroke against the cached
+            // match list; typing must never rebuild the table against the
+            // whole fleet again.
+            this.$watch('hostSearch', () => {
+                // A programmatic clear already refreshed and picked the
+                // page showing the saved row; do not reset over it.
+                if (this.searchJumping) { this.searchJumping = false; return; }
+                this.hostPage = 1;
+                this.refreshHostMatches();
+            });
 
             // In-app navigation with unsaved edits gets a real modal
             // instead of silent loss. Capture phase, so it runs before
@@ -1609,6 +1680,8 @@ function unifiedConfigPage() {
                 if (Object.keys(this.invalidHosts).length === 0) {
                     this.validationError = '';
                 }
+                // A fixed host must also stop floating to the top.
+                this.refreshHostMatches();
             }
         },
 
@@ -1764,6 +1837,7 @@ function unifiedConfigPage() {
                 console.error('Failed to load config:', e);
                 uiAlert('Error loading configuration: ' + e.message);
             }
+            this.refreshHostMatches();
             this.loadingStructured = false;
         },
 
@@ -1839,6 +1913,7 @@ function unifiedConfigPage() {
             // so only IP and check type can actually block a save.
             const bad = this.findInvalidHosts();
             this.invalidHosts = bad;
+            this.refreshHostMatches();
             const indexes = Object.keys(bad);
             if (indexes.length === 0) {
                 this.validationError = '';
@@ -1854,9 +1929,11 @@ function unifiedConfigPage() {
                 ' missing required fields - ' + names.join(', ') + more +
                 '. They are highlighted in red at the top of the host list; edit each to fill in what is missing.';
             // Make sure the highlighted rows can actually be seen: open
-            // the section, drop any filter hiding them, and go there.
+            // the section, drop any filter hiding them, jump to the first
+            // page (invalid rows bucket to the front), and go there.
             this.sections.hosts = true;
             this.hostSearch = '';
+            this.hostPage = 1;
             this.$nextTick(() => {
                 document.getElementById('hosts-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             });
@@ -1896,32 +1973,58 @@ function unifiedConfigPage() {
             }
         },
 
-        // Invalid rows float to the top while a failed save is being
-        // fixed, so "highlighted in red at the top" is literally true.
-        sortInvalidFirst(list) {
-            if (Object.keys(this.invalidHosts).length === 0) return list;
-            return list.slice().sort((a, b) =>
-                (this.invalidHosts[b.originalIndex] ? 1 : 0) - (this.invalidHosts[a.originalIndex] ? 1 : 0));
+        get totalHostPages() {
+            return Math.max(1, Math.ceil(this.hostMatches.length / this.hostsPerPage));
         },
 
-        get filteredHosts() {
-            if (!this.hostSearch || this.hostSearch.trim() === '') {
-                return this.sortInvalidFirst(
-                    (this.structuredConfig.hosts || []).map((host, index) => ({ host, originalIndex: index })));
-            }
+        get pagedHosts() {
+            const start = (this.hostPage - 1) * this.hostsPerPage;
+            return this.hostMatches.slice(start, start + this.hostsPerPage);
+        },
 
-            const search = this.hostSearch.toLowerCase().trim();
-            return this.sortInvalidFirst((this.structuredConfig.hosts || [])
-                .map((host, index) => ({ host, originalIndex: index }))
-                .filter(({ host }) => {
+        // Recompute which hosts the table shows: one linear pass, called
+        // on (debounced) search input and after anything that changes the
+        // host list or the invalid map - never per render, which is what
+        // made the old filteredHosts getter a per-keystroke fleet scan.
+        // Invalid rows go first via two linear buckets instead of a sort,
+        // so "highlighted in red at the top" stays literally true, and
+        // originalIndex keeps Edit/Delete addressing the real entries in
+        // structuredConfig.hosts.
+        refreshHostMatches() {
+            const q = this.hostSearch.trim().toLowerCase();
+            const hosts = this.structuredConfig.hosts || [];
+            const invalid = [];
+            const valid = [];
+
+            for (let i = 0; i < hosts.length; i++) {
+                const host = hosts[i];
+
+                if (q) {
                     const hostname = (host.hostname || '').toLowerCase();
                     const ip = (host.ip || '').toLowerCase();
-                    const description = (host.notes || '').toLowerCase();
+                    const notes = (host.notes || '').toLowerCase();
 
-                    return hostname.includes(search) ||
-                           ip.includes(search) ||
-                           description.includes(search);
-                }));
+                    if (!hostname.includes(q) &&
+                        !ip.includes(q) &&
+                        !notes.includes(q)) {
+                        continue;
+                    }
+                }
+
+                const item = { host, originalIndex: i };
+
+                if (this.invalidHosts[i]) {
+                    invalid.push(item);
+                } else {
+                    valid.push(item);
+                }
+            }
+
+            this.hostMatches = invalid.concat(valid);
+
+            if (this.hostPage > this.totalHostPages) {
+                this.hostPage = this.totalHostPages;
+            }
         },
 
         addHost() {
@@ -2052,6 +2155,23 @@ function unifiedConfigPage() {
                 this.structuredConfig.hosts[this.editingHostIndex] = hostToSave;
             }
 
+            this.refreshHostMatches();
+            // The row just saved must end up on screen. A new host is
+            // appended to the end of the fleet, which with paged rows
+            // means the last page - saved, refreshed, and never seen.
+            // Jump to its page; if the active search filter hides it,
+            // showing the saved row wins over keeping the filter.
+            const savedIndex = this.editingHostIndex === -1
+                ? this.structuredConfig.hosts.length - 1
+                : this.editingHostIndex;
+            let at = this.hostMatches.findIndex(m => m.originalIndex === savedIndex);
+            if (at === -1 && this.hostSearch) {
+                this.searchJumping = true;
+                this.hostSearch = '';
+                this.refreshHostMatches();
+                at = this.hostMatches.findIndex(m => m.originalIndex === savedIndex);
+            }
+            if (at >= 0) this.hostPage = Math.floor(at / this.hostsPerPage) + 1;
             this.closeHostModal();
         },
 
@@ -2104,6 +2224,7 @@ function unifiedConfigPage() {
         async deleteHost(index) {
             if (await uiConfirm('Delete this host?')) {
                 this.structuredConfig.hosts.splice(index, 1);
+                this.refreshHostMatches();
             }
         },
 

@@ -46,7 +46,49 @@
                 <span x-show="editMode">Edit mode - add hosts, draw dependencies, then save</span>
             </p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+            <!-- The three questions this map answers, as its three primary
+                 views: the network in aggregate, only what is broken, or
+                 one host in its full context. Everything about map
+                 mechanics lives under Layout instead of up here. -->
+            <div class="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                <button @click="setMode('overview')"
+                        :class="mode === 'overview' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                        class="px-3 py-1.5">Overview</button>
+                <button @click="setMode('problems')"
+                        :class="mode === 'problems' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                        class="px-3 py-1.5 border-l border-gray-200">Problems<span x-show="problemCount" x-cloak
+                        class="ml-1.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold"
+                        x-text="problemCount"></span></button>
+                <button @click="focusSelected()"
+                        :class="mode === 'focus' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                        class="px-3 py-1.5 border-l border-gray-200"
+                        title="Focus on the selected host - its upstream path and downstream neighbourhood">Focus</button>
+            </div>
+            <!-- Search means "take me to this object": pick a result and
+                 the map expands its branch, focuses, centres and selects
+                 it - not a highlight somewhere off screen. -->
+            <div class="relative">
+                <input type="text" x-model="search" @input="searchInput()" @focus="searchInput()"
+                       @keydown.down.prevent="searchMove(1)" @keydown.up.prevent="searchMove(-1)"
+                       @keydown.enter.prevent="searchGo()" @keydown.escape="searchResults = []"
+                       @click.outside="searchResults = []"
+                       placeholder="Find host..."
+                       class="px-3 py-1.5 border border-gray-200 rounded text-sm w-56">
+                <div x-show="searchResults.length" x-cloak
+                     class="absolute left-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-2xl z-50 py-1 max-h-80 overflow-y-auto">
+                    <template x-for="(r, i) in searchResults" :key="'sr-' + r.id">
+                        <button @mousedown.prevent="goTo(r.id)"
+                                :class="i === searchSel ? 'bg-blue-50' : ''"
+                                class="w-full text-left px-3 py-1.5 hover:bg-blue-50 flex items-center gap-2">
+                            <span class="mono text-sm text-gray-900 truncate" x-text="r.id"></span>
+                            <span class="text-xs text-gray-400 truncate" x-text="r.ip || r.notes || ''"></span>
+                            <span x-show="statusOf(r.id)" class="ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
+                                  :class="badgeClass(statusOf(r.id))" x-text="statusOf(r.id)"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
             <div class="flex items-center gap-1.5">
                 <label class="text-xs text-gray-500">Site</label>
                 <select @change="pickSite($event.target.value)" :disabled="!sitePickerSites.length"
@@ -59,31 +101,6 @@
                     </template>
                 </select>
             </div>
-            <input type="text" x-model="search" placeholder="Find host..."
-                   class="px-3 py-1.5 border border-gray-200 rounded text-sm w-44">
-            <button @click="expandAll()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Expand all">
-                <i class="fas fa-angles-down"></i>
-            </button>
-            <button @click="collapseAll()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Collapse to roots">
-                <i class="fas fa-angles-up"></i>
-            </button>
-            <button @click="fit()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Fit to view">
-                <i class="fas fa-expand"></i>
-            </button>
-            <button @click="savePositions()" x-show="layoutDirty"
-                    class="px-2.5 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700" title="Save hand-placed positions">
-                <i class="fas fa-thumbtack mr-1"></i>Save layout
-            </button>
-            <button @click="revertPositions()" x-show="layoutDirty"
-                    class="px-2.5 py-1.5 bg-amber-100 text-amber-800 text-xs rounded hover:bg-amber-200"
-                    title="Discard moves made since the last save">
-                <i class="fas fa-rotate-left mr-1"></i>Revert
-            </button>
-            <button @click="resetPositions()"
-                    class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200"
-                    title="Discard hand-placed positions and re-run the automatic layout">
-                <i class="fas fa-wand-magic-sparkles mr-1"></i>Reset layout
-            </button>
             <template x-if="!editMode && !site">
                 <button @click="enterEdit()" class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
                     <i class="fas fa-pen-to-square mr-1"></i>Edit
@@ -104,6 +121,31 @@
                     <button @click="exitEdit()" class="px-3 py-1.5 text-gray-600 text-sm rounded hover:bg-gray-100">Done</button>
                 </div>
             </template>
+            <!-- Map mechanics: important, but not the map's main job. -->
+            <div class="relative">
+                <button @click="layoutMenu = !layoutMenu"
+                        class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200" title="Layout tools">
+                    <i class="fas fa-sliders mr-1"></i>Layout<span x-show="layoutDirty" x-cloak
+                        class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 align-middle"
+                        title="Unsaved hand-placed positions"></span>
+                </button>
+                <div x-show="layoutMenu" x-cloak @click.outside="layoutMenu = false"
+                     class="absolute right-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-2xl z-50 py-1 text-sm">
+                    <button @click="fit(); layoutMenu = false"
+                            class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-expand w-4 mr-2 text-gray-500"></i>Fit to view</button>
+                    <button @click="expandAll(); layoutMenu = false"
+                            class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-angles-down w-4 mr-2 text-gray-500"></i>Expand all</button>
+                    <button @click="collapseAll(); layoutMenu = false"
+                            class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-angles-up w-4 mr-2 text-gray-500"></i>Collapse to roots</button>
+                    <div class="border-t border-gray-100 my-1"></div>
+                    <button x-show="layoutDirty" @click="savePositions(); layoutMenu = false"
+                            class="w-full text-left px-3 py-2 hover:bg-indigo-50 text-indigo-700"><i class="fas fa-thumbtack w-4 mr-2"></i>Save manual layout</button>
+                    <button x-show="layoutDirty" @click="revertPositions(); layoutMenu = false"
+                            class="w-full text-left px-3 py-2 hover:bg-amber-50 text-amber-800"><i class="fas fa-rotate-left w-4 mr-2"></i>Revert unsaved moves</button>
+                    <button @click="layoutMenu = false; resetPositions()"
+                            class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-wand-magic-sparkles w-4 mr-2 text-gray-500"></i>Reset to automatic layout</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -113,6 +155,36 @@
         <button @click="linking = null" class="underline">cancel</button>.
     </div>
     <div x-show="notice" x-cloak class="mb-3 text-sm bg-amber-50 border border-amber-200 rounded p-3 text-amber-900" x-text="notice"></div>
+
+    <!-- Where you are. Focus shows the upstream chain as crumbs (each
+         one clickable); Problems says what it is hiding. Both offer the
+         way back to Overview. -->
+    <div x-show="mode !== 'overview'" x-cloak class="flex flex-wrap items-center gap-2 mb-2">
+        <button @click="setMode('overview')" class="text-blue-600 hover:underline text-xs">
+            <i class="fas fa-arrow-left mr-1"></i>Overview
+        </button>
+        <template x-if="mode === 'focus'">
+            <div class="flex items-center gap-1 flex-wrap">
+                <template x-for="(c, i) in crumbs" :key="'crumb-' + c">
+                    <span class="flex items-center gap-1">
+                        <span x-show="i > 0" class="text-gray-300 text-xs">/</span>
+                        <button @click="goTo(c)" class="mono text-xs px-1.5 py-0.5 rounded"
+                                :class="c === focusId ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-blue-50'"
+                                x-text="c"></button>
+                    </span>
+                </template>
+                <span x-show="focusImpact" x-cloak class="text-xs text-amber-700 ml-1">
+                    impact view - everything downstream of <span class="mono" x-text="focusId"></span>
+                </span>
+            </div>
+        </template>
+        <template x-if="mode === 'problems'">
+            <span class="text-xs text-gray-500">
+                <span x-show="problemCount"><span x-text="problemCount"></span> problem object<span x-show="problemCount !== 1">s</span>, the paths back to their roots, and what hangs off them. Healthy branches are hidden.</span>
+                <span x-show="!problemCount">Nothing is CRITICAL, WARNING or stale right now - the network is quiet.</span>
+            </span>
+        </template>
+    </div>
 
     <div class="flex items-center gap-4 mb-2 text-xs text-gray-500">
         <span><span x-text="stats.total"></span> hosts</span>
@@ -126,7 +198,8 @@
             <span x-text="stats.multi"></span> with multiple parents
         </span>
         <span x-show="stats.hidden > 0" class="text-blue-600">
-            <span x-text="stats.hidden"></span> hidden in collapsed branches
+            <span x-text="stats.hidden"></span> not drawn -
+            <span x-text="mode === 'overview' ? 'inside collapsed branches' : (mode === 'problems' ? 'healthy or unrelated' : 'outside this focus')"></span>
         </span>
         <span class="ml-auto">Drag a node to move it, drag the canvas to pan, scroll to zoom<span x-show="editMode">; the link handle draws a dependency</span></span>
     </div>
@@ -140,17 +213,185 @@
          (min-height keeps it usable on short screens), and scrolls: the
          SVG is sized to the drawing, so the browser's own scrollbars do
          the work and panning stays available for quick moves. -->
-    <div class="bg-white rounded-lg border border-gray-200 overflow-auto"
-         x-ref="canvas"
-         :style="'height:' + canvasHeight + 'px;min-height:420px;cursor:' + (pan.active ? 'grabbing' : 'grab')"
-         x-html="svgMarkup"
-         x-effect="svgMarkup, $nextTick(() => { applyTransform(); applySelection(); })"
-         @click="onCanvasClick($event)"
-         x-effect="selected, $nextTick(() => applySelection())"
-         @contextmenu.prevent="onContextMenu($event)"
-         @scroll="ctx = null"
-         @mousedown="panStart($event)" @mousemove="panMove($event)"
-         @mouseup="panEnd()" @mouseleave="panEnd()" @wheel.prevent="wheel($event)"></div>
+    <div class="flex items-stretch">
+        <div class="bg-white rounded-lg border border-gray-200 overflow-auto flex-1 min-w-0"
+             x-ref="canvas"
+             :style="'height:' + canvasHeight + 'px;min-height:420px;cursor:' + (pan.active ? 'grabbing' : 'grab')"
+             x-html="svgMarkup"
+             x-effect="svgMarkup, $nextTick(() => { applyTransform(); applySelection(); })"
+             @click="onCanvasClick($event)"
+             x-effect="selected, $nextTick(() => applySelection())"
+             @contextmenu.prevent="onContextMenu($event)"
+             @scroll="ctx = null"
+             @mousedown="panStart($event)" @mousemove="panMove($event)"
+             @mouseup="panEnd()" @mouseleave="panEnd()" @wheel.prevent="wheel($event)"></div>
+
+        <!-- Host inspector: a drawer beside the map, not a modal over it.
+             Inspecting a node must not hide the topology it sits in -
+             clicking another host updates the drawer without destroying
+             the operator's spatial context. -->
+        <div x-show="selected" x-cloak @keydown.escape.window="closeInspector()"
+             class="w-80 shrink-0 ml-3 bg-white rounded-lg border border-gray-200 overflow-y-auto flex flex-col"
+             :style="'height:' + canvasHeight + 'px'">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 sticky top-0 bg-white">
+                <h3 class="font-semibold text-gray-900 text-sm min-w-0">
+                    <span class="mono truncate" x-text="selected?.id || '(new host)'"></span>
+                    <span x-show="statusOf(selected?.id)" class="ml-1.5 px-1.5 py-0.5 rounded text-xs font-medium"
+                          :class="badgeClass(statusOf(selected?.id))" x-text="statusOf(selected?.id)"></span>
+                    <span x-show="draft && selected === draft" class="text-gray-400 font-normal text-xs">New host</span>
+                    <span x-show="editMode && !(draft && selected === draft)" class="ml-1.5 text-xs font-normal text-gray-400">editing</span>
+                </h3>
+                <button @click="closeInspector()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+
+            <!-- read-only view -->
+            <template x-if="selected && !editMode">
+                <div class="p-4 space-y-4 text-sm">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><div class="text-xs text-gray-400">Address</div><div class="mono" x-text="selected.ip || '-'"></div></div>
+                        <div><div class="text-xs text-gray-400">Type</div><div x-text="selected.type || 'ping'"></div></div>
+                        <div class="col-span-2" x-show="selected.notes"><div class="text-xs text-gray-400">Description</div><div x-text="selected.notes"></div></div>
+                        <div x-show="selected.group"><div class="text-xs text-gray-400">Group</div><div class="mono" x-text="selected.group"></div></div>
+                    </div>
+                    <div x-show="selMeta.parents.length">
+                        <div class="text-xs text-gray-400 mb-1">Depends on</div>
+                        <div class="flex flex-wrap gap-1">
+                            <template x-for="p in selMeta.parents" :key="'sp-' + p">
+                                <button @click="goTo(p)" class="mono text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100" x-text="p"></button>
+                            </template>
+                        </div>
+                    </div>
+                    <div x-show="!selMeta.parents.length" class="text-xs text-gray-400">This host is a root - it depends on nothing.</div>
+                    <div x-show="selMeta.childCount">
+                        <div class="text-xs text-gray-400 mb-1">Direct dependents (<span x-text="selMeta.childCount"></span>)</div>
+                        <div class="flex flex-wrap gap-1">
+                            <template x-for="c in selMeta.children" :key="'sc-' + c">
+                                <button @click="goTo(c)" class="mono text-xs px-1.5 py-0.5 rounded"
+                                        :class="statusOf(c) === 'CRITICAL' ? 'bg-red-100 text-red-700 hover:bg-red-200' : (statusOf(c) === 'WARNING' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')"
+                                        x-text="c"></button>
+                            </template>
+                            <span x-show="selMeta.childCount > selMeta.children.length" class="text-xs text-gray-400 px-1 py-0.5"
+                                  x-text="'+' + (selMeta.childCount - selMeta.children.length) + ' more'"></span>
+                        </div>
+                    </div>
+                    <!-- The dependency graph already knows the blast radius;
+                         say it instead of leaving it decorative. -->
+                    <div class="text-xs rounded p-2 border"
+                         :class="selMeta.impact ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-gray-50 text-gray-500 border-gray-200'">
+                        <span class="font-semibold" x-text="selMeta.impact"></span>
+                        downstream object<span x-show="selMeta.impact !== 1">s</span>
+                        depend<span x-show="selMeta.impact === 1">s</span> on this host, directly or indirectly.
+                    </div>
+                    <div class="flex flex-col gap-1.5">
+                        <button @click="goTo(selected.id)"
+                                class="px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 text-left">
+                            <i class="fas fa-route mr-1.5"></i>Show path to root
+                        </button>
+                        <button @click="showImpact(selected.id)" :disabled="!selMeta.impact"
+                                class="px-3 py-1.5 bg-amber-100 text-amber-900 text-xs rounded hover:bg-amber-200 text-left disabled:opacity-40">
+                            <i class="fas fa-sitemap mr-1.5"></i>Show impact
+                        </button>
+                        <a :href="'/host-detail.html?hostname=' + encodeURIComponent((site ? site + ':' : '') + (selected.id || ''))"
+                           class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
+                            <i class="fas fa-chart-line mr-1.5"></i>Open host detail
+                        </a>
+                    </div>
+                </div>
+            </template>
+
+            <!-- editable -->
+            <template x-if="selected && editMode">
+                <div class="p-4 space-y-3 text-sm">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">
+                            Object name
+                            <span x-show="draft && selected === draft" class="text-red-600 font-semibold">- required</span>
+                        </label>
+                        <!-- A new host arrives here nameless, with the cursor in
+                             this box and a red border: the operator names the
+                             thing they are adding. A generated "-child2" is only
+                             ever shipped by accident. -->
+                        <input type="text" x-ref="nameInput" x-model="nameField"
+                               @input="nameError = nameProblem(nameField)"
+                               @change="commitName()" @keydown.enter.prevent="commitName()"
+                               placeholder="name this object"
+                               :class="nameError ? 'border-red-500 ring-1 ring-red-400 bg-red-50' : 'border-gray-200'"
+                               class="w-full px-3 py-1.5 border rounded text-sm mono">
+                        <p x-show="nameError" class="text-xs text-red-600 mt-1" x-text="nameError"></p>
+                        <p x-show="!nameError && draft && selected === draft" class="text-xs text-gray-500 mt-1">
+                            This becomes the object name in sysmon.conf.
+                        </p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">IP address / hostname</label>
+                        <input type="text" x-model="selected.ip" @input="dirty = true"
+                               class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Check type</label>
+                        <select x-model="selected.type" @change="dirty = true; layout()"
+                                class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
+                            <template x-for="t in ['ping','pingv6','tcp','http','dns','smtp','imap','pop3','snmp','ssh','radius','nntp']" :key="t">
+                                <option :value="t" x-text="t"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">
+                            Depends on <span class="text-gray-400">(a host may depend on several)</span>
+                        </label>
+                        <!-- One box per dependency: a datalist can only match a
+                             whole field value, so a comma-separated string could
+                             never autocomplete. Each row is its own input, each
+                             with type-ahead over every object name. -->
+                        <div class="space-y-2">
+                            <template x-for="(d, i) in depRows" :key="'dep-' + i">
+                                <div class="flex items-center gap-2">
+                                    <input type="text" list="host-names"
+                                           x-model="depRows[i]"
+                                           @change="syncDeps(selected)"
+                                           placeholder="start typing a host name..."
+                                           class="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                                    <button @click="removeDepRow(selected, i)"
+                                            class="px-2 py-1.5 text-gray-400 hover:text-red-600" title="Remove this dependency">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </template>
+                            <div class="flex items-center gap-3">
+                                <button @click="addDepRow()"
+                                        class="px-3 py-1.5 bg-blue-50 text-blue-700 text-xs rounded hover:bg-blue-100">
+                                    <i class="fas fa-plus mr-1"></i>Add dependency
+                                </button>
+                                <span x-show="!depRows.length" class="text-xs text-gray-400">
+                                    No dependencies - this host is a root.
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Port (tcp/http/etc)</label>
+                        <input type="number" x-model.number="selected.port" @input="dirty = true"
+                               class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                        <input type="text" x-model="selected.notes" @input="dirty = true; layout()"
+                               class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
+                    </div>
+                    <div class="flex flex-col gap-1.5 pt-1">
+                        <button @click="startLink(selected)" class="text-blue-600 text-xs hover:underline text-left">
+                            <i class="fas fa-link mr-1"></i>Draw dependency from this host
+                        </button>
+                        <button @click="deleteHost(selected)" class="px-3 py-1.5 text-red-600 text-xs rounded hover:bg-red-50 text-left">
+                            <i class="fas fa-trash mr-1"></i><span
+                                x-text="draft && selected === draft ? 'Discard this host' : 'Delete host'">Delete host</span>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
 
     <div x-show="!loading && stats.total === 0" class="text-center text-gray-400 text-sm mt-4">
         No hosts configured yet<span x-show="editMode"> - click "Add Host" to start</span>.
@@ -253,6 +494,11 @@
             <div class="text-xs text-gray-400">Host</div>
             <div class="text-sm font-semibold text-gray-900 mono truncate" x-text="ctx?.host?.id"></div>
         </div>
+        <button @click="goTo(ctx.host.id); ctx = null"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2">
+            <i class="fas fa-crosshairs text-gray-600 w-4"></i>
+            <span>Focus on this host</span>
+        </button>
         <button @click="newDependentHost(ctx.host)"
                 class="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2">
             <i class="fas fa-code-branch text-blue-600 w-4"></i>
@@ -290,138 +536,6 @@
         </template>
     </datalist>
 
-    <!-- Host inspector: a modal, so clicking a node in a big map does not
-         send you hunting below the fold for the panel. -->
-    <div x-show="selected" x-cloak
-         class="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto"
-         @click.self="closeInspector()" @keydown.escape.window="closeInspector()">
-      <div class="bg-white rounded-lg shadow-2xl w-full max-w-3xl mt-16 mb-8">
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h3 class="font-semibold text-gray-900">
-                <span x-text="selected?.id"></span>
-                <span x-show="statusOf(selected?.id)" class="ml-2 px-1.5 py-0.5 rounded text-xs font-medium"
-                      :class="badgeClass(statusOf(selected?.id))" x-text="statusOf(selected?.id)"></span>
-                <span x-show="draft && selected === draft" class="text-gray-400 font-normal">New host</span>
-                <span x-show="editMode" class="ml-2 text-xs font-normal text-gray-400">editing</span>
-            </h3>
-            <button @click="closeInspector()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="p-6">
-
-        <!-- read-only view -->
-        <template x-if="selected && !editMode">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div><div class="text-xs text-gray-400">Address</div><div class="mono" x-text="selected.ip || '-'"></div></div>
-                <div><div class="text-xs text-gray-400">Type</div><div x-text="selected.type || 'ping'"></div></div>
-                <div><div class="text-xs text-gray-400">Depends on</div><div class="mono" x-text="selected.dependencies || '(root)'"></div></div>
-                <div><div class="text-xs text-gray-400">Description</div><div x-text="selected.notes || '-'"></div></div>
-                <div class="col-span-2 md:col-span-4">
-                    <a :href="'/host-detail.html?hostname=' + encodeURIComponent((site ? site + ':' : '') + selected.id)"
-                       class="text-blue-600 text-xs hover:underline">Open host detail &rarr;</a>
-                </div>
-            </div>
-        </template>
-
-        <!-- editable -->
-        <template x-if="selected && editMode">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">
-                        Object name
-                        <span x-show="draft && selected === draft" class="text-red-600 font-semibold">- required</span>
-                    </label>
-                    <!-- A new host arrives here nameless, with the cursor in
-                         this box and a red border: the operator names the
-                         thing they are adding. A generated "-child2" is only
-                         ever shipped by accident. -->
-                    <input type="text" x-ref="nameInput" x-model="nameField"
-                           @input="nameError = nameProblem(nameField)"
-                           @change="commitName()" @keydown.enter.prevent="commitName()"
-                           placeholder="name this object"
-                           :class="nameError ? 'border-red-500 ring-1 ring-red-400 bg-red-50' : 'border-gray-200'"
-                           class="w-full px-3 py-1.5 border rounded text-sm mono">
-                    <p x-show="nameError" class="text-xs text-red-600 mt-1" x-text="nameError"></p>
-                    <p x-show="!nameError && draft && selected === draft" class="text-xs text-gray-500 mt-1">
-                        This becomes the object name in sysmon.conf.
-                    </p>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">IP address / hostname</label>
-                    <input type="text" x-model="selected.ip" @input="dirty = true"
-                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Check type</label>
-                    <select x-model="selected.type" @change="dirty = true; layout()"
-                            class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
-                        <template x-for="t in ['ping','pingv6','tcp','http','dns','smtp','imap','pop3','snmp','ssh','radius','nntp']" :key="t">
-                            <option :value="t" x-text="t"></option>
-                        </template>
-                    </select>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">
-                        Depends on <span class="text-gray-400">(a host may depend on several)</span>
-                    </label>
-                    <!-- One box per dependency: a datalist can only match a
-                         whole field value, so a comma-separated string could
-                         never autocomplete. Each row is its own input, each
-                         with type-ahead over every object name. -->
-                    <div class="space-y-2">
-                        <template x-for="(d, i) in depRows" :key="'dep-' + i">
-                            <div class="flex items-center gap-2">
-                                <input type="text" list="host-names"
-                                       x-model="depRows[i]"
-                                       @change="syncDeps(selected)"
-                                       placeholder="start typing a host name..."
-                                       class="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm mono">
-                                <button @click="removeDepRow(selected, i)"
-                                        class="px-2 py-1.5 text-gray-400 hover:text-red-600" title="Remove this dependency">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                        </template>
-                        <div class="flex items-center gap-3">
-                            <button @click="addDepRow()"
-                                    class="px-3 py-1.5 bg-blue-50 text-blue-700 text-xs rounded hover:bg-blue-100">
-                                <i class="fas fa-plus mr-1"></i>Add dependency
-                            </button>
-                            <span x-show="!depRows.length" class="text-xs text-gray-400">
-                                No dependencies - this host is a root.
-                            </span>
-                        </div>
-                    </div>
-
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Port (tcp/http/etc)</label>
-                    <input type="number" x-model.number="selected.port" @input="dirty = true"
-                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm mono">
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Description</label>
-                    <input type="text" x-model="selected.notes" @input="dirty = true; layout()"
-                           class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm">
-                </div>
-                <div class="md:col-span-2 flex justify-between items-center pt-1">
-                    <button @click="startLink(selected)" class="text-blue-600 text-xs hover:underline">
-                        <i class="fas fa-link mr-1"></i>Draw dependency from this host
-                    </button>
-                    <button @click="deleteHost(selected)" class="px-3 py-1.5 text-red-600 text-sm rounded hover:bg-red-50">
-                        <i class="fas fa-trash mr-1"></i><span
-                            x-text="draft && selected === draft ? 'Discard this host' : 'Delete host'">Delete host</span>
-                    </button>
-                </div>
-            </div>
-        </template>
-        </div>
-        <div class="px-6 py-3 border-t border-gray-200 flex justify-end">
-            <button @click="closeInspector()"
-                    class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200"
-                    x-text="draft && selected === draft ? 'Discard' : 'Close'">Close</button>
-        </div>
-      </div>
-    </div>
 </div>
 
 <script>
@@ -511,6 +625,41 @@ function mapPage() {
         drag: null,
         layoutDirty: false,
         statusTimer: null,
+        // The three primary views. Overview is the default: the network
+        // in aggregate, collapsed by information value. Problems shows
+        // only what is broken and the paths back to its roots. Focus
+        // shows one host's complete upstream chain and a bounded
+        // downstream neighbourhood.
+        mode: 'overview',
+        focusId: null,
+        focusImpact: false,
+        crumbs: [],
+        searchResults: [],
+        searchSel: 0,
+        layoutMenu: false,
+        // Semantic zoom band, derived from view.k: 'far' draws status
+        // dots, 'mid' names only, 'near' the full two-line boxes. Only
+        // band CROSSINGS rebuild the SVG; plain zooming stays an
+        // attribute write.
+        zoomBand: 'near',
+        // What the drawer says about the selected host, computed once at
+        // selection: its parents, its direct dependents, and its blast
+        // radius (every downstream object, direct or indirect).
+        selMeta: { parents: [], children: [], childCount: 0, impact: 0 },
+        selUp: null,
+        selDown: null,
+        // The startup collapse runs before any status has arrived, so
+        // the first status load gets one re-cluster (statusSeen) - and
+        // only one: doing it every 15s would fight the operator's
+        // drill-down (userAdjusted).
+        statusSeen: false,
+        userAdjusted: false,
+        // Ancestor branches expanded by navigating to a host (search,
+        // goTo, impact). smartCollapse leaves these open, so returning
+        // to Overview keeps the promise that a found host stays
+        // revealed instead of re-folding it into an aggregate.
+        // Manually collapsing a branch takes it back off this list.
+        revealed: {},
 
         async init() {
             // Sites first: the config fetch below needs to know which box.
@@ -539,12 +688,11 @@ function mapPage() {
                 this.sizeCanvas();
                 this.applyTransform();
             });
-            // Big trees are unreadable fully expanded. Open to a depth
-            // that fits on screen and let the operator drill in: a real
-            // 800-host access network is mostly leaf APs hanging off a
-            // handful of switches, so one level shows the backbone.
-            if (this.hosts.length > 300) this.collapseDeep(1);
-            else if (this.hosts.length > 60) this.collapseDeep(2);
+            // Big trees are unreadable fully expanded. Collapse by
+            // information value (smartCollapse), not depth: backbone,
+            // rings and anything with a problem underneath stay open,
+            // large healthy fans become aggregate branches with counts.
+            this.smartCollapse();
             this.layout();
             this.$nextTick(() => this.fit());
             this.loadStatus();   // fire and forget; colors arrive when they do
@@ -552,7 +700,6 @@ function mapPage() {
                 this.loadStatus();
                 this.syncPositions();
             }, 15000);
-            this.$watch('search', () => this.layout());
         },
 
         destroy() { if (this.statusTimer) clearInterval(this.statusTimer); },
@@ -640,6 +787,8 @@ function mapPage() {
             // Open the branch we just added to, so the new device is visible.
             if (this.tplForm.parent) this.collapsed[this.tplForm.parent] = false;
             this.layout();
+            this.refreshSelectionStory();
+            this.refreshFocusContext();
             this.notice = 'Added ' + this.tplPreview.length + ' object(s) from template. Save to write them to sysmon.conf.';
             setTimeout(() => this.notice = '', 6000);
         },
@@ -757,6 +906,16 @@ function mapPage() {
                 this.statuses = m;
                 this.staleHosts = st;
                 this.statusStale = false;
+                // The startup collapse classified everything as healthy
+                // because no status existed yet, folding problem paths
+                // like quiet fans. The invariant "problems and their
+                // ancestors stay open" only becomes true once status is
+                // known - re-cluster exactly once, and never over the
+                // operator's own drill-down.
+                if (!this.statusSeen) {
+                    this.statusSeen = true;
+                    if (this.mode === 'overview' && !this.userAdjusted) this.smartCollapse();
+                }
                 this.layout();
             } catch (e) {
                 // The colours on screen are from the last successful
@@ -775,24 +934,24 @@ function mapPage() {
             return 'bg-gray-100 text-gray-600';
         },
 
-        // sysmon dependencies form a forest (each object names at most one
-        // parent), so a layered walk lays it out deterministically - no
-        // physics, no overlap, and collapsed branches simply aren't walked,
-        // which is what keeps 800+ hosts responsive.
-        // Dependencies are a DAG, not a tree: sysmond accepts multiple
-        // "dep" lines per object, so a host can have several parents.
-        // Depth is therefore the longest path from a root, rows are
-        // ordered by a walk over the primary (first) parent so related
-        // hosts stay adjacent, and every parent gets its own edge.
-        deps(h) {
-            return (h.dependencies || '').split(',')
-                .map(d => d.trim()).filter(Boolean);
+        // A problem is anything that needs eyes: CRITICAL, WARNING, or a
+        // host whose site has stopped answering (its colour is a memory).
+        isProblem(id) {
+            const s = this.statuses[id];
+            return s === 'CRITICAL' || s === 'WARNING' || !!this.staleHosts[id];
         },
 
-        layout() {
+        get problemCount() {
+            let n = 0;
+            this.hosts.forEach(h => { if (h.id && this.isProblem(h.id)) n++; });
+            return n;
+        },
+
+        // The dependency graph, built once per caller: id index, children
+        // lists (sorted for stable layout), parent lists, roots.
+        buildGraph() {
             const byId = {};
             this.hosts.forEach(h => { if (h.id) byId[h.id] = h; });
-
             const kids = {}, parents = {}, roots = [];
             this.hosts.forEach(h => {
                 const ps = this.deps(h).filter(p => byId[p] && p !== h.id);
@@ -802,48 +961,49 @@ function mapPage() {
             });
             Object.values(kids).forEach(l => l.sort((a, b) => a.id.localeCompare(b.id)));
             roots.sort((a, b) => a.id.localeCompare(b.id));
+            return { byId, kids, parents, roots };
+        },
 
-            // Rings are strongly connected components: every member can
-            // reach every other, which is what a redundant path looks like
-            // in a dependency graph. Finding them as components - rather
-            // than asking "is this node in some cycle" - is what lets each
-            // ring be drawn as one ring. Tarjan, iterative, because an
-            // 800-host config would blow the stack on the recursive form.
+        // Rings are strongly connected components: every member can
+        // reach every other, which is what a redundant path looks like
+        // in a dependency graph. Finding them as components - rather
+        // than asking "is this node in some cycle" - is what lets each
+        // ring be drawn as one ring. Tarjan, iterative, because an
+        // 800-host config would blow the stack on the recursive form.
+        ringInfo(parents, kids) {
             const sccOf = {}, comps = [];
-            {
-                let idx = 0;
-                const index = {}, low = {}, onStack = {}, stack = [];
-                for (const h of this.hosts) {
-                    if (!h.id || index[h.id] !== undefined) continue;
-                    const work = [{ v: h.id, i: 0 }];
-                    while (work.length) {
-                        const f = work[work.length - 1];
-                        if (f.i === 0) {
-                            index[f.v] = low[f.v] = idx++;
-                            stack.push(f.v); onStack[f.v] = true;
+            let idx = 0;
+            const index = {}, low = {}, onStack = {}, stack = [];
+            for (const h of this.hosts) {
+                if (!h.id || index[h.id] !== undefined) continue;
+                const work = [{ v: h.id, i: 0 }];
+                while (work.length) {
+                    const f = work[work.length - 1];
+                    if (f.i === 0) {
+                        index[f.v] = low[f.v] = idx++;
+                        stack.push(f.v); onStack[f.v] = true;
+                    }
+                    const ps = parents[f.v] || [];
+                    let descended = false;
+                    while (f.i < ps.length) {
+                        const w = ps[f.i++];
+                        if (index[w] === undefined) { work.push({ v: w, i: 0 }); descended = true; break; }
+                        if (onStack[w]) low[f.v] = Math.min(low[f.v], index[w]);
+                    }
+                    if (descended) continue;
+                    if (low[f.v] === index[f.v]) {
+                        const comp = [];
+                        for (;;) {
+                            const w = stack.pop(); onStack[w] = false; comp.push(w);
+                            if (w === f.v) break;
                         }
-                        const ps = parents[f.v] || [];
-                        let descended = false;
-                        while (f.i < ps.length) {
-                            const w = ps[f.i++];
-                            if (index[w] === undefined) { work.push({ v: w, i: 0 }); descended = true; break; }
-                            if (onStack[w]) low[f.v] = Math.min(low[f.v], index[w]);
-                        }
-                        if (descended) continue;
-                        if (low[f.v] === index[f.v]) {
-                            const comp = [];
-                            for (;;) {
-                                const w = stack.pop(); onStack[w] = false; comp.push(w);
-                                if (w === f.v) break;
-                            }
-                            comp.forEach(m => { sccOf[m] = comps.length; });
-                            comps.push(comp);
-                        }
-                        work.pop();
-                        if (work.length) {
-                            const up = work[work.length - 1].v;
-                            low[up] = Math.min(low[up], low[f.v]);
-                        }
+                        comp.forEach(m => { sccOf[m] = comps.length; });
+                        comps.push(comp);
+                    }
+                    work.pop();
+                    if (work.length) {
+                        const up = work[work.length - 1].v;
+                        low[up] = Math.min(low[up], low[f.v]);
                     }
                 }
             }
@@ -867,6 +1027,248 @@ function mapPage() {
                 comp.forEach(m => { if (!seen.has(m)) order.push(m); });
                 ringMembers[cid] = order;
             });
+            return { ringOf, ringMembers, ring };
+        },
+
+        // Everything the host hangs from, transitively. Cycle-safe.
+        ancestorsOf(id, parents) {
+            const seen = new Set(), stack = (parents[id] || []).slice();
+            while (stack.length) {
+                const p = stack.pop();
+                if (seen.has(p)) continue;
+                seen.add(p);
+                (parents[p] || []).forEach(x => stack.push(x));
+            }
+            return seen;
+        },
+
+        // Everything that hangs off the host, transitively: its blast
+        // radius if it goes down. Cycle-safe.
+        descendantsOf(id, kids) {
+            const seen = new Set(), stack = (kids[id] || []).map(k => k.id);
+            while (stack.length) {
+                const c = stack.pop();
+                if (seen.has(c)) continue;
+                seen.add(c);
+                (kids[c] || []).forEach(k => stack.push(k.id));
+            }
+            return seen;
+        },
+
+        // Collapse by information value, not by depth. The old rule
+        // ("300 hosts: collapse below depth 1") was arbitrary: it hid
+        // problems and showed healthy fans with equal enthusiasm. The
+        // replacement never collapses roots, ring members, dual-homed
+        // nodes, problem nodes, or any ancestor of a problem (a branch
+        // with something red beneath it is never quiet), and prefers
+        // collapsing exactly the large healthy fans that make a big map
+        // unreadable. Collapsed marks are set at every quiet level, so
+        // manually expanding a branch reveals the next level still
+        // aggregated - drill-down, not an avalanche.
+        smartCollapse() {
+            this.collapsed = {};
+            if (this.hosts.length <= 60) return;
+            const { kids, parents } = this.buildGraph();
+            const { ring } = this.ringInfo(parents, kids);
+            this.hosts.forEach(h => {
+                const id = h.id;
+                if (!id || !(kids[id] || []).length) return;
+                if (!(parents[id] || []).length) return;      // roots stay open
+                if ((parents[id] || []).length > 1) return;   // dual-homed: topology, keep visible
+                if (ring.has(id)) return;                     // backbone rings stay visible
+                if (this.isProblem(id)) return;               // problems stay open
+                let quiet = true;
+                for (const d of this.descendantsOf(id, kids)) {
+                    if (this.isProblem(d) || ring.has(d) || ((parents[d] || []).length > 1)) {
+                        quiet = false; break;
+                    }
+                }
+                if (quiet) this.collapsed[id] = true;
+            });
+            // Paths the operator navigated to stay open through a
+            // re-cluster: goTo promised the found host stays revealed
+            // after returning to Overview, and this is where that
+            // promise would otherwise be broken.
+            Object.keys(this.revealed).forEach(id => {
+                if (this.collapsed[id]) delete this.collapsed[id];
+            });
+        },
+
+        // The ONE definition of leaving Focus for an aggregate view:
+        // clear the focus state and drop the selection story. Path
+        // emphasis fades everything unrelated to the selected host,
+        // which is Focus's tool - carried into Problems it would wash
+        // out the very failures that view exists to show, and carried
+        // back to Overview it would fade most of the overview. Every
+        // route out of Focus (mode buttons, breadcrumb, Layout menu)
+        // must go through here; a second copy of this cleanup is how
+        // the Layout-menu bleed bug happened. A draft mid-naming is
+        // never silently discarded.
+        leaveFocus() {
+            this.focusId = null;
+            this.focusImpact = false;
+            this.crumbs = [];
+            if (this.selected && !(this.draft && this.selected === this.draft)) {
+                this.closeInspector();
+            }
+        },
+
+        setMode(m) {
+            if (m !== 'focus') this.leaveFocus();
+            // Re-entering Overview re-clusters against current statuses:
+            // pressing the button is an explicit "show me the shape again".
+            if (m === 'overview') this.smartCollapse();
+            this.mode = m;
+            this.layout();
+            this.$nextTick(() => this.fit());
+        },
+
+        focusSelected() {
+            if (this.selected && this.selected !== this.draft && this.selected.id) { this.goTo(this.selected.id); return; }
+            if (this.focusId) { this.goTo(this.focusId); return; }
+            this.notice = 'Select a host, or search for one, to focus on it.';
+            setTimeout(() => this.notice = '', 4000);
+        },
+
+        // Search and click-through both land here: reveal the host,
+        // focus the map on it, centre it, select it. "Find" must mean
+        // "take me to this object", not "paint it blue somewhere on an
+        // enormous sheet of paper".
+        goTo(id) {
+            const host = this.hosts.find(h => h.id === id);
+            if (!host) return;
+            this.searchResults = [];
+            this.search = '';
+            this.userAdjusted = true;
+            const { parents } = this.buildGraph();
+            // Expand the whole ancestor chain and remember it as
+            // revealed, so the path is open here and stays open through
+            // Overview's re-clustering.
+            this.ancestorsOf(id, parents).forEach(a => {
+                if (this.collapsed[a]) this.collapsed[a] = false;
+                this.revealed[a] = true;
+            });
+            this.mode = 'focus';
+            this.focusImpact = false;
+            this.focusId = id;
+            this.crumbs = this.chainToRoot(id, parents);
+            this.openInspector(host);
+            this.layout();
+            this.$nextTick(() => this.centerOn(id));
+        },
+
+        // Focus, but downstream-complete: every object that depends on
+        // this one, however indirectly. The dependency graph already
+        // knows the blast radius; this view is that answer.
+        showImpact(id) {
+            const host = this.hosts.find(h => h.id === id);
+            if (!host) return;
+            this.userAdjusted = true;
+            const { parents } = this.buildGraph();
+            this.ancestorsOf(id, parents).forEach(a => {
+                if (this.collapsed[a]) this.collapsed[a] = false;
+                this.revealed[a] = true;
+            });
+            this.mode = 'focus';
+            this.focusImpact = true;
+            this.focusId = id;
+            this.crumbs = this.chainToRoot(id, parents);
+            this.openInspector(host);
+            this.layout();
+            this.$nextTick(() => this.centerOn(id));
+        },
+
+        // The breadcrumb trail: first-parent chain from a root down to
+        // the host. Rings terminate through the seen set.
+        chainToRoot(id, parents) {
+            const chain = [id], seen = new Set([id]);
+            let cur = id;
+            for (;;) {
+                const p = (parents[cur] || [])[0];
+                if (!p || seen.has(p)) break;
+                chain.unshift(p); seen.add(p); cur = p;
+            }
+            return chain;
+        },
+
+        centerOn(id) {
+            const n = this.nodes.find(x => x.id === id);
+            const el = this.$refs.canvas;
+            if (!n || !el) return;
+            // A sensible reading zoom: never zoom OUT to centre, never
+            // punch past the full-detail band.
+            this.view.k = Math.min(Math.max(this.view.k, 1), 1.4);
+            this.setZoomBand();
+            this.view.x = el.clientWidth / 2 - n.x * this.view.k;
+            this.view.y = el.clientHeight / 2.5 - n.y * this.view.k;
+            this.applyTransform();
+            el.scrollTo({ top: 0, left: 0 });
+        },
+
+        setZoomBand() {
+            const b = this.view.k < 0.45 ? 'far' : (this.view.k < 0.8 ? 'mid' : 'near');
+            if (b !== this.zoomBand) this.zoomBand = b;  // reactive: crossing a band rebuilds the SVG
+        },
+
+        searchInput() {
+            const q = this.search.trim().toLowerCase();
+            this.searchSel = 0;
+            if (!q) { this.searchResults = []; return; }
+            const out = [];
+            for (const h of this.hosts) {
+                if (!h.id) continue;
+                if ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) out.push(h);
+            }
+            // Name-prefix matches first: typing "awb" should offer
+            // awbreyrouter before something that merely mentions it.
+            out.sort((a, b) =>
+                (a.id.toLowerCase().startsWith(q) ? 0 : 1) - (b.id.toLowerCase().startsWith(q) ? 0 : 1) ||
+                a.id.localeCompare(b.id));
+            this.searchResults = out.slice(0, 12);
+        },
+
+        searchMove(d) {
+            if (!this.searchResults.length) { this.searchInput(); return; }
+            this.searchSel = (this.searchSel + d + this.searchResults.length) % this.searchResults.length;
+        },
+
+        searchGo() {
+            if (this.searchResults.length) this.goTo(this.searchResults[this.searchSel].id);
+        },
+
+        metaFor(host) {
+            if (!host || !host.id) return { parents: [], children: [], childCount: 0, impact: 0 };
+            const { kids, parents } = this.buildGraph();
+            const ch = (kids[host.id] || []).map(k => k.id);
+            return {
+                parents: parents[host.id] || [],
+                children: ch.slice(0, 12),
+                childCount: ch.length,
+                impact: this.descendantsOf(host.id, kids).size
+            };
+        },
+
+        // sysmon dependencies form a forest (each object names at most one
+        // parent), so a layered walk lays it out deterministically - no
+        // physics, no overlap, and collapsed branches simply aren't walked,
+        // which is what keeps 800+ hosts responsive.
+        // Dependencies are a DAG, not a tree: sysmond accepts multiple
+        // "dep" lines per object, so a host can have several parents.
+        // Depth is therefore the longest path from a root, rows are
+        // ordered by a walk over the primary (first) parent so related
+        // hosts stay adjacent, and every parent gets its own edge.
+        deps(h) {
+            return (h.dependencies || '').split(',')
+                .map(d => d.trim()).filter(Boolean);
+        },
+
+        layout() {
+            const { byId, kids, parents, roots } = this.buildGraph();
+            const { ringOf, ringMembers, ring } = this.ringInfo(parents, kids);
+            // Focus on a host that no longer exists falls back to the
+            // aggregate view rather than an empty sheet.
+            const mode = (this.mode === 'focus' && (!this.focusId || !byId[this.focusId]))
+                ? 'overview' : this.mode;
 
             // Depth = shortest path from a root, computed by BFS. A
             // longest-path walk is undefined once dependencies form a
@@ -874,8 +1276,20 @@ function mapPage() {
             // on the other for redundancy) - it just keeps pushing ring
             // members further right on every pass, which produced
             // 200-column-deep layouts on a real 811-host config.
+            // A ring none of whose members has a parent outside the ring
+            // is the top of the graph, so its members count as roots for
+            // depth and visibility. Otherwise a top-level core ring - and
+            // everything hanging off it - is "unreachable from any root",
+            // falls through to the survivor fallback below, and defeats
+            // collapsing entirely.
+            const rootIds = new Set(roots.map(r => r.id));
+            Object.entries(ringMembers).forEach(([cid, ms]) => {
+                const hasExternal = ms.some(m => (parents[m] || []).some(p => ringOf[p] !== Number(cid)));
+                if (!hasExternal) ms.forEach(m => rootIds.add(m));
+            });
+
             const depth = {};
-            let frontier = roots.map(r => r.id);
+            let frontier = [...rootIds];
             frontier.forEach(id => { depth[id] = 0; });
             for (let d = 1; frontier.length && d < 500; d++) {
                 const next = [];
@@ -887,24 +1301,106 @@ function mapPage() {
                 frontier = next;
             }
 
-            // Visibility: a node shows when at least one parent is shown
-            // and not collapsed. Roots always show.
-            const visible = new Set(roots.map(r => r.id));
-            for (let pass = 0; pass < 40; pass++) {
-                let changed = false;
-                this.hosts.forEach(h => {
-                    if (visible.has(h.id)) return;
-                    const ps = parents[h.id] || [];
-                    if (ps.some(p => visible.has(p) && !this.collapsed[p])) {
-                        visible.add(h.id); changed = true;
+            // Which hosts the engine draws depends on the view.
+            //   overview: roots outward, stopping at collapsed branches.
+            //   focus:    the focused host, its complete upstream, and a
+            //             bounded downstream neighbourhood (or ALL of
+            //             downstream in the impact variant).
+            //   problems: every problem object, the paths back to its
+            //             roots, and one level of what hangs off each.
+            // The engine itself is unchanged - it just gets asked to
+            // render the subset that answers the operator's question,
+            // and everything undrawn is accounted for by aggregation.
+            let visible;
+            if (mode === 'focus') {
+                visible = new Set([this.focusId]);
+                this.ancestorsOf(this.focusId, parents).forEach(a => visible.add(a));
+                if (this.focusImpact) {
+                    this.descendantsOf(this.focusId, kids).forEach(d => visible.add(d));
+                } else {
+                    // Direct children capped too, problems-first: the
+                    // exact event Focus exists for - a backhaul with 300
+                    // dependents going down - must not turn Focus back
+                    // into a 300-node sheet. hiddenAgg reports whatever
+                    // the cap leaves out on the focus node itself, and
+                    // Show impact stays the explicit "yes, everything".
+                    const children = (kids[this.focusId] || []).map(k => k.id)
+                        .sort((a, b) => (this.isProblem(b) ? 1 : 0) - (this.isProblem(a) ? 1 : 0))
+                        .slice(0, 40);
+                    children.forEach(c => visible.add(c));
+                    let budget = 80 - visible.size;
+                    outer:
+                    for (const c of children) {
+                        for (const g of (kids[c] || [])) {
+                            if (budget-- <= 0) break outer;
+                            visible.add(g.id);
+                        }
                     }
+                }
+            } else if (mode === 'problems') {
+                visible = new Set();
+                this.hosts.forEach(h => {
+                    if (!h.id || !this.isProblem(h.id)) return;
+                    visible.add(h.id);
+                    this.ancestorsOf(h.id, parents).forEach(a => visible.add(a));
+                    // One level of affected dependents, problems-first
+                    // and capped: a problem with 300 children says
+                    // "+284 objects" through its aggregate instead of
+                    // becoming the 300-node sheet this view replaces.
+                    (kids[h.id] || []).map(k => k.id)
+                        .sort((a, b) => (this.isProblem(b) ? 1 : 0) - (this.isProblem(a) ? 1 : 0))
+                        .slice(0, 30)
+                        .forEach(c => visible.add(c));
                 });
-                if (!changed) break;
+            } else {
+                // Overview: a node shows when at least one parent is
+                // shown and not collapsed. Roots always show.
+                visible = new Set(rootIds);
+                for (let pass = 0; pass < 40; pass++) {
+                    let changed = false;
+                    this.hosts.forEach(h => {
+                        if (visible.has(h.id)) return;
+                        const ps = parents[h.id] || [];
+                        if (ps.some(p => visible.has(p) && !this.collapsed[p])) {
+                            visible.add(h.id); changed = true;
+                        }
+                    });
+                    if (!changed) break;
+                }
             }
-            // Cycle survivors (unreachable from any root) are still worth
-            // showing rather than silently vanishing.
+            // Cycle survivors (unreachable from any root) still need a
+            // depth; in Overview they are also worth drawing rather than
+            // silently vanishing.
             this.hosts.forEach(h => {
-                if (h.id && depth[h.id] === undefined) { depth[h.id] = 0; visible.add(h.id); }
+                if (h.id && depth[h.id] === undefined) {
+                    depth[h.id] = 0;
+                    if (mode === 'overview') visible.add(h.id);
+                }
+            });
+
+            // A collapsed or out-of-view branch is an aggregate object,
+            // not an absence of objects: every drawn node tallies its
+            // undrawn descendants and how sick they are, without crossing
+            // drawn ones (those speak for themselves). This is what lets
+            // a quiet branch stay quiet and a branch with a failure
+            // underneath turn red while staying collapsed.
+            const hiddenAgg = {};
+            visible.forEach(id => {
+                let count = 0, crit = 0, warn = 0, stale = 0;
+                const stack = (kids[id] || []).map(k => k.id).filter(c => !visible.has(c));
+                const seen = new Set(stack);
+                while (stack.length) {
+                    const c = stack.pop();
+                    count++;
+                    const s = this.statuses[c];
+                    if (s === 'CRITICAL') crit++;
+                    else if (s === 'WARNING') warn++;
+                    if (this.staleHosts[c]) stale++;
+                    (kids[c] || []).forEach(k => {
+                        if (!visible.has(k.id) && !seen.has(k.id)) { seen.add(k.id); stack.push(k.id); }
+                    });
+                }
+                if (count) hiddenAgg[id] = { count, crit, warn, stale };
             });
             // One ring sits in one column: its members share the shallowest
             // depth any of them reached, so the circle is not smeared across
@@ -916,7 +1412,6 @@ function mapPage() {
 
             const COL = 215, ROW = 46;
             const nodes = [], pos = {};
-            const q = this.search.trim().toLowerCase();
             let row = 0, maxDepth = 0;
             const placed = new Set();
             const ringGeom = {};
@@ -998,7 +1493,8 @@ function mapPage() {
                     status: this.statuses[h.id] || '',
                     stale: !!this.staleHosts[h.id],
                     ring: ring.has(h.id),
-                    match: q ? ((h.id + ' ' + (h.ip || '') + ' ' + (h.notes || '')).toLowerCase().includes(q)) : false
+                    group: h.group || '',
+                    agg: hiddenAgg[h.id] || null
                 });
             });
 
@@ -1050,7 +1546,7 @@ function mapPage() {
                         d = 'M ' + (a.x + 72) + ' ' + a.y + ' C ' + mx + ' ' + a.y +
                             ', ' + mx + ' ' + b.y + ', ' + (b.x - 72) + ' ' + b.y;
                     }
-                    edges.push({ id: h.id + '<-' + p, secondary: !primary, ring: sameRing, d });
+                    edges.push({ id: h.id + '<-' + p, child: h.id, parent: p, secondary: !primary, ring: sameRing, d });
                 });
             });
             this.ringCircles = Object.values(ringGeom);
@@ -1059,7 +1555,10 @@ function mapPage() {
             this.edges = edges;
             this.stats = {
                 total: this.hosts.length,
-                roots: roots.length,
+                // rootIds, not roots: members of a top-level ring were
+                // just promoted to roots by the engine, and the stats
+                // line must agree with what the engine did.
+                roots: rootIds.size,
                 depth: maxDepth + 1,
                 hidden: this.hosts.length - visible.size,
                 multi: this.hosts.filter(h => (parents[h.id] || []).length > 1).length,
@@ -1068,24 +1567,48 @@ function mapPage() {
             };
         },
 
+        // A hidden failure must surface on the node hiding it: a branch
+        // head whose collapsed subtree contains a CRITICAL turns red
+        // itself, WARNING turns it amber. Own status wins over aggregate.
         fillFor(n) {
-            if (n.match) return '#dbeafe';
-            if (n.status === 'CRITICAL') return '#fee2e2';
-            if (n.status === 'WARNING') return '#fef3c7';
+            if (n.status === 'CRITICAL' || (n.agg && n.agg.crit)) return '#fee2e2';
+            if (n.status === 'WARNING' || (n.agg && (n.agg.warn || n.agg.stale))) return '#fef3c7';
             if (n.status === 'OK') return '#f0fdf4';
             return '#f8fafc';
         },
         strokeFor(n) {
             if (this.linking === n.id) return '#2563eb';
-            if (n.match) return '#3b82f6';
-            if (n.status === 'CRITICAL') return '#ef4444';
-            if (n.status === 'WARNING') return '#f59e0b';
+            if (n.status === 'CRITICAL' || (n.agg && n.agg.crit)) return '#ef4444';
+            if (n.status === 'WARNING' || (n.agg && (n.agg.warn || n.agg.stale))) return '#f59e0b';
             return '#cbd5e1';
+        },
+        // Saturated variants for the far-zoom dots, where a pale tint
+        // would vanish at that size.
+        dotFor(n) {
+            if (n.status === 'CRITICAL' || (n.agg && n.agg.crit)) return '#ef4444';
+            if (n.status === 'WARNING' || (n.agg && (n.agg.warn || n.agg.stale))) return '#f59e0b';
+            if (n.status === 'OK') return '#22c55e';
+            return '#94a3b8';
+        },
+        // The one-line story of what a collapsed branch hides.
+        aggText(a) {
+            let t = a.count + (a.count === 1 ? ' object' : ' objects');
+            if (a.crit) t += ' · ' + a.crit + ' crit';
+            if (a.warn) t += ' · ' + a.warn + ' warn';
+            if (a.stale) t += ' · ' + a.stale + ' stale';
+            return t;
+        },
+        aggColor(a) {
+            return a.crit ? '#b91c1c' : ((a.warn || a.stale) ? '#b45309' : '#64748b');
         },
         trim(s) { s = s || ''; return s.length > 21 ? s.slice(0, 20) + '…' : s; },
 
         toggle(id) {
+            this.userAdjusted = true;
             this.collapsed[id] = !this.collapsed[id];
+            // Manually folding a branch is a decision: it comes off the
+            // revealed list, or the next re-cluster would re-open it.
+            if (this.collapsed[id]) delete this.revealed[id];
             this.layout();
         },
         collapseDeep(fromDepth) {
@@ -1117,8 +1640,14 @@ function mapPage() {
             // Hosts only reachable through a ring still need collapsing.
             this.hosts.forEach(h => walk(h, fromDepth));
         },
-        expandAll() { this.collapsed = {}; this.layout(); },
-        collapseAll() { this.collapseDeep(0); this.layout(); },
+        // Manual expansion controls are Overview concepts: using one
+        // from another view first returns to Overview, with the same
+        // cleanup every other route out of Focus gets.
+        backToOverview() {
+            if (this.mode !== 'overview') { this.leaveFocus(); this.mode = 'overview'; }
+        },
+        expandAll() { this.userAdjusted = true; this.backToOverview(); this.collapsed = {}; this.layout(); },
+        collapseAll() { this.userAdjusted = true; this.backToOverview(); this.collapseDeep(0); this.layout(); },
 
         onContextMenu(e) {
             const el = e.target.closest && e.target.closest('[data-node]');
@@ -1133,7 +1662,7 @@ function mapPage() {
             };
         },
 
-        // Open the inspector modal for a host (shared by click and menu).
+        // Open the inspector drawer for a host (shared by click and menu).
         openInspector(host) {
             // Moving to another host abandons an unnamed draft; it was
             // never a real object.
@@ -1142,10 +1671,46 @@ function mapPage() {
             this.depRows = host ? this.deps(host) : [];
             this.nameField = host ? (host.id || '') : '';
             this.nameError = host ? this.nameProblem(this.nameField) : '';
+            this.refreshSelectionStory();
             this.$nextTick(() => {
-                this.applySelection();
+                this.sizeCanvas();
                 if (this.draft && this.draft === host) this.focusName();
             });
+        },
+
+        // The selection's dependency story: what the drawer says
+        // (parents, dependents, blast radius) and what path emphasis
+        // paints (upstream, downstream). Recomputed here and ONLY here -
+        // at selection, and again after every topology mutation, or the
+        // drawer would keep listing a parent the operator just unlinked
+        // while the highlighting told the same stale story.
+        refreshSelectionStory() {
+            const host = this.selected;
+            this.selMeta = this.metaFor(host);
+            if (host && host.id) {
+                const { kids, parents } = this.buildGraph();
+                this.selUp = this.ancestorsOf(host.id, parents);
+                this.selDown = this.descendantsOf(host.id, kids);
+            } else {
+                this.selUp = null;
+                this.selDown = null;
+            }
+            this.$nextTick(() => this.applySelection());
+        },
+
+        // Focus state must follow topology edits too. A rename must
+        // carry focusId with it - otherwise layout()'s missing-focus
+        // fallback silently renders Overview while the UI still says
+        // Focus - and a dependency change must recompute the breadcrumb,
+        // which is the first-parent chain and can now run another way.
+        refreshFocusContext(oldId, newId) {
+            if (oldId && this.focusId === oldId) {
+                this.focusId = newId || (this.selected && this.selected.id) || null;
+            }
+            if (this.mode === 'focus' && this.focusId) {
+                const { parents } = this.buildGraph();
+                this.crumbs = this.chainToRoot(this.focusId, parents);
+            }
         },
 
         // x-if builds the edit form a tick late, so retry briefly rather
@@ -1198,7 +1763,8 @@ function mapPage() {
             if (parent) this.collapsed[parent] = false;
             this.dirty = true;
             this.layout();
-            this.$nextTick(() => this.applySelection());
+            this.refreshSelectionStory();
+            this.refreshFocusContext();
             this.notice = 'Created ' + name + (parent ? ' depending on ' + parent : '') +
                 '. Set its address, then Save.';
             setTimeout(() => this.notice = '', 6000);
@@ -1221,6 +1787,8 @@ function mapPage() {
             }
             this.selected = null;
             this.nameError = '';
+            this.selUp = null;
+            this.selDown = null;
         },
 
         // Start a host that depends on the right-clicked one. It opens as a
@@ -1275,6 +1843,8 @@ function mapPage() {
                 }
                 this.linking = null;
                 this.layout();
+                this.refreshSelectionStory();
+                this.refreshFocusContext();
                 return;
             }
             this.openInspector(host);
@@ -1292,6 +1862,8 @@ function mapPage() {
             host.dependencies = kept.join(', ');
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         // Walking up from the proposed parent must never reach the child.
@@ -1329,6 +1901,8 @@ function mapPage() {
             host.dependencies = clean.join(', ');
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         addDepRow() {
@@ -1344,6 +1918,8 @@ function mapPage() {
             host.dependencies = this.deps(host).filter(d => d !== dep).join(', ');
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         enterEdit() { this.editMode = true; },
@@ -1383,8 +1959,19 @@ function mapPage() {
                 if (d.includes(old)) h.dependencies = d.map(x => x === old ? newId : x).join(', ');
             });
             if (this.positions[old]) { this.positions[old + ''] = this.positions[old]; this.positions[newId] = this.positions[old]; delete this.positions[old]; }
+            // Every per-id piece of UI state follows the rename, or the
+            // next smartCollapse misses the stale key: a revealed path
+            // would re-fold over the host the operator navigated to, and
+            // a collapsed branch head would silently pop open.
+            if (this.collapsed[old]) { this.collapsed[newId] = true; delete this.collapsed[old]; }
+            if (this.revealed[old]) { this.revealed[newId] = true; delete this.revealed[old]; }
             this.dirty = true;
+            // Focus follows the rename BEFORE layout, or layout's
+            // missing-focus fallback renders Overview for one pass.
+            this.refreshFocusContext(old, newId);
             this.layout();
+            this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         async deleteHost(host) {
@@ -1399,6 +1986,10 @@ function mapPage() {
             });
             delete this.positions[host.id];
             this.selected = null;
+            this.selUp = null;
+            this.selDown = null;
+            // A focus on the deleted host has nothing left to point at.
+            if (this.focusId === host.id) this.backToOverview();
             this.dirty = true;
             this.layout();
         },
@@ -1468,6 +2059,29 @@ function mapPage() {
                 '<g data-viewport transform="translate(' + this.view.x + ',' +
                 this.view.y + ') scale(' + this.view.k + ')">';
 
+            // Group containers first, so they sit behind everything. The
+            // config's own "group" directive is the clustering the
+            // operator already maintains - draw it rather than inventing
+            // a map-specific grouping. Two or more drawn members earn a
+            // subtle box; scattered members just make a bigger box,
+            // which is honest about where the group's things are.
+            const grp = {};
+            for (const n of this.nodes) {
+                if (!n.group) continue;
+                const g = grp[n.group] || (grp[n.group] = { minX: 1e9, minY: 1e9, maxX: -1e9, maxY: -1e9, count: 0 });
+                g.minX = Math.min(g.minX, n.x - 84); g.maxX = Math.max(g.maxX, n.x + 84);
+                g.minY = Math.min(g.minY, n.y - 28); g.maxY = Math.max(g.maxY, n.y + 26);
+                g.count++;
+            }
+            for (const name of Object.keys(grp).sort()) {
+                const g = grp[name];
+                if (g.count < 2) continue;
+                out += '<rect x="' + g.minX + '" y="' + g.minY + '" width="' + (g.maxX - g.minX) +
+                    '" height="' + (g.maxY - g.minY) + '" rx="12" fill="#64748b" opacity="0.06"/>' +
+                    '<text x="' + (g.minX + 10) + '" y="' + (g.minY + 14) +
+                    '" font-size="10" font-weight="600" fill="#64748b" opacity="0.75">' +
+                    this.esc(name.toUpperCase()) + '</text>';
+            }
             for (const g of this.ringCircles) {
                 out += '<circle cx="' + g.cx + '" cy="' + g.cy + '" r="' + g.r +
                     '" fill="none" stroke="#f59e0b" stroke-width="1" ' +
@@ -1477,39 +2091,71 @@ function mapPage() {
             }
             for (const e of this.edges) {
                 // Extra parents render dashed so the primary spine of the
-                // tree stays legible in a DAG.
-                out += '<path d="' + e.d + '" fill="none" stroke="' +
-                    (e.ring ? '#f59e0b' : (e.secondary ? '#a5b4fc' : '#cbd5e1')) +
-                    '" stroke-width="' + (e.ring ? 2 : 1.5) + '"' +
+                // tree stays legible in a DAG. Child/parent identity and
+                // base style ride on the element so path emphasis can be
+                // painted (and unpainted) as pure attribute writes.
+                const stroke = e.ring ? '#f59e0b' : (e.secondary ? '#a5b4fc' : '#cbd5e1');
+                const width = e.ring ? 2 : 1.5;
+                out += '<path data-edge data-child="' + this.esc(e.child) + '" data-parent="' + this.esc(e.parent) +
+                    '" d="' + e.d + '" fill="none" stroke="' + stroke +
+                    '" stroke-width="' + width + '"' +
+                    ' data-base-stroke="' + stroke + '" data-base-width="' + width + '"' +
                     (e.secondary ? ' stroke-dasharray="4 3"' : '') +
                     ' marker-end="url(#arrow)"/>';
             }
+            // Semantic zoom: the representation changes with distance
+            // instead of shrinking the same box into an unreadable speck.
+            // Far is a status dot (aggregates keep a label - they are the
+            // overview's subject). Mid is the name. Near is the full box.
+            const band = this.zoomBand;
             for (const n of this.nodes) {
                 const id = this.esc(n.id);
-                out += '<g transform="translate(' + n.x + ',' + n.y + ')" data-node="' + id + '" style="cursor:pointer;">' +
-                    '<rect x="-72" y="-17" width="144" height="34" rx="7" fill="' + this.fillFor(n) +
-                    '" stroke="' + this.strokeFor(n) + '" stroke-width="' +
-                    ((this.linking === n.id || n.match) ? 2.5 : 1.25) +
-                    '" data-base-stroke="' + this.strokeFor(n) +
-                    '" data-base-width="' + ((this.linking === n.id || n.match) ? 2.5 : 1.25) + '"' +
-                    (n.stale ? ' stroke-dasharray="5 3" opacity="0.65"' : '') + '/>' +
-                    '<text x="0" y="-3" text-anchor="middle" font-size="10.5" font-weight="600" fill="#0f172a">' +
-                    this.esc(this.trim(n.label)) + '</text>' +
-                    '<text x="0" y="9" text-anchor="middle" font-size="8" fill="#64748b">' +
-                    this.esc(n.sub) + '</text>';
-                if (n.moved) {
-                    out += '<circle cx="66" cy="-11" r="2.5" fill="#6366f1"/>';
-                }
-                if (n.kids > 0) {
-                    out += '<g data-toggle="' + id + '">' +
-                        '<circle cx="-72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
-                        '<text x="-72" y="3" text-anchor="middle" font-size="9" fill="#475569" style="pointer-events:none;">' +
-                        (this.collapsed[n.id] ? ('+' + n.kids) : '\u2212') + '</text></g>';
-                }
-                if (this.editMode) {
-                    out += '<g data-link="' + id + '">' +
-                        '<circle cx="72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
-                        '<text x="72" y="3" text-anchor="middle" font-size="8" fill="#475569" style="pointer-events:none;">\u2197</text></g>';
+                out += '<g transform="translate(' + n.x + ',' + n.y + ')" data-node="' + id + '" style="cursor:pointer;">';
+                if (band === 'far') {
+                    out += '<circle data-shape r="7" fill="' + this.dotFor(n) +
+                        '" stroke="#ffffff" stroke-width="1.5"' +
+                        ' data-base-stroke="#ffffff" data-base-width="1.5"' +
+                        (n.stale ? ' stroke-dasharray="2 2" opacity="0.65"' : '') + '/>';
+                    if (n.agg) {
+                        out += '<text x="11" y="4" font-size="9" font-weight="600" fill="#334155">' +
+                            this.esc(this.trim(n.label)) + ' \u00b7 ' + n.agg.count + '</text>';
+                    }
+                } else {
+                    out += '<rect data-shape x="-72" y="-17" width="144" height="34" rx="7" fill="' + this.fillFor(n) +
+                        '" stroke="' + this.strokeFor(n) + '" stroke-width="' +
+                        (this.linking === n.id ? 2.5 : 1.25) +
+                        '" data-base-stroke="' + this.strokeFor(n) +
+                        '" data-base-width="' + (this.linking === n.id ? 2.5 : 1.25) + '"' +
+                        (n.stale ? ' stroke-dasharray="5 3" opacity="0.65"' : '') + '/>';
+                    const second = n.agg ? this.aggText(n.agg) : (band === 'near' ? n.sub : '');
+                    out += '<text x="0" y="' + (second ? -3 : 4) + '" text-anchor="middle" font-size="' +
+                        (band === 'mid' ? 11 : 10.5) + '" font-weight="600" fill="#0f172a">' +
+                        this.esc(this.trim(n.label)) + '</text>';
+                    if (second) {
+                        out += '<text x="0" y="9" text-anchor="middle" font-size="8" fill="' +
+                            (n.agg ? this.aggColor(n.agg) : '#64748b') + '"' +
+                            (n.agg ? ' font-weight="600"' : '') + '>' +
+                            this.esc(second) + '</text>';
+                    }
+                    if (n.moved) {
+                        out += '<circle cx="66" cy="-11" r="2.5" fill="#6366f1"/>';
+                    }
+                    // In Overview the badge folds and unfolds the branch.
+                    // In Focus/Problems an aggregate is a door: clicking
+                    // it re-focuses there (see onCanvasClick).
+                    if (this.mode === 'overview' ? n.kids > 0 : !!n.agg) {
+                        out += '<g data-toggle="' + id + '">' +
+                            '<circle cx="-72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
+                            '<text x="-72" y="3" text-anchor="middle" font-size="9" fill="#475569" style="pointer-events:none;">' +
+                            (this.mode === 'overview'
+                                ? (this.collapsed[n.id] ? ('+' + n.kids) : '\u2212')
+                                : ('+' + n.agg.count)) + '</text></g>';
+                    }
+                    if (this.editMode) {
+                        out += '<g data-link="' + id + '">' +
+                            '<circle cx="72" cy="0" r="8" fill="#fff" stroke="#94a3b8" stroke-width="1.25"/>' +
+                            '<text x="72" y="3" text-anchor="middle" font-size="8" fill="#475569" style="pointer-events:none;">\u2197</text></g>';
+                    }
                 }
                 out += '</g>';
             }
@@ -1519,7 +2165,18 @@ function mapPage() {
         onCanvasClick(e) {
             if (this.panMoved) { this.panMoved = false; return; }  // ignore click that ended a drag
             const toggle = e.target.closest('[data-toggle]');
-            if (toggle) { this.toggle(toggle.getAttribute('data-toggle')); return; }
+            if (toggle) {
+                const id = toggle.getAttribute('data-toggle');
+                // Overview folds and unfolds. In Focus/Problems the badge
+                // sits on an aggregate, and opening it means going there -
+                // except on the host already focused, where "+260" can
+                // only mean "show me those 260": re-focusing would draw
+                // the same capped view again, so it opens the impact view.
+                if (this.mode === 'overview') this.toggle(id);
+                else if (this.mode === 'focus' && this.focusId === id) this.showImpact(id);
+                else this.goTo(id);
+                return;
+            }
             const link = e.target.closest('[data-link]');
             if (link) {
                 const host = this.hosts.find(h => h.id === link.getAttribute('data-link'));
@@ -1530,7 +2187,11 @@ function mapPage() {
             if (node) {
                 const n = this.nodes.find(x => x.id === node.getAttribute('data-node'));
                 if (n) this.nodeClick(n);
+                return;
             }
+            // Empty canvas: clear the selection (but never silently
+            // discard a draft mid-naming - that is closeInspector's job).
+            if (this.selected && !(this.draft && this.selected === this.draft)) this.closeInspector();
         },
 
         // The SVG is sized to the transformed drawing so the container's
@@ -1544,22 +2205,48 @@ function mapPage() {
             };
         },
 
-        // Selection highlight is a two-attribute write on the affected
-        // nodes. Deriving it inside svgMarkup meant a click rebuilt all
-        // 800 nodes - slow, and the rebuild is what flashed.
+        // Selection paints the whole dependency story, not just a box:
+        // the chain the host hangs from in blue, everything that would
+        // fall with it in orange, the host itself outlined, everything
+        // unrelated faded nearly out. Attribute writes only - deriving
+        // this inside svgMarkup meant a click rebuilt all 800 nodes,
+        // which was slow, and the rebuild is what flashed.
         applySelection() {
             const root = this.$refs.canvas;
             if (!root) return;
-            root.querySelectorAll('[data-node] rect').forEach(r => {
-                r.setAttribute('stroke', r.dataset.baseStroke || '#cbd5e1');
-                r.setAttribute('stroke-width', r.dataset.baseWidth || '1.25');
+            const selId = (this.selected && this.selected !== this.draft) ? this.selected.id : null;
+            const up = this.selUp || new Set(), down = this.selDown || new Set();
+            root.querySelectorAll('[data-node]').forEach(g => {
+                const id = g.getAttribute('data-node');
+                const shape = g.querySelector('[data-shape]');
+                if (!shape) return;
+                let stroke = shape.dataset.baseStroke || '#cbd5e1';
+                let width = shape.dataset.baseWidth || '1.25';
+                let op = '1';
+                if (selId) {
+                    if (id === selId) { stroke = '#0f172a'; width = '2.5'; }
+                    else if (up.has(id)) { stroke = '#2563eb'; width = '2'; }
+                    else if (down.has(id)) { stroke = '#f97316'; width = '2'; }
+                    else op = '0.25';
+                }
+                shape.setAttribute('stroke', stroke);
+                shape.setAttribute('stroke-width', width);
+                g.setAttribute('opacity', op);
             });
-            if (!this.selected) return;
-            const el = root.querySelector('[data-node="' + CSS.escape(this.selected.id) + '"] rect');
-            if (el) {
-                el.setAttribute('stroke', '#0f172a');
-                el.setAttribute('stroke-width', '2.5');
-            }
+            root.querySelectorAll('[data-edge]').forEach(p => {
+                const c = p.getAttribute('data-child'), par = p.getAttribute('data-parent');
+                let stroke = p.dataset.baseStroke || '#cbd5e1';
+                let width = p.dataset.baseWidth || '1.5';
+                let op = '1';
+                if (selId) {
+                    if ((c === selId || up.has(c)) && up.has(par)) { stroke = '#2563eb'; width = '2'; }
+                    else if ((par === selId || down.has(par)) && down.has(c)) { stroke = '#f97316'; width = '2'; }
+                    else op = '0.12';
+                }
+                p.setAttribute('stroke', stroke);
+                p.setAttribute('stroke-width', width);
+                p.setAttribute('opacity', op);
+            });
         },
 
         applyTransform() {
@@ -1639,6 +2326,7 @@ function mapPage() {
             this.view.x = mx - (mx - this.view.x) * (k / this.view.k);
             this.view.y = my - (my - this.view.y) * (k / this.view.k);
             this.view.k = k;
+            this.setZoomBand();
             this.applyTransform();
         },
         fit() {
@@ -1660,6 +2348,7 @@ function mapPage() {
                 x: (rect.width - (maxX - minX) * k) / 2 - minX * k,
                 y: 24 - minY * k
             };
+            this.setZoomBand();
             this.applyTransform();
             this.$refs.canvas.scrollTo({ top: 0, left: 0 });
         }
