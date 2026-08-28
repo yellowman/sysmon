@@ -2148,6 +2148,21 @@ function unifiedConfigPage() {
             }
 
             this.refreshHostMatches();
+            // The row just saved must end up on screen. A new host is
+            // appended to the end of the fleet, which with paged rows
+            // means the last page - saved, refreshed, and never seen.
+            // Jump to its page; if the active search filter hides it,
+            // showing the saved row wins over keeping the filter.
+            const savedIndex = this.editingHostIndex === -1
+                ? this.structuredConfig.hosts.length - 1
+                : this.editingHostIndex;
+            let at = this.hostMatches.findIndex(m => m.originalIndex === savedIndex);
+            if (at === -1 && this.hostSearch) {
+                this.hostSearch = '';
+                this.refreshHostMatches();
+                at = this.hostMatches.findIndex(m => m.originalIndex === savedIndex);
+            }
+            if (at >= 0) this.hostPage = Math.floor(at / this.hostsPerPage) + 1;
             this.closeHostModal();
         },
 

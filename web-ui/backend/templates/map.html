@@ -654,6 +654,12 @@ function mapPage() {
         // drill-down (userAdjusted).
         statusSeen: false,
         userAdjusted: false,
+        // Ancestor branches expanded by navigating to a host (search,
+        // goTo, impact). smartCollapse leaves these open, so returning
+        // to Overview keeps the promise that a found host stays
+        // revealed instead of re-folding it into an aggregate.
+        // Manually collapsing a branch takes it back off this list.
+        revealed: {},
 
         async init() {
             // Sites first: the config fetch below needs to know which box.
@@ -1079,6 +1085,13 @@ function mapPage() {
                 }
                 if (quiet) this.collapsed[id] = true;
             });
+            // Paths the operator navigated to stay open through a
+            // re-cluster: goTo promised the found host stays revealed
+            // after returning to Overview, and this is where that
+            // promise would otherwise be broken.
+            Object.keys(this.revealed).forEach(id => {
+                if (this.collapsed[id]) delete this.collapsed[id];
+            });
         },
 
         // The ONE definition of leaving Focus for an aggregate view:
@@ -1128,9 +1141,13 @@ function mapPage() {
             this.search = '';
             this.userAdjusted = true;
             const { parents } = this.buildGraph();
-            // Expand the whole ancestor chain, so the path is open here
-            // and the host stays revealed after returning to Overview.
-            this.ancestorsOf(id, parents).forEach(a => { if (this.collapsed[a]) this.collapsed[a] = false; });
+            // Expand the whole ancestor chain and remember it as
+            // revealed, so the path is open here and stays open through
+            // Overview's re-clustering.
+            this.ancestorsOf(id, parents).forEach(a => {
+                if (this.collapsed[a]) this.collapsed[a] = false;
+                this.revealed[a] = true;
+            });
             this.mode = 'focus';
             this.focusImpact = false;
             this.focusId = id;
@@ -1148,7 +1165,10 @@ function mapPage() {
             if (!host) return;
             this.userAdjusted = true;
             const { parents } = this.buildGraph();
-            this.ancestorsOf(id, parents).forEach(a => { if (this.collapsed[a]) this.collapsed[a] = false; });
+            this.ancestorsOf(id, parents).forEach(a => {
+                if (this.collapsed[a]) this.collapsed[a] = false;
+                this.revealed[a] = true;
+            });
             this.mode = 'focus';
             this.focusImpact = true;
             this.focusId = id;
@@ -1586,6 +1606,9 @@ function mapPage() {
         toggle(id) {
             this.userAdjusted = true;
             this.collapsed[id] = !this.collapsed[id];
+            // Manually folding a branch is a decision: it comes off the
+            // revealed list, or the next re-cluster would re-open it.
+            if (this.collapsed[id]) delete this.revealed[id];
             this.layout();
         },
         collapseDeep(fromDepth) {
