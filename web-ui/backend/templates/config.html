@@ -1594,6 +1594,11 @@ function unifiedConfigPage() {
         hostMatches: [],
         hostPage: 1,
         hostsPerPage: 100,
+        // Set when code clears the search as part of jumping to a saved
+        // row. Alpine runs $watch callbacks on a microtask AFTER the
+        // synchronous save code, so without this guard the watcher's
+        // reset-to-page-1 would stomp the page the save just computed.
+        searchJumping: false,
 
         successMessage: '',
 
@@ -1624,6 +1629,9 @@ function unifiedConfigPage() {
             // match list; typing must never rebuild the table against the
             // whole fleet again.
             this.$watch('hostSearch', () => {
+                // A programmatic clear already refreshed and picked the
+                // page showing the saved row; do not reset over it.
+                if (this.searchJumping) { this.searchJumping = false; return; }
                 this.hostPage = 1;
                 this.refreshHostMatches();
             });
@@ -2158,6 +2166,7 @@ function unifiedConfigPage() {
                 : this.editingHostIndex;
             let at = this.hostMatches.findIndex(m => m.originalIndex === savedIndex);
             if (at === -1 && this.hostSearch) {
+                this.searchJumping = true;
                 this.hostSearch = '';
                 this.refreshHostMatches();
                 at = this.hostMatches.findIndex(m => m.originalIndex === savedIndex);

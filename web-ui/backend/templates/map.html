@@ -1959,6 +1959,12 @@ function mapPage() {
                 if (d.includes(old)) h.dependencies = d.map(x => x === old ? newId : x).join(', ');
             });
             if (this.positions[old]) { this.positions[old + ''] = this.positions[old]; this.positions[newId] = this.positions[old]; delete this.positions[old]; }
+            // Every per-id piece of UI state follows the rename, or the
+            // next smartCollapse misses the stale key: a revealed path
+            // would re-fold over the host the operator navigated to, and
+            // a collapsed branch head would silently pop open.
+            if (this.collapsed[old]) { this.collapsed[newId] = true; delete this.collapsed[old]; }
+            if (this.revealed[old]) { this.revealed[newId] = true; delete this.revealed[old]; }
             this.dirty = true;
             // Focus follows the rename BEFORE layout, or layout's
             // missing-focus fallback renders Overview for one pass.
