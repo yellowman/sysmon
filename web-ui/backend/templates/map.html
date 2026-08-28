@@ -782,6 +782,7 @@ function mapPage() {
             if (this.tplForm.parent) this.collapsed[this.tplForm.parent] = false;
             this.layout();
             this.refreshSelectionStory();
+            this.refreshFocusContext();
             this.notice = 'Added ' + this.tplPreview.length + ' object(s) from template. Save to write them to sysmon.conf.';
             setTimeout(() => this.notice = '', 6000);
         },
@@ -1080,17 +1081,27 @@ function mapPage() {
             });
         },
 
-        setMode(m) {
-            if (m !== 'focus') { this.focusId = null; this.focusImpact = false; this.crumbs = []; }
-            // Leaving Focus also drops the selection story. Path emphasis
-            // fades everything unrelated to the selected host, which is
-            // Focus's tool: carried into Problems it would wash out the
-            // very failures that view exists to show, and carried back to
-            // Overview it would fade most of the overview. A draft
-            // mid-naming is never silently discarded here.
-            if (m !== 'focus' && this.selected && !(this.draft && this.selected === this.draft)) {
+        // The ONE definition of leaving Focus for an aggregate view:
+        // clear the focus state and drop the selection story. Path
+        // emphasis fades everything unrelated to the selected host,
+        // which is Focus's tool - carried into Problems it would wash
+        // out the very failures that view exists to show, and carried
+        // back to Overview it would fade most of the overview. Every
+        // route out of Focus (mode buttons, breadcrumb, Layout menu)
+        // must go through here; a second copy of this cleanup is how
+        // the Layout-menu bleed bug happened. A draft mid-naming is
+        // never silently discarded.
+        leaveFocus() {
+            this.focusId = null;
+            this.focusImpact = false;
+            this.crumbs = [];
+            if (this.selected && !(this.draft && this.selected === this.draft)) {
                 this.closeInspector();
             }
+        },
+
+        setMode(m) {
+            if (m !== 'focus') this.leaveFocus();
             // Re-entering Overview re-clusters against current statuses:
             // pressing the button is an explicit "show me the shape again".
             if (m === 'overview') this.smartCollapse();
@@ -1607,9 +1618,10 @@ function mapPage() {
             this.hosts.forEach(h => walk(h, fromDepth));
         },
         // Manual expansion controls are Overview concepts: using one
-        // from another view first returns to Overview.
+        // from another view first returns to Overview, with the same
+        // cleanup every other route out of Focus gets.
         backToOverview() {
-            if (this.mode !== 'overview') { this.mode = 'overview'; this.focusId = null; this.focusImpact = false; this.crumbs = []; }
+            if (this.mode !== 'overview') { this.leaveFocus(); this.mode = 'overview'; }
         },
         expandAll() { this.userAdjusted = true; this.backToOverview(); this.collapsed = {}; this.layout(); },
         collapseAll() { this.userAdjusted = true; this.backToOverview(); this.collapseDeep(0); this.layout(); },
@@ -1663,6 +1675,21 @@ function mapPage() {
             this.$nextTick(() => this.applySelection());
         },
 
+        // Focus state must follow topology edits too. A rename must
+        // carry focusId with it - otherwise layout()'s missing-focus
+        // fallback silently renders Overview while the UI still says
+        // Focus - and a dependency change must recompute the breadcrumb,
+        // which is the first-parent chain and can now run another way.
+        refreshFocusContext(oldId, newId) {
+            if (oldId && this.focusId === oldId) {
+                this.focusId = newId || (this.selected && this.selected.id) || null;
+            }
+            if (this.mode === 'focus' && this.focusId) {
+                const { parents } = this.buildGraph();
+                this.crumbs = this.chainToRoot(this.focusId, parents);
+            }
+        },
+
         // x-if builds the edit form a tick late, so retry briefly rather
         // than leaving the operator to hunt for the field.
         focusName(tries) {
@@ -1714,6 +1741,7 @@ function mapPage() {
             this.dirty = true;
             this.layout();
             this.refreshSelectionStory();
+            this.refreshFocusContext();
             this.notice = 'Created ' + name + (parent ? ' depending on ' + parent : '') +
                 '. Set its address, then Save.';
             setTimeout(() => this.notice = '', 6000);
@@ -1793,6 +1821,7 @@ function mapPage() {
                 this.linking = null;
                 this.layout();
                 this.refreshSelectionStory();
+                this.refreshFocusContext();
                 return;
             }
             this.openInspector(host);
@@ -1811,6 +1840,7 @@ function mapPage() {
             this.dirty = true;
             this.layout();
             this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         // Walking up from the proposed parent must never reach the child.
@@ -1849,6 +1879,7 @@ function mapPage() {
             this.dirty = true;
             this.layout();
             this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         addDepRow() {
@@ -1865,6 +1896,7 @@ function mapPage() {
             this.dirty = true;
             this.layout();
             this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         enterEdit() { this.editMode = true; },
@@ -1905,8 +1937,12 @@ function mapPage() {
             });
             if (this.positions[old]) { this.positions[old + ''] = this.positions[old]; this.positions[newId] = this.positions[old]; delete this.positions[old]; }
             this.dirty = true;
+            // Focus follows the rename BEFORE layout, or layout's
+            // missing-focus fallback renders Overview for one pass.
+            this.refreshFocusContext(old, newId);
             this.layout();
             this.refreshSelectionStory();
+            this.refreshFocusContext();
         },
 
         async deleteHost(host) {
@@ -2102,9 +2138,13 @@ function mapPage() {
             const toggle = e.target.closest('[data-toggle]');
             if (toggle) {
                 const id = toggle.getAttribute('data-toggle');
-                // Overview folds and unfolds; in Focus/Problems the badge
-                // sits on an aggregate, and opening it means going there.
+                // Overview folds and unfolds. In Focus/Problems the badge
+                // sits on an aggregate, and opening it means going there -
+                // except on the host already focused, where "+260" can
+                // only mean "show me those 260": re-focusing would draw
+                // the same capped view again, so it opens the impact view.
                 if (this.mode === 'overview') this.toggle(id);
+                else if (this.mode === 'focus' && this.focusId === id) this.showImpact(id);
                 else this.goTo(id);
                 return;
             }
