@@ -648,6 +648,12 @@ function mapPage() {
         selMeta: { parents: [], children: [], childCount: 0, impact: 0 },
         selUp: null,
         selDown: null,
+        // The startup collapse runs before any status has arrived, so
+        // the first status load gets one re-cluster (statusSeen) - and
+        // only one: doing it every 15s would fight the operator's
+        // drill-down (userAdjusted).
+        statusSeen: false,
+        userAdjusted: false,
 
         async init() {
             // Sites first: the config fetch below needs to know which box.
@@ -775,6 +781,7 @@ function mapPage() {
             // Open the branch we just added to, so the new device is visible.
             if (this.tplForm.parent) this.collapsed[this.tplForm.parent] = false;
             this.layout();
+            this.refreshSelectionStory();
             this.notice = 'Added ' + this.tplPreview.length + ' object(s) from template. Save to write them to sysmon.conf.';
             setTimeout(() => this.notice = '', 6000);
         },
@@ -892,6 +899,16 @@ function mapPage() {
                 this.statuses = m;
                 this.staleHosts = st;
                 this.statusStale = false;
+                // The startup collapse classified everything as healthy
+                // because no status existed yet, folding problem paths
+                // like quiet fans. The invariant "problems and their
+                // ancestors stay open" only becomes true once status is
+                // known - re-cluster exactly once, and never over the
+                // operator's own drill-down.
+                if (!this.statusSeen) {
+                    this.statusSeen = true;
+                    if (this.mode === 'overview' && !this.userAdjusted) this.smartCollapse();
+                }
                 this.layout();
             } catch (e) {
                 // The colours on screen are from the last successful
@@ -1065,6 +1082,15 @@ function mapPage() {
 
         setMode(m) {
             if (m !== 'focus') { this.focusId = null; this.focusImpact = false; this.crumbs = []; }
+            // Leaving Focus also drops the selection story. Path emphasis
+            // fades everything unrelated to the selected host, which is
+            // Focus's tool: carried into Problems it would wash out the
+            // very failures that view exists to show, and carried back to
+            // Overview it would fade most of the overview. A draft
+            // mid-naming is never silently discarded here.
+            if (m !== 'focus' && this.selected && !(this.draft && this.selected === this.draft)) {
+                this.closeInspector();
+            }
             // Re-entering Overview re-clusters against current statuses:
             // pressing the button is an explicit "show me the shape again".
             if (m === 'overview') this.smartCollapse();
@@ -1089,6 +1115,7 @@ function mapPage() {
             if (!host) return;
             this.searchResults = [];
             this.search = '';
+            this.userAdjusted = true;
             const { parents } = this.buildGraph();
             // Expand the whole ancestor chain, so the path is open here
             // and the host stays revealed after returning to Overview.
@@ -1108,6 +1135,7 @@ function mapPage() {
         showImpact(id) {
             const host = this.hosts.find(h => h.id === id);
             if (!host) return;
+            this.userAdjusted = true;
             const { parents } = this.buildGraph();
             this.ancestorsOf(id, parents).forEach(a => { if (this.collapsed[a]) this.collapsed[a] = false; });
             this.mode = 'focus';
@@ -1259,9 +1287,15 @@ function mapPage() {
                 if (this.focusImpact) {
                     this.descendantsOf(this.focusId, kids).forEach(d => visible.add(d));
                 } else {
-                    // Children always; grandchildren while the
-                    // neighbourhood stays readable.
-                    const children = (kids[this.focusId] || []).map(k => k.id);
+                    // Direct children capped too, problems-first: the
+                    // exact event Focus exists for - a backhaul with 300
+                    // dependents going down - must not turn Focus back
+                    // into a 300-node sheet. hiddenAgg reports whatever
+                    // the cap leaves out on the focus node itself, and
+                    // Show impact stays the explicit "yes, everything".
+                    const children = (kids[this.focusId] || []).map(k => k.id)
+                        .sort((a, b) => (this.isProblem(b) ? 1 : 0) - (this.isProblem(a) ? 1 : 0))
+                        .slice(0, 40);
                     children.forEach(c => visible.add(c));
                     let budget = 80 - visible.size;
                     outer:
@@ -1278,7 +1312,14 @@ function mapPage() {
                     if (!h.id || !this.isProblem(h.id)) return;
                     visible.add(h.id);
                     this.ancestorsOf(h.id, parents).forEach(a => visible.add(a));
-                    (kids[h.id] || []).forEach(k => visible.add(k.id));
+                    // One level of affected dependents, problems-first
+                    // and capped: a problem with 300 children says
+                    // "+284 objects" through its aggregate instead of
+                    // becoming the 300-node sheet this view replaces.
+                    (kids[h.id] || []).map(k => k.id)
+                        .sort((a, b) => (this.isProblem(b) ? 1 : 0) - (this.isProblem(a) ? 1 : 0))
+                        .slice(0, 30)
+                        .forEach(c => visible.add(c));
                 });
             } else {
                 // Overview: a node shows when at least one parent is
@@ -1483,7 +1524,10 @@ function mapPage() {
             this.edges = edges;
             this.stats = {
                 total: this.hosts.length,
-                roots: roots.length,
+                // rootIds, not roots: members of a top-level ring were
+                // just promoted to roots by the engine, and the stats
+                // line must agree with what the engine did.
+                roots: rootIds.size,
                 depth: maxDepth + 1,
                 hidden: this.hosts.length - visible.size,
                 multi: this.hosts.filter(h => (parents[h.id] || []).length > 1).length,
@@ -1529,6 +1573,7 @@ function mapPage() {
         trim(s) { s = s || ''; return s.length > 21 ? s.slice(0, 20) + '…' : s; },
 
         toggle(id) {
+            this.userAdjusted = true;
             this.collapsed[id] = !this.collapsed[id];
             this.layout();
         },
@@ -1566,8 +1611,8 @@ function mapPage() {
         backToOverview() {
             if (this.mode !== 'overview') { this.mode = 'overview'; this.focusId = null; this.focusImpact = false; this.crumbs = []; }
         },
-        expandAll() { this.backToOverview(); this.collapsed = {}; this.layout(); },
-        collapseAll() { this.backToOverview(); this.collapseDeep(0); this.layout(); },
+        expandAll() { this.userAdjusted = true; this.backToOverview(); this.collapsed = {}; this.layout(); },
+        collapseAll() { this.userAdjusted = true; this.backToOverview(); this.collapseDeep(0); this.layout(); },
 
         onContextMenu(e) {
             const el = e.target.closest && e.target.closest('[data-node]');
@@ -1591,11 +1636,22 @@ function mapPage() {
             this.depRows = host ? this.deps(host) : [];
             this.nameField = host ? (host.id || '') : '';
             this.nameError = host ? this.nameProblem(this.nameField) : '';
+            this.refreshSelectionStory();
+            this.$nextTick(() => {
+                this.sizeCanvas();
+                if (this.draft && this.draft === host) this.focusName();
+            });
+        },
+
+        // The selection's dependency story: what the drawer says
+        // (parents, dependents, blast radius) and what path emphasis
+        // paints (upstream, downstream). Recomputed here and ONLY here -
+        // at selection, and again after every topology mutation, or the
+        // drawer would keep listing a parent the operator just unlinked
+        // while the highlighting told the same stale story.
+        refreshSelectionStory() {
+            const host = this.selected;
             this.selMeta = this.metaFor(host);
-            // The selection's dependency story, for path emphasis:
-            // upstream in one colour, downstream in another, everything
-            // unrelated faded. Computed once here, painted by
-            // applySelection as attribute writes.
             if (host && host.id) {
                 const { kids, parents } = this.buildGraph();
                 this.selUp = this.ancestorsOf(host.id, parents);
@@ -1604,11 +1660,7 @@ function mapPage() {
                 this.selUp = null;
                 this.selDown = null;
             }
-            this.$nextTick(() => {
-                this.applySelection();
-                this.sizeCanvas();
-                if (this.draft && this.draft === host) this.focusName();
-            });
+            this.$nextTick(() => this.applySelection());
         },
 
         // x-if builds the edit form a tick late, so retry briefly rather
@@ -1661,7 +1713,7 @@ function mapPage() {
             if (parent) this.collapsed[parent] = false;
             this.dirty = true;
             this.layout();
-            this.$nextTick(() => this.applySelection());
+            this.refreshSelectionStory();
             this.notice = 'Created ' + name + (parent ? ' depending on ' + parent : '') +
                 '. Set its address, then Save.';
             setTimeout(() => this.notice = '', 6000);
@@ -1740,6 +1792,7 @@ function mapPage() {
                 }
                 this.linking = null;
                 this.layout();
+                this.refreshSelectionStory();
                 return;
             }
             this.openInspector(host);
@@ -1757,6 +1810,7 @@ function mapPage() {
             host.dependencies = kept.join(', ');
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
         },
 
         // Walking up from the proposed parent must never reach the child.
@@ -1794,6 +1848,7 @@ function mapPage() {
             host.dependencies = clean.join(', ');
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
         },
 
         addDepRow() {
@@ -1809,6 +1864,7 @@ function mapPage() {
             host.dependencies = this.deps(host).filter(d => d !== dep).join(', ');
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
         },
 
         enterEdit() { this.editMode = true; },
@@ -1850,6 +1906,7 @@ function mapPage() {
             if (this.positions[old]) { this.positions[old + ''] = this.positions[old]; this.positions[newId] = this.positions[old]; delete this.positions[old]; }
             this.dirty = true;
             this.layout();
+            this.refreshSelectionStory();
         },
 
         async deleteHost(host) {
