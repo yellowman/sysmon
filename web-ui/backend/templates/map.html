@@ -686,11 +686,14 @@ function mapPage() {
             // so re-check once it has.
             if (this.editMode && !this.isAdmin) {
                 this.editMode = false;
-                setTimeout(() => {
-                    if (this.isAdmin && new URLSearchParams(location.search).get('edit') === '1') {
-                        this.enterEdit();
-                    }
-                }, 600);
+                // Watch the role rather than guessing how long
+                // /api/auth/me takes: a slow answer used to lose the
+                // requested edit mode outright.
+                const stop = this.$watch('$store.auth.role', role => {
+                    if (role !== 'admin') return;
+                    stop();
+                    if (new URLSearchParams(location.search).get('edit') === '1') this.enterEdit();
+                });
             }
             // Sites first: the config fetch below needs to know which box.
             await this.loadSitesForPicker();

@@ -56,6 +56,19 @@ var adminOnly = []struct{ method, path string }{
 	{"POST", "/api/settings/agents"},
 	{"POST", "/api/settings/agents/revoke/metro"},
 	{"GET", "/api/settings/agents/ca"},
+
+	// The daemon's raw SHOWOBJ document for an object carries that
+	// object's SNMP community, check username and password, RADIUS
+	// secret, header value, URL and the command a failure runs. It sat
+	// on the open side, and the host detail page fetched it into every
+	// user's browser - the page rendered none of those fields, which is
+	// not the same as not sending them.
+	{"GET", "/api/xml/object/core-rtr-1"},
+
+	// A saved map layout is what everyone who opens the map sees, so
+	// writing one is a mutation of shared state.
+	{"PUT", "/api/map/layout"},
+
 }
 
 // openToAnyone is the other half of the rule. Losing these to a
@@ -67,6 +80,13 @@ var openToAnyone = []struct{ method, path string }{
 	{"GET", "/api/monitoring/status"},
 	{"GET", "/api/sites"},
 	{"GET", "/api/templates"},
+
+	// The map's shape and one object's detail, both allow-listed to
+	// carry no credentials - the whole point of them existing beside
+	// the admin-only config endpoints.
+	{"GET", "/api/monitoring/topology"},
+	{"GET", "/api/monitoring/object-detail/core-rtr-1"},
+	{"GET", "/api/map/layout"},
 }
 
 func TestConfigContentIsAdminOnly(t *testing.T) {
@@ -186,5 +206,31 @@ func testRouter(t *testing.T) (http.Handler, *auth.Service, func()) {
 		stopPush()
 		settingsStore.Close()
 		authSvc.Close()
+	}
+}
+
+// The admin-only PAGES are gated server-side too, not just hidden from
+// the navbar: hiding a link is tidiness, and typing the URL is not an
+// exploit. A page redirects rather than answering 403 - a browser
+// following a link deserves somewhere to land, not an error document -
+// which is why these are not in the API table above.
+func TestAdminPagesAreGatedServerSide(t *testing.T) {
+	handler, authSvc, stop := testRouter(t)
+	defer stop()
+
+	userToken := sessionFor(t, authSvc, "viewer2", "pw-viewer", auth.RoleUser)
+	adminToken := sessionFor(t, authSvc, "boss2", "pw-boss", auth.RoleAdmin)
+
+	for _, page := range []string{"/config.html", "/admin.html"} {
+		if got := status(handler, "GET", page, userToken); got != http.StatusSeeOther {
+			t.Errorf("%s as a plain user: got %d, want a 303 redirect away", page, got)
+		}
+		// As with the API table: the gate is the claim, not the
+		// handler's own answer. This router has no template set
+		// loaded, so an admin reaching the renderer may well get a
+		// 500 - what matters is that they were not turned away.
+		if got := status(handler, "GET", page, adminToken); got == http.StatusSeeOther {
+			t.Errorf("%s as an admin: redirected away, so the page is unreachable to everyone", page)
+		}
 	}
 }

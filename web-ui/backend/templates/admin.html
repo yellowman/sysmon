@@ -16,15 +16,28 @@
         <div class="card p-6">
             <h2 class="section-title mb-4">System Information</h2>
             <div class="space-y-3">
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600">Daemon Version:</span>
-                    <span class="text-sm font-mono font-medium text-gray-900" x-text="version || 'Loading...'"></span>
+                <!-- Version and uptime belong to one daemon. On a fleet
+                     with no site chosen the answer would be whichever
+                     box replied first, which is a coin toss during the
+                     upgrade this panel exists to check. -->
+                <template x-if="!siteAmbiguous">
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600">Daemon Version:</span>
+                            <span class="text-sm font-mono font-medium text-gray-900" x-text="version || 'Loading...'"></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600">Uptime:</span>
+                            <span class="text-sm font-medium text-gray-900" x-text="uptime || 'Loading...'"></span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="siteAmbiguous" x-cloak class="text-sm text-gray-500">
+                    Several monitoring boxes are connected. Pick one in the
+                    site selector to see its version and uptime.
                 </div>
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600">Uptime:</span>
-                    <span class="text-sm font-medium text-gray-900" x-text="uptime || 'Loading...'"></span>
-                </div>
-                <button @click="loadVersion()"
+                <button @click="loadVersion(); loadUptime()" :disabled="siteAmbiguous"
+                        :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                         class="mt-2 w-full px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
                     <i class="fas fa-sync-alt mr-1"></i>Refresh
                 </button>

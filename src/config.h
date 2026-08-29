@@ -1251,7 +1251,7 @@ void stop_check_radius(struct monitorent *);
 void md5_calc (unsigned char *, unsigned char *, unsigned int);
 
 /* srvclient.c */
-void send_object_xml(int, FILE*, struct graph_elements *);
+void send_object_xml(int, FILE*, struct graph_elements *, int);
 void send_traps(struct clientstatus *, unsigned long);
 void send_site(struct clientstatus *);
 void client_send_statechange(char *, int , int);

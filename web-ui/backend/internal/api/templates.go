@@ -158,7 +158,16 @@ func (r *Router) handleHistoryPage(w http.ResponseWriter, req *http.Request) {
 	r.renderTemplate(w, "history.html", PageData{Active: "history"})
 }
 
+// Config and Admin are admin-only pages, gated here and not only in the
+// navbar: hiding a link is a tidiness measure, not a control, and typing
+// the URL is not an exploit. Every API these pages use is refused for a
+// non-admin anyway, so the page would render as a shell of dead
+// controls - which reads as a broken product rather than a boundary.
 func (r *Router) handleConfigPage(w http.ResponseWriter, req *http.Request) {
+	if req.Header.Get("X-Session-Role") != auth.RoleAdmin {
+		http.Redirect(w, req, "/", http.StatusSeeOther)
+		return
+	}
 	r.renderTemplate(w, "config.html", PageData{Active: "config"})
 }
 
@@ -190,6 +199,10 @@ func (r *Router) handleTemplatesPage(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleAdminPage(w http.ResponseWriter, req *http.Request) {
+	if req.Header.Get("X-Session-Role") != auth.RoleAdmin {
+		http.Redirect(w, req, "/", http.StatusSeeOther)
+		return
+	}
 	r.renderTemplate(w, "admin.html", PageData{Active: "admin"})
 }
 

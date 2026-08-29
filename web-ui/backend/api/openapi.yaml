@@ -339,9 +339,18 @@ paths:
             enum: [informational, warning, error, critical, unknown]
         - name: source
           in: query
-          description: Only traps from this source address.
+          description: >
+            Only traps from this source. Accepts `site/address` for one
+            exact device, or a bare `address` meaning that address at any
+            site - private ranges overlap, so the bare form can match
+            several distinct devices. The UI sends the qualified form.
           schema:
             type: string
+          examples:
+            exactDevice:
+              value: bend/10.20.1.14
+            anySite:
+              value: 10.20.1.14
         - name: page
           in: query
           schema:
@@ -361,6 +370,40 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SNMPTrap'
+
+  /api/monitoring/object-detail/{object}:
+    get:
+      tags: [Monitoring]
+      summary: Get one object's detail, without check credentials
+      description: >
+        Queue state, counters, thresholds, timings and description for a
+        single object - what the host detail page renders. The fields are
+        a positive allow-list, so the daemon's credential-bearing tags
+        (SNMP community, check username and password, RADIUS shared
+        secret, HTTP header value, URL, failure command) cannot appear,
+        including any added to the daemon later. The raw document is
+        available to admins at `/api/xml/object/{object}`.
+      parameters:
+        - name: object
+          in: path
+          required: true
+          description: Object key, site-qualified as `site:object` on a fleet.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detail retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: The object's status document could not be read
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/monitoring/topology:
     get:

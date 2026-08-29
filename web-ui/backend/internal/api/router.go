@@ -171,7 +171,11 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/metrics", r.handleMetrics)
 
 	// XML passthrough endpoint (for host detail - kept for compatibility)
-	r.mux.HandleFunc("/api/xml/object/", r.handleXMLObject)
+	// The daemon's raw SHOWOBJ document carries the credentials an
+	// object's checks run with, so it is admin-only. Ordinary users get
+	// the allow-listed detail below, which is what the page renders.
+	r.mux.HandleFunc("/api/xml/object/", auth.RequireAdmin(r.handleXMLObject))
+	r.mux.HandleFunc("/api/monitoring/object-detail/", r.handleObjectDetail)
 
 	// Admin/debug endpoints (all require admin role)
 	r.mux.HandleFunc("/api/admin/version", auth.RequireAdmin(r.handleAdminVersion))
@@ -516,11 +520,27 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 	status, err := r.monitoring.GetStatus()
 	if err != nil {
 		if xmlErr, ok := err.(*monitoring.XMLParseError); ok {
-			r.sendErrorWithDetails(w, http.StatusServiceUnavailable, xmlErr.Message, map[string]interface{}{
-				"object_name":   xmlErr.ObjectName,
-				"raw_xml":       xmlErr.RawXML,
-				"samples":       xmlErr.AllSamples,
-				"all_responses": xmlErr.AllResponses,
+			// The debug payload is the daemon's raw SHOWOBJ/CONF
+			// response, which carries the object's community string,
+			// check password, RADIUS secret and command line. That is
+			// protocol debugging, and it goes only to an admin - who
+			// can read the config anyway. Everyone else is told which
+			// object is broken, which is the part they can act on.
+			if req.Header.Get("X-Session-Role") == auth.RoleAdmin {
+				r.sendErrorWithDetails(w, http.StatusServiceUnavailable, xmlErr.Message, map[string]interface{}{
+					"object_name":   xmlErr.ObjectName,
+					"raw_xml":       xmlErr.RawXML,
+					"samples":       xmlErr.AllSamples,
+					"all_responses": xmlErr.AllResponses,
+				})
+				return
+			}
+			msg := "a monitored object returned malformed status XML"
+			if xmlErr.ObjectName != "" {
+				msg = "object " + xmlErr.ObjectName + " returned malformed status XML"
+			}
+			r.sendErrorWithDetails(w, http.StatusServiceUnavailable, msg, map[string]interface{}{
+				"object_name": xmlErr.ObjectName,
 			})
 			return
 		}

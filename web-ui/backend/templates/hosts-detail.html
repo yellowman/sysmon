@@ -378,21 +378,16 @@ function hostDetail() {
                 this.loading = true;
                 this.error = null;
 
-                // Fetch XML data for this host
-                const fetchOpts = {};
-                const token = sessionStorage.getItem('sysmon_token');
-                if (token) fetchOpts.headers = { 'Authorization': 'Bearer ' + token };
-                const response = await fetch(`/api/xml/object/${encodeURIComponent(this.hostname)}`, fetchOpts);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const xmlText = await response.text();
-                const parser = new DOMParser();
-                const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
-
-                // Parse XML into object
-                this.host = this.parseXML(xmlDoc);
+                // The allow-listed detail, not the daemon's raw SHOWOBJ
+                // document. That document carries this object's SNMP
+                // community, check password, RADIUS secret and command
+                // line - none of which this page renders, but all of
+                // which the browser used to receive, where anyone with
+                // devtools could read them. The server now names the
+                // fields it will send instead of stripping ones it
+                // remembers to.
+                this.host = await apiCall(
+                    '/api/monitoring/object-detail/' + encodeURIComponent(this.hostname));
 
                 this.loading = false;
             } catch (e) {
@@ -401,33 +396,6 @@ function hostDetail() {
             }
         },
 
-        parseXML(xmlDoc) {
-            const obj = {};
-
-            if (xmlDoc.querySelector('parsererror')) {
-                throw new Error('Malformed XML response from daemon');
-            }
-
-            const status = xmlDoc.querySelector('ObjectStatus');
-            if (!status) {
-                throw new Error('No ObjectStatus element in response');
-            }
-
-            // Parse all child elements
-            Array.from(status.children).forEach(child => {
-                const tagName = child.tagName;
-                let value = child.textContent;
-
-                // Try to parse as number if it looks like one
-                if (!isNaN(value) && value.trim() !== '') {
-                    value = parseFloat(value);
-                }
-
-                obj[tagName] = value;
-            });
-
-            return obj;
-        },
 
         toggleSection(section) {
             this.sections[section] = !this.sections[section];

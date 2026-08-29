@@ -180,6 +180,10 @@
                 <div class="px-6 py-4 hover:bg-gray-50">
                     <div class="flex items-center justify-between">
                         <div>
+                            <!-- Which box received it. This list is
+                                 fleet-wide, and private ranges overlap:
+                                 two sites' 10.20.1.14 are two devices. -->
+                            <span x-show="trap.site" class="text-[11px] text-gray-400 mono" x-text="trap.site"></span>
                             <span class="font-medium text-gray-900" x-text="trap.source_ip"></span>
                             <span class="text-sm text-gray-500" x-show="trap.source_hostname" x-text="' (' + trap.source_hostname + ')'"></span>
                         </div>

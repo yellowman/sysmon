@@ -159,7 +159,8 @@ int	send_conf(struct clientstatus *client, unsigned long since)
 		if (here->value != NULL && here->value->data != NULL &&
 		    here->value->data->change_seq > since)
 		{
-			send_object_xml(client->filedes, NULL, here->value);
+			/* send_conf refuses an unauthenticated client above. */
+			send_object_xml(client->filedes, NULL, here->value, 1);
 			sent++;
 		}
 		here=here->next;
@@ -226,8 +227,27 @@ static char *xml_escape(const char *in, char *out, size_t outlen);
  * send_object_xml - send an object described as obj
  * to either FILE or file(can be socket).  do FILE = null
  * if you want it to go to the socket.
+ *
+ * privileged says whether the recipient has authenticated. An object
+ * record carries the credentials its checks run with - the SNMP
+ * community, the check username and password, the RADIUS shared secret,
+ * the HTTP header value, the URL, and the command line a failure runs -
+ * and an unauthenticated client has no business receiving any of them.
+ * They are omitted entirely rather than blanked: an absent tag is what
+ * an object without that setting already looks like, so every existing
+ * reader handles it, and nothing has to be taught a placeholder.
+ *
+ * The status fields - names, types, timings, counters, thresholds - go
+ * to everyone, because that is what a status query is for.
+ *
+ * SHOWOBJ passes 0 here unless the client authenticated: it required
+ * only "MODE xml", so anyone who could open the port could read every
+ * credential in the config one object at a time. CONF is refused
+ * outright without auth (see send_conf), so it passes 1. The trap path
+ * has withheld its community from unauthenticated clients from the
+ * start; this is the same rule applied where it was missing.
  */
-void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
+void send_object_xml(int fd, FILE *fh, struct graph_elements *obj, int privileged)
 {
 	char buffer[TEMPBUF_SIZE];
 
@@ -305,7 +325,7 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 
 	if (obj->data->type == SYSM_TYPE_SNMP)
 	{
-		if (obj->data->snmp_community != NULL)
+		if (privileged && obj->data->snmp_community != NULL)
 		{
 			snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_SNMP_COMMUNITY,
 			xml_escape(obj->data->snmp_community, esc, sizeof(esc)), XML_SNMP_COMMUNITY);
@@ -349,35 +369,35 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 	snprintf(buffer, sizeof(buffer), "<%s>%d</%s>", XML_OBJECT_STATE, obj->data->lastcheck, XML_OBJECT_STATE);
 	SEND_OR_ABORT(fd, fh, buffer);
 
-	if (obj->data->username != NULL)
+	if (privileged && obj->data->username != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_USER,
 			xml_escape(obj->data->username, esc, sizeof(esc)), XML_AUTH_USER);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
-	if (obj->data->password != NULL)
+	if (privileged && obj->data->password != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_AUTH_PASSWD,
 			xml_escape(obj->data->password, esc, sizeof(esc)), XML_AUTH_PASSWD);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
-	if (obj->data->hdr != NULL)
+	if (privileged && obj->data->hdr != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER,
 			xml_escape(obj->data->hdr, esc, sizeof(esc)), XML_HEADER);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
-	if (obj->data->hdrval != NULL)
+	if (privileged && obj->data->hdrval != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_HEADER_VAL,
 			xml_escape(obj->data->hdrval, esc, sizeof(esc)), XML_HEADER_VAL);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
-	if (obj->data->secret != NULL)
+	if (privileged && obj->data->secret != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_RADIUS_SECRET,
 			xml_escape(obj->data->secret, esc, sizeof(esc)), XML_RADIUS_SECRET);
@@ -398,14 +418,14 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
-	if (obj->data->url != NULL)
+	if (privileged && obj->data->url != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL,
 			xml_escape(obj->data->url, esc, sizeof(esc)), XML_OBJ_URL);
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 
-	if (obj->data->url_text != NULL)
+	if (privileged && obj->data->url_text != NULL)
 	{
 		/* BUG FIX: Use url_text instead of url */
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_URL_TEXT,
@@ -413,7 +433,7 @@ void send_object_xml(int fd, FILE *fh, struct graph_elements *obj)
 		SEND_OR_ABORT(fd, fh, buffer);
 	}
 	
-	if (obj->data->command != NULL)
+	if (privileged && obj->data->command != NULL)
 	{
 		snprintf(buffer, sizeof(buffer), "<%s>%s</%s>", XML_OBJ_EXEC,
 			xml_escape(obj->data->command, esc, sizeof(esc)), XML_OBJ_EXEC);
@@ -829,7 +849,15 @@ void srv_client_do_showobject(struct clientstatus *client, char *buff)
 		sendline(client->filedes, "403 object not found");
 		return;
 	} else {
-		send_object_xml(client->filedes, NULL, found_obj);
+		/*
+		 * Status to anyone who reached this far; credentials only to a
+		 * client that authenticated. SHOWOBJ asks for one object by
+		 * name, so without this an unauthenticated caller could walk
+		 * the config and read every community string, check password
+		 * and RADIUS secret in it.
+		 */
+		send_object_xml(client->filedes, NULL, found_obj,
+			client->authlvl > 0);
 	}
 	return;
 }
