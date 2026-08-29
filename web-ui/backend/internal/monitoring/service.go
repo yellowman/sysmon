@@ -766,71 +766,85 @@ func (s *Service) pruneRemovedLocked() {
 	}
 }
 
+// siteScope is what one site's view of the fleet looks like: its own
+// hosts, statistics computed over only those hosts, its own daemon, and
+// coverage describing that site instead of the fleet.
+//
+// Every field here has to be recomputed together. Scoping the host list
+// but keeping fleet-wide statistics produces a screen whose cards and
+// whose table disagree - which is worse than either answer alone,
+// because both look authoritative.
+type siteScope struct {
+	Hosts     []models.HostStatus
+	Stats     models.Stats
+	Daemon    models.DaemonInfo
+	Daemons   []models.DaemonInfo
+	Total     int
+	Reachable int
+}
+
+// scopeSite computes that view. A site is reachable exactly when it
+// answered this poll, which is what putting its DaemonInfo in the merged
+// Daemons list means (see Refresh: a dark site keeps its hosts, flagged
+// stale, but contributes no DaemonInfo).
+func scopeSite(hosts []models.HostStatus, daemons []models.DaemonInfo, site string) siteScope {
+	sc := siteScope{
+		Hosts: make([]models.HostStatus, 0, len(hosts)),
+		Stats: models.Stats{
+			ChecksByType:   make(map[string]int),
+			ChecksByStatus: make(map[string]int),
+		},
+		// The selection names one site, so one site is what coverage
+		// describes. Carrying the fleet's counts here is what let a
+		// dashboard filtered to a live site claim the fleet was dark
+		// (and a site that is dark look fine because others answered).
+		Total: 1,
+	}
+	for _, h := range hosts {
+		if h.Site != site {
+			continue
+		}
+		sc.Hosts = append(sc.Hosts, h)
+		sc.Stats.TotalHosts++
+		switch h.OverallStatus {
+		case "CRITICAL":
+			sc.Stats.CriticalHosts++
+		case "WARNING":
+			sc.Stats.WarningHosts++
+		default:
+			sc.Stats.HealthyHosts++
+		}
+		sc.Stats.ChecksByStatus[h.OverallStatus]++
+		if len(h.Checks) > 0 && h.Checks[0].Type != "" {
+			sc.Stats.ChecksByType[h.Checks[0].Type]++
+		}
+	}
+	sc.Stats.TotalChecks = len(sc.Hosts)
+	for _, di := range daemons {
+		if di.Site == site {
+			sc.Daemon = di
+			sc.Daemons = []models.DaemonInfo{di}
+			sc.Reachable = 1
+			break
+		}
+	}
+	return sc
+}
+
 // FilterSite narrows a status to one site. Used to serve ?site= without
 // making the client download the rest of the fleet.
 func FilterSite(status *models.SysmonStatus, site string) *models.SysmonStatus {
 	if status == nil || site == "" {
 		return status
 	}
+	sc := scopeSite(status.Hosts, status.Daemons, site)
 	out := *status
-	out.Hosts = make([]models.HostStatus, 0, len(status.Hosts))
-	out.Statistics = models.Stats{
-		ChecksByType:   make(map[string]int),
-		ChecksByStatus: make(map[string]int),
-	}
-	for _, h := range status.Hosts {
-		if h.Site != site {
-			continue
-		}
-		out.Hosts = append(out.Hosts, h)
-		out.Statistics.TotalHosts++
-		switch h.OverallStatus {
-		case "CRITICAL":
-			out.Statistics.CriticalHosts++
-		case "WARNING":
-			out.Statistics.WarningHosts++
-		default:
-			out.Statistics.HealthyHosts++
-		}
-		out.Statistics.ChecksByStatus[h.OverallStatus]++
-		if len(h.Checks) > 0 && h.Checks[0].Type != "" {
-			out.Statistics.ChecksByType[h.Checks[0].Type]++
-		}
-	}
-	for _, di := range status.Daemons {
-		if di.Site == site {
-			out.Daemon = di
-			out.Daemons = []models.DaemonInfo{di}
-			break
-		}
-	}
-	return &out
-}
-
-// FilterDeltaSite narrows a delta the same way.
-//
-// The revision stays global and monotonic: a client whose delta comes back
-// empty because the change was in a site it does not watch just stores the
-// new rev and moves on. Widening the filter is the case that needs care -
-// the client has never seen the sites it was excluding - and is handled by
-// the caller forcing a full resync.
-func FilterDeltaSite(d *models.StatusDelta, site string) *models.StatusDelta {
-	if d == nil || site == "" {
-		return d
-	}
-	out := *d
-	out.Changed = make([]models.HostStatus, 0, len(d.Changed))
-	for _, h := range d.Changed {
-		if h.Site == site {
-			out.Changed = append(out.Changed, h)
-		}
-	}
-	out.Removed = nil
-	for _, name := range d.Removed {
-		if s, _ := SplitQualified(name); s == site {
-			out.Removed = append(out.Removed, name)
-		}
-	}
+	out.Hosts = sc.Hosts
+	out.Statistics = sc.Stats
+	out.Daemon = sc.Daemon
+	out.Daemons = sc.Daemons
+	out.SitesTotal = sc.Total
+	out.SitesReachable = sc.Reachable
 	return &out
 }
 
@@ -839,7 +853,21 @@ func FilterDeltaSite(d *models.StatusDelta, site string) *models.StatusDelta {
 // ahead, it returns a full resync (Full=true, Changed=all hosts). Daemon
 // and Statistics are always included (they're small). If nothing changed
 // since `since`, Changed/Removed are empty and Rev==since.
-func (s *Service) GetDelta(since int64) *models.StatusDelta {
+//
+// A site narrows the whole response, not just the host lists. Filtering
+// only Changed/Removed - as a filter applied afterwards can - left the
+// daemon block, the statistics and the coverage counts fleet-wide, so a
+// dashboard filtered to one site showed that site's hosts under the
+// fleet's totals from the first delta poll onwards: the full poll was
+// right and every poll after it quietly was not.
+//
+// The revision stays global and monotonic: a client whose delta comes
+// back empty because the change was in a site it does not watch just
+// stores the new rev and moves on. Widening the filter is the case that
+// needs care - the client has never seen the sites it was excluding -
+// and the client handles it by resetting to a full resync when its
+// selection changes.
+func (s *Service) GetDelta(since int64, site string) *models.StatusDelta {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
@@ -852,30 +880,47 @@ func (s *Service) GetDelta(since int64) *models.StatusDelta {
 		d.Full = true
 		return d
 	}
-	d.Daemon = cur.Daemon
-	d.Statistics = cur.Statistics
-	d.SitesTotal = cur.SitesTotal
-	d.SitesReachable = cur.SitesReachable
+
+	hosts := cur.Hosts
+	if site != "" {
+		sc := scopeSite(cur.Hosts, cur.Daemons, site)
+		hosts = sc.Hosts
+		d.Daemon = sc.Daemon
+		d.Statistics = sc.Stats
+		d.SitesTotal = sc.Total
+		d.SitesReachable = sc.Reachable
+	} else {
+		d.Daemon = cur.Daemon
+		d.Statistics = cur.Statistics
+		d.SitesTotal = cur.SitesTotal
+		d.SitesReachable = cur.SitesReachable
+	}
 
 	if since <= 0 || since < s.minDeltaRev || since > s.rev {
 		d.Full = true
-		if cur.Hosts != nil {
-			d.Changed = cur.Hosts
+		if hosts != nil {
+			d.Changed = hosts
 		}
 		return d
 	}
 	if since == s.rev {
 		return d // up to date - nothing changed
 	}
-	for i := range cur.Hosts {
-		if s.hostRev[hostKey(&cur.Hosts[i])] > since {
-			d.Changed = append(d.Changed, cur.Hosts[i])
+	for i := range hosts {
+		if s.hostRev[hostKey(&hosts[i])] > since {
+			d.Changed = append(d.Changed, hosts[i])
 		}
 	}
 	for name, r := range s.removedAt {
-		if r > since {
-			d.Removed = append(d.Removed, name)
+		if r <= since {
+			continue
 		}
+		if site != "" {
+			if owner, _ := SplitQualified(name); owner != site {
+				continue
+			}
+		}
+		d.Removed = append(d.Removed, name)
 	}
 	return d
 }
@@ -1919,7 +1964,7 @@ func (s *Service) GetHostStatus(name string) (*models.HostStatus, error) {
 
 // GetTrapsBySource gets traps from a specific source
 func (s *Service) GetTrapsBySource(sourceIP string, authKey string) ([]models.Trap, error) {
-	traps, err := s.GetTraps(authKey)
+	traps, err := s.GetTraps(authKey, "")
 	if err != nil {
 		return nil, err
 	}
@@ -2236,7 +2281,10 @@ func (s *Service) ToggleTrace(hostname string, authKey string) (bool, error) {
 }
 
 // GetVersion gets the sysmon daemon version
-func (s *Service) GetVersion(authKey string) (string, error) {
+// A site asks that box's version. Without one, the answer is the first
+// version any box reports - fine on a single-box install, and a coin
+// toss on a fleet mid-upgrade, which is exactly when somebody is asking.
+func (s *Service) GetVersion(authKey string, site string) (string, error) {
 	// From what the poller already recorded, not from a connection of
 	// its own. This used to dial a configured address, which predates
 	// the fleet: daemons dial in, so there was nothing to reach for and
@@ -2247,7 +2295,11 @@ func (s *Service) GetVersion(authKey string) (string, error) {
 	for _, d := range s.fleet() {
 		d.mu.Lock()
 		v := d.info.Version
+		name := d.site
 		d.mu.Unlock()
+		if site != "" && name != site {
+			continue
+		}
 		if v != "" {
 			return v, nil
 		}

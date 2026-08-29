@@ -234,7 +234,24 @@ paths:
     get:
       tags: [Monitoring]
       summary: Get overall monitoring status
-      description: Returns summary statistics and daemon status
+      description: >
+        Returns summary statistics and daemon status. With `since`, returns
+        only what changed after that revision (delta polling); the delta
+        cursor belongs to one site's stream, so changing `site` requires
+        starting again without `since`.
+      parameters:
+        - name: site
+          in: query
+          description: >
+            Narrow to one monitoring box. Omit for the whole fleet.
+          schema:
+            type: string
+        - name: since
+          in: query
+          description: Revision to return changes after (delta mode).
+          schema:
+            type: integer
+            format: int64
       responses:
         '200':
           description: Status retrieved successfully
@@ -300,7 +317,50 @@ paths:
     get:
       tags: [Monitoring]
       summary: Get SNMP traps
-      description: Returns received SNMP traps
+      description: >
+        Returns received SNMP traps, newest first. Each trap carries the
+        site that received it: private address ranges overlap between
+        sites, so a trap's identity is site plus source address, never
+        the address alone. Severity and source filtering is applied to
+        the whole set before any page is cut.
+      parameters:
+        - name: site
+          in: query
+          description: Only traps received by this monitoring box.
+          schema:
+            type: string
+        - name: severity
+          in: query
+          description: >
+            Only traps of this decoded severity. Traps that could not be
+            decoded are reachable as `unknown`.
+          schema:
+            type: string
+            enum: [informational, warning, error, critical, unknown]
+        - name: source
+          in: query
+          description: >
+            Only traps from this source. Accepts `site/address` for one
+            exact device, or a bare `address` meaning that address at any
+            site - private ranges overlap, so the bare form can match
+            several distinct devices. The UI sends the qualified form.
+          schema:
+            type: string
+          examples:
+            exactDevice:
+              value: bend/10.20.1.14
+            anySite:
+              value: 10.20.1.14
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
       responses:
         '200':
           description: Traps retrieved successfully
@@ -310,6 +370,183 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SNMPTrap'
+
+  /api/monitoring/object-detail/{object}:
+    get:
+      tags: [Monitoring]
+      summary: Get one object's detail, without check credentials
+      description: >
+        Queue state, counters, thresholds, timings and description for a
+        single object - what the host detail page renders. The fields are
+        a positive allow-list, so the daemon's credential-bearing tags
+        (SNMP community, check username and password, RADIUS shared
+        secret, HTTP header value, URL, failure command) cannot appear,
+        including any added to the daemon later. The raw document is
+        available to admins at `/api/xml/object/{object}`.
+      parameters:
+        - name: object
+          in: path
+          required: true
+          description: Object key, site-qualified as `site:object` on a fleet.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detail retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: The object's status document could not be read
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/monitoring/topology:
+    get:
+      tags: [Monitoring]
+      summary: Get the dependency graph, without config secrets
+      description: >
+        The shape of the network for the dependency map: object names,
+        addresses, check types, descriptions, groups and dependencies.
+        Deliberately separate from `/api/config`, which is admin-only
+        because a config carries the daemon authkey, SNMP communities,
+        RADIUS secrets, check passwords and spawn command lines. This
+        endpoint is available to any authenticated user and carries none
+        of those; the fields are an allow-list, not a redaction. Read
+        only - editing topology is still a config write.
+      parameters:
+        - name: site
+          in: query
+          description: Which box's topology. Omit for the local config.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Topology retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hosts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        ip: { type: string }
+                        type: { type: string }
+                        notes: { type: string }
+                        group: { type: string }
+                        dependencies: { type: string }
+                        paused: { type: boolean }
+                  version: { type: string }
+                  site: { type: string }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/map/layout:
+    get:
+      tags: [Monitoring]
+      summary: Get hand-placed dependency-map positions
+      description: >
+        Node positions for one box's map. Layouts are per site, because
+        the map is: object names are only unique within a box, so two
+        boxes that both contain a `core` would otherwise share (and
+        overwrite) one set of coordinates.
+      parameters:
+        - name: site
+          in: query
+          description: Which box's layout. Omit for the local map.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Layout retrieved (an empty object when unset)
+          content:
+            application/json:
+              schema:
+                type: object
+    put:
+      tags: [Monitoring]
+      summary: Save hand-placed dependency-map positions
+      description: >
+        Admin only: a saved layout is what everyone who opens the map
+        sees, so writing one is a mutation of shared state.
+      parameters:
+        - name: site
+          in: query
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  x: { type: number }
+                  y: { type: number }
+      responses:
+        '200':
+          description: Layout saved
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/monitoring/history:
+    get:
+      tags: [Monitoring]
+      summary: Get recent status transitions
+      description: >
+        Host and alerter transitions, newest first. A `site` narrows to
+        one box, applied before `limit` is counted so the page is that
+        site's newest events rather than whatever of the fleet's newest
+        happened to belong to it. `truncated` says the window holds more
+        than this page shows.
+      parameters:
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: window
+          in: query
+          description: Time window; anything other than `30d` is the 48h default.
+          schema:
+            type: string
+            enum: ['48h', '30d']
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        '200':
+          description: History retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                  count: { type: integer }
+                  available: { type: boolean }
+                  window: { type: string }
+                  limit: { type: integer }
+                  truncated: { type: boolean }
+        '503':
+          description: The history store could not be read
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/monitoring/stats:
     get:
@@ -585,10 +822,18 @@ paths:
     get:
       tags: [Admin]
       summary: Get daemon version
-      description: Returns the sysmon daemon version
+      description: >
+        Returns a sysmond's version. Name the site on a fleet: without
+        one the answer is whichever box reports a version first, which is
+        a coin toss mid-upgrade - exactly when the question gets asked.
       security:
         - SessionAuth: []
         - CookieAuth: []
+      parameters:
+        - name: site
+          in: query
+          schema:
+            type: string
       responses:
         '200':
           description: Version retrieved
@@ -1201,6 +1446,15 @@ components:
 
     Unauthorized:
       description: Unauthorized - authentication required or failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: >
+        Authenticated, but this operation is admin-only. Config contents
+        and every mutation of shared state sit behind this boundary.
       content:
         application/json:
           schema:

@@ -27,7 +27,23 @@ var (
 	bucketTemplates = []byte("templates")
 )
 
+// kMapLayout is the layout of the LOCAL config's map. Per-site layouts
+// are stored under "layout/<site>": the map is drawn per sysmond, so its
+// hand-placed positions are per sysmond too. One shared key meant two
+// boxes that both contain a "core" and a "router1" - which is normal,
+// names are only unique within a box - fought over the same coordinates,
+// each save moving the other site's nodes.
 const kMapLayout = "layout"
+
+// mapLayoutKey names the stored layout for a site. The empty site keeps
+// the original key, so layouts saved before this split are still the
+// local map's layout rather than orphaned.
+func mapLayoutKey(site string) []byte {
+	if site == "" {
+		return []byte(kMapLayout)
+	}
+	return []byte(kMapLayout + "/" + site)
+}
 
 // Keys within the push bucket.
 const (
@@ -176,11 +192,12 @@ func cloneBytes(b []byte) []byte {
 	return out
 }
 
-// GetMapLayout returns the stored map layout JSON ("{}" when unset).
-func (s *Store) GetMapLayout() ([]byte, error) {
+// GetMapLayout returns the stored map layout JSON for a site ("{}" when
+// unset). The empty site is the local config's map.
+func (s *Store) GetMapLayout(site string) ([]byte, error) {
 	var out []byte
 	err := s.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketMap).Get([]byte(kMapLayout))
+		v := tx.Bucket(bucketMap).Get(mapLayoutKey(site))
 		if len(v) > 0 {
 			out = append([]byte(nil), v...)
 		}
@@ -192,10 +209,10 @@ func (s *Store) GetMapLayout() ([]byte, error) {
 	return out, err
 }
 
-// SetMapLayout stores the map layout JSON.
-func (s *Store) SetMapLayout(data []byte) error {
+// SetMapLayout stores the map layout JSON for a site.
+func (s *Store) SetMapLayout(site string, data []byte) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketMap).Put([]byte(kMapLayout), data)
+		return tx.Bucket(bucketMap).Put(mapLayoutKey(site), data)
 	})
 }
 

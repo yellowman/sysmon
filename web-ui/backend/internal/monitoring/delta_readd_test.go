@@ -40,7 +40,7 @@ func TestReAddedHostIsNotAlsoReportedRemoved(t *testing.T) {
 	snapshot("gw")         // leaf is removed
 	snapshot("gw", "leaf") // and comes straight back
 
-	d := s.GetDelta(before)
+	d := s.GetDelta(before, "")
 
 	inChanged := false
 	for _, h := range d.Changed {
@@ -84,7 +84,7 @@ func TestRemovedHostIsStillReportedRemoved(t *testing.T) {
 	s.cacheMu.Unlock()
 	snapshot("gw")
 
-	d := s.GetDelta(before)
+	d := s.GetDelta(before, "")
 
 	found := false
 	for _, n := range d.Removed {
