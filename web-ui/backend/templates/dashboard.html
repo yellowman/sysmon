@@ -24,7 +24,18 @@
         state each site reported, not the present.
     </div>
 
-    <!-- Error State -->
+    <!-- Refresh is failing, but there is still state worth showing. The
+         page keeps polling underneath; this clears itself on success. -->
+    <div x-show="refreshError" x-cloak
+         class="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900 flex items-center gap-2">
+        <i class="fas fa-triangle-exclamation"></i>
+        <span>
+            Refresh is failing (<span x-text="refreshError"></span>) - showing state from
+            <span x-text="staleSeconds"></span>s ago. Still retrying.
+        </span>
+    </div>
+
+    <!-- Error State: only when there is nothing to show at all. -->
     <div x-show="error" class="card p-6 mb-6 border-red-200">
         <div class="flex items-start gap-4">
             <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
@@ -293,6 +304,12 @@ function dashboard() {
         fleetDark: false,
         refreshInterval: null,
         trapsInterval: null,
+        clockInterval: null,
+        // Last successful poll, and the message from a refresh that is
+        // failing while the screen still shows that poll's state.
+        lastGood: 0,
+        refreshError: '',
+        now: Date.now(),
         poller: createStatusPoller(),
         updateDialog: {
             show: false,
@@ -309,16 +326,19 @@ function dashboard() {
             // Delta polling makes a steady-state refresh nearly free, so
             // poll fast; back off is unnecessary. Traps aren't part of the
             // delta stream, refresh them on their own slower cadence.
-            this.refreshInterval = setInterval(() => {
-                if (!this.error) {
-                    this.fetchData();
-                }
-            }, 5000);
-            this.trapsInterval = setInterval(() => {
-                if (!this.error) {
-                    this.fetchTraps();
-                }
-            }, 30000);
+            //
+            // These used to skip a tick while `error` was set, which meant
+            // one failed request stopped the NOC screen refreshing until
+            // somebody noticed and clicked Retry - exactly backwards for
+            // monitoring software, and worst precisely when the network is
+            // in trouble. Polling is unconditional now; a failure shows a
+            // staleness banner over the last known state and clears itself
+            // when a poll succeeds.
+            this.refreshInterval = setInterval(() => this.fetchData(), 5000);
+            this.trapsInterval = setInterval(() => this.fetchTraps(), 30000);
+            // Drives the "showing state from Ns ago" label, which has to
+            // keep counting while nothing else is happening.
+            this.clockInterval = setInterval(() => { this.now = Date.now(); }, 1000);
         },
 
         destroy() {
@@ -330,12 +350,25 @@ function dashboard() {
                 clearInterval(this.trapsInterval);
                 this.trapsInterval = null;
             }
+            if (this.clockInterval) {
+                clearInterval(this.clockInterval);
+                this.clockInterval = null;
+            }
+        },
+
+        // Have we ever successfully loaded? Decides whether a failure is
+        // "this screen is stale" or "this screen has nothing".
+        get hasData() { return this.stats && this.stats.total_hosts !== undefined; },
+
+        // How old what you are looking at is, in seconds.
+        get staleSeconds() {
+            if (!this.lastGood) return 0;
+            return Math.max(0, Math.round((this.now - this.lastGood) / 1000));
         },
 
         async fetchData() {
             try {
-                if (this.stats.total_hosts === undefined) this.loading = true;
-                this.error = null;
+                if (!this.hasData) this.loading = true;
 
                 const r = await this.poller.poll();
                 this.daemon = r.daemon;
@@ -347,16 +380,28 @@ function dashboard() {
                     this.traps = r.snmp_traps.recent_traps || [];
                 }
 
+                this.lastGood = Date.now();
+                this.now = this.lastGood;
+                this.refreshError = '';
+                this.error = null;
                 this.loading = false;
             } catch (e) {
-                this.error = e?.message || e?.toString() || 'Unknown error';
+                const msg = e?.message || e?.toString() || 'Unknown error';
+                if (this.hasData) {
+                    // Keep the last known state on screen and say how old
+                    // it is. A frozen number presented as current is the
+                    // one thing this page must never do.
+                    this.refreshError = msg;
+                } else {
+                    this.error = e?.details ? e : msg;
+                }
                 this.loading = false;
             }
         },
 
         async fetchTraps() {
             try {
-                const t = await apiCall('/api/monitoring/traps');
+                const t = await apiCall('/api/monitoring/traps' + siteQuery());
                 this.traps = t.recent_traps || [];
                 this.trapsStale = false;
             } catch (e) { this.trapsStale = true; }

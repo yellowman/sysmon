@@ -101,7 +101,10 @@
                     </template>
                 </select>
             </div>
-            <template x-if="!editMode && !site">
+            <!-- Edit is for admins, and the fleet map always has a site
+                 selected - the old "!site" condition meant the button was
+                 effectively absent in exactly the normal case. -->
+            <template x-if="!editMode && isAdmin">
                 <button @click="enterEdit()" class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800">
                     <i class="fas fa-pen-to-square mr-1"></i>Edit
                 </button>
@@ -137,13 +140,20 @@
                             class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-angles-down w-4 mr-2 text-gray-500"></i>Expand all</button>
                     <button @click="collapseAll(); layoutMenu = false"
                             class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-angles-up w-4 mr-2 text-gray-500"></i>Collapse to roots</button>
-                    <div class="border-t border-gray-100 my-1"></div>
-                    <button x-show="layoutDirty" @click="savePositions(); layoutMenu = false"
-                            class="w-full text-left px-3 py-2 hover:bg-indigo-50 text-indigo-700"><i class="fas fa-thumbtack w-4 mr-2"></i>Save manual layout</button>
-                    <button x-show="layoutDirty" @click="revertPositions(); layoutMenu = false"
-                            class="w-full text-left px-3 py-2 hover:bg-amber-50 text-amber-800"><i class="fas fa-rotate-left w-4 mr-2"></i>Revert unsaved moves</button>
-                    <button @click="layoutMenu = false; resetPositions()"
-                            class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-wand-magic-sparkles w-4 mr-2 text-gray-500"></i>Reset to automatic layout</button>
+                    <!-- A saved layout is what everyone else sees, so
+                         writing one is admin-only server-side; offering
+                         these to a read-only user could only 403. -->
+                    <template x-if="isAdmin">
+                        <div>
+                            <div class="border-t border-gray-100 my-1"></div>
+                            <button x-show="layoutDirty" @click="savePositions(); layoutMenu = false"
+                                    class="w-full text-left px-3 py-2 hover:bg-indigo-50 text-indigo-700"><i class="fas fa-thumbtack w-4 mr-2"></i>Save manual layout</button>
+                            <button x-show="layoutDirty" @click="revertPositions(); layoutMenu = false"
+                                    class="w-full text-left px-3 py-2 hover:bg-amber-50 text-amber-800"><i class="fas fa-rotate-left w-4 mr-2"></i>Revert unsaved moves</button>
+                            <button @click="layoutMenu = false; resetPositions()"
+                                    class="w-full text-left px-3 py-2 hover:bg-gray-50"><i class="fas fa-wand-magic-sparkles w-4 mr-2 text-gray-500"></i>Reset to automatic layout</button>
+                        </div>
+                    </template>
                 </div>
             </div>
         </div>
@@ -499,12 +509,14 @@
             <i class="fas fa-crosshairs text-gray-600 w-4"></i>
             <span>Focus on this host</span>
         </button>
-        <button @click="newDependentHost(ctx.host)"
+        <!-- Everything that mutates the config is admin-only, so a
+             read-only user is not offered it. -->
+        <button x-show="isAdmin" @click="newDependentHost(ctx.host)"
                 class="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2">
             <i class="fas fa-code-branch text-blue-600 w-4"></i>
             <span>Create new dependent host</span>
         </button>
-        <button @click="dependentFromTemplate(ctx.host)"
+        <button x-show="isAdmin" @click="dependentFromTemplate(ctx.host)"
                 class="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 flex items-center gap-2">
             <i class="fas fa-layer-group text-emerald-600 w-4"></i>
             <span>Add dependent from template...</span>
@@ -513,7 +525,7 @@
         <button @click="openInspector(ctx.host); ctx = null"
                 class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2">
             <i class="fas fa-sliders text-gray-500 w-4"></i>
-            <span>Edit this host</span>
+            <span x-text="isAdmin ? 'Edit this host' : 'Inspect this host'"></span>
         </button>
         <button @click="startLink(ctx.host); ctx = null" x-show="editMode"
                 class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2">
@@ -602,6 +614,10 @@ function mapPage() {
         ctx: null,
         linking: null,
         editMode: new URLSearchParams(location.search).get('edit') === '1',
+        // Whether `hosts` holds complete config records (admin, via
+        // /api/config) or the drawable subset from the topology
+        // endpoint. Saving is only ever allowed from the former.
+        fullConfig: false,
         dirty: false,
         saving: false,
         loading: true,
@@ -704,13 +720,33 @@ function mapPage() {
 
         destroy() { if (this.statusTimer) clearInterval(this.statusTimer); },
 
+        get isAdmin() { return this.$store.auth && this.$store.auth.role === 'admin'; },
+
+        // The map draws from topology, not from the config. /api/config
+        // carries the daemon authkey, SNMP communities, RADIUS secrets
+        // and spawn command lines, so it is admin-only - and reading it
+        // to draw a picture made the whole map admin-only, which is
+        // backwards: the map is the screen a read-only NOC operator most
+        // wants during an outage. /api/monitoring/topology serves the
+        // same graph with only the drawable fields, to anyone logged in.
+        // Edit mode still needs the full record, so an admin entering it
+        // loads the config then.
         async loadConfig() {
+            const q = this.site ? '?site=' + encodeURIComponent(this.site) : '';
             try {
-                const r = await apiCall('/api/config' + (this.site ? '?site=' + encodeURIComponent(this.site) : ''));
-                this.hosts = (r.config && r.config.hosts) || [];
-                this.version = r.version || '';
+                if (this.editMode && this.isAdmin) {
+                    const r = await apiCall('/api/config' + q);
+                    this.hosts = (r.config && r.config.hosts) || [];
+                    this.version = r.version || '';
+                    this.fullConfig = true;
+                } else {
+                    const r = await apiCall('/api/monitoring/topology' + q);
+                    this.hosts = r.hosts || [];
+                    this.version = r.version || '';
+                    this.fullConfig = false;
+                }
             } catch (e) {
-                this.notice = 'Could not load configuration: ' + (e.message || e);
+                this.notice = 'Could not load the map: ' + (e.message || e);
             }
             this.loading = false;
         },
@@ -793,9 +829,15 @@ function mapPage() {
             setTimeout(() => this.notice = '', 6000);
         },
 
+        // Hand-placed positions are per sysmond, because the map is: two
+        // boxes both containing a "core" and a "router1" - normal, names
+        // are only unique within a box - used to fight over one shared
+        // set of coordinates, each save moving the other site's nodes.
+        layoutQ() { return this.site ? '?site=' + encodeURIComponent(this.site) : ''; },
+
         async loadPositions() {
             try {
-                this.positions = (await apiCall('/api/map/layout')) || {};
+                this.positions = (await apiCall('/api/map/layout' + this.layoutQ())) || {};
                 this.layoutLoadFailed = false;
             } catch (e) {
                 // Saving now would replace the whole stored layout -
@@ -814,7 +856,7 @@ function mapPage() {
         async syncPositions() {
             if (this.layoutDirty || this.drag) return;
             try {
-                const remote = (await apiCall('/api/map/layout')) || {};
+                const remote = (await apiCall('/api/map/layout' + this.layoutQ())) || {};
                 if (this.layoutLoadFailed) {
                     // The load that failed at startup has now succeeded.
                     this.layoutLoadFailed = false;
@@ -834,7 +876,7 @@ function mapPage() {
                 return;
             }
             try {
-                await apiCall('/api/map/layout', {
+                await apiCall('/api/map/layout' + this.layoutQ(), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.positions)
@@ -1794,10 +1836,16 @@ function mapPage() {
         // Start a host that depends on the right-clicked one. It opens as a
         // draft with the cursor in the name box - nothing is added to the
         // map until it has a name of the operator's choosing.
-        newDependentHost(parent) {
+        async newDependentHost(parent) {
             this.ctx = null;
             if (!parent) return;
-            if (!this.editMode) this.editMode = true;   // creating implies editing
+            // Creating implies editing - and editing implies holding the
+            // full config, not the topology subset.
+            if (!this.editMode || !this.fullConfig) {
+                await this.enterEdit();
+                if (!this.editMode) return;
+                parent = this.hosts.find(h => h.id === parent.id) || parent;
+            }
             this.draftParent = parent.id;
             this.draft = {
                 id: '', hostname: '', ip: '', type: 'ping',
@@ -1808,10 +1856,13 @@ function mapPage() {
         },
 
         // Same intent, but stamp out a whole device from a template.
-        dependentFromTemplate(parent) {
+        async dependentFromTemplate(parent) {
             this.ctx = null;
             if (!parent) return;
-            if (!this.editMode) this.editMode = true;
+            if (!this.editMode || !this.fullConfig) {
+                await this.enterEdit();
+                if (!this.editMode) return;
+            }
             this.openTemplate();
             this.tplForm.parent = parent.id;
         },
@@ -1922,7 +1973,31 @@ function mapPage() {
             this.refreshFocusContext();
         },
 
-        enterEdit() { this.editMode = true; },
+        // Editing needs the FULL objects, not the topology subset: saving
+        // a host built from {id, ip, type, notes, group, dependencies}
+        // would write back a config with every password, community,
+        // secret and spawn line stripped out of it. So load the real
+        // config first, and only then let the editor open.
+        async enterEdit() {
+            if (!this.isAdmin) {
+                this.notice = 'Editing the map changes sysmon.conf, which is an admin operation.';
+                setTimeout(() => this.notice = '', 5000);
+                return;
+            }
+            if (!this.fullConfig) {
+                this.editMode = true;
+                await this.loadConfig();
+                if (!this.fullConfig) {
+                    // The config did not load; do not open an editor over
+                    // a partial record set.
+                    this.editMode = false;
+                    return;
+                }
+                this.layout();
+            } else {
+                this.editMode = true;
+            }
+        },
         async exitEdit() {
             if (this.dirty && !await uiConfirm('Discard unsaved map changes?')) return;
             this.editMode = false;
@@ -1995,6 +2070,12 @@ function mapPage() {
         },
 
         async save() {
+            // Belt and braces for the rule enterEdit() enforces: never
+            // write a host list that came from the topology endpoint.
+            if (!this.fullConfig) {
+                this.notice = 'Not saved: this map was drawn from topology data, which omits check credentials. Reload the page as an admin before editing.';
+                return;
+            }
             const bad = this.hosts.find(h => !h.id || !h.ip || !h.type);
             if (bad) {
                 this.notice = 'Every host needs a name, an address, and a check type (check "' + (bad.id || 'unnamed') + '").';

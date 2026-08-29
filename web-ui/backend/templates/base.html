@@ -47,7 +47,13 @@
                         <a href="/history.html" class="nav-link {{if eq .Active "history"}}active{{end}}">
                             <i class="fas fa-clock-rotate-left mr-2"></i>History
                         </a>
-                        <a href="/config.html" class="nav-link {{if eq .Active "config"}}active{{end}}">
+                        <!-- Admin-only pages are hidden from an ordinary
+                             user rather than offered and then refused: the
+                             server gates them (config contents carry the
+                             authkey, SNMP communities and RADIUS secrets),
+                             so a link here could only ever lead to a 403. -->
+                        <a x-show="$store.auth.role === 'admin'" x-cloak
+                           href="/config.html" class="nav-link {{if eq .Active "config"}}active{{end}}">
                             <i class="fas fa-cog mr-2"></i>Configuration
                         </a>
                         <a href="/fleet.html" class="nav-link {{if eq .Active "fleet"}}active{{end}}">
@@ -56,7 +62,8 @@
                         <a href="/templates.html" class="nav-link {{if eq .Active "templates"}}active{{end}}">
                             <i class="fas fa-cubes mr-2"></i>Templates
                         </a>
-                        <a href="/admin.html" class="nav-link {{if eq .Active "admin"}}active{{end}}">
+                        <a x-show="$store.auth.role === 'admin'" x-cloak
+                           href="/admin.html" class="nav-link {{if eq .Active "admin"}}active{{end}}">
                             <i class="fas fa-tools mr-2"></i>Admin
                         </a>
                         <a href="/metrics.html" class="nav-link {{if eq .Active "metrics"}}active{{end}}">
@@ -105,10 +112,10 @@
                 <a href="/map.html" class="mobile-nav {{if eq .Active "map"}}active{{end}}"><i class="fas fa-sitemap mr-2 w-5 text-center"></i>Map</a>
                 <a href="/traps.html" class="mobile-nav {{if eq .Active "traps"}}active{{end}}"><i class="fas fa-exclamation-triangle mr-2 w-5 text-center"></i>SNMP Traps</a>
                 <a href="/history.html" class="mobile-nav {{if eq .Active "history"}}active{{end}}"><i class="fas fa-clock-rotate-left mr-2 w-5 text-center"></i>History</a>
-                <a href="/config.html" class="mobile-nav {{if eq .Active "config"}}active{{end}}"><i class="fas fa-cog mr-2 w-5 text-center"></i>Configuration</a>
+                <a x-show="$store.auth.role === 'admin'" x-cloak href="/config.html" class="mobile-nav {{if eq .Active "config"}}active{{end}}"><i class="fas fa-cog mr-2 w-5 text-center"></i>Configuration</a>
                 <a href="/fleet.html" class="mobile-nav {{if eq .Active "fleet"}}active{{end}}"><i class="fas fa-server mr-2 w-5 text-center"></i>Fleet</a>
                 <a href="/templates.html" class="mobile-nav {{if eq .Active "templates"}}active{{end}}"><i class="fas fa-cubes mr-2 w-5 text-center"></i>Templates</a>
-                <a href="/admin.html" class="mobile-nav {{if eq .Active "admin"}}active{{end}}"><i class="fas fa-tools mr-2 w-5 text-center"></i>Admin</a>
+                <a x-show="$store.auth.role === 'admin'" x-cloak href="/admin.html" class="mobile-nav {{if eq .Active "admin"}}active{{end}}"><i class="fas fa-tools mr-2 w-5 text-center"></i>Admin</a>
                 <a href="/metrics.html" class="mobile-nav {{if eq .Active "metrics"}}active{{end}}"><i class="fas fa-chart-line mr-2 w-5 text-center"></i>Metrics</a>
             </div>
         </div>
@@ -438,15 +445,33 @@
             return {
                 rev: 0,
                 index: new Map(),
+                // Which site the current index and revision belong to.
+                // The poller has to carry the selector's choice or the
+                // navbar says "Bend" while the page shows the whole
+                // fleet - the single worst thing a monitoring UI can do,
+                // because every count and colour on screen then answers
+                // a different question than the one the operator asked.
+                site: null,
 
                 // Returns {full, hosts, changed, removed, daemon, stats}.
                 // `hosts` is always the complete current list; `changed` /
                 // `removed` describe just this poll's difference (empty on
                 // a full resync - use `full` to decide how to apply).
                 async poll() {
+                    // A changed selection invalidates the delta cursor:
+                    // "what changed since rev N" is only meaningful
+                    // within one site's stream, and the index still
+                    // holds the old site's hosts.
+                    const site = localStorage.getItem('sysmon-site') || '';
+                    if (site !== this.site) {
+                        this.site = site;
+                        this.rev = 0;
+                        this.index = new Map();
+                    }
+                    const q = site ? 'site=' + encodeURIComponent(site) : '';
                     const url = this.rev === 0
-                        ? '/api/monitoring/status'
-                        : `/api/monitoring/status?since=${this.rev}`;
+                        ? '/api/monitoring/status' + (q ? '?' + q : '')
+                        : `/api/monitoring/status?since=${this.rev}` + (q ? '&' + q : '');
                     const d = await apiCall(url);
                     let full, changed = [], removed = [];
                     if (this.rev === 0 || d.full || d.hosts !== undefined) {

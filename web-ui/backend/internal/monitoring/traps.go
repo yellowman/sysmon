@@ -65,23 +65,37 @@ type xmlVarbind struct {
 	Note  string `xml:"VarbindNote"`
 }
 
+// sitedTrap is a trap plus the daemon that received it. The fleet merge
+// has to carry provenance: two sites' private ranges overlap, so the
+// source address alone is not an identity.
+type sitedTrap struct {
+	site string
+	t    xmlTrap
+}
+
 // GetTraps returns the traps the poller has collected, newest first.
 //
 // It does not talk to sysmond: the poller already asked, on the same
 // connection it uses for object status, and kept what came back. Traps
 // are held far longer than the daemon's ring holds them, so this is also
 // the only place a month of history exists.
-// Traps from every daemon in the fleet, newest first.
-func (s *Service) GetTraps(authKey string) (*models.TrapInfo, error) {
-	var held []xmlTrap
+// Traps from every daemon in the fleet, newest first. Pass a site to get
+// just that daemon's.
+func (s *Service) GetTraps(authKey string, site string) (*models.TrapInfo, error) {
+	var held []sitedTrap
 	lost := 0
 	for _, d := range s.fleet() {
 		d.mu.Lock()
-		held = append(held, d.trapHistory...)
-		lost += d.trapsLost
+		name := d.site
+		if site == "" || name == site {
+			for _, t := range d.trapHistory {
+				held = append(held, sitedTrap{site: name, t: t})
+			}
+			lost += d.trapsLost
+		}
 		d.mu.Unlock()
 	}
-	sort.Slice(held, func(i, j int) bool { return held[i].Time > held[j].Time })
+	sort.Slice(held, func(i, j int) bool { return held[i].t.Time > held[j].t.Time })
 
 	info := buildTrapInfo(held)
 	info.Summary.Lost = lost
@@ -217,15 +231,17 @@ func (s *Service) fetchTraps(d *daemon, conn net.Conn, reader *bufio.Reader) {
 
 // buildTrapInfo turns the daemon's records into the page model, including
 // the per-source and summary rollups the UI shows above the list.
-func buildTrapInfo(traps []xmlTrap) *models.TrapInfo {
+func buildTrapInfo(traps []sitedTrap) *models.TrapInfo {
 	info := emptyTrapInfo()
 	sources := map[string]*models.TrapSource{}
 	hourAgo := time.Now().Add(-time.Hour)
 
-	for _, t := range traps {
+	for _, st := range traps {
+		t := st.t
 		when := time.Unix(t.Time, 0)
 
 		trap := models.Trap{
+			Site:         st.site,
 			SourceIP:     t.Source,
 			Timestamp:    when,
 			TrapType:     t.Name,
@@ -280,10 +296,13 @@ func buildTrapInfo(traps []xmlTrap) *models.TrapInfo {
 		}
 		info.Summary.TrapsBySeverity[severity]++
 
-		src, ok := sources[t.Source]
+		// Keyed by site AND address: one rollup row per device, not one
+		// per address shared between sites.
+		key := st.site + "\x00" + t.Source
+		src, ok := sources[key]
 		if !ok {
-			src = &models.TrapSource{SourceIP: t.Source, Hostname: t.MatchedHost}
-			sources[t.Source] = src
+			src = &models.TrapSource{Site: st.site, SourceIP: t.Source, Hostname: t.MatchedHost}
+			sources[key] = src
 		}
 		src.TrapCount++
 		if when.After(src.LastTrap) {

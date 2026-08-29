@@ -100,6 +100,9 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 	r.mux.HandleFunc("/api/monitoring/stats", r.handleMonitoringStats)
 	r.mux.HandleFunc("/api/monitoring/alerts", r.handleMonitoringAlerts)
 	r.mux.HandleFunc("/api/monitoring/traps", r.handleMonitoringTraps)
+	// The map's shape, without the config's secrets: available to every
+	// logged-in user, unlike /api/config. See topology.go.
+	r.mux.HandleFunc("/api/monitoring/topology", r.handleMonitoringTopology)
 	r.mux.HandleFunc("/api/sites", r.handleSites)
 	r.mux.HandleFunc("/api/alerters", r.handleAlerters)
 	r.mux.HandleFunc("/api/alerters/nickname", auth.RequireAdmin(r.handleAlerterNickname))
@@ -782,10 +785,22 @@ func (r *Router) handleAlerterNickname(w http.ResponseWriter, req *http.Request)
 func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request) {
 	// Authenticating to sysmond is what unlocks the community string in
 	// the trap records; without it the daemon withholds that field.
-	traps, err := r.monitoring.GetTraps(r.getSysmonAuthKey())
+	site := req.URL.Query().Get("site")
+	traps, err := r.monitoring.GetTraps(r.getSysmonAuthKey(), site)
 	if err != nil {
 		r.sendError(w, http.StatusServiceUnavailable, err.Error())
 		return
+	}
+
+	// Severity and source filter here, on the whole result, before any
+	// page is cut. Filtering in the browser instead only ever searched
+	// the page already fetched, so "show me the critical traps" meant
+	// "show me the critical traps among the most recent hundred" - which
+	// looks identical to there being none.
+	severity := strings.ToLower(req.URL.Query().Get("severity"))
+	source := req.URL.Query().Get("source")
+	if severity != "" || source != "" {
+		traps = filterTraps(traps, severity, source)
 	}
 
 	// Check if pagination is requested
@@ -825,6 +840,49 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 		// No pagination requested, return all traps (backward compatible)
 		r.sendJSON(w, traps)
 	}
+}
+
+// filterTraps narrows a trap set by severity and/or source address, and
+// rebuilds the summary counters so the numbers above the list describe
+// what the list is actually showing. The per-source rollup is filtered
+// to match; the lost-trap count is a property of collection, not of the
+// filter, so it survives.
+func filterTraps(in *models.TrapInfo, severity, source string) *models.TrapInfo {
+	out := &models.TrapInfo{
+		RecentTraps: make([]models.Trap, 0, len(in.RecentTraps)),
+		TrapSources: make([]models.TrapSource, 0, len(in.TrapSources)),
+		Summary: models.TrapSummary{
+			Lost:            in.Summary.Lost,
+			TrapsByType:     map[string]int{},
+			TrapsBySeverity: map[string]int{},
+		},
+	}
+	hourAgo := time.Now().Add(-time.Hour)
+	for _, t := range in.RecentTraps {
+		sev := "unknown"
+		if t.Decoded != nil && t.Decoded.Severity != "" {
+			sev = strings.ToLower(t.Decoded.Severity)
+		}
+		if severity != "" && sev != severity {
+			continue
+		}
+		if source != "" && t.SourceIP != source {
+			continue
+		}
+		out.RecentTraps = append(out.RecentTraps, t)
+		if t.Timestamp.After(hourAgo) {
+			out.Summary.TotalTraps++
+		}
+		out.Summary.TrapsByType[t.TrapType]++
+		out.Summary.TrapsBySeverity[sev]++
+	}
+	for _, s := range in.TrapSources {
+		if source != "" && s.SourceIP != source {
+			continue
+		}
+		out.TrapSources = append(out.TrapSources, s)
+	}
+	return out
 }
 
 // handleTemplates lists device templates (shipped set merged with any
@@ -918,9 +976,18 @@ func (r *Router) handleMapLayout(w http.ResponseWriter, req *http.Request) {
 		r.sendError(w, http.StatusServiceUnavailable, "Settings store not configured")
 		return
 	}
+	// The map is drawn per sysmond, so its hand placement is per sysmond:
+	// without this every site shared one set of coordinates and two boxes
+	// with same-named objects overwrote each other's arrangement.
+	site := req.URL.Query().Get("site")
+	if site != "" && !monitoring.ValidSiteName(site) {
+		r.sendError(w, http.StatusBadRequest, "invalid site name")
+		return
+	}
+
 	switch req.Method {
 	case http.MethodGet:
-		data, err := r.settings.GetMapLayout()
+		data, err := r.settings.GetMapLayout(site)
 		if err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -929,6 +996,14 @@ func (r *Router) handleMapLayout(w http.ResponseWriter, req *http.Request) {
 		w.Write(data)
 
 	case http.MethodPut:
+		// A saved layout is shared: everyone who opens the map sees it.
+		// Rearranging the whole NOC's view of the network is an editing
+		// act, so it sits on the admin side of the line like every other
+		// mutation of shared state.
+		if req.Header.Get("X-Session-Role") != auth.RoleAdmin {
+			r.sendError(w, http.StatusForbidden, "Admin access required")
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
 		if err != nil {
 			r.sendError(w, http.StatusBadRequest, err.Error())
@@ -939,7 +1014,7 @@ func (r *Router) handleMapLayout(w http.ResponseWriter, req *http.Request) {
 			r.sendError(w, http.StatusBadRequest, "layout must be an object of {x,y} positions")
 			return
 		}
-		if err := r.settings.SetMapLayout(body); err != nil {
+		if err := r.settings.SetMapLayout(site, body); err != nil {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -974,7 +1049,7 @@ func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Reques
 	if req.URL.Query().Get("window") == "30d" {
 		window = 30 * 24 * time.Hour
 	}
-	events, err := hist.Recent(limit, window)
+	events, err := hist.Recent(limit, window, req.URL.Query().Get("site"))
 	if err != nil {
 		// A broken history store must not masquerade as an empty,
 		// healthy one - especially now that history is the alerter
@@ -982,7 +1057,16 @@ func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Reques
 		r.sendError(w, http.StatusServiceUnavailable, "history store unreadable: "+err.Error())
 		return
 	}
-	r.sendJSON(w, map[string]interface{}{"events": events, "count": len(events), "available": true, "window": req.URL.Query().Get("window")})
+	// truncated says the window holds more than this page shows, so the
+	// page can say "latest N" instead of implying it is the whole window.
+	r.sendJSON(w, map[string]interface{}{
+		"events":    events,
+		"count":     len(events),
+		"available": true,
+		"window":    req.URL.Query().Get("window"),
+		"limit":     limit,
+		"truncated": len(events) == limit,
+	})
 }
 
 func (r *Router) handleMonitoringAck(w http.ResponseWriter, req *http.Request) {

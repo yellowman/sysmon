@@ -178,7 +178,12 @@ func (h *HistoryStore) prune(now time.Time) {
 // guarantee, and a store that has become unreadable must say so - an
 // empty list with a swallowed error reads as "nothing happened", which
 // is the one thing a broken guarantee must never claim.
-func (h *HistoryStore) Recent(limit int, window time.Duration) ([]HistoryEvent, error) {
+// A site narrows the result to one daemon's events. The filter is
+// applied inside the walk, before the limit is counted: filtering a
+// fleet-wide page afterwards would return however few of the newest N
+// events happened to belong to that site, and call it that site's
+// history.
+func (h *HistoryStore) Recent(limit int, window time.Duration, site string) ([]HistoryEvent, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -210,6 +215,9 @@ func (h *HistoryStore) Recent(limit int, window time.Duration) ([]HistoryEvent, 
 			}
 			if t.Before(cutoff) {
 				break // keys are chronological: everything further back is older
+			}
+			if site != "" && ev.Site != site {
+				continue
 			}
 			out = append(out, ev)
 		}

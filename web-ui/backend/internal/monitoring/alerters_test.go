@@ -424,7 +424,7 @@ func TestAlerterPushQueueFullStillRecordsAndAccepts(t *testing.T) {
 	// Every accepted alert is in history - including the one whose
 	// phone delivery was skipped - and the counter agrees.
 	total := alertQueueDepth + 2
-	events, _ := hist.Recent(total+10, 0)
+	events, _ := hist.Recent(total+10, 0, "")
 	if len(events) != total {
 		t.Fatalf("history holds %d events, want %d", len(events), total)
 	}
@@ -621,7 +621,7 @@ func TestAlerterHistoryIsADeliveryPath(t *testing.T) {
 	// Recorded like host transitions: keyed source:object with the
 	// halves split out, the text as the description, and the second
 	// row knowing what the object changed from.
-	events, _ := hist.Recent(10, 0)
+	events, _ := hist.Recent(10, 0, "")
 	if len(events) != 2 {
 		t.Fatalf("history holds %d events, want 2: %+v", len(events), events)
 	}
@@ -815,7 +815,7 @@ func TestAlerterRetryAfterHistoryFailurePreservesPreviousStatus(t *testing.T) {
 	if got := send("ALERT CRITICAL battery low"); got != "333 ok" {
 		t.Fatalf("retry answered %q", got)
 	}
-	events, _ := hist.Recent(10, 0)
+	events, _ := hist.Recent(10, 0, "")
 	if len(events) != 1 {
 		t.Fatalf("history holds %d events, want 1", len(events))
 	}
@@ -878,7 +878,7 @@ func TestAlerterReconnectRejectsParsedEventFromObsoleteConnection(t *testing.T) 
 
 	// History holds only the replacement's OK; the stale CRITICAL never
 	// landed after it.
-	events, _ := hist.Recent(10, 0)
+	events, _ := hist.Recent(10, 0, "")
 	if len(events) != 1 || events[0].NewStatus != "OK" {
 		t.Fatalf("history = %+v, want only the OK", events)
 	}
@@ -1105,7 +1105,7 @@ func TestRevokeAfterLineReadBeforeAcceptanceCannotCommit(t *testing.T) {
 	testHookAfterParse = nil
 
 	// The already-read event did NOT land after the revocation.
-	if events, _ := hist.Recent(10, 0); len(events) != 0 {
+	if events, _ := hist.Recent(10, 0, ""); len(events) != 0 {
 		t.Fatalf("history = %+v, want empty - the event committed after revocation returned", events)
 	}
 	if l := svc.Alerters(); len(l) != 1 || l[0].Connected || l[0].Alerts != 0 {
@@ -1273,7 +1273,7 @@ func TestAlerterRateLimited(t *testing.T) {
 	}
 	// History holds exactly what was accepted - refusals committed
 	// nothing.
-	if events, _ := hist.Recent(1000, 0); len(events) != accepted {
+	if events, _ := hist.Recent(1000, 0, ""); len(events) != accepted {
 		t.Errorf("history holds %d events, accepted %d", len(events), accepted)
 	}
 	client.Close()

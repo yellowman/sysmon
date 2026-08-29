@@ -30,13 +30,21 @@
 
         <!-- Filters -->
         <div class="flex flex-wrap gap-3">
-            <select x-model="filterSource" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            <!-- Both filters are applied by the server, over the whole
+                 result set, before a page is cut. Filtering here in the
+                 browser only ever searched the page already fetched, so
+                 "critical traps" silently meant "critical traps among the
+                 most recent hundred" - indistinguishable from none. -->
+            <select x-model="filterSource" @change="applyFilters()"
+                    class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                 <option value="">All Sources</option>
-                <template x-for="source in sources" :key="source.source_ip">
-                    <option :value="source.source_ip" x-text="source.hostname || source.source_ip"></option>
+                <template x-for="source in sources" :key="(source.site || '') + '-' + source.source_ip">
+                    <option :value="source.source_ip"
+                            x-text="(source.hostname || source.source_ip) + (source.site ? ' (' + source.site + ')' : '')"></option>
                 </template>
             </select>
-            <select x-model="filterSeverity" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            <select x-model="filterSeverity" @change="applyFilters()"
+                    class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                 <option value="">All Severities</option>
                 <option value="informational">Informational</option>
                 <option value="warning">Warning</option>
@@ -60,13 +68,17 @@
     <!-- Traps List -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="divide-y divide-gray-200">
-            <template x-for="(trap, idx) in filteredTraps" :key="idx + '-' + trap.source_ip + '-' + trap.timestamp">
+            <template x-for="(trap, idx) in filteredTraps" :key="idx + '-' + (trap.site || '') + '-' + trap.source_ip + '-' + trap.timestamp">
                 <div class="px-6 py-4 hover:bg-gray-50 cursor-pointer" @click="selectedTrap = trap">
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
                             <!-- Source Info -->
                             <div class="flex items-center space-x-3 mb-2">
                                 <i class="fas fa-server text-gray-400"></i>
+                                <!-- Which box received it. Private ranges
+                                     overlap between sites, so the address
+                                     alone does not name a device. -->
+                                <span x-show="trap.site" class="text-[11px] text-gray-400 mono" x-text="trap.site"></span>
                                 <span class="font-medium text-gray-900" x-text="trap.source_ip"></span>
                                 <span class="text-sm text-gray-500" x-show="trap.source_hostname" x-text="'(' + trap.source_hostname + ')'"></span>
                                 <span class="text-xs text-gray-400" x-text="formatRelativeTime(trap.timestamp)"></span>
@@ -195,7 +207,7 @@
                             <dl class="grid grid-cols-2 gap-2 text-sm">
                                 <div>
                                     <dt class="text-gray-600">IP Address:</dt>
-                                    <dd class="font-medium" x-text="selectedTrap.source_ip"></dd>
+                                    <dd class="font-medium" x-text="selectedTrap.source_ip + (selectedTrap.site ? ' @ ' + selectedTrap.site : '')"></dd>
                                 </div>
                                 <div x-show="selectedTrap.source_hostname">
                                     <dt class="text-gray-600">Hostname:</dt>
@@ -314,12 +326,13 @@ function trapsPage() {
             return pages;
         },
 
-        get filteredTraps() {
-            return this.traps.filter(trap => {
-                const matchesSource = !this.filterSource || trap.source_ip === this.filterSource;
-                const matchesSeverity = !this.filterSeverity || trap.decoded?.severity === this.filterSeverity;
-                return matchesSource && matchesSeverity;
-            });
+        // The server has already applied the filters and the site; what
+        // came back IS the page to draw.
+        get filteredTraps() { return this.traps; },
+
+        applyFilters() {
+            this.currentPage = 1;
+            this.fetchTraps();
         },
 
         init() {
@@ -336,14 +349,18 @@ function trapsPage() {
 
         async fetchTraps() {
             try {
-                let url = '/api/monitoring/traps';
-
+                const p = new URLSearchParams();
                 // Add pagination parameters if not showing all
                 if (this.perPage !== 'all') {
-                    url += `?page=${this.currentPage}&limit=${this.limit}`;
+                    p.set('page', this.currentPage);
+                    p.set('limit', this.limit);
                 }
-
-                const data = await apiCall(url);
+                const site = localStorage.getItem('sysmon-site') || '';
+                if (site) p.set('site', site);
+                if (this.filterSeverity) p.set('severity', this.filterSeverity);
+                if (this.filterSource) p.set('source', this.filterSource);
+                const qs = p.toString();
+                const data = await apiCall('/api/monitoring/traps' + (qs ? '?' + qs : ''));
 
                 // Handle paginated response
                 if (this.perPage !== 'all' && data.data) {

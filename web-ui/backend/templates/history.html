@@ -96,7 +96,7 @@
         </table>
     </div>
     <p class="text-xs text-gray-400 mt-3" x-show="available"
-       x-text="'Showing ' + filtered.length + ' of ' + events.length + ' transitions from the last ' + (window === '30d' ? '30 days' : '48 hours') + ' (newest first)'"></p>
+       x-text="'Showing ' + filtered.length + ' of ' + events.length + ' transitions from the last ' + (window === '30d' ? '30 days' : '48 hours') + ' (newest first)' + (truncated ? ' - the newest ' + limit + ' only; the window holds more' : '')"></p>
 </div>
 
 <script>
@@ -117,6 +117,8 @@ function historyPage() {
         now: Date.now(),
         loadFails: 0,
         staleError: '',
+        truncated: false,
+        limit: 500,
 
         init() {
             this.fetchHistory();
@@ -158,8 +160,13 @@ function historyPage() {
 
         async fetchHistory() {
             try {
-                const r = await apiCall('/api/monitoring/history?limit=500&window=' + this.window);
+                const r = await apiCall('/api/monitoring/history?limit=500&window=' + this.window + siteQuery('&'));
                 this.events = r.events || [];
+                // The server says when the window holds more than this
+                // page: "showing 500 of the last 30 days" beats implying
+                // these are all the transitions there were.
+                this.truncated = !!r.truncated;
+                this.limit = r.limit || 500;
                 // A single-box install keeps the old four-column table.
                 this.anySite = this.events.some(ev => hostSite(ev));
                 this.available = r.available !== false;

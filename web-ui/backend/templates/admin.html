@@ -797,7 +797,7 @@ function adminPage() {
 
         async loadVersion() {
             try {
-                const result = await apiCall('/api/admin/version');
+                const result = await apiCall('/api/admin/version' + siteQuery());
                 this.version = result.version;
             } catch (e) {
                 this.version = 'Error: ' + e.message;
@@ -806,7 +806,7 @@ function adminPage() {
 
         async loadUptime() {
             try {
-                const status = await apiCall('/api/monitoring/status');
+                const status = await apiCall('/api/monitoring/status' + siteQuery());
                 if (status.daemon && status.daemon.uptime_seconds) {
                     const seconds = status.daemon.uptime_seconds;
                     const days = Math.floor(seconds / 86400);
@@ -821,7 +821,7 @@ function adminPage() {
 
         async toggleDebug() {
             try {
-                const result = await apiCall('/api/admin/debug', { method: 'POST' });
+                const result = await apiCall('/api/admin/debug' + siteQuery(), { method: 'POST' });
                 this.commandOutput = result?.response || 'No output received';
                 uiAlert('Debug logging toggled. Response: ' + (result?.response || 'Success'));
             } catch (e) {
@@ -831,7 +831,7 @@ function adminPage() {
 
         async toggleSNMPDebug() {
             try {
-                const result = await apiCall('/api/admin/snmpd', { method: 'POST' });
+                const result = await apiCall('/api/admin/snmpd' + siteQuery(), { method: 'POST' });
                 this.commandOutput = result?.response || 'No output received';
                 uiAlert('SNMP debug logging toggled. Response: ' + (result?.response || 'Success'));
             } catch (e) {
@@ -845,7 +845,7 @@ function adminPage() {
             }
 
             try {
-                const result = await apiCall('/api/admin/expiredns', { method: 'POST' });
+                const result = await apiCall('/api/admin/expiredns' + siteQuery(), { method: 'POST' });
                 this.commandOutput = result?.response || 'DNS cache expired';
                 uiAlert('DNS cache expired successfully');
             } catch (e) {
@@ -855,7 +855,7 @@ function adminPage() {
 
         async printQueue() {
             try {
-                const result = await apiCall('/api/admin/printq');
+                const result = await apiCall('/api/admin/printq' + siteQuery());
                 this.commandOutput = result?.output || 'No queue data received';
                 this.revealCommandOutput();
             } catch (e) {
@@ -865,7 +865,7 @@ function adminPage() {
 
         async showNextFD() {
             try {
-                const result = await apiCall('/api/admin/nfd');
+                const result = await apiCall('/api/admin/nfd' + siteQuery());
                 this.commandOutput = result?.info || 'No FD info received';
                 this.revealCommandOutput();
             } catch (e) {
@@ -889,7 +889,7 @@ function adminPage() {
             }
 
             try {
-                const result = await apiCall('/api/admin/killit', { method: 'POST' });
+                const result = await apiCall('/api/admin/killit' + siteQuery(), { method: 'POST' });
                 this.commandOutput = result?.response || 'Shutdown initiated';
                 uiAlert('Daemon shutdown initiated. The web UI will stop working shortly.');
 

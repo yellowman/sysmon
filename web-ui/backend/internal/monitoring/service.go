@@ -1919,7 +1919,7 @@ func (s *Service) GetHostStatus(name string) (*models.HostStatus, error) {
 
 // GetTrapsBySource gets traps from a specific source
 func (s *Service) GetTrapsBySource(sourceIP string, authKey string) ([]models.Trap, error) {
-	traps, err := s.GetTraps(authKey)
+	traps, err := s.GetTraps(authKey, "")
 	if err != nil {
 		return nil, err
 	}

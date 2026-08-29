@@ -396,6 +396,12 @@ type TrapInfo struct {
 
 // Trap represents an SNMP trap
 type Trap struct {
+	// Site is which sysmond received it. A trap's identity is site plus
+	// source address, never the address alone: private ranges overlap,
+	// so 10.20.1.14 at Bend and 10.20.1.14 at Prineville are different
+	// devices, and merging the fleet's traps on address alone made them
+	// indistinguishable in the list and in the per-source rollup.
+	Site           string      `json:"site,omitempty"`
 	SourceIP       string      `json:"source_ip"`
 	SourceHostname string      `json:"source_hostname,omitempty"`
 	Timestamp      time.Time   `json:"timestamp"`
@@ -428,6 +434,8 @@ type TrapDecode struct {
 
 // TrapSource represents a trap source summary
 type TrapSource struct {
+	// Site scopes the address: see Trap.Site.
+	Site      string    `json:"site,omitempty"`
 	SourceIP  string    `json:"source_ip"`
 	Hostname  string    `json:"hostname,omitempty"`
 	TrapCount int       `json:"trap_count"`
