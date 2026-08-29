@@ -23,7 +23,7 @@ func TestDeltaCarriesFleetCoverage(t *testing.T) {
 	rev := s.rev
 	s.cacheMu.Unlock()
 
-	d := s.GetDelta(rev)
+	d := s.GetDelta(rev, "")
 	if d.SitesTotal != 3 || d.SitesReachable != 2 {
 		t.Fatalf("delta coverage = %d/%d, want 2/3", d.SitesReachable, d.SitesTotal)
 	}

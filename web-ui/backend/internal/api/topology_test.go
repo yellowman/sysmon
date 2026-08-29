@@ -112,3 +112,55 @@ func TestFilterTrapsNarrowsAndRecounts(t *testing.T) {
 		t.Fatalf("source filter: %d traps, %d sources", len(bySource.RecentTraps), len(bySource.TrapSources))
 	}
 }
+
+// A source is site plus address. Selecting Bend's 10.20.1.14 must not
+// also select Prineville's device at the same address, and a severity
+// filter must not leave sources in the rollup whose every trap it just
+// removed - "Unique Sources" has to describe the list underneath it.
+func TestFilterTrapsSourceIdentityIsSiteQualified(t *testing.T) {
+	in := &models.TrapInfo{
+		RecentTraps: []models.Trap{
+			{Site: "bend", SourceIP: "10.20.1.14", TrapType: "linkDown",
+				Decoded: &models.TrapDecode{Severity: "critical"}},
+			{Site: "prineville", SourceIP: "10.20.1.14", TrapType: "authFailure",
+				Decoded: &models.TrapDecode{Severity: "warning"}},
+			{Site: "bend", SourceIP: "10.20.9.9", TrapType: "coldStart",
+				Decoded: &models.TrapDecode{Severity: "warning"}},
+		},
+		TrapSources: []models.TrapSource{
+			{Site: "bend", SourceIP: "10.20.1.14"},
+			{Site: "prineville", SourceIP: "10.20.1.14"},
+			{Site: "bend", SourceIP: "10.20.9.9"},
+		},
+	}
+
+	one := filterTraps(in, "", "bend/10.20.1.14")
+	if len(one.RecentTraps) != 1 || one.RecentTraps[0].Site != "bend" {
+		t.Fatalf("site-qualified source selected the wrong devices: %+v", one.RecentTraps)
+	}
+	if len(one.TrapSources) != 1 || one.TrapSources[0].Site != "bend" {
+		t.Fatalf("rollup should hold one device: %+v", one.TrapSources)
+	}
+
+	// A bare address means that address at any site: the only sensible
+	// reading of a request that did not name one.
+	both := filterTraps(in, "", "10.20.1.14")
+	if len(both.RecentTraps) != 2 {
+		t.Fatalf("bare address should match both sites, got %d", len(both.RecentTraps))
+	}
+
+	// Severity narrows the rollup too.
+	warn := filterTraps(in, "warning", "")
+	if len(warn.RecentTraps) != 2 {
+		t.Fatalf("want 2 warnings, got %d", len(warn.RecentTraps))
+	}
+	if len(warn.TrapSources) != 2 {
+		t.Fatalf("Unique Sources must reflect the filtered set, got %d: %+v",
+			len(warn.TrapSources), warn.TrapSources)
+	}
+	for _, s := range warn.TrapSources {
+		if s.Site == "bend" && s.SourceIP == "10.20.1.14" {
+			t.Fatal("a source whose only trap was filtered out is still counted")
+		}
+	}
+}

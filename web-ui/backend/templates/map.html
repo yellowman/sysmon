@@ -678,6 +678,20 @@ function mapPage() {
         revealed: {},
 
         async init() {
+            // ?edit=1 is a URL anyone can type. The server refuses the
+            // writes either way, but landing a read-only user in an
+            // edit-looking UI - link handles on every node, Save, Delete -
+            // is its own kind of lie, so the flag only survives for an
+            // admin. The role may still be arriving from /api/auth/me,
+            // so re-check once it has.
+            if (this.editMode && !this.isAdmin) {
+                this.editMode = false;
+                setTimeout(() => {
+                    if (this.isAdmin && new URLSearchParams(location.search).get('edit') === '1') {
+                        this.enterEdit();
+                    }
+                }, 600);
+            }
             // Sites first: the config fetch below needs to know which box.
             await this.loadSitesForPicker();
             if (!this.sitePickerSites.length) {

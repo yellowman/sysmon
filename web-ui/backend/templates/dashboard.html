@@ -138,7 +138,11 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="flex flex-col gap-1 flex-shrink-0" @click.prevent.stop>
+                            <!-- Acknowledging and updating are admin
+                                 operations server-side; a read-only user
+                                 is not shown a button that can only 403. -->
+                            <div x-show="$store.auth.role === 'admin'" x-cloak
+                                 class="flex flex-col gap-1 flex-shrink-0" @click.prevent.stop>
                                 <button @click="openAckDialog(alert.object_name || alert.hostname)"
                                         class="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700"
                                         title="Acknowledge (a note is required)">
@@ -213,7 +217,8 @@
                             </div>
                             <div class="text-xs text-gray-500 mt-1 italic" x-show="alert.notes" x-text="alert.notes"></div>
                         </div>
-                        <button @click="unackHost(alert.object_name || alert.hostname)"
+                        <button x-show="$store.auth.role === 'admin'" x-cloak
+                                @click="unackHost(alert.object_name || alert.hostname)"
                                 class="whitespace-nowrap px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] rounded hover:bg-blue-100 flex-shrink-0"
                                 title="Un-acknowledge: back to the active board">
                             <i class="fas fa-rotate-left mr-0.5"></i>unack

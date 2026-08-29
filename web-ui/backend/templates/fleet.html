@@ -17,6 +17,10 @@
                class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 no-underline">
                 <i class="fas fa-plus mr-1"></i>Add credential
             </a>
+            <!-- Config delivery is admin-only server-side; a read-only
+                 user gets the fleet's state, not its controls. -->
+            <template x-if="$store.auth.role === 'admin'">
+              <span class="flex items-center gap-2">
             <label class="text-xs text-gray-500">Watch window</label>
             <input type="number" x-model.number="watchSeconds" min="0" step="30"
                    class="w-20 px-2 py-1 border border-gray-200 rounded text-sm">
@@ -26,6 +30,8 @@
                 <i class="fas fa-rocket mr-1"></i>Roll out
                 <span x-show="selected.length" x-text="'(' + selected.length + ')'"></span>
             </button>
+              </span>
+            </template>
             <button @click="load()" class="px-2.5 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
                 <i class="fas fa-rotate"></i>
             </button>
@@ -65,6 +71,7 @@
                     <tr class="border-t border-gray-100">
                         <td class="px-3 py-2">
                             <input type="checkbox" :value="s.site" x-model="selected"
+                                   x-show="$store.auth.role === 'admin'" x-cloak
                                    :disabled="s.state !== 'pending'"
                                    class="h-4 w-4 rounded border-gray-300">
                         </td>
@@ -88,18 +95,19 @@
                         <td class="px-3 py-2 mono text-xs text-gray-500"
                             :title="s.running_hash" x-text="(s.running_hash || '').slice(0, 12)"></td>
                         <td class="px-3 py-2 whitespace-nowrap">
-                            <button x-show="!s.adopted" @click="adopt(s.site)" :disabled="busy"
+                            <span x-show="$store.auth.role !== 'admin'" class="text-xs text-gray-400">-</span>
+                            <button x-show="!s.adopted && $store.auth.role === 'admin'" @click="adopt(s.site)" :disabled="busy"
                                     class="px-2 py-1 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700 disabled:opacity-40">
                                 Adopt
                             </button>
-                            <button x-show="s.state === 'pending'" @click="deliver(s.site)" :disabled="busy"
+                            <button x-show="s.state === 'pending' && $store.auth.role === 'admin'" @click="deliver(s.site)" :disabled="busy"
                                     class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-40">
                                 Deliver
                             </button>
                             <!-- Never resolved automatically. The person at
                                  the console usually had a reason, so adopting
                                  what they did is the first thing offered. -->
-                            <template x-if="s.state === 'locally-modified'">
+                            <template x-if="s.state === 'locally-modified' && $store.auth.role === 'admin'">
                                 <span>
                                     <button @click="adopt(s.site)" :disabled="busy"
                                             class="px-2 py-1 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700 disabled:opacity-40">
@@ -111,7 +119,7 @@
                                     </button>
                                 </span>
                             </template>
-                            <button x-show="s.adopted && s.running_generation > 0" @click="rollback(s.site)" :disabled="busy"
+                            <button x-show="s.adopted && s.running_generation > 0 && $store.auth.role === 'admin'" @click="rollback(s.site)" :disabled="busy"
                                     class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40">
                                 Roll back
                             </button>
@@ -119,7 +127,7 @@
                                  running a copy in its own state directory;
                                  this puts it back on the config an operator
                                  wrote, which was never touched. -->
-                            <button x-show="s.running_generation > 0" @click="revert(s.site)" :disabled="busy"
+                            <button x-show="s.running_generation > 0 && $store.auth.role === 'admin'" @click="revert(s.site)" :disabled="busy"
                                     class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200 disabled:opacity-40"
                                     title="stop managing this box - it goes back to its own /etc config">
                                 Unmanage

@@ -779,10 +779,18 @@ paths:
     get:
       tags: [Admin]
       summary: Get daemon version
-      description: Returns the sysmon daemon version
+      description: >
+        Returns a sysmond's version. Name the site on a fleet: without
+        one the answer is whichever box reports a version first, which is
+        a coin toss mid-upgrade - exactly when the question gets asked.
       security:
         - SessionAuth: []
         - CookieAuth: []
+      parameters:
+        - name: site
+          in: query
+          schema:
+            type: string
       responses:
         '200':
           description: Version retrieved

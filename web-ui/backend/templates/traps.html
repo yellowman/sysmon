@@ -38,8 +38,11 @@
             <select x-model="filterSource" @change="applyFilters()"
                     class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                 <option value="">All Sources</option>
+                <!-- The value is "site/address", not the address: two
+                     sites' private ranges overlap, so picking Bend's
+                     10.20.1.14 must not also select Prineville's. -->
                 <template x-for="source in sources" :key="(source.site || '') + '-' + source.source_ip">
-                    <option :value="source.source_ip"
+                    <option :value="(source.site ? source.site + '/' : '') + source.source_ip"
                             x-text="(source.hostname || source.source_ip) + (source.site ? ' (' + source.site + ')' : '')"></option>
                 </template>
             </select>

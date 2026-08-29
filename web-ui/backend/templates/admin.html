@@ -31,16 +31,26 @@
             </div>
         </div>
 
+        <!-- These act on ONE daemon. With several boxes and no site
+             chosen there is no answer to "which daemon", so the controls
+             are disabled and say so rather than letting the backend
+             refuse the request. -->
+        <div x-show="siteAmbiguous" x-cloak
+             class="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+            <i class="fas fa-circle-info mr-2"></i>
+            These commands act on one monitoring box. Pick a site in the
+            selector above to enable them.
+        </div>
         <!-- Debug Controls -->
         <div class="card p-6">
             <h2 class="section-title mb-4">Debug Logging</h2>
             <div class="space-y-3">
-                <button @click="toggleDebug()"
+                <button @click="toggleDebug()" :disabled="siteAmbiguous" :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                         class="w-full px-4 py-3 bg-yellow-600 text-white rounded hover:bg-yellow-700 flex items-center justify-between">
                     <span><i class="fas fa-toggle-on mr-2"></i>Toggle General Debug</span>
                     <i class="fas fa-chevron-right"></i>
                 </button>
-                <button @click="toggleSNMPDebug()"
+                <button @click="toggleSNMPDebug()" :disabled="siteAmbiguous" :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                         class="w-full px-4 py-3 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center justify-between">
                     <span><i class="fas fa-network-wired mr-2"></i>Toggle SNMP Debug</span>
                     <i class="fas fa-chevron-right"></i>
@@ -59,17 +69,17 @@
             <h2 class="section-title">Diagnostics</h2>
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button @click="expireDNS()"
+            <button @click="expireDNS()" :disabled="siteAmbiguous" :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                     class="px-4 py-3 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center justify-between">
                 <span><i class="fas fa-sync mr-2"></i>Expire DNS Cache</span>
                 <i class="fas fa-chevron-right"></i>
             </button>
-            <button @click="printQueue()"
+            <button @click="printQueue()" :disabled="siteAmbiguous" :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                     class="px-4 py-3 bg-green-600 text-white rounded hover:bg-green-700 flex items-center justify-between">
                 <span><i class="fas fa-list mr-2"></i>Show Queue Status</span>
                 <i class="fas fa-chevron-right"></i>
             </button>
-            <button @click="showNextFD()"
+            <button @click="showNextFD()" :disabled="siteAmbiguous" :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                     class="px-4 py-3 bg-cyan-600 text-white rounded hover:bg-cyan-700 flex items-center justify-between">
                 <span><i class="fas fa-file-alt mr-2"></i>Show FD Info</span>
                 <i class="fas fa-chevron-right"></i>
@@ -687,7 +697,7 @@
             </p>
 
             <div x-show="!killitConfirm" class="space-y-2">
-                <button @click="killitConfirm = true"
+                <button @click="killitConfirm = true" :disabled="siteAmbiguous" :class="siteAmbiguous ? 'opacity-40 cursor-not-allowed' : ''"
                         class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
                     <i class="fas fa-power-off mr-2"></i>Shutdown Daemon
                 </button>
@@ -735,6 +745,13 @@ function adminPage() {
         killitText: '',
         currentUser: sessionStorage.getItem('sysmon_user') || '',
         get currentRole() { return this.$store.auth.role; },
+        // DEBUG, SNMPD, EXPIREDNS, PRINTQ, NFD and KILLIT each act on one
+        // daemon. With a fleet and "All sites" selected there is no
+        // answer to which one, so the controls say so instead of firing
+        // a request the backend will refuse.
+        get siteAmbiguous() {
+            return this.fleetSites.length > 1 && !(localStorage.getItem('sysmon-site') || '');
+        },
         users: [],
         showAddUser: false,
         newUser: { username: '', password: '', role: 'user' },

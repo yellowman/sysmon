@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -539,11 +540,11 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 			r.sendError(w, http.StatusBadRequest, "invalid 'since' parameter")
 			return
 		}
-		delta := r.monitoring.GetDelta(since)
-		if site != "" {
-			delta = monitoring.FilterDeltaSite(delta, site)
-		}
-		if delta.Daemon.PID == 0 {
+		// The site scopes the whole delta - hosts, daemon, statistics
+		// and coverage - inside GetDelta, so the second poll cannot
+		// disagree with the first.
+		delta := r.monitoring.GetDelta(since, site)
+		if delta.Daemon.PID == 0 && site == "" {
 			delta.Daemon.PID = r.daemonPID()
 		}
 		r.sendJSON(w, delta)
@@ -557,7 +558,13 @@ func (r *Router) handleMonitoringStatus(w http.ResponseWriter, req *http.Request
 	// sysmond's TCP protocol doesn't expose its PID; read it from the
 	// pidfile configured in sysmon.conf so the dashboard isn't stuck
 	// showing "PID 0".
-	if status.Daemon.PID == 0 {
+	//
+	// Local only. That pidfile is this machine's sysmond, so filling a
+	// remote site's blank PID from it would print the local daemon's PID
+	// as Bend's - a specific, wrong, checkable number, which is worse
+	// than "unknown". A remote PID comes from the agent link or not at
+	// all.
+	if status.Daemon.PID == 0 && site == "" {
 		status.Daemon.PID = r.daemonPID()
 	}
 
@@ -842,12 +849,22 @@ func (r *Router) handleMonitoringTraps(w http.ResponseWriter, req *http.Request)
 	}
 }
 
-// filterTraps narrows a trap set by severity and/or source address, and
-// rebuilds the summary counters so the numbers above the list describe
-// what the list is actually showing. The per-source rollup is filtered
-// to match; the lost-trap count is a property of collection, not of the
-// filter, so it survives.
+// filterTraps narrows a trap set by severity and/or source, and rebuilds
+// the summary and the per-source rollup from what survived, so every
+// number above the list describes the list. The lost-trap count is a
+// property of collection rather than of the filter, so it survives.
+//
+// A source is identified by site AND address: private ranges overlap, so
+// "10.20.1.14" alone selects a device at Bend and a different device at
+// Prineville at the same time. The filter accepts either "site/address"
+// or a bare address (which then means that address at any site, the only
+// sensible reading of a request that did not name one).
 func filterTraps(in *models.TrapInfo, severity, source string) *models.TrapInfo {
+	wantSite, wantIP := "", source
+	if i := strings.LastIndex(source, "/"); i >= 0 {
+		wantSite, wantIP = source[:i], source[i+1:]
+	}
+
 	out := &models.TrapInfo{
 		RecentTraps: make([]models.Trap, 0, len(in.RecentTraps)),
 		TrapSources: make([]models.TrapSource, 0, len(in.TrapSources)),
@@ -858,6 +875,11 @@ func filterTraps(in *models.TrapInfo, severity, source string) *models.TrapInfo 
 		},
 	}
 	hourAgo := time.Now().Add(-time.Hour)
+	// The rollup is rebuilt from the surviving traps rather than copied
+	// and filtered: a severity filter changes which sources still have
+	// traps, and "Unique Sources" must not keep counting devices whose
+	// every trap the filter just removed.
+	sources := map[string]*models.TrapSource{}
 	for _, t := range in.RecentTraps {
 		sev := "unknown"
 		if t.Decoded != nil && t.Decoded.Severity != "" {
@@ -866,7 +888,10 @@ func filterTraps(in *models.TrapInfo, severity, source string) *models.TrapInfo 
 		if severity != "" && sev != severity {
 			continue
 		}
-		if source != "" && t.SourceIP != source {
+		if wantIP != "" && t.SourceIP != wantIP {
+			continue
+		}
+		if wantSite != "" && t.Site != wantSite {
 			continue
 		}
 		out.RecentTraps = append(out.RecentTraps, t)
@@ -875,13 +900,27 @@ func filterTraps(in *models.TrapInfo, severity, source string) *models.TrapInfo 
 		}
 		out.Summary.TrapsByType[t.TrapType]++
 		out.Summary.TrapsBySeverity[sev]++
-	}
-	for _, s := range in.TrapSources {
-		if source != "" && s.SourceIP != source {
-			continue
+
+		key := t.Site + "\x00" + t.SourceIP
+		src, ok := sources[key]
+		if !ok {
+			src = &models.TrapSource{Site: t.Site, SourceIP: t.SourceIP, Hostname: t.SourceHostname}
+			sources[key] = src
 		}
-		out.TrapSources = append(out.TrapSources, s)
+		src.TrapCount++
+		if t.Timestamp.After(src.LastTrap) {
+			src.LastTrap = t.Timestamp
+		}
+		if src.Hostname == "" {
+			src.Hostname = t.MatchedHost
+		}
 	}
+	for _, s := range sources {
+		out.TrapSources = append(out.TrapSources, *s)
+	}
+	sort.Slice(out.TrapSources, func(i, j int) bool {
+		return out.TrapSources[i].LastTrap.After(out.TrapSources[j].LastTrap)
+	})
 	return out
 }
 
@@ -992,6 +1031,26 @@ func (r *Router) handleMapLayout(w http.ResponseWriter, req *http.Request) {
 			r.sendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Upgrade path. Before layouts were per site there was one
+		// global key, and on the ordinary agent-backed single-site
+		// install that key holds a map somebody arranged by hand.
+		// Asking for "layout/<site>" after the upgrade would find
+		// nothing and silently throw that arrangement away.
+		//
+		// So adopt it - but only when there is exactly one monitoring
+		// site, where "the old layout" and "this site's layout" cannot
+		// mean different things. With a fleet the old key is ambiguous
+		// by construction and handing it to every site would be the
+		// same collision the split just fixed.
+		if site != "" && string(data) == "{}" {
+			if legacy, lerr := r.settings.GetMapLayout(""); lerr == nil && string(legacy) != "{}" {
+				if sites := r.monitoring.Sites(); len(sites) == 1 && sites[0].Site == site {
+					if err := r.settings.SetMapLayout(site, legacy); err == nil {
+						data = legacy
+					}
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(data)
 
@@ -1049,13 +1108,21 @@ func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Reques
 	if req.URL.Query().Get("window") == "30d" {
 		window = 30 * 24 * time.Hour
 	}
-	events, err := hist.Recent(limit, window, req.URL.Query().Get("site"))
+	// Ask for one more than we will show. "len == limit" cannot tell a
+	// window holding exactly `limit` events from one holding thousands,
+	// and would tell the operator there is more history when there is
+	// not; an actual extra row is proof.
+	events, err := hist.Recent(limit+1, window, req.URL.Query().Get("site"))
 	if err != nil {
 		// A broken history store must not masquerade as an empty,
 		// healthy one - especially now that history is the alerter
 		// protocol's delivery guarantee.
 		r.sendError(w, http.StatusServiceUnavailable, "history store unreadable: "+err.Error())
 		return
+	}
+	truncated := len(events) > limit
+	if truncated {
+		events = events[:limit]
 	}
 	// truncated says the window holds more than this page shows, so the
 	// page can say "latest N" instead of implying it is the whole window.
@@ -1065,7 +1132,7 @@ func (r *Router) handleMonitoringHistory(w http.ResponseWriter, req *http.Reques
 		"available": true,
 		"window":    req.URL.Query().Get("window"),
 		"limit":     limit,
-		"truncated": len(events) == limit,
+		"truncated": truncated,
 	})
 }
 
@@ -1200,7 +1267,7 @@ func (r *Router) handleAdminVersion(w http.ResponseWriter, req *http.Request) {
 	}
 
 	authKey := r.getSysmonAuthKey()
-	version, err := r.monitoring.GetVersion(authKey)
+	version, err := r.monitoring.GetVersion(authKey, req.URL.Query().Get("site"))
 	if err != nil {
 		if strings.Contains(err.Error(), "authentication failed") {
 			r.sendError(w, http.StatusUnauthorized, err.Error())
