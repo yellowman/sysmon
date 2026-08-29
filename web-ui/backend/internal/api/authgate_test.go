@@ -68,7 +68,6 @@ var adminOnly = []struct{ method, path string }{
 	// A saved map layout is what everyone who opens the map sees, so
 	// writing one is a mutation of shared state.
 	{"PUT", "/api/map/layout"},
-
 }
 
 // openToAnyone is the other half of the rule. Losing these to a

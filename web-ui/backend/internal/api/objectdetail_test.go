@@ -2,6 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -144,5 +147,94 @@ func TestParseErrorDetailsAreAdminOnly(t *testing.T) {
 		if adminDetails[field] == nil {
 			t.Errorf("admin lost %s, so a parse failure is no longer debuggable", field)
 		}
+	}
+}
+
+// The allow-list only works if its names are the daemon's names: a tag
+// spelled wrongly here is not a loud error, it is a field that silently
+// never appears on the page. Three were wrong on first writing -
+// ObjectSNMPOID for ObjectSNMPoid, ObjectRTT for ObjectAvgRTT, ChangeSeq
+// for ObjectChangeSeq - and nothing in Go could have noticed, because
+// nothing in Go knows what the daemon emits.
+//
+// So check against the source of truth: every name here must be one of
+// the XML_* string constants in src/config.h. Skipped rather than failed
+// when the C tree is not present, since the Go module can be built on
+// its own.
+func TestObjectDetailFieldsExistInTheDaemon(t *testing.T) {
+	header, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "src", "config.h"))
+	if err != nil {
+		t.Skip("src/config.h not reachable from here; skipping cross-check")
+	}
+
+	// #define XML_SOMETHING   "ObjectSomething"
+	re := regexp.MustCompile(`#define\s+XML_[A-Z0-9_]+\s+"([^"]+)"`)
+	emitted := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(string(header), -1) {
+		emitted[m[1]] = true
+	}
+	if len(emitted) < 20 {
+		t.Fatalf("only %d XML tags parsed out of config.h; the regexp is wrong, not the list", len(emitted))
+	}
+
+	for name := range objectDetailFields {
+		if !emitted[name] {
+			t.Errorf("%q is not a tag the daemon emits, so the field is silently dropped", name)
+		}
+	}
+}
+
+// The other direction: every field the host detail page reads must be on
+// the allow-list. An allow-list is only safe to work with if leaving
+// something off is loud, and here it is silent - the page just renders
+// an empty box. Skipped when the templates are not reachable.
+func TestObjectDetailCoversWhatTheDetailPageRenders(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("..", "..", "templates", "hosts-detail.html"))
+	if err != nil {
+		t.Skip("templates not reachable from here; skipping cross-check")
+	}
+	re := regexp.MustCompile(`host\.([A-Za-z_]+)`)
+	seen := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(string(page), -1) {
+		seen[m[1]] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("only %d host fields found in the template; the regexp is wrong", len(seen))
+	}
+	for name := range seen {
+		if _, ok := objectDetailFields[name]; !ok {
+			t.Errorf("the page renders host.%s but the allow-list omits it, so the box is always empty", name)
+		}
+	}
+}
+
+// Queue timestamps are "seconds.microseconds" text, not quantities.
+// float64 carries about 15.95 significant digits and a current epoch
+// with microseconds needs 16, so a tenth of all values come back a digit
+// short. They stay strings, as the status parser has always kept them.
+func TestObjectDetailKeepsMicrosecondTimestampsAsText(t *testing.T) {
+	fields := objectDetail(`<ObjectStatus>` +
+		`<CheckQueuedAt>1749302958.258270</CheckQueuedAt>` +
+		`<CheckLastServiced>1749302958.000456</CheckLastServiced>` +
+		`<ObjectUpCt>412</ObjectUpCt>` +
+		`</ObjectStatus>`)
+
+	for _, f := range []struct{ name, want string }{
+		{"CheckQueuedAt", "1749302958.258270"},
+		{"CheckLastServiced", "1749302958.000456"},
+	} {
+		got, ok := fields[f.name].(string)
+		if !ok {
+			t.Errorf("%s came back as %T; a microsecond timestamp must stay text", f.name, fields[f.name])
+			continue
+		}
+		if got != f.want {
+			t.Errorf("%s = %q, want the daemon's own text %q", f.name, got, f.want)
+		}
+	}
+
+	// Ordinary counters are still numbers, so the page can compare them.
+	if v, ok := fields["ObjectUpCt"].(float64); !ok || v != 412 {
+		t.Errorf("ObjectUpCt = %#v, want numeric 412", fields["ObjectUpCt"])
 	}
 }

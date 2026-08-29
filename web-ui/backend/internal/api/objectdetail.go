@@ -27,70 +27,86 @@ import (
 // send_object_xml() later cannot appear here by having been forgotten in
 // a blocklist - it simply is not on the list.
 
+// How a field's text is carried to the page.
+type detailKind int
+
+const (
+	// kindAuto: numeric-looking text becomes a JSON number, so the page
+	// can compare and format it without re-sniffing types.
+	kindAuto detailKind = iota
+	// kindText: keep the daemon's text exactly as sent. The queue
+	// timestamps are "seconds.microseconds" (%ld.%06ld), which is a
+	// formatted string, not a quantity: float64 holds about 15.95
+	// significant digits and a current epoch with microseconds needs 16,
+	// so a tenth of all values lose their trailing digit on the way
+	// through. The status parser has always kept these as strings for
+	// the same reason.
+	kindText
+)
+
 // objectDetailFields is every ObjectStatus tag the detail page may see.
 // Status, timing, counters, thresholds and queue state: what the page
 // actually renders, and nothing that could carry a secret.
-var objectDetailFields = map[string]bool{
+//
+// The names must match the daemon's XML_* defines exactly - a tag named
+// wrongly here is simply dropped, silently, since this is an allow-list.
+// TestObjectDetailFieldsExistInTheDaemon cross-checks every one of them
+// against src/config.h.
+var objectDetailFields = map[string]detailKind{
 	// Identity and configuration shape.
-	"ObjectName":      true,
-	"Object":          true,
-	"HostName":        true,
-	"ObjectType":      true,
-	"ObjectPort":      true,
-	"ObjectGroup":     true,
-	"ObjectNotes":     true,
-	"ObjectContact":   true,
-	"ObjectUniqueID":  true,
-	"ObjectDependent": true,
+	"Object":         kindAuto,
+	"HostName":       kindAuto,
+	"ObjectType":     kindAuto,
+	"ObjectPort":     kindAuto,
+	"ObjectGroup":    kindAuto,
+	"ObjectNotes":    kindAuto,
+	"ObjectContact":  kindAuto,
+	"ObjectUniqueID": kindAuto,
 
 	// Current state.
-	"ObjectStatus":         true,
-	"ObjectMessage":        true,
-	"ObjectAcked":          true,
-	"ObjectAckedBy":        true,
-	"ObjectAckNote":        true,
-	"ObjectLastcheckState": true,
-	"ObjectTraceEnabled":   true,
-	"ObjectPaused":         true,
-	"ObjectContacted":      true,
-	"ObjectContactedAt":    true,
-	"ObjectPageMessage":    true,
+	"ObjectStatus":         kindAuto,
+	"ObjectMessage":        kindAuto,
+	"ObjectAcked":          kindAuto,
+	"ObjectLastcheckState": kindAuto,
+	"ObjectTraceEnabled":   kindAuto,
+	"ObjectContacted":      kindAuto,
+	"ObjectContactedAt":    kindAuto,
+	"ObjectPageMessage":    kindAuto,
 
 	// Counters and timings.
-	"ObjectUpCt":         true,
-	"ObjectDownCt":       true,
-	"ObjectTotalChecked": true,
-	"ObjectTotalDown":    true,
-	"ObjectMaxDown":      true,
-	"ObjectLastChecked":  true,
-	"ObjectLastChange":   true,
-	"ObjectTimeFailed":   true,
-	"ChangeSeq":          true,
+	"ObjectUpCt":         kindAuto,
+	"ObjectDownCt":       kindAuto,
+	"ObjectTotalChecked": kindAuto,
+	"ObjectTotalDown":    kindAuto,
+	"ObjectMaxDown":      kindAuto,
+	"ObjectLastTimeUp":   kindAuto,
+	"ObjectLastChecked":  kindAuto,
+	"ObjectChangeSeq":    kindAuto,
 
 	// Queue / scheduler state.
-	"ObjectQueued":         true,
-	"ObjectQueueInterval":  true,
-	"ObjectNextQueueTime":  true,
-	"CheckQueuedAt":        true,
-	"CheckStarted":         true,
-	"CheckLastServiced":    true,
-	"CheckLastWakeupTime":  true,
-	"CheckWakeupCount":     true,
-	"CheckFileDescriptor":  true,
+	"ObjectQueued":        kindAuto,
+	"ObjectQueueInterval": kindAuto,
+	"ObjectNextQueueTime": kindAuto,
+	"CheckQueuedAt":       kindText,
+	"CheckStarted":        kindAuto,
+	"CheckLastServiced":   kindText,
+	"CheckLastWakeupTime": kindAuto,
+	"CheckWakeupCount":    kindAuto,
+	"CheckFileDescriptor": kindAuto,
 
 	// Ping / RTT tuning and results.
-	"ObjectSendPings":           true,
-	"ObjectMinPings":            true,
-	"ObjectRTTThreshold":        true,
-	"ObjectJitterThreshold":     true,
-	"ObjectPacketLossThreshold": true,
-	"ObjectRTT":                 true,
-	"ObjectJitter":              true,
-	"ObjectPacketLoss":          true,
+	"ObjectSendPings":           kindAuto,
+	"ObjectMinPings":            kindAuto,
+	"ObjectRTTThreshold":        kindAuto,
+	"ObjectJitterThreshold":     kindAuto,
+	"ObjectPacketLossThreshold": kindAuto,
+	"ObjectAvgRTT":              kindAuto,
+	"ObjectJitter":              kindAuto,
+	"ObjectPacketLoss":          kindAuto,
 
 	// SNMP shape, but never the community.
-	"ObjectSNMPOID":  true,
-	"ObjectSNMPType": true,
+	"ObjectSNMPoid":  kindAuto,
+	"ObjectSNMPType": kindAuto,
 }
 
 // objectDetail parses an ObjectStatus document and returns only the
@@ -114,14 +130,15 @@ func objectDetail(doc string) map[string]interface{} {
 		case xml.StartElement:
 			current = t.Name.Local
 		case xml.CharData:
-			if current == "" || !objectDetailFields[current] {
+			kind, ok := objectDetailFields[current]
+			if current == "" || !ok {
 				continue
 			}
 			text := strings.TrimSpace(string(t))
 			if text == "" {
 				continue
 			}
-			if n, err := strconv.ParseFloat(text, 64); err == nil {
+			if n, err := strconv.ParseFloat(text, 64); kind == kindAuto && err == nil {
 				out[current] = n
 			} else {
 				out[current] = text
