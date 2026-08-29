@@ -2,11 +2,11 @@ package api
 
 import (
 	"encoding/json"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"sysmon-web/internal/auth"
+	"sysmon-web/internal/monitoring"
 )
 
 // The daemon's SHOWOBJ document as it looks for an object with every
@@ -87,26 +87,62 @@ func TestObjectDetailIsAnAllowListNotABlockList(t *testing.T) {
 // The XML parse-error path is the other way the daemon's raw response
 // used to reach a browser: on malformed status XML the handler returned
 // raw_xml, samples and all_responses to any authenticated caller, and
-// those fields hold exactly the credential-bearing document above. A
-// plain user gets told which object is broken; the protocol dump is for
-// an admin, who can read the config anyway.
+// those fields hold exactly the credential-bearing document above.
+//
+// This drives the policy function with a real XMLParseError rather than
+// poking the endpoint on a router with no daemon behind it - that
+// request never reaches this branch, so such a test passes whatever the
+// branch does, which is the opposite of a regression barrier.
 func TestParseErrorDetailsAreAdminOnly(t *testing.T) {
-	handler, authSvc, stop := testRouter(t)
-	defer stop()
+	e := &monitoring.XMLParseError{
+		Message:    "XML parse failure on awbreyrouter",
+		ObjectName: "awbreyrouter",
+		RawXML: "<ObjectStatus><ObjectAuthPassword>" + secretMarker +
+			"</ObjectAuthPassword><ObjectSNMPCommunity>" + secretMarker +
+			"</ObjectSNMPCommunity></ObjectStatu",
+		AllSamples: []map[string]string{
+			{"sample": "<ObjectRadiusSecret>" + secretMarker + "</ObjectRadiusSecret>"},
+		},
+		AllResponses: []monitoring.ResponseCapture{
+			{Command: "SHOWOBJ awbreyrouter", Parsed: false,
+				Response: "<ObjectExecCmd>/usr/bin/page --token " + secretMarker + "</ObjectExecCmd>"},
+		},
+	}
 
-	userToken := sessionFor(t, authSvc, "viewer3", "pw-viewer", auth.RoleUser)
-
-	req := httptest.NewRequest("GET", "/api/monitoring/status", nil)
-	req.Header.Set("Authorization", "Bearer "+userToken)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	// Whatever this router answers with no daemon behind it, the one
-	// thing the body must never contain is a raw protocol dump.
-	body := rec.Body.String()
-	for _, field := range []string{"raw_xml", "all_responses", "samples"} {
+	// A plain user: which object is broken, and nothing else.
+	msg, details := xmlParseErrorResponse(e, auth.RoleUser)
+	blob, err := json.Marshal(map[string]interface{}{"message": msg, "details": details})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(blob)
+	if strings.Contains(body, secretMarker) {
+		t.Fatalf("a plain user's error carries a credential: %s", body)
+	}
+	for _, field := range []string{"raw_xml", "samples", "all_responses"} {
 		if strings.Contains(body, field) {
-			t.Errorf("a plain user's error body carries %s: %s", field, body)
+			t.Errorf("a plain user's error carries %s: %s", field, body)
+		}
+	}
+	if !strings.Contains(msg, "awbreyrouter") {
+		t.Errorf("the user is not told which object is broken: %q", msg)
+	}
+
+	// An empty role is not an admin either - the header is absent on
+	// any path that has not been through the session middleware.
+	if _, d := xmlParseErrorResponse(e, ""); d["raw_xml"] != nil {
+		t.Error("an unknown role got the protocol dump")
+	}
+
+	// An admin keeps the diagnostics: they can read the config anyway,
+	// and this is the payload that makes a parse failure debuggable.
+	adminMsg, adminDetails := xmlParseErrorResponse(e, auth.RoleAdmin)
+	if adminMsg != e.Message {
+		t.Errorf("admin message = %q, want the parser's own %q", adminMsg, e.Message)
+	}
+	for _, field := range []string{"raw_xml", "samples", "all_responses"} {
+		if adminDetails[field] == nil {
+			t.Errorf("admin lost %s, so a parse failure is no longer debuggable", field)
 		}
 	}
 }

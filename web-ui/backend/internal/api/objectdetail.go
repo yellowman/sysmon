@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"sysmon-web/internal/auth"
+	"sysmon-web/internal/monitoring"
 )
 
 // The host detail page used to fetch /api/xml/object/<key> and hand the
@@ -166,4 +169,34 @@ func (r *Router) handleObjectDetail(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	r.sendJSON(w, fields)
+}
+
+// xmlParseErrorResponse decides what a malformed-status-XML failure may
+// say to whom.
+//
+// The debug payload is the daemon's raw SHOWOBJ/CONF response, which
+// carries the object's SNMP community, check password, RADIUS secret,
+// header value and command line. That is protocol debugging: it goes to
+// an admin, who can read the config anyway, and to nobody else. Everyone
+// else is told which object is broken, which is the part they can act
+// on.
+//
+// Split out of the handler so the policy can be tested against a real
+// XMLParseError. Tested through the handler it could not be: a router
+// with no daemon behind it never reaches this branch, so the test would
+// pass while the branch handed out raw XML to the world.
+func xmlParseErrorResponse(e *monitoring.XMLParseError, role string) (string, map[string]interface{}) {
+	if role == auth.RoleAdmin {
+		return e.Message, map[string]interface{}{
+			"object_name":   e.ObjectName,
+			"raw_xml":       e.RawXML,
+			"samples":       e.AllSamples,
+			"all_responses": e.AllResponses,
+		}
+	}
+	msg := "a monitored object returned malformed status XML"
+	if e.ObjectName != "" {
+		msg = "object " + e.ObjectName + " returned malformed status XML"
+	}
+	return msg, map[string]interface{}{"object_name": e.ObjectName}
 }

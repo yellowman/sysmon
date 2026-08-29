@@ -116,14 +116,24 @@ confgen-test: confgen_test.c confgen.c config.h
 savestate-test: savestate_test.c savestate.c config.h
 	$(CC) $(CFLAGS) -o savestate-test savestate_test.c savestate.c
 
-check: trapdecode-test snmpget-test confgen-test savestate-test
+# What an object's status XML may say to a client that has not
+# authenticated: no SNMP community, check username or password, RADIUS
+# secret, header value, URL or failure command. SHOWOBJ used to require
+# only "MODE xml", so this is the test that keeps the port from handing
+# out the config's credentials one object at a time.
+showobj-test: showobj_test.c srvclient.c config.h
+	$(CC) $(CFLAGS) -o showobj-test showobj_test.c srvclient.c $(LIBS)
+
+check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test
 	./trapdecode-test
 	./snmpget-test
 	./confgen-test
 	./savestate-test
+	./showobj-test
 
 clean:
-	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test core sysmond.core sysmon.core
+	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test snmpget-test \
+		confgen-test savestate-test showobj-test core sysmond.core sysmon.core
 
 heartbeat.o: 	config.h Makefile heartbeat.c
 syswatch.o:	config.h Makefile syswatch.c

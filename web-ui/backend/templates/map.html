@@ -614,6 +614,9 @@ function mapPage() {
         ctx: null,
         linking: null,
         editMode: new URLSearchParams(location.search).get('edit') === '1',
+        // ?edit=1 arrived but the role had not: honoured once, when the
+        // role turns out to be admin.
+        editRequestHandled: false,
         // Whether `hosts` holds complete config records (admin, via
         // /api/config) or the drawable subset from the topology
         // endpoint. Saving is only ever allowed from the former.
@@ -687,12 +690,19 @@ function mapPage() {
             if (this.editMode && !this.isAdmin) {
                 this.editMode = false;
                 // Watch the role rather than guessing how long
-                // /api/auth/me takes: a slow answer used to lose the
-                // requested edit mode outright.
-                const stop = this.$watch('$store.auth.role', role => {
-                    if (role !== 'admin') return;
-                    stop();
-                    if (new URLSearchParams(location.search).get('edit') === '1') this.enterEdit();
+                // /api/auth/me takes: a fixed timer loses the requested
+                // edit mode outright when the answer is slow.
+                //
+                // No self-unsubscribe: Alpine's $watch magic registers
+                // its cleanup with the component and returns nothing, so
+                // calling the "stop function" it does not return throws -
+                // and it would throw right here, in the callback, before
+                // enterEdit() ran. A flag is what actually works, and a
+                // watcher living until the component dies costs nothing.
+                this.$watch('$store.auth.role', role => {
+                    if (role !== 'admin' || this.editRequestHandled) return;
+                    this.editRequestHandled = true;
+                    this.enterEdit();
                 });
             }
             // Sites first: the config fetch below needs to know which box.
