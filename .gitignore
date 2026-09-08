@@ -18,3 +18,5 @@ src/savestate-test
 src/showobj-test
 src/runtime-policy-test
 src/daemon-core-test
+
+src/page-test

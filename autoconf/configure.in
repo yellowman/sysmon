@@ -403,7 +403,7 @@ LIBS="$LIBS_SAVE $TLS_LIBS"
 dnl some checks
 if test "$SENDMAIL" = no; then
 	AC_MSG_WARN(without sendmail there is no support for alert messages)
-	SENDMAIL=-DMAIL=''
+	SENDMAIL=-DMAIL='""'
 else
 	SENDMAIL=-DMAIL='"'$SENDMAIL'"'
 fi

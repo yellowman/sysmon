@@ -4725,7 +4725,7 @@ LIBS="$LIBS_SAVE $TLS_LIBS"
 if test "$SENDMAIL" = no; then
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: without sendmail there is no support for alert messages" >&5
 printf "%s\n" "$as_me: WARNING: without sendmail there is no support for alert messages" >&2;}
-	SENDMAIL=-DMAIL=''
+	SENDMAIL=-DMAIL='""'
 else
 	SENDMAIL=-DMAIL='"'$SENDMAIL'"'
 fi

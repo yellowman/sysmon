@@ -40,11 +40,12 @@ infodir = @infodir@
 
 all:	@PROGS@
 
-DAEMON_CORE_OBJECTS = heartbeat.o page.o tcp.o udp.o icmp.o pop3.o \
+DAEMON_SUPPORT_OBJECTS = heartbeat.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
 		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o savestate.o pingv6.o logging.o dns.o ssh.o runtime_policy.o
 
+DAEMON_CORE_OBJECTS = page.o $(DAEMON_SUPPORT_OBJECTS)
 DAEMON_OBJECTS = syswatch.o $(DAEMON_CORE_OBJECTS)
 
 sysmon: client.o talktcp.o lib.o dnscache.o tlsio.o
@@ -135,10 +136,13 @@ syswatch-test.o: syswatch.c config.h runtime_policy.h Makefile
 daemon-core-test: daemon_core_test.c syswatch-test.o $(DAEMON_CORE_OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o daemon-core-test daemon_core_test.c syswatch-test.o $(DAEMON_CORE_OBJECTS) $(LIBS)
 
+page-test: page_test.c page.c syswatch-test.o $(DAEMON_SUPPORT_OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o page-test page_test.c syswatch-test.o $(DAEMON_SUPPORT_OBJECTS) $(LIBS)
+
 reload-test: sysmond reload_test.sh
 	sh ./reload_test.sh ./sysmond
 
-check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test reload-test
+check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test page-test reload-test
 	./trapdecode-test
 	./snmpget-test
 	./confgen-test
@@ -146,10 +150,11 @@ check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test run
 	./showobj-test
 	./runtime-policy-test
 	./daemon-core-test
+	./page-test
 
 clean:
 	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test snmpget-test \
-		confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test core sysmond.core sysmon.core
+		confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test page-test core sysmond.core sysmon.core
 
 client.o:	config.h Makefile client.c
 heartbeat.o: 	config.h Makefile heartbeat.c

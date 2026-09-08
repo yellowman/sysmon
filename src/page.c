@@ -1,11 +1,10 @@
 /* $Id: page.c,v 1.59 2006/09/22 19:43:45 jared Exp $ */
 #include "config.h"
 
-/* Override empty MAIL definition from configure when sendmail not found */
-#ifdef MAIL
-#undef MAIL
+/* Honor configure's sendmail path; an empty path means no mailer. */
+#ifndef MAIL
+#define MAIL ""
 #endif
-#define MAIL "/usr/sbin/sendmail"
 
 /*
  *
@@ -69,11 +68,6 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
         /*                                   */
 
 	hp = my_gethostbyname(svc->hostname, -1);
-	if (hp == NULL)
-	{
-		snprintf(out, sizeof(out), "translate_string() error with %s", svc->hostname);
-		return strdup(out);
-	}
 
         /* convert to page */
         for (x=0; x < strlen(str);x++)
@@ -102,7 +96,7 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
                                         SAFE_APPEND(myhostname);
                                         break;
 				case 'H':
-					SAFE_APPEND(get_hostname(hp));
+					SAFE_APPEND(hp != NULL ? get_hostname(hp) : (char *)svc->hostname);
 					break;
                                 case 'd': /* downtime */
                                         SAFE_APPEND(str_difftime(svc->deathtime,t));
@@ -126,7 +120,7 @@ char *translate_string(char *str, struct hostinfo *svc, char *myhostname)
                                         break;
 				case 'I':
 					snprintf(tmp, sizeof(tmp), "%s%s", out,
-						get_ip(hp));
+						hp != NULL ? get_ip(hp) : (char *)svc->hostname);
 					/* BUG FIX: Use sizeof(tmp) not sizeof(out) to avoid reading beyond tmp buffer */
 					memcpy(out,tmp,sizeof(tmp)); current_len = strlen(out);
 					break;
@@ -222,290 +216,240 @@ void gen_msgid(char *our_msgid)
 	gen_rand_ascii(our_msgid, 26);
 }
 
-/*
- *
- */
-void run_command_and_mail_output(struct hostinfo *svc, char *myhostname)
+/* Mail goes to one executable, not a shell command. A sender containing
+ * whitespace or shell metacharacters is one -f argument, and a configured
+ * executable path containing spaces is still the path configure found. */
+struct mail_pipe {
+	FILE *stream;
+	pid_t pid;
+};
+
+static int wait_child(pid_t pid)
 {
-	FILE *mail;
-	FILE *cmd;
-        struct passwd *pw; /* password structure */
-	char *runme;
-	uid_t myuid;
-	char mailcmd[512];
-	char buff[200];
-
-	memset(buff, 0, 200);
-	memset(mailcmd, 0, 512);
-
-	if (fork() != 0)
-	{
-		return;
-	}
-
-	myuid = getuid();
-	errno = 0;
-	pw = getpwuid(myuid);
-
-	if (pw == NULL)
-	{
-		perror("page.c:run_command_and_mail_output:getpwuid");
-		return;
-	}
-
-	runme = translate_string(svc->command, svc, myhostname);
-	snprintf(mailcmd, 510, "%s -t", MAIL);
-
-	if ((svc->contact == NULL) || (strlen(svc->contact) == 0))
-	{
-		int ret = system(runme);
-		if (ret == -1)
-		{
-			perror("page.c:run_command_and_mail_output:system");
-		}
-		free(runme);
-		exit(0);
-	}
-
-	if (debug)
-	{
-		print_err(0, "popening \"%s\"", runme);
-	}
-
-	errno = 0;
-	cmd = popen(runme, "r");
-	if (cmd == NULL)
-	{
-		perror("page.c:run_command_and_mail_output:popen cmd");
-	}
-	errno = 0;
-	mail = popen(mailcmd, "w");
-	if (mail == NULL)
-	{
-		perror("page.c:run_command_and_mail_output:popen mail");
-        }
-
-	/* The message */
-	if (sender == NULL)
-	{
-		fprintf(mail, "From: System Monitor <%s@localhost>\n", 
-			pw->pw_name);
-	} else {
-		fprintf(mail, "From: %s\n", sender);
-	}
-	fprintf(mail, "X-Sysmon-unique-id: %s\n", svc->unique_id);
-	if (svc->hdr != NULL)
-	{
-		if (svc->hdrval != NULL)
-			fprintf(mail, "%s: %s\n", svc->hdr, svc->hdrval);
-		else
-			fprintf(mail, "%s:\n", svc->hdr);
-	}
-	fprintf(mail, "To: %s\n", svc->contact);
-	/* Insert Errors-To: headder if necessary */
-	if (errorsto != NULL)
-		fprintf(mail, "Errors-To: %s\n", errorsto);
-	if (replyto != NULL)
-		fprintf(mail, "Reply-To: %s\n", replyto);
-	/* Insert Subject line */
-	if (subject != NULL)
-	{
-		fprintf(mail, "Subject: %s is %s\n", svc->hostname, 
-			errtostr(svc->lastcheck));
-	} else {
-		fprintf(mail, "\n");
-	}
-
-	/* Body of message */
-	while (fgets(buff, 190, cmd) != NULL)
-	{
-		fprintf(mail, "%s", buff);
-	}
-
-	pclose(cmd);
-	pclose(mail);
-	free(runme);
-	exit(0);
+	int status;
+	pid_t got;
+	do {
+		got = waitpid(pid, &status, 0);
+	} while (got < 0 && errno == EINTR);
+	if (got != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return FALSE;
+	return TRUE;
 }
 
-/* Tell someone that the host is down */
+static int open_mail(struct mail_pipe *mail)
+{
+	int fds[2], error;
+	pid_t child;
+
+	mail->stream = NULL;
+	mail->pid = -1;
+	if (MAIL[0] == '\0') {
+		errno = ENOENT;
+		return FALSE;
+	}
+	if (pipe(fds) < 0) return FALSE;
+	child = fork();
+	if (child < 0) {
+		error = errno;
+		close(fds[0]);
+		close(fds[1]);
+		errno = error;
+		return FALSE;
+	}
+	if (child == 0) {
+		char *args[7];
+		int n = 0;
+		close(fds[1]);
+		if (fds[0] != STDIN_FILENO) {
+			if (dup2(fds[0], STDIN_FILENO) < 0) _exit(127);
+			close(fds[0]);
+		}
+		args[n++] = (char *)MAIL;
+		args[n++] = "-oi"; /* A line containing '.' is message data. */
+		args[n++] = "-t";
+		if (sender != NULL && *sender != '\0') {
+			args[n++] = "-f";
+			args[n++] = sender;
+		}
+		args[n] = NULL;
+		execv(MAIL, args);
+		_exit(127);
+	}
+	close(fds[0]);
+	mail->stream = fdopen(fds[1], "w");
+	if (mail->stream == NULL) {
+		error = errno;
+		close(fds[1]);
+		(void)wait_child(child);
+		errno = error;
+		return FALSE;
+	}
+	mail->pid = child;
+	return TRUE;
+}
+
+static int close_mail(struct mail_pipe *mail)
+{
+	int failed = ferror(mail->stream);
+	int accepted;
+	if (fflush(mail->stream) != 0) failed = TRUE;
+	if (fclose(mail->stream) != 0) failed = TRUE;
+	mail->stream = NULL;
+	accepted = wait_child(mail->pid);
+	return !failed && accepted;
+}
+
+static void mail_headers(FILE *mail, struct hostinfo *svc, struct passwd *pw)
+{
+	if (sender != NULL)
+		fprintf(mail, "From: %s\n", sender);
+	else
+		fprintf(mail, "From: System Monitor <%s@localhost>\n", pw->pw_name);
+	fprintf(mail, "X-SysMon-Unique-ID: %s\n", svc->unique_id != NULL ? (char *)svc->unique_id : "");
+	fprintf(mail, "X-SysMon-Host: %s\n", svc->hostname);
+	fprintf(mail, "X-SysMon-Uptime: %lu\n", svc->system_uptime);
+	if (svc->hdr != NULL)
+		fprintf(mail, "%s: %s\n", svc->hdr, svc->hdrval != NULL ? (char *)svc->hdrval : "");
+	fprintf(mail, "To: %s\n", svc->contact);
+	if (errorsto != NULL) fprintf(mail, "Errors-To: %s\n", errorsto);
+	if (replyto != NULL) fprintf(mail, "Reply-To: %s\n", replyto);
+}
+
+/* A command notification is asynchronous. TRUE means the worker was
+ * launched, NOT that the command or its optional mail eventually succeeded.
+ * Eventual completion cannot update the parent's hostinfo without a separate
+ * IPC/reaping design; do not pretend a fork made that guarantee. */
+static bool run_command_and_mail_output(struct hostinfo *svc, char *myhostname)
+{
+	struct mail_pipe mail;
+	FILE *cmd;
+	struct passwd *pw;
+	char *runme, *subjectline;
+	char buff[512];
+	pid_t child;
+	int status, failed, have_mail;
+
+	runme = translate_string((char *)svc->command, svc, myhostname);
+	if (runme == NULL) return FALSE;
+	child = fork();
+	if (child != 0) {
+		free(runme);
+		if (child < 0) perror("page: fork notification worker");
+		return child > 0;
+	}
+	/* Every child path terminates here, never in the daemon event loop. */
+	if (svc->contact == NULL || *svc->contact == '\0') {
+		status = system(runme);
+		free(runme);
+		if (status != 0) print_err(1, "page: notification command failed");
+		_exit(status == 0 ? 0 : 1);
+	}
+	cmd = popen(runme, "r");
+	free(runme);
+	if (cmd == NULL) {
+		perror("page: open notification command");
+		_exit(1);
+	}
+	pw = sender == NULL ? getpwuid(getuid()) : NULL;
+	subjectline = subject != NULL ? translate_string(subject, svc, myhostname) : NULL;
+	have_mail = (sender != NULL || pw != NULL) &&
+	    (subject == NULL || subjectline != NULL) && open_mail(&mail);
+	if (have_mail) {
+		mail_headers(mail.stream, svc, pw);
+		if (subjectline != NULL) fprintf(mail.stream, "Subject: %s\n", subjectline);
+		fputc('\n', mail.stream); /* Required even when a Subject was written. */
+	} else
+		print_err(1, "page: cannot mail command output; running command without mail");
+	free(subjectline);
+	/* Drain even if mailing failed: the command may itself be the pager
+	 * action, and a missing sendmail must not prevent that action running. */
+	while (fgets(buff, sizeof(buff), cmd) != NULL)
+		if (have_mail) fputs(buff, mail.stream);
+	failed = ferror(cmd);
+	status = pclose(cmd);
+	if (have_mail && !close_mail(&mail)) failed = TRUE;
+	if (!have_mail || failed || status != 0) {
+		print_err(1, "page: notification command/mail worker failed");
+		_exit(1);
+	}
+	_exit(0);
+}
+
 void page_someone(struct hostinfo *svc, int newstate, time_t now_t)
 {
-        FILE *fp; /* file handle used with popen */
-	char command[512]; /* command for popen */
-        struct passwd *pw; /* password structure */
-        char *out;
-	uid_t myuid;
-	char myhostname[80]; /* my hostname */
-	char msgid[256]; /* Our message-id */
-	char *subjectline;
+	struct mail_pipe mail;
+	struct passwd *pw;
+	char myhostname[80] = "localhost", msgid[256];
+	char *out, *subjectline, *nextmsgid;
 
-	/* bug check */
-	if (svc == NULL)
+	if (svc == NULL) return;
+	if (gethostname(myhostname, sizeof(myhostname)) < 0)
+		snprintf(myhostname, sizeof(myhostname), "localhost");
+	myhostname[sizeof(myhostname) - 1] = '\0';
+	out = translate_string(svc->pmesg != NULL ? (char *)svc->pmesg :
+	    (pmesg != NULL ? pmesg : PMESG), svc, myhostname);
+	if (out == NULL) return;
+	syslogmsg(out, now_t);
+	if (!donotify || !(svc->contact_when & newstate)) {
+		free(out);
 		return;
-
-
-	/* Getuid can never fail per man page */
-	myuid = getuid();
-
-	if (gethostname(myhostname, 80) == -1)
-	{
-		perror("page.c:page_someone:gethostname");
-		print_err(0, "page.c:page_someone:gethostname - unable to get our host name");
 	}
-
-	/* If no locally configured pmesg */
-	if (svc->pmesg == NULL)
-	{
-		/* If no global default configured pmesg */
-		if (pmesg == NULL)
-		{
-			/* Use config.h default */
-			out = translate_string(PMESG, svc, myhostname);
-		} else {
-			/* use configured pmesg */
-			out = translate_string(pmesg, svc, myhostname);
+	if (svc->command != NULL) {
+		if (run_command_and_mail_output(svc, myhostname)) {
+			svc->lastcontacted = now_t;
+			svc->contacted = TRUE;
+			object_changed(svc);
 		}
-	} else {
-		/* use object specific pmesg */
-		out = translate_string(svc->pmesg, svc, myhostname);
+		free(out);
+		return;
 	}
-
-        syslogmsg(out, now_t);
-
-	snprintf(command, sizeof(command),
-	  "contact when %d/%d", svc->contact_when, newstate);
-
-	if (debug)
-		print_err(0, "%s\n", command);
-
-	if (svc->command != NULL && donotify &&
-	  (svc->contact_when & newstate))
-	{
-		if (debug)
-		{
-			print_err(0, "We need to execute %s", 
-				translate_string(svc->command, svc, myhostname));
-		}
-
-		run_command_and_mail_output(svc, myhostname);
-		time(&svc->lastcontacted);
+	if (svc->contact == NULL || *svc->contact == '\0') {
+		/* No external recipient: record the locally handled event. */
+		svc->lastcontacted = now_t;
 		svc->contacted = TRUE;
 		object_changed(svc);
 		free(out);
 		return;
 	}
-
-	if (svc->contact == NULL || strlen (svc->contact) == 0)
-	{
-		if (debug) print_err(1,"page.c:page_someone:nobody to contact");
-		svc->contacted = TRUE;
-		object_changed(svc);
+	pw = sender == NULL ? getpwuid(getuid()) : NULL;
+	if (sender == NULL && pw == NULL) {
+		print_err(1, "page: cannot look up local mail identity; notification remains pending");
 		free(out);
 		return;
 	}
-
-        if (donotify && (svc->contact_when & newstate))
-        {
-		errno = 0;
-                pw = getpwuid(myuid);
-		if (pw == NULL)
-		{
-			perror("page.c:page_someone:getpwuid");
-			return;
-		}
-
-		/* set the time */
-		time(&svc->lastcontacted);
-                /* Set contacted */
-                svc->contacted = TRUE;
-		object_changed(svc);
-
-
-		/* setup the command to call (sendmail) */
-		snprintf(command, 500, "%s -t", MAIL);
-		if (sender != NULL)
-		{
-			snprintf(command, 500, "%s -f%s -t", MAIL, sender);
-		}
-
-		errno = 0;
-		/* open a connection to sendmail */
-                fp = popen(command, "w");
-
-		if (fp == NULL)
-		{
-			perror("page.c:page_someone:popen fp");
-			free(out);
-			return;
-		}
-
-		if (sender == NULL)
-		{
-			fprintf(fp, "From: System Monitor <%s@localhost>\n", 
-				pw->pw_name);
-		} else {
-			fprintf(fp, "From: %s\n", sender);
-		}
-		fprintf (fp, "X-SysMon-Unique-ID: %s\n", svc->unique_id);
-		fprintf (fp, "X-SysMon-Host: %s\n", svc->hostname);
-		fprintf (fp, "X-SysMon-Uptime: %ld\n", svc->system_uptime);
-	        if (svc->hdr != NULL)
-	        {
-			if (svc->hdrval != NULL)
-				fprintf(fp, "%s: %s\n", svc->hdr, svc->hdrval);
-			else
-				fprintf(fp, "%s:\n", svc->hdr);
-	        }
-
-                fprintf(fp, "To: %s\n", svc->contact);
-		/* Insert Errors-To: headder if necessary */
-		if (errorsto != NULL)
-		{
-			fprintf(fp, "Errors-To: %s\n", errorsto);
-		}
-		if (replyto != NULL)
-		{
-			fprintf(fp, "Reply-To: %s\n", replyto);
-		}
-
-	/* Generate our own message-id for use in headders
-	 * such that threading mail clients can be used easier
-	 */
-		gen_msgid(msgid);
-
-		fprintf(fp, "Message-Id: <%s@%s>\n", msgid, "sysmon");
-		if (svc->lastmsgid != NULL)
-		{
-			fprintf(fp, "In-Reply-To: <%s@%s>\n", svc->lastmsgid,
-				"sysmon");
-			FREE(svc->lastmsgid);
-		}
-		svc->lastmsgid = strdup(msgid);
-
-		subjectline = translate_string(subject, svc, myhostname);
-		/* Insert Subject line */
-		if (subject != NULL)
-		{
-			fprintf(fp, "Subject: %s\n", subjectline);
-		} else {
-			fprintf(fp, "\n");
-		}
-
-		if (subjectline != NULL)
-		{
-			free (subjectline);
-		}
-
-		/* Body of message */
-                fprintf(fp, "%s\n.\n", out);
-
-		/* Close the PIPE */
-                pclose(fp);
-
-        }
+	subjectline = subject != NULL ? translate_string(subject, svc, myhostname) : NULL;
+	gen_msgid(msgid);
+	nextmsgid = strdup(msgid);
+	if ((subject != NULL && subjectline == NULL) || nextmsgid == NULL) {
+		free(out);
+		free(subjectline);
+		free(nextmsgid);
+		return;
+	}
+	if (!open_mail(&mail)) {
+		print_err(1, "page: cannot open configured sendmail; notification remains pending");
+		free(out);
+		free(subjectline);
+		free(nextmsgid);
+		return;
+	}
+	mail_headers(mail.stream, svc, pw);
+	fprintf(mail.stream, "Message-Id: <%s@sysmon>\n", msgid);
+	if (svc->lastmsgid != NULL)
+		fprintf(mail.stream, "In-Reply-To: <%s@sysmon>\n", svc->lastmsgid);
+	if (subjectline != NULL) fprintf(mail.stream, "Subject: %s\n", subjectline);
+	fprintf(mail.stream, "\n%s\n", out);
+	free(subjectline);
 	free(out);
-
-	return;
+	if (!close_mail(&mail)) {
+		print_err(1, "page: sendmail failed for %s; notification remains pending", svc->hostname);
+		free(nextmsgid);
+		return;
+	}
+	/* Successful local handoff, not proof of delivery to the recipient. */
+	if (svc->lastmsgid != NULL) FREE(svc->lastmsgid);
+	svc->lastmsgid = (unsigned char *)nextmsgid;
+	svc->lastcontacted = now_t;
+	svc->contacted = TRUE;
+	object_changed(svc);
 }
-
