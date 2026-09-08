@@ -1,6 +1,10 @@
 /* $Id: syswatch.c,v 1.197 2014/07/09 16:29:39 jared Exp $ */
 #include "config.h"
 #include "ping-helper.h"
+#include "runtime_policy.h"
+
+/* The standalone client has a different, private client_poll(). */
+void client_poll(void);
 
 /* Normal global vars */
 unsigned char *ident_hash = NULL;
@@ -565,6 +569,8 @@ void queue_check(struct hostinfo *entry, unsigned char *unique_name)
 		print_err(1, "BUG:queue_check: Attempt to queue check already in q");
 		return;
 	}
+	if (!sysmon_queue_has_capacity(numqueued, maxqueued))
+		return;
 	entry->warnlog = 0; /* reset warnings for long time btw checks */
 	newentry = MALLOC(sizeof(struct monitorent), "new entry - monitorent in queue_check");
 	if (newentry == NULL) {
@@ -666,7 +672,6 @@ void walk_queue_checks_add(struct graph_elements *here, time_t now, struct graph
 void walk_queue_checks(struct graph_elements *here, time_t now)
 {
         int x;
-        bool last_queued_warn = FALSE;
 
         /* trouble check */
         if (here == NULL)
@@ -702,10 +707,11 @@ void walk_queue_checks(struct graph_elements *here, time_t now)
         if (here->data->next_queuetime <= now )
         {
                 /* Do not exceed queue limit */
-                if (numqueued <= maxqueued)
+                if (sysmon_queue_has_capacity(numqueued, maxqueued))
                 {
                         last_queued_at = now;
                         queue_check(here->data, here->unique_name);
+                        last_queued_warn = FALSE;
 
                         /* BUG: We may want to add a return HERE to allow
                          * us to not monitor children at the same time
@@ -868,7 +874,7 @@ int queue_checks_qsort_way(time_t now)
 			for (curr = 0; curr < numele; curr++)
 			{
 				/* Do not exceed queue limit */
-				if (numqueued <= maxqueued)
+				if (sysmon_queue_has_capacity(numqueued, maxqueued))
 				{
 					last_queued_at = now;
 					last_queued_warn = FALSE;
@@ -968,17 +974,19 @@ void needssleep(time_t now_t)
 	}
 
 	/* if icmp enabled, watch icmp fd */
-	if (glob_icmp_fd > maxfd && (!disable_icmp))
+	if (glob_icmp_fd >= 0 && (!disable_icmp))
 	{
-		maxfd = glob_icmp_fd;
 		FD_SET(glob_icmp_fd, &rd);
+		if (glob_icmp_fd > maxfd)
+			maxfd = glob_icmp_fd;
 	}
 
 	/* if icmpv6 enabled, watch icmpv6 fd */
-	if (glob_icmpv6_fd > maxfd && (!disable_icmp))
+	if (glob_icmpv6_fd >= 0 && (!disable_icmp))
 	{
-		maxfd = glob_icmpv6_fd;
 		FD_SET(glob_icmpv6_fd, &rd);
+		if (glob_icmpv6_fd > maxfd)
+			maxfd = glob_icmpv6_fd;
 	}
 
 	/* Check:
@@ -1029,10 +1037,17 @@ void needssleep(time_t now_t)
 	}
 
 	/* Watch the fd_sets accordingly */
-	select(maxfd+1, &rd, &wr, &except, &local_timeout);
+	if (select(maxfd+1, &rd, &wr, &except, &local_timeout) < 0)
+	{
+		if (errno != EINTR)
+			perror("syswatch.c:needssleep:select");
+		/* fd_sets are unspecified after an error. Signals are handled
+		   by the main loop immediately after this return. */
+		return;
+	}
 
 	/* if icmp enabled */
-	if (!disable_icmp && glob_icmp_fd > 0)
+	if (!disable_icmp && glob_icmp_fd >= 0)
 	{
 		/* and there are icmp packets */
 		if (FD_ISSET(glob_icmp_fd, &rd))
@@ -1042,7 +1057,7 @@ void needssleep(time_t now_t)
 		}
 	}
 	/* if icmpv6 enabled */
-	if (!disable_icmp && glob_icmpv6_fd > 0)
+	if (!disable_icmp && glob_icmpv6_fd >= 0)
 	{
 		/* and there are icmpv6 packets */
 		if (FD_ISSET(glob_icmpv6_fd, &rd))
@@ -1152,6 +1167,7 @@ void stop_this(struct monitorent *here)
 #ifdef HAVE_IPv6
 		case SYSM_TYPE_PINGv6:
 			stop_test_pingv6(here);
+			break;
 #endif /* HAVE_IPv6 */
 		default:
 			print_err(1, "stop_this:BUG Invalid event type");
@@ -1601,6 +1617,11 @@ void wakeup_checks(time_t now_t)
 	while (here != NULL)
 	{
 		next = here->next;  /* Save next pointer before potential modifications */
+		if (here->retval != -1)
+		{
+			here = next;
+			continue;
+		}
 		stale_time = mydifftime(here->queueat, now);
 
 		if (debug)
@@ -1621,8 +1642,8 @@ void wakeup_checks(time_t now_t)
 				? here->checkent->max_wakeup_retries
 				: DEFAULT_MAX_WAKEUP_RETRIES;
 
-			/* Check if we've exceeded max retries */
-			if (here->wakeup_count >= max_retries)
+			if (!sysmon_stale_retry_available(here->wakeup_count,
+				max_retries))
 			{
 				print_err(0, "Permanently killing check %s:%s:%d after %u wakeup attempts (stale for %.2fs)",
 					here->checkent->hostname,
@@ -1631,10 +1652,8 @@ void wakeup_checks(time_t now_t)
 					here->wakeup_count,
 					stale_time);
 
-				if (here->checkent->type != SYSM_TYPE_PING)
-				{
+				if (here->started && here->monitordata != NULL)
 					stop_this(here);
-				}
 				here->retval = SYSM_KILLED;
 				killed++;
 			}
@@ -1649,31 +1668,13 @@ void wakeup_checks(time_t now_t)
 					max_retries,
 					stale_time);
 
-				/* Stop the stuck check */
-				if (here->checkent->type != SYSM_TYPE_PING)
-				{
+				/* Stop and reset this same queue entry. Setting a
+				   timeout retval consumed the entry in service_checks,
+				   losing wakeup_count and never making the promised
+				   retry. */
+				if (here->started && here->monitordata != NULL)
 					stop_this(here);
-				}
-
-				/* Mark as timeout (will trigger alert if configured) */
-				here->retval = SYSM_TIMEDOUT;
-
-				/* Increment wakeup counter and update timestamp */
-				here->wakeup_count++;
-				here->last_wakeup_time = now_t;
-
-				/* Re-queue by resetting last check time */
-				/* This will cause queue_checks() to pick it up again */
-				here->checkent->lchecktime = now_t - here->checkent->queuetime;
-
-				if (debug)
-				{
-					print_err(0, "Re-queued %s:%s:%d for retry (lchecktime set to %ld)",
-						here->checkent->hostname,
-						type_to_name(here->checkent->type),
-						here->checkent->port,
-						here->checkent->lchecktime);
-				}
+				sysmon_prepare_stale_retry(here, &now, now_t);
 			}
 		}
 		else if (stale_time >= warnafter && warnlog)
@@ -1989,7 +1990,7 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 	while (1)
 	{
 		time(&now_t);
-		if (currenthead != NULL && (numqueued <= maxqueued)) 
+		if (currenthead != NULL && sysmon_queue_has_capacity(numqueued, maxqueued))
 		/* something in the tree to monitor */
 		{
 #ifndef QSORT_WAY
@@ -2017,12 +2018,12 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 		 * We call handle_icmp_responses() here using non-blocking reads to drain
 		 * the kernel buffer of any waiting packets.
 		 */
-		if (!disable_icmp && glob_icmp_fd > 0)
+		if (!disable_icmp && glob_icmp_fd >= 0)
 		{
 			handle_icmp_responses();
 		}
 #ifdef HAVE_IPv6
-		if (!disable_icmp && glob_icmpv6_fd > 0)
+		if (!disable_icmp && glob_icmpv6_fd >= 0)
 		{
 			handle_pingv6_responses();
 		}
@@ -2188,12 +2189,10 @@ void walk_periodic_page_checks(struct graph_elements *here, time_t now)
 		return;
 	here->visit = TRUE;
 	/* Do the check and page */
-	/* Use per-object pageinterval if set (-1 means use global) */
-	int effective_pageinterval = (here->data->pageinterval == -1) ?
-		pageinterval : here->data->pageinterval;
-
-	if (((now - here->data->lastcontacted) > (effective_pageinterval*60)) &&
-		(here->data->contacted))
+	if (here->data->lastcheck != SYSM_OK &&
+	    (here->data->contact_when & SYSM_CONTACT_DOWN) &&
+	    sysmon_should_repage(now, here->data->lastcontacted,
+		here->data->pageinterval, pageinterval, here->data->contacted))
 	{
 		page_someone(here->data, SYSM_CONTACT_DOWN, now);
 	}
@@ -2278,11 +2277,9 @@ void do_tree_periodic(time_t now)
 	/* walk tree and check for now valid dns entries */
 	periodic_rewalk(currenthead, now, 0);
 
-	/* walk tree and check for time to repage about sites */
-	if (pageinterval != 0)
-	{
+	/* Per-object intervals still apply when the global is disabled. */
+	if (configed_root != NULL)
 		periodic_page(now);
-	}
 }
 
 
@@ -2329,6 +2326,10 @@ int main(int argc, char **argv)
 	signal(SIGINT, handle_stop);
 	signal(SIGQUIT, handle_stop);
 	signal(SIGTERM, handle_stop);
+
+	/* A failed pager/sendmail pipe must become EPIPE. The default
+	   SIGPIPE action would terminate the monitoring daemon itself. */
+	signal(SIGPIPE, SIG_IGN);
 
 #ifndef __FreeBSD__
 	/* FreeBSD can trigger some interesting situations if
@@ -2426,7 +2427,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (max_numnei > maxqueued && (!quiet))
+	if (maxqueued > 0 && max_numnei > maxqueued && (!quiet))
 	{
 		print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",
 			max_numnei, maxqueued);

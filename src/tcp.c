@@ -34,8 +34,8 @@ void	start_test_tcp(struct monitorent *here, time_t now_t)
 	if (here->filedes == -1)
 	{
 		print_err(1, "tcp.c: Unable to open a socket, unable to perform check on %s", here->checkent->hostname);
-		/* Bad error, code around it later */
-		here->retval = here->checkent->lastcheck;
+		/* Failure to run a probe is not a fresh OK observation. */
+		here->retval = SYSM_ERR;
 		FREE(here->monitordata);
 		here->monitordata = NULL;
 		return;
@@ -47,6 +47,8 @@ void	start_test_tcp(struct monitorent *here, time_t now_t)
 	if (hp == NULL)
 	{
 		here->retval = SYSM_NODNS;
+		close(here->filedes);
+		here->filedes = -1;
 		FREE(here->monitordata);
 		here->monitordata = NULL;
 		return;
@@ -73,6 +75,7 @@ void	start_test_tcp(struct monitorent *here, time_t now_t)
 
         if ((errcode < 0) && (errno != EINPROGRESS))
         {
+                here->retval = SYSM_ERR;
                 if (errno == ECONNREFUSED || errno == EINTR)
                 {
                         here->retval = SYSM_CONNREF;
@@ -84,6 +87,7 @@ void	start_test_tcp(struct monitorent *here, time_t now_t)
                         here->retval = SYSM_TIMEDOUT; /* Conn timed out */
                 }
 		close(here->filedes);
+		here->filedes = -1;
 
                 /* Free memory we'd normally leak */
                 FREE(localstruct);
@@ -131,6 +135,7 @@ service_test_tcp(struct monitorent *here, time_t now_t)
 		}
 		here->retval = isopenretval;
 		close(here->filedes);
+		here->filedes = -1;
 		FREE(localstruct);
 		here->monitordata = NULL;
 		if (debug)
@@ -147,6 +152,7 @@ service_test_tcp(struct monitorent *here, time_t now_t)
 	{
 		here->retval = SYSM_TIMEDOUT;
 		close(here->filedes);
+		here->filedes = -1;
                 FREE(localstruct);
                 here->monitordata = NULL;
                 if (debug)
@@ -170,6 +176,7 @@ stop_test_tcp(struct monitorent *here)
 	if (localstruct != NULL)
 	{
 		close(here->filedes);
+		here->filedes = -1;
 		FREE(localstruct);
 	}
 	here->monitordata = NULL;

@@ -40,10 +40,12 @@ infodir = @infodir@
 
 all:	@PROGS@
 
-DAEMON_OBJECTS = heartbeat.o syswatch.o page.o tcp.o udp.o icmp.o pop3.o \
+DAEMON_CORE_OBJECTS = heartbeat.o page.o tcp.o udp.o icmp.o pop3.o \
 		umichX500.o loadconfig.o smtp.o nntp.o talktcp.o imap.o lib.o \
 		textfile.o http.o srvclient.o dnscache.o ircd.o sysmon.o \
-		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o savestate.o pingv6.o logging.o dns.o ssh.o
+		radius.o md5.o parser.o snpp.o snmp.o trapdecode.o tlsio.o aggregator.o confgen.o savestate.o pingv6.o logging.o dns.o ssh.o runtime_policy.o
+
+DAEMON_OBJECTS = syswatch.o $(DAEMON_CORE_OBJECTS)
 
 sysmon: client.o talktcp.o lib.o dnscache.o tlsio.o
 	-$(RM) sysmon
@@ -124,19 +126,32 @@ savestate-test: savestate_test.c savestate.c config.h
 showobj-test: showobj_test.c srvclient.c config.h
 	$(CC) $(CFLAGS) -o showobj-test showobj_test.c srvclient.c $(LIBS)
 
-check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test
+runtime-policy-test: runtime_policy_test.c runtime_policy.c runtime_policy.h config.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o runtime-policy-test runtime_policy_test.c runtime_policy.c
+
+syswatch-test.o: syswatch.c config.h runtime_policy.h Makefile
+	$(CC) $(CFLAGS) -Dmain=sysmond_program_main -c syswatch.c -o syswatch-test.o
+
+daemon-core-test: daemon_core_test.c syswatch-test.o $(DAEMON_CORE_OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o daemon-core-test daemon_core_test.c syswatch-test.o $(DAEMON_CORE_OBJECTS) $(LIBS)
+
+check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test
 	./trapdecode-test
 	./snmpget-test
 	./confgen-test
 	./savestate-test
 	./showobj-test
+	./runtime-policy-test
+	./daemon-core-test
 
 clean:
 	-$(RM) *.o @PROGS@ sysmon-ping-helper trapdecode-test snmpget-test \
-		confgen-test savestate-test showobj-test core sysmond.core sysmon.core
+		confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test core sysmond.core sysmon.core
 
+client.o:	config.h Makefile client.c
 heartbeat.o: 	config.h Makefile heartbeat.c
-syswatch.o:	config.h Makefile syswatch.c
+syswatch.o:	config.h runtime_policy.h Makefile syswatch.c
+runtime_policy.o: config.h runtime_policy.h Makefile runtime_policy.c
 page.o:		config.h Makefile page.c
 tcp.o:		config.h Makefile tcp.c
 udp.o: 		config.h Makefile udp.c

@@ -686,6 +686,7 @@ object[^\{]+{WS}+\{	{
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
 
+  parser_obj_i_pageinterval = -1;
   parser_reverse = FALSE;
   parser_snmp_octets = FALSE;
   parser_trap_alert = FALSE;
@@ -986,56 +987,41 @@ config\ dnslog\ [^;]+{WS}*;          {
     print_err(0, "dnslog : %s/%d ", parser_dnslog, parser_i_dnslog); 
 };
 
-config\ pageinterval\ [^;]+;          {
-  /* Search for extra newlines that are not being counted */
+config{WS}+pageinterval{WS}+[^;]+; {
+  char *value = yytext + strlen("config");
+  char *end;
+  long interval;
+
   fixup_lineno();
-
-  parser_pos1 = strrchr( yytext, ' ' );
-  if (parser_pos1 == NULL)
+  while (isspace((unsigned char)*value))
+    value++;
+  value += strlen("pageinterval");
+  errno = 0;
+  interval = strtol(value, &end, 10);
+  if (value == end || errno == ERANGE || interval < 0 || interval > INT_MAX)
   {
-	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid pageinterval");
+    badconfig = TRUE;
+    break;
   }
-  parser_pos1=parser_pos1+1;
-  parser_pos2 = strchr( parser_pos1, ';' );
-  if (parser_pos2 == NULL)
+  while (isspace((unsigned char)*end))
+    end++;
+  if (*end != ';')
   {
-	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid pageinterval suffix");
+    badconfig = TRUE;
+    break;
   }
-
-  if (parser_pageinterval != NULL)
-  {
-        FREE(parser_pageinterval);
-	parser_i_pageinterval = -1;
-  }
-  parser_pageinterval = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_pageinterval");
-
-  strncpy( parser_pageinterval, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_pageinterval[ parser_pos2 - parser_pos1 ] = '\0';
-
-  /* If we are inside an object, apply this information only to this object */
   if (parser_name != NULL)
+    parser_obj_i_pageinterval = (int)interval;
+  else
   {
-        parser_obj_i_pageinterval = atol(parser_pageinterval);
-        if (parser_obj_i_pageinterval < 0)
-        {
-          print_err(1, "Invalid per-object pageinterval specified in %s line %d",
-                  current_parsing_filename, line_no);
-          parser_obj_i_pageinterval = -1; /* Revert to use global */
-        }
-  } else {
-    parser_i_pageinterval = atol(parser_pageinterval);
-    if (parser_i_pageinterval < 0)
-    {
-          print_err(1, "Invalid pageinterval specified in %s line %d",
-                  current_parsing_filename, line_no);
-    }
-    parser_obj_i_pageinterval = -1;
-    if (debug)
-      print_err(0, "pageinterval : %s/%d ", parser_pageinterval, parser_i_pageinterval);
+    if (parser_pageinterval != NULL)
+      FREE(parser_pageinterval);
+    parser_pageinterval = STRDUP(value, "global pageinterval");
+    parser_i_pageinterval = (int)interval;
   }
-};
+}
 
 config\ maxqueued\ [^;]+;          {
   /* Search for extra newlines that are not being counted */

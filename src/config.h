@@ -1036,6 +1036,11 @@ void stop_test_pingv6(struct monitorent *);
 
 int is_open(int);
 void set_defaults();
+void queue_check(struct hostinfo *, unsigned char *);
+void wakeup_checks(time_t);
+void service_checks(time_t);
+void fast_cleanup_checks(void);
+void walk_periodic_page_checks(struct graph_elements *, time_t);
 void free_tree(struct all_elements_list *);
 void stop_it();
 void service_this(struct monitorent *, struct timeval *, time_t);

@@ -273,7 +273,7 @@ void setup_icmpv6_fd()
 	}
 
 	/* If success, update the queue size */
-	if (glob_icmpv6_fd>0)
+	if (glob_icmpv6_fd >= 0)
 	{
 	        retval = -1;
 	        while (retval == -1)
@@ -307,8 +307,8 @@ void start_test_pingv6(struct monitorent *checkme)
 
         if (glob_icmpv6_fd == -1)
         {
-                /* If there is no icmp fd, say it's ok */
-                checkme->retval = SYSM_OK;
+                /* The helper sends only; a receive socket is required. */
+                checkme->retval = disable_icmp ? SYSM_OK : SYSM_ERR;
                 return;
         }
         checkme->monitordata=MALLOC(sizeof(struct pingv6data),"icmpv6-localstruct");

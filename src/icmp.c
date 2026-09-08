@@ -95,14 +95,13 @@ void setup_icmp_fd()
 
 	if (glob_icmp_fd == -1)
 	{
-		if (errno == EPERM)
-		{
-			print_err(1, "We are not root, unable to perform icmp check, exiting");
-			exit(1);
-		}
+		int saved_errno = errno;
 		perror("icmp.c:setup_icmpv4_fd: error!");
-		print_err(1, "icmp.c:glob_icmpv4_fd setup was -1, errno = %d",
-			errno);
+		print_err(1, "unable to open the IPv4 raw socket (errno %d); "
+			"refusing to run ping checks as healthy. Start with -i "
+			"only if ICMP monitoring is intentionally disabled.",
+			saved_errno);
+		exit(1);
 	}
 
 	retval = -1;
@@ -370,8 +369,10 @@ void	start_test_ping(struct monitorent *here)
 
 	if (glob_icmp_fd == -1)
 	{
-		/* If there is no icmp fd, say it's ok */
-		here->retval = SYSM_OK;
+		/* A send-only helper cannot replace the missing receive socket.
+		 * Keep the explicit -i administrative bypass, but do not
+		 * report a broken check facility as a successful probe. */
+		here->retval = disable_icmp ? SYSM_OK : SYSM_ERR;
 		return;
 	}
 
@@ -923,8 +924,8 @@ void start_test_pktloss(struct monitorent *here)
 	struct pingdata *localstruct;
 
 	if (glob_icmp_fd == -1) {
-		/* No ICMP socket - mark as OK and return */
-		here->retval = SYSM_OK;
+		/* A missing receive socket is a local check error, except for -i. */
+		here->retval = disable_icmp ? SYSM_OK : SYSM_ERR;
 		return;
 	}
 
@@ -1333,7 +1334,7 @@ void start_test_rtt(struct monitorent *here)
 
 	/* Check ICMP socket available */
 	if (glob_icmp_fd == -1) {
-		here->retval = SYSM_OK;
+		here->retval = disable_icmp ? SYSM_OK : SYSM_ERR;
 		return;
 	}
 

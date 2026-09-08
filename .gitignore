@@ -16,3 +16,5 @@ autom4te.cache/
 ios/Sysmon/GoogleService-Info.plist
 src/savestate-test
 src/showobj-test
+src/runtime-policy-test
+src/daemon-core-test
