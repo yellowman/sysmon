@@ -11,131 +11,11 @@
 /* include our config header.  nothing else should be #included here */
 #include "config.h"
 
-/* parser global variables required */
-char *parser_pos1, *parser_pos2;
-char *parser_name = NULL;
-char *parser_pmesg = NULL;
-char *parser_obj_pmesg = NULL;
-char *parser_ip = NULL;
-char *parser_root = NULL;
-char *parser_type = NULL;
-int  parser_i_type = 0;
-char *parser_port;
-int  parser_i_port = 0;
-char *parser_numfailures = NULL;
-int parser_i_numfailures = -1;
-int parser_obj_i_numfailures = -1;
-char *parser_minnumfailures = NULL;
-int parser_i_minnumfailures = -1;
-char *parser_flaptime = NULL;
-int parser_i_flaptime = -1;
-char *parser_desc = NULL;
-char *parser_group = NULL;
-char *parser_dns_query = NULL;
-bool parser_dns_aa = FALSE;
-bool parser_dns_recursion = FALSE;
-char *parser_spawn = NULL;
-char *parser_contact = NULL;
-int parser_when = SYSM_CONTACT_DOWN | SYSM_CONTACT_UP;
-char *parser_child = NULL;
-int parser_html_refresh = 60;
-bool parser_reverse = FALSE;
-bool parser_snmp_octets = FALSE;
-bool parser_catch_snmptrap = FALSE;
-bool parser_trap_alert = FALSE;
-char *parser_rtt_threshold = NULL;
-int parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
-/* pktloss_tolerance: how many lost packets a cycle may have before it
-   alerts. The daemon has always had the field and compared against it -
-   it simply had no directive, so it was stuck on its default of 0
-   (alert on any loss) and no config could say otherwise. */
-char *parser_pktloss_tolerance = NULL;
-int parser_i_pktloss_tolerance = -1;
-char *parser_jitter_threshold = NULL;
-int parser_i_jitter_threshold = 0;
-char *parser_rtt_samples = NULL;
-int parser_i_rtt_samples = 5;  /* Default: 5 samples */
-char *parser_rtt_interval = NULL;
-int parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
-char *parser_sender = NULL;
-char *parser_subject = NULL;
-char *parser_upcolor = NULL;
-char *parser_downcolor = NULL;
-char *parser_recentcolor = NULL;
-char *parser_replyto = NULL;
-char *parser_errorsto = NULL;
-char *parser_header = NULL;
-char *parser_authkey = NULL;
-char *parser_sitename = NULL;
-char *parser_aggregator = NULL;
-char *parser_agg_token = NULL;
-char *parser_agg_ca = NULL;
-char *parser_statedir = NULL;
-int parser_listenport = -1;   /* -1 = not configured; 0 = explicitly off */
-char *parser_sitedesc = NULL;
-char *parser_savestate = NULL;
-char *parser_statusfile = NULL;
-char *parser_statustempdir = NULL;
-char *parser_cssfile = NULL;
-char *parser_pidfile = NULL;
-char *parser_logging = NULL;
-int parser_logging_fac;
-int parser_statusfile_type;
-char *parser_dateformat = NULL;
-struct nei_list *parser_dep = NULL;
-struct nei_list *parser_dep_tmp = NULL;   /* Used when adding new elements */
-char *parser_page = NULL;
-char *parser_also = NULL;
-char *parser_secret = NULL;
-char *parser_username = NULL;
-char *parser_community = NULL;
-char *parser_oid = NULL;
-char *parser_snmp_oid_sec = NULL;
-char *parser_snmp_type = NULL;
-/* v2c unless an object says otherwise: it is what everything since the
-   late 90s speaks, and v1 cannot carry a 64-bit counter. */
-int parser_snmp_version = SNMP_VERSION_2C;
-int parser_i_snmp_type = -1;
-char *parser_snmp_low = NULL;
-char *parser_snmp_high = NULL;
-char *parser_snmp_exact = NULL;
-char *parser_snmp_rate = NULL;
-unsigned long parser_i_snmp_low;
-unsigned long parser_i_snmp_high;
-unsigned long parser_i_snmp_exact;
-unsigned long parser_i_snmp_rate;
-char *parser_password = NULL;
-char *parser_url = NULL;
-char *parser_urltext = NULL;
-char *parser_include = NULL;
-char *parser_value = NULL;
-char *parser_eq = NULL;
-int parser_i_queuetime = -1;
-int parser_obj_i_queuetime = -1;
-char *parser_queuetime = NULL;
-int parser_i_dnsexpire;
-char *parser_dnsexpire = NULL;
-int parser_i_dnslog;
-char *parser_dnslog = NULL;
-int parser_i_pageinterval;
-int parser_obj_i_pageinterval = -1;
-char *parser_pageinterval = NULL;
-int parser_i_maxqueued;
-char *parser_maxqueued = NULL;
-int parser_showupalso; /*  */
-int parser_nologconnects;
-int parser_nosubject;
-int temp_int;
-int line_no;
-char *temp_char;
-char *current_parsing_filename;
+#include "parser_state.h"
+#define PARSER_DEFINE(type, name, initial, cleanup) type name = initial;
+PARSER_FIELDS(PARSER_DEFINE)
+#undef PARSER_DEFINE
 
-/* Spawn command definitions tracking */
-bool parser_in_spawns_block = FALSE;
-char *parser_spawn_name = NULL;
-char *parser_spawn_command = NULL;
-
-/* end parser global variables */
 
 /* Function definitions that are found later in the program */
 void add_object();
@@ -291,7 +171,7 @@ config\ nologconnects{WS}*;	{
 }
 
 config{WS}noheartbeat{WS}*;	{
-	heartbeat = FALSE;
+	parser_heartbeat = FALSE;
 }
 
 config{WS}nosubject{WS}*;	{
@@ -686,6 +566,65 @@ object[^\{]+{WS}+\{	{
   /* Search for extra newlines that are not being counted */
   fixup_lineno();
 
+  /* Object-local omissions mean defaults, never the previous object. */
+  if (parser_obj_pmesg != NULL) FREE(parser_obj_pmesg);
+  parser_obj_pmesg = NULL;
+  if (parser_ip != NULL) FREE(parser_ip);
+  parser_ip = NULL;
+  if (parser_type != NULL) FREE(parser_type);
+  parser_type = NULL;
+  if (parser_port != NULL) FREE(parser_port);
+  parser_port = NULL;
+  if (parser_desc != NULL) FREE(parser_desc);
+  parser_desc = NULL;
+  if (parser_group != NULL) FREE(parser_group);
+  parser_group = NULL;
+  if (parser_dns_query != NULL) FREE(parser_dns_query);
+  parser_dns_query = NULL;
+  if (parser_spawn != NULL) FREE(parser_spawn);
+  parser_spawn = NULL;
+  if (parser_contact != NULL) FREE(parser_contact);
+  parser_contact = NULL;
+  if (parser_child != NULL) FREE(parser_child);
+  parser_child = NULL;
+  if (parser_page != NULL) FREE(parser_page);
+  parser_page = NULL;
+  if (parser_also != NULL) FREE(parser_also);
+  parser_also = NULL;
+  if (parser_secret != NULL) FREE(parser_secret);
+  parser_secret = NULL;
+  if (parser_username != NULL) FREE(parser_username);
+  parser_username = NULL;
+  if (parser_password != NULL) FREE(parser_password);
+  parser_password = NULL;
+  if (parser_community != NULL) FREE(parser_community);
+  parser_community = NULL;
+  if (parser_oid != NULL) FREE(parser_oid);
+  parser_oid = NULL;
+  if (parser_snmp_oid_sec != NULL) FREE(parser_snmp_oid_sec);
+  parser_snmp_oid_sec = NULL;
+  if (parser_snmp_type != NULL) FREE(parser_snmp_type);
+  parser_snmp_type = NULL;
+  if (parser_snmp_low != NULL) FREE(parser_snmp_low);
+  parser_snmp_low = NULL;
+  if (parser_snmp_high != NULL) FREE(parser_snmp_high);
+  parser_snmp_high = NULL;
+  if (parser_snmp_exact != NULL) FREE(parser_snmp_exact);
+  parser_snmp_exact = NULL;
+  if (parser_snmp_rate != NULL) FREE(parser_snmp_rate);
+  parser_snmp_rate = NULL;
+  if (parser_url != NULL) FREE(parser_url);
+  parser_url = NULL;
+  if (parser_urltext != NULL) FREE(parser_urltext);
+  parser_urltext = NULL;
+  parser_i_type = -1;
+  parser_i_port = 0;
+  parser_when = SYSM_CONTACT_DOWN | SYSM_CONTACT_UP;
+  parser_dns_aa = parser_dns_recursion = FALSE;
+  parser_i_snmp_type = -1;
+  parser_i_snmp_low = parser_i_snmp_high = 0;
+  parser_i_snmp_exact = parser_i_snmp_rate = 0;
+  parser_obj_i_queuetime = parser_obj_i_numfailures = -1;
   parser_obj_i_pageinterval = -1;
   parser_reverse = FALSE;
   parser_snmp_octets = FALSE;
@@ -861,53 +800,37 @@ config\ html\ refresh\ [^;]+{WS}*;          {
     print_err(0, "HTML refresh : %d ", parser_html_refresh);
 };
 
-config\ queuetime\ [^;]+{WS}*;          {
-  /* Search for extra newlines that are not being counted */
+config{WS}+queuetime{WS}+[^;]+; {
+  char *value = yytext + strlen("config");
+  char *end;
+  long number;
   fixup_lineno();
-
-  parser_pos1 = strrchr( yytext, ' ' );
-  if (parser_pos1 == NULL)
+  while (isspace((unsigned char)*value)) value++;
+  value += strlen("queuetime");
+  errno = 0;
+  number = strtol(value, &end, 10);
+  if (end == value || errno == ERANGE || number < 0 || number > INT_MAX)
   {
-	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid queuetime");
+    badconfig = TRUE;
+    break;
   }
-  parser_pos1=parser_pos1+1;
-  parser_pos2 = strchr( parser_pos1, ';' );
-  if (parser_pos2 == NULL)
+  while (isspace((unsigned char)*end)) end++;
+  if (*end != ';')
   {
-	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid queuetime suffix");
+    badconfig = TRUE;
+    break;
   }
-
-  if (parser_queuetime != NULL)
-  {
-        FREE(parser_queuetime);
-	parser_queuetime = NULL;
-	parser_i_queuetime = -1;
-  }
-  parser_queuetime = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_queuetime");
-
-  strncpy( parser_queuetime, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_queuetime[ parser_pos2 - parser_pos1 ] = '\0';
-
-  /* If we are inside an object, apply this information
-   * only to this object
-   */
   if (parser_name != NULL)
+    parser_obj_i_queuetime = (int)number;
+  else
   {
-        parser_obj_i_queuetime = atol(parser_queuetime);
-  } else {
-    parser_i_queuetime = atol(parser_queuetime);
-    if (parser_i_queuetime == -1)
-    {
-          print_err(1, "Invalid queuetime specified in %s line %d",
-                  current_parsing_filename, line_no);
-    }
-    parser_obj_i_queuetime = -1;
-    if (debug)
-      print_err(0, "queuetime : %s/%d ", parser_queuetime, parser_i_queuetime); 
+    if (parser_queuetime != NULL) FREE(parser_queuetime);
+    parser_queuetime = STRDUP(value, "global queuetime");
+    parser_i_queuetime = (int)number;
   }
-};
+}
 
 
 config\ dnsexpire\ [^;]+{WS}*;          {
@@ -1023,91 +946,64 @@ config{WS}+pageinterval{WS}+[^;]+; {
   }
 }
 
-config\ maxqueued\ [^;]+;          {
-  /* Search for extra newlines that are not being counted */
+config{WS}+maxqueued{WS}+[^;]+; {
+  char *value = yytext + strlen("config");
+  char *end;
+  long number;
   fixup_lineno();
-
-  parser_pos1 = strrchr( yytext, ' ' );
-  if (parser_pos1 == NULL)
+  while (isspace((unsigned char)*value)) value++;
+  value += strlen("maxqueued");
+  errno = 0;
+  number = strtol(value, &end, 10);
+  if (end == value || errno == ERANGE || number < 0 || number > INT_MAX)
   {
-	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid maxqueued");
+    badconfig = TRUE;
+    break;
   }
-  parser_pos1=parser_pos1+1;
-  parser_pos2 = strchr( parser_pos1, ';' );
-  if (parser_pos2 == NULL)
+  while (isspace((unsigned char)*end)) end++;
+  if (*end != ';')
   {
-	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid maxqueued suffix");
+    badconfig = TRUE;
+    break;
   }
+  if (parser_maxqueued != NULL) FREE(parser_maxqueued);
+  parser_maxqueued = STRDUP(value, "global maxqueued");
+  parser_i_maxqueued = (int)number;
+}
 
-  if (parser_maxqueued != NULL)
-  {
-        FREE(parser_maxqueued);
-	parser_i_maxqueued = -1;
-  }
-  parser_maxqueued = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_maxqueued");
-
-  strncpy( parser_maxqueued, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_maxqueued[ parser_pos2 - parser_pos1 ] = '\0';
-
-  parser_i_maxqueued = atol(parser_maxqueued);
-  if (parser_i_maxqueued == -1)
-  {
-	print_err(1, "Invalid maxqueued specified in %s line %d", 
-		current_parsing_filename, line_no);
-  }
-  if (debug)
-    print_err(0, "maxqueued : %s/%d ", parser_maxqueued, parser_i_maxqueued); 
-};
-
-config\ numfailures\ [^;]+;          {
-  /* Search for extra newlines that are not being counted */
+config{WS}+numfailures{WS}+[^;]+; {
+  char *value = yytext + strlen("config");
+  char *end;
+  long number;
   fixup_lineno();
-
-  parser_pos1 = strrchr( yytext, ' ' );
-  if (parser_pos1 == NULL)
+  while (isspace((unsigned char)*value)) value++;
+  value += strlen("numfailures");
+  errno = 0;
+  number = strtol(value, &end, 10);
+  if (end == value || errno == ERANGE || number < 0 || number > INT_MAX)
   {
-	print_err(1, "missing space/value on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid numfailures");
+    badconfig = TRUE;
+    break;
   }
-  parser_pos1=parser_pos1+1;
-  parser_pos2 = strchr( parser_pos1, ';' );
-  if (parser_pos2 == NULL)
+  while (isspace((unsigned char)*end)) end++;
+  if (*end != ';')
   {
-	print_err(1, "misbalanced quotes on line %d in %s", line_no, current_parsing_filename);
-	break;
+    parser_error(current_parsing_filename, line_no, "invalid numfailures suffix");
+    badconfig = TRUE;
+    break;
   }
-
-  if (parser_numfailures != NULL)
-  {
-        FREE(parser_numfailures);
-	parser_i_numfailures = -1;
-  }
-  parser_numfailures = MALLOC((parser_pos2-parser_pos1)+1, "parse.l:parser_numfailures");
-
-  strncpy( parser_numfailures, parser_pos1, parser_pos2 - parser_pos1 );
-  parser_numfailures[ parser_pos2 - parser_pos1 ] = '\0';
-
-  parser_i_numfailures = atol(parser_numfailures);
-  if (parser_i_numfailures == -1)
-  {
-	print_err(1, "Invalid numfailures specified in %s line %d", 
-		current_parsing_filename, line_no);
-  }
-  /* If we are inside an object, apply this information
-   * only to this object
-   */
   if (parser_name != NULL)
+    parser_obj_i_numfailures = (int)number;
+  else
   {
-	parser_obj_i_numfailures = parser_i_numfailures;
-  } else {
-	parser_obj_i_numfailures = -1;
+    if (parser_numfailures != NULL) FREE(parser_numfailures);
+    parser_numfailures = STRDUP(value, "global numfailures");
+    parser_i_numfailures = (int)number;
   }
-  if (debug)
-    print_err(0, "numfailures : %s/%d ", parser_numfailures, parser_i_numfailures);
-
-};
+}
 
 config\ minnumfailures\ [^;]+;          {
   /* Search for extra newlines that are not being counted */
@@ -2763,6 +2659,7 @@ spawn\ [^;]+;         {
 	{
 		print_err(1, "ERROR: spawn command '%s' not found in spawns block at line %d in %s",
 			temp_char, line_no, current_parsing_filename);
+		badconfig = TRUE;
 		FREE(temp_char);
 		break;
 	}
@@ -3091,6 +2988,7 @@ void open_new_file(char *filename, FILE *current_file)
 			print_err(1, "parser.l: include \"%s\" in a managed config names a "
 				"path; only plain filenames are read from %s",
 				filename, confgen_statedir());
+			badconfig = TRUE;
 			return;
 		}
 		snprintf(sibling, sizeof(sibling), "%s", save_current_parsing_filename);
@@ -3134,6 +3032,7 @@ void open_new_file(char *filename, FILE *current_file)
 	if (new_file == NULL)
 	{
                 perror(filename);
+		badconfig = TRUE;
                 return;
 	}
 	/* Record it only once it opened: a missing include is not part of
@@ -3229,11 +3128,11 @@ void add_object()
 			parser_name);
 		valid_obj = 0;
 	}
-	hp = my_gethostbyname(parser_ip, -1);
-	if (hp == NULL)
+	if (parser_ip != NULL)
 	{
-		print_err(1, "%s is not a valid dns name, not monitoring", parser_ip);
-		valid_obj = 0;
+		hp = my_gethostbyname(parser_ip, -1);
+		if (hp == NULL)
+			print_err(1, "%s is unresolved; retaining object with NODNS status", parser_ip);
 	}
 
 	if (parser_i_type == -1)
@@ -3420,7 +3319,7 @@ void add_object()
 		new_ele->value->data->hdrval = NULL;
 		new_ele->value->data->hdr = NULL;
 		new_ele->value->data->lastmsgid = NULL;
-		new_ele->value->data->lastcheck = 0;
+		new_ele->value->data->lastcheck = (hp != NULL) ? SYSM_OK : SYSM_NODNS;
 		new_ele->value->data->totaldown = 0;
 		new_ele->value->data->totalchecked = 0;
 		new_ele->value->data->downct = 0;
@@ -3429,22 +3328,10 @@ void add_object()
 		new_ele->value->data->contacted = FALSE;
 		new_ele->value->data->queued = FALSE;
 		new_ele->value->data->trace = FALSE;
-		if (parser_queuetime != NULL)
-		{
-			if (parser_obj_i_queuetime != -1)
-			{
-				new_ele->value->data->queuetime = parser_obj_i_queuetime;
-			} else {
-				new_ele->value->data->queuetime = parser_i_queuetime;
-			}
-		} else {
-			if (parser_i_queuetime == -1)
-			{
-				new_ele->value->data->queuetime = queuetime;
-			} else {
-				new_ele->value->data->queuetime = parser_i_queuetime;
-			}
-		}
+		new_ele->value->data->queuetime =
+			(parser_obj_i_queuetime >= 0) ? (unsigned long)parser_obj_i_queuetime :
+			(parser_i_queuetime >= 0) ? (unsigned long)parser_i_queuetime : 60;
+
 		if (debug)
 		{
 			print_err(1, "%s : obj->queuetime = %d / dflt %d",
@@ -3502,17 +3389,10 @@ void add_object()
 			new_ele->value->data->pktloss_history_hours = PKTLOSS_DEFAULT_HISTORY;
 			new_ele->value->data->pktloss_last_check = 0;
 		}
-		if (parser_numfailures != NULL)
-		{
-			if (parser_obj_i_numfailures == -1)
-			{
-				new_ele->value->data->max_down = parser_i_numfailures;
-			} else {
-				new_ele->value->data->max_down = parser_obj_i_numfailures;
-			}
-		} else {
-			new_ele->value->data->max_down = numfailures;
-		}
+		new_ele->value->data->max_down =
+			(parser_obj_i_numfailures >= 0) ? (unsigned long)parser_obj_i_numfailures :
+			(parser_i_numfailures >= 0) ? (unsigned long)parser_i_numfailures : 4;
+
 		/* clear it since this is a per-obj setting */
 		parser_obj_i_numfailures = -1;
 
@@ -3709,194 +3589,53 @@ void free_struct_nei_list(struct nei_list *freethis)
 	}
 }
 
-void initalize_parser()
-{
-	if (parser_name != NULL)
-		FREE(parser_name);
-	if (parser_pmesg != NULL)
-		FREE(parser_pmesg);
-	if (parser_obj_pmesg != NULL)
-		FREE(parser_obj_pmesg);
-	if (parser_ip != NULL)
-		FREE(parser_ip);
-	if (parser_root != NULL)
-		FREE(parser_root);
-	if (parser_type != NULL)
-		FREE(parser_type);
-	if (parser_port != NULL)
-		FREE(parser_port);
-	if (parser_numfailures != NULL)
-		FREE(parser_numfailures);
-	if (parser_desc != NULL)
-		FREE(parser_desc);
-        if (parser_group != NULL)
-                FREE(parser_group);
-	if (parser_dns_query != NULL)
-		FREE(parser_dns_query);
-	if (parser_spawn != NULL)
-		FREE(parser_spawn);
-	if (parser_contact != NULL)
-		FREE(parser_contact);
-	if (parser_child != NULL)
-		FREE(parser_child);
-	if (parser_sender != NULL)
-		FREE(parser_sender);
-	if (parser_subject != NULL)
-		FREE(parser_subject);
-	if (parser_upcolor != NULL)
-		FREE(parser_upcolor);
-	if (parser_downcolor != NULL)
-		FREE(parser_downcolor);
-	if (parser_recentcolor != NULL)
-		FREE(parser_recentcolor);
-	if (parser_replyto != NULL)
-		FREE(parser_replyto);
-	if (parser_errorsto != NULL)
-		FREE(parser_errorsto);
-	if (parser_header != NULL)
-		FREE(parser_header);
-	if (parser_authkey != NULL)
-		FREE(parser_authkey);
-	if (parser_savestate != NULL)
-		FREE(parser_savestate);
-	if (parser_pidfile != NULL)
-		FREE(parser_pidfile);
-	if (parser_statusfile != NULL)
-		FREE(parser_statusfile);
-	if (parser_statedir != NULL)
-		FREE(parser_statedir);
-	if (parser_statustempdir != NULL)
-		FREE(parser_statustempdir);
-	if (parser_logging != NULL)
-		FREE(parser_logging);
-	if (parser_page != NULL)
-		FREE(parser_page);
-	if (parser_also != NULL)
-		FREE(parser_also);
-	if (parser_secret != NULL)
-		FREE(parser_secret);
-	if (parser_username != NULL)
-		FREE(parser_username);
-	if (parser_password != NULL)
-		FREE(parser_password);
-	if (parser_url != NULL)
-		FREE(parser_url);
-	if (parser_urltext != NULL)
-		FREE(parser_urltext);
-	if (parser_include != NULL)
-		FREE(parser_include);
-	if (parser_queuetime != NULL)
-		FREE(parser_queuetime);
-	if (parser_dnsexpire != NULL)
-		FREE(parser_dnsexpire);
-	if (parser_dnslog != NULL)
-		FREE(parser_dnslog);
-	if (parser_pageinterval != NULL)
-		FREE(parser_pageinterval);
-	if (parser_maxqueued != NULL)
-		FREE(parser_maxqueued);
-	if (parser_eq != NULL)
-		FREE(parser_eq);
-	if (parser_value != NULL)
-		FREE(parser_value);
-	if (parser_snmp_type != NULL)
-		FREE(parser_snmp_type);
-	if (parser_snmp_low != NULL)
-		FREE(parser_snmp_low);
-	if (parser_snmp_high != NULL)
-		FREE(parser_snmp_high);
-	if (parser_snmp_exact != NULL)
-		FREE(parser_snmp_exact);
-	if (parser_dateformat != NULL)
-		FREE(parser_dateformat);
-	if (parser_community != NULL)
-		FREE(parser_community);
-	if (parser_oid != NULL)
-		FREE(parser_community);
-	if (parser_snmp_oid_sec != NULL)
-		FREE(parser_snmp_oid_sec);
+/* A snapshot transfers ownership: loadconfig may now free/reset every
+ * parser global without touching the live configuration's strings. */
+struct parser_snapshot {
+#define PARSER_MEMBER(type, name, initial, cleanup) type name;
+	PARSER_FIELDS(PARSER_MEMBER)
+#undef PARSER_MEMBER
+};
 
-/* null stuff out */
-	parser_value = NULL;
-	parser_eq = NULL;
-	parser_name = NULL;
-	parser_pmesg = NULL;
-	parser_obj_pmesg = NULL;
-	parser_ip = NULL;
-	parser_root = NULL;
-	parser_type = NULL;
-	parser_port = NULL;
-	parser_i_port = 0;
-	parser_numfailures = NULL;
-	parser_desc = NULL;
-	parser_group = NULL;
-	parser_dns_query = NULL;
-	parser_dns_aa = FALSE;
-	parser_dns_recursion = FALSE;
-	parser_spawn = NULL;
-	parser_contact = NULL;
-	parser_child = NULL;
-	parser_sender = NULL;
-	parser_subject = NULL;
-	parser_upcolor = NULL;
-	parser_downcolor = NULL;
-	parser_recentcolor = NULL;
-	parser_replyto = NULL;
-	parser_errorsto = NULL;
-	parser_header = NULL;
-	parser_authkey = NULL;
-	parser_sitename = NULL;
-	parser_aggregator = NULL;
-	parser_agg_token = NULL;
-	parser_agg_ca = NULL;
-	parser_sitedesc = NULL;
-	parser_savestate = NULL;
-	parser_statusfile = NULL;
-	parser_statedir = NULL;
-	parser_listenport = -1;
-	parser_statustempdir = NULL;
-	parser_pidfile = STRDUP (PIDFILE, "default PID file name");
-	parser_logging = NULL;
-	parser_page = NULL;
-	parser_also = NULL;
-	parser_secret = NULL;
-	parser_username = NULL;
-	parser_password = NULL;
-	parser_url = NULL;
-	parser_urltext = NULL;
-	parser_include = NULL;
-	parser_queuetime = NULL;
-	parser_obj_i_queuetime = -1;
-	parser_obj_i_pageinterval = -1;
-	parser_obj_i_numfailures = -1;
-	parser_dnsexpire = NULL;
-	parser_dnslog = NULL;
-	parser_pageinterval = NULL;
-	parser_obj_i_pageinterval = -1;
-	parser_maxqueued = NULL;
-	parser_showupalso = FALSE;
-	parser_nologconnects = FALSE;
-	parser_nosubject = FALSE;
-	parser_catch_snmptrap = 0;
-	parser_trap_alert = FALSE;
-	parser_rtt_threshold = NULL;
-	parser_i_rtt_threshold = RTT_DEFAULT_THRESHOLD_MS;
-	parser_jitter_threshold = NULL;
-	parser_i_jitter_threshold = 0;
-	parser_rtt_samples = NULL;
-	parser_i_rtt_samples = 5;  /* Default: 5 samples */
-	parser_rtt_interval = NULL;
-	parser_i_rtt_interval = RTT_DEFAULT_INTERVAL_MS;
-	parser_html_refresh = 60;
-	parser_snmp_type = NULL;
-	parser_snmp_version = SNMP_VERSION_2C;
-	parser_snmp_low = NULL;
-	parser_snmp_high = NULL;
-	parser_snmp_exact = NULL;
-	parser_community = NULL;
-	parser_oid = NULL;
-	parser_snmp_oid_sec = NULL;
-	parser_dateformat = NULL;
+#define PARSER_FREE_STRING(value) do { if ((value) != NULL) FREE(value); } while (0)
+#define PARSER_FREE_NEIGHBORS(value) free_struct_nei_list(value)
+#define PARSER_FREE_NONE(value) ((void)0)
+
+void initalize_parser(void)
+{
+#define PARSER_CLEAR(type, name, initial, cleanup) \
+	PARSER_FREE_##cleanup(name); name = initial;
+	PARSER_FIELDS(PARSER_CLEAR)
+#undef PARSER_CLEAR
+}
+
+struct parser_snapshot *parser_save_state(void)
+{
+	struct parser_snapshot *saved = malloc(sizeof(*saved));
+	if (saved == NULL)
+		return NULL;
+#define PARSER_SAVE(type, name, initial, cleanup) \
+	saved->name = name; name = initial;
+	PARSER_FIELDS(PARSER_SAVE)
+#undef PARSER_SAVE
+	return saved;
+}
+
+void parser_restore_state(struct parser_snapshot *saved)
+{
+	initalize_parser();
+#define PARSER_RESTORE(type, name, initial, cleanup) name = saved->name;
+	PARSER_FIELDS(PARSER_RESTORE)
+#undef PARSER_RESTORE
+	free(saved);
+}
+
+void parser_discard_state(struct parser_snapshot *saved)
+{
+#define PARSER_DISCARD(type, name, initial, cleanup) PARSER_FREE_##cleanup(saved->name);
+	PARSER_FIELDS(PARSER_DISCARD)
+#undef PARSER_DISCARD
+	free(saved);
 }
 
 void cleanup_after_parser()

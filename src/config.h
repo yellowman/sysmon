@@ -956,6 +956,11 @@ void service_test_https(struct monitorent *);
 
 /* parser.l */
 void initalize_parser();
+struct parser_snapshot;
+struct parser_snapshot *parser_save_state(void);
+void parser_restore_state(struct parser_snapshot *);
+void parser_discard_state(struct parser_snapshot *);
+extern bool parser_heartbeat;
 void free_struct_nei_list(struct nei_list *);
 
 /* icmp.c */
@@ -1121,6 +1126,10 @@ struct confgen_file {
 #define CONFGEN_MAX_PAYLOAD (8 * 1024 * 1024)
 
 void confset_reset(void);
+struct confset_snapshot;
+struct confset_snapshot *confset_save_state(void);
+void confset_restore_state(struct confset_snapshot *);
+void confset_discard_state(struct confset_snapshot *);
 void confset_record(const char *, const char *);
 int confset_count(void);
 const char *confset_name(int);
@@ -1138,6 +1147,7 @@ bool confgen_hash_files(struct confgen_file *, int, char *, size_t);
 unsigned long confgen_generation(void);
 const char *confgen_statedir(void);
 const char *confgen_active_config(void);
+bool confgen_validate_config(const char *, char *, size_t);
 bool confgen_is_managed_file(const char *);
 void confgen_set_statedir(const char *);
 void confgen_lock_statedir(void);

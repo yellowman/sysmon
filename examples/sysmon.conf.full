@@ -87,17 +87,11 @@ config snmp-trap;               # Enable SNMP trap monitoring (port 162)
 #               %t=type, %m=message, %G=group, %c=downcount, %C=upcount
 
 spawns {
-    name "sendalert" {
-        command "/usr/local/bin/send-alert.sh %I %U %s %w %t";
-    };
+    sendalert "/usr/local/bin/send-alert.sh %I %U %s %w %t"
 
-    name "pagerduty" {
-        command "/usr/local/bin/pagerduty-trigger %h %s";
-    };
+    pagerduty "/usr/local/bin/pagerduty-trigger %h %s"
 
-    name "slack" {
-        command "/usr/local/bin/slack-notify '%h is %s: %m'";
-    };
+    slack "/usr/local/bin/slack-notify '%h is %s: %m'"
 };
 
 

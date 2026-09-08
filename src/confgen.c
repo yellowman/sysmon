@@ -81,11 +81,12 @@
  */
 #define GEN_ORDER_FILE ".order"
 
-static struct {
+struct confset_entry {
 	char *name;
 	char *path;
 	bool flat; /* name is a plain filename, so this file can be managed */
-} confset[CONFSET_MAX];
+};
+static struct confset_entry confset[CONFSET_MAX];
 
 static int confset_n = 0;
 
@@ -123,6 +124,40 @@ void confset_reset(void)
 		confset[i].path = NULL;
 	}
 	confset_n = 0;
+}
+
+struct confset_snapshot {
+	int count;
+	struct confset_entry entries[CONFSET_MAX];
+};
+
+struct confset_snapshot *confset_save_state(void)
+{
+	struct confset_snapshot *saved = malloc(sizeof(*saved));
+	if (saved == NULL) return NULL;
+	saved->count = confset_n;
+	memcpy(saved->entries, confset, sizeof(confset));
+	memset(confset, 0, sizeof(confset));
+	confset_n = 0;
+	return saved;
+}
+
+void confset_restore_state(struct confset_snapshot *saved)
+{
+	confset_reset();
+	memcpy(confset, saved->entries, sizeof(confset));
+	confset_n = saved->count;
+	free(saved);
+}
+
+void confset_discard_state(struct confset_snapshot *saved)
+{
+	int i;
+	for (i = 0; i < saved->count; i++) {
+		FREE(saved->entries[i].name);
+		FREE(saved->entries[i].path);
+	}
+	free(saved);
 }
 
 /*
@@ -1014,6 +1049,11 @@ static void prune_generations(void)
 /* A generation sitting on disk, read back in its recorded load order. */
 static bool hash_generation(unsigned long gen, char *out, size_t outlen)
 {
+#ifndef HAVE_TLS
+	(void)gen;
+	if (out != NULL && outlen > 0) out[0] = '\0';
+	return FALSE;
+#else
 	char dir[PATH_MAX], path[PATH_MAX + 160], line[256];
 	FILE *order;
 
@@ -1059,6 +1099,7 @@ static bool hash_generation(unsigned long gen, char *out, size_t outlen)
 		fclose(order);
 		return hash_end(&h, out);
 	}
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -1121,6 +1162,8 @@ static bool validate_config(const char *path, char *err, size_t errlen,
 		dup2(fds[1], STDERR_FILENO);
 		close(fds[1]);
 
+		signal(SIGALRM, SIG_DFL);
+		alarm(10);
 		badconfig = FALSE;
 		tree = loadconfig((char *)path);
 		if (badconfig)
@@ -1153,9 +1196,11 @@ static bool validate_config(const char *path, char *err, size_t errlen,
 	}
 
 	close(fds[1]);
-	while (errlen > 1 && used < errlen - 1)
+	while (err != NULL && errlen > 1 && used < errlen - 1)
 	{
 		got = read(fds[0], err + used, errlen - 1 - used);
+		if (got < 0 && errno == EINTR)
+			continue;
 		if (got <= 0)
 			break;
 		used += (size_t)got;
@@ -1165,8 +1210,9 @@ static bool validate_config(const char *path, char *err, size_t errlen,
 	/* Drain the rest so the child is never blocked writing. */
 	{
 		char sink[512];
-		while (read(fds[0], sink, sizeof(sink)) > 0)
-			;
+		do {
+			got = read(fds[0], sink, sizeof(sink));
+		} while (got > 0 || (got < 0 && errno == EINTR));
 	}
 	close(fds[0]);
 
@@ -1189,8 +1235,16 @@ static bool validate_config(const char *path, char *err, size_t errlen,
 		}
 	}
 
-	while (waitpid(pid, &status, 0) == -1 && errno == EINTR)
-		;
+	{
+		pid_t waited;
+		do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+		if (waited != pid)
+		{
+			if (err != NULL && errlen > 0)
+				snprintf(err, errlen, "cannot collect config validator: %s", strerror(errno));
+			return FALSE;
+		}
+	}
 
 	if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
 		return TRUE;
@@ -1204,6 +1258,14 @@ static bool validate_config(const char *path, char *err, size_t errlen,
 			snprintf(err, errlen, "the config was rejected");
 	}
 	return FALSE;
+}
+
+/* Validate an ordinary SIGHUP target without running the non-reentrant
+ * parser against the live daemon. Config delivery already uses this
+ * child-process boundary; local reload deserves the same guarantee. */
+bool confgen_validate_config(const char *path, char *err, size_t errlen)
+{
+	return validate_config(path, err, errlen, NULL);
 }
 
 /* ------------------------------------------------------------------ */

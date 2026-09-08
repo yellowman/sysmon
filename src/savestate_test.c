@@ -224,8 +224,18 @@ static void test_rejections(void)
 	writefile(body);
 	make_tree(names, 1);
 	load_state(statepath);
-	check(find("core")->downct == 5,
-		"a complete line before the truncation is still used");
+	check(find("core")->downct == 0,
+		"a mid-line truncation rejects the whole checkpoint");
+	free_tree_local();
+
+	/* truncated cleanly at a line boundary: the header count catches it */
+	header(hdr, sizeof(hdr), 1, 60, 2);
+	snprintf(body, sizeof(body), "%sdownct=5 name=core\n", hdr);
+	writefile(body);
+	make_tree(names, 1);
+	load_state(statepath);
+	check(find("core")->downct == 0,
+		"a line-boundary truncation rejects the whole checkpoint");
 	free_tree_local();
 
 	/* a line with no name is not attributable to anything */
@@ -235,6 +245,17 @@ static void test_rejections(void)
 	make_tree(names, 1);
 	load_state(statepath);
 	check(find("core")->downct == 0, "a nameless line is dropped");
+	free_tree_local();
+
+	/* A checkpoint materially ahead of this host's clock is not evidence
+	   about the current outage. header() subtracts age, so negative is
+	   in the future. */
+	header(hdr, sizeof(hdr), 1, -60 * 60, 1);
+	snprintf(body, sizeof(body), "%sdownct=5 name=core\n", hdr);
+	writefile(body);
+	make_tree(names, 1);
+	load_state(statepath);
+	check(find("core")->downct == 0, "a future checkpoint is ignored");
 	free_tree_local();
 
 	/* no file at all - a first start */
@@ -304,6 +325,63 @@ static void test_checkpoint_pacing(void)
 	checkpoint_state(t0 - 5000 + 600, statepath);
 	check(access(statepath, F_OK) == 0, "the re-armed interval writes again");
 
+	/* A failed write remains due: once its path becomes writable, a
+	   short bounded retry replaces waiting another ten minutes. */
+	{
+		char blocker[512];
+		char retry_path[640];
+		FILE *fh;
+
+		snprintf(blocker, sizeof(blocker), "%s.blocker", statepath);
+		snprintf(retry_path, sizeof(retry_path), "%s/state", blocker);
+		unlink(retry_path);
+		rmdir(blocker);
+		fh = fopen(blocker, "w");
+		if (fh != NULL)
+			fclose(fh);
+		checkpoint_state(t0 + 50000, retry_path);
+		check(access(retry_path, F_OK) != 0,
+			"an unwritable checkpoint path fails");
+		unlink(blocker);
+		mkdir(blocker, 0700);
+		checkpoint_state(t0 + 50001, retry_path);
+		check(access(retry_path, F_OK) != 0, "failed checkpoint retries are rate limited");
+		checkpoint_state(t0 + 50005, retry_path);
+		check(access(retry_path, F_OK) == 0,
+			"a failed checkpoint retries after five seconds");
+		unlink(retry_path);
+		rmdir(blocker);
+	}
+
+	free_tree_local();
+}
+
+static void test_malformed_records(void)
+{
+	static const char *names[] = { "core", "leaf" };
+	static const char *bad[] = {
+		"garbage", "   ", "downct=-1 name=leaf", "downct=9junk name=leaf",
+		"downct=184467440737095516160 name=leaf", "contacted=2 name=leaf",
+		"acked=-1 name=leaf", "deathtime=9223372036854775808 name=leaf",
+		"downct=1 downct=2 name=leaf", "downct=4 name=", "downct=6 name=core",
+		"downct= name=leaf", "lastcheck=99999999999999999 name=leaf"
+	};
+	char hdr[128], body[1024];
+	size_t i;
+	for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+		header(hdr, sizeof(hdr), 1, 60, 2);
+		snprintf(body, sizeof(body), "%sdownct=5 name=core\n%s\n", hdr, bad[i]);
+		writefile(body);
+		make_tree(names, 2);
+		load_state(statepath);
+		check(find("core")->downct == 0 && find("leaf")->downct == 0,
+		    "malformed records reject the complete checkpoint");
+		free_tree_local();
+	}
+	writefile("sysmon-state 1 9999999999999999999999999999999999 1\ndownct=5 name=core\n");
+	make_tree(names, 2);
+	load_state(statepath);
+	check(find("core")->downct == 0, "overflowing timestamp is rejected");
 	free_tree_local();
 }
 
@@ -324,6 +402,7 @@ int main(void)
 	test_rejections();
 	test_unknown_object();
 	test_checkpoint_pacing();
+	test_malformed_records();
 
 	unlink(statepath);
 	rmdir(dir);

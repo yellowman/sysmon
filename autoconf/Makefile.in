@@ -135,7 +135,10 @@ syswatch-test.o: syswatch.c config.h runtime_policy.h Makefile
 daemon-core-test: daemon_core_test.c syswatch-test.o $(DAEMON_CORE_OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o daemon-core-test daemon_core_test.c syswatch-test.o $(DAEMON_CORE_OBJECTS) $(LIBS)
 
-check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test
+reload-test: sysmond reload_test.sh
+	sh ./reload_test.sh ./sysmond
+
+check: trapdecode-test snmpget-test confgen-test savestate-test showobj-test runtime-policy-test daemon-core-test reload-test
 	./trapdecode-test
 	./snmpget-test
 	./confgen-test
@@ -186,9 +189,9 @@ ssh.o:		config.h Makefile ssh.c
 
 sysmon-ping-helper.o: sysmon-ping-helper.c ping-helper.h
 
-parser.c: parser.l
+parser.c: parser.l parser_state.h
 	-$(RM) parser.c
 	$(LEX) -t parser.l > parser.c
 
-parser.o: parser.c config.h
+parser.o: parser.c config.h parser_state.h
 

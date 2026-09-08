@@ -1565,9 +1565,9 @@ void fast_cleanup_checks()
 			print_err(0, "in q @ sighup - %s:%d", here->checkent->hostname,
 				here->checkent->type);
 		}
+		here->checkent->queued = 0;
 		if (!here->started)
 		{
-			here->checkent->queued = 0;
 			here->retval = here->checkent->lastcheck;
 		} else {
 			if (here->monitordata != NULL)
@@ -2084,8 +2084,13 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 
 		if (gotsighup)
 		{
-			/* Kill all checks currently pending */
-			fast_cleanup_checks();
+			char validation[LARGE_TEMPBUF_SIZE];
+			const char *active = confgen_active_config();
+			gotsighup = FALSE;
+			if (!confgen_validate_config(active, validation, sizeof(validation))) {
+				print_err(1, "Reload rejected for %s: %s", active, validation);
+				continue;
+			}
 
 			/* do all the fun stuff */
 			if (debug)
@@ -2096,8 +2101,7 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			   delivery swaps the current generation, a rollback swaps
 			   it back, and a revert drops it and returns to the seed.
 			   Ask rather than remember. */
-			hupdata = sync_after_sighup(currenthead,
-				(char *)confgen_active_config());
+			hupdata = sync_after_sighup(currenthead, (char *)active);
 
 			currenthead = hupdata;
 			/* Must do this to avoid qsort having out of bounds issues
@@ -2108,7 +2112,6 @@ do_watch(char *cmdname, int listenport, char *myhostname)
 			{
 				print_err(0, "resetting gotsighup");
 			}
-			gotsighup = FALSE;
 			statuschanged = TRUE;
 		}
 
@@ -2154,7 +2157,7 @@ void periodic_rewalk(struct all_elements_list *here, time_t right_now, int down)
 #ifdef HAVE_LIBPTHREAD
 				pthread_mutex_lock(&Sysmon_Giant);
 #endif /* HAVE_LIBPTHREAD */
-				loc->value->data->lastcheck = 0;
+				loc->value->data->next_queuetime = right_now;
 #ifdef HAVE_LIBPTHREAD
 				pthread_mutex_unlock(&Sysmon_Giant);
 #endif /* HAVE_LIBPTHREAD */
@@ -2398,27 +2401,42 @@ int main(int argc, char **argv)
 	 * this daemon actually runs.
 	 */
 	currenthead = loadconfig(configfile);
-	update_globs_from_parser();
+
+	confgen_set_statedir(parser_statedir);
 	confgen_lock_statedir();
+	if (send_stop_sig || send_pause_sig) {
+		signal_ourselves(send_stop_sig ? SIGTERM : SIGUSR2);
+		exit(0);
+	}
 
 	/*
 	 * Command line wins over config: -p is somebody at a terminal saying
 	 * what they want right now, and it is also how the config gets
 	 * overridden when the config is the thing being debugged.
 	 */
-	if (listenport < 0)
-		listenport = (parser_listenport >= 0) ? parser_listenport : 0;
 
 	{
 		const char *active = confgen_active_config();
 
 		if (strcmp(active, configfile) != 0)
 		{
+			struct all_elements_list *seedhead = currenthead;
+			struct all_elements_list *managedhead;
+
 			print_err(1, "running managed generation %lu from %s",
 				confgen_generation(), confgen_statedir());
-			free_tree(currenthead);
-			currenthead = loadconfig((char *)active);
-			update_globs_from_parser();
+			managedhead = loadconfig((char *)active);
+			if (badconfig || managedhead == NULL || configed_root == NULL)
+			{
+				print_err(1, "Managed configuration %s is not runnable; refusing to start",
+					active);
+				if (managedhead != NULL)
+					free_tree(managedhead);
+				free_tree(seedhead);
+				exit(1);
+			}
+			currenthead = managedhead;
+			free_tree(seedhead);
 		}
 		else
 		{
@@ -2427,25 +2445,21 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (badconfig || currenthead == NULL || configed_root == NULL) {
+		print_err(1, "Active configuration is not runnable; refusing to start");
+		free_tree(currenthead);
+		exit(1);
+	}
+	update_globs_from_parser();
+	if (listenport < 0)
+		listenport = (parser_listenport >= 0) ? parser_listenport : 0;
+
 	if (maxqueued > 0 && max_numnei > maxqueued && (!quiet))
 	{
 		print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",
 			max_numnei, maxqueued);
 	}
 
-	/* XXX: can this be done before parsing the config? */
-	if (send_stop_sig) 
-	{
-		signal_ourselves(SIGTERM);
-		exit(0);
-	}
-
-	/* check if we should pause/unpause monitoring */
-	if (send_pause_sig)
-	{
-		signal_ourselves(SIGUSR2);
-		exit(0);
-	}
 
 	not_started_yet = FALSE;
 

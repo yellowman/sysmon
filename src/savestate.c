@@ -46,6 +46,7 @@
  */
 
 #include "config.h"
+#include <stdint.h>
 
 #define STATE_MAGIC	"sysmon-state"
 #define STATE_VERSION	1
@@ -61,6 +62,9 @@
  * so rather than acting on stale beliefs.
  */
 #define STATE_MAX_AGE	(12 * 60 * 60)
+
+/* Tolerate a small clock correction, not a checkpoint from the future. */
+#define STATE_FUTURE_SKEW	(5 * 60)
 
 /* How often the watch loop checkpoints. Ten minutes bounds what an
    unclean death can forget to ten minutes of state changes. */
@@ -117,8 +121,9 @@ struct saved_state {
  */
 static long write_state(const char *path)
 {
-	char tmp[PATH_MAX + 8];
+	char tmp[PATH_MAX + 16];
 	FILE *fh;
+	int fd, failed;
 	struct all_elements_list *here;
 	unsigned long count = 0;
 
@@ -126,12 +131,22 @@ static long write_state(const char *path)
 		return -1;
 
 	for (here = currenthead; here != NULL; here = here->next)
-		count++;
+		if (here->value != NULL && here->value->data != NULL &&
+		    here->value->unique_name != NULL)
+			count++;
 
-	snprintf(tmp, sizeof(tmp), "%s.new", path);
-	fh = fopen(tmp, "w");
+	if (snprintf(tmp, sizeof(tmp), "%s.new.XXXXXX", path) >= (int)sizeof(tmp))
+		return -1;
+	fd = mkstemp(tmp);
+	if (fd < 0) {
+		print_err(1, "save_state: cannot create temporary checkpoint: %s", strerror(errno));
+		return -1;
+	}
+	fh = fdopen(fd, "w");
 	if (fh == NULL)
 	{
+		close(fd);
+		unlink(tmp);
 		print_err(1, "save_state: cannot write %s: %s", tmp, strerror(errno));
 		return -1;
 	}
@@ -158,7 +173,11 @@ static long write_state(const char *path)
 			here->value->unique_name);
 	}
 
-	if (fclose(fh) != 0)
+	failed = ferror(fh);
+	if (fflush(fh) != 0) failed = TRUE;
+	if (!failed && fsync(fileno(fh)) != 0) failed = TRUE;
+	if (fclose(fh) != 0) failed = TRUE;
+	if (failed)
 	{
 		print_err(1, "save_state: cannot finish writing %s", tmp);
 		unlink(tmp);
@@ -191,27 +210,29 @@ void save_state(const char *path)
  * loss lost everything since the last clean stop - and an unclean death
  * is exactly when the next start most needs to know who was already
  * paged. Called from the watch loop every pass; writes at most once per
- * STATE_CHECKPOINT_SECS, silently (failures still complain).
+ * STATE_CHECKPOINT_SECS after success; failures retry at a bounded rate.
  */
 void checkpoint_state(time_t now, const char *path)
 {
-	static time_t last = 0;
+	static time_t last = 0, last_attempt = 0;
+	static bool retry_pending = FALSE;
 
-	if (path == NULL || *path == '\0')
-		return;
-	if (last == 0 || now < last)
-	{
-		/* First pass after start - load_state only just read this
-		   file, so there is nothing new to write - or the clock
-		   stepped backwards. Either way: (re)arm, wait a full
-		   interval. */
-		last = now;
+	if (path == NULL || *path == '\0') return;
+	if (last == 0 || now < last || now < last_attempt) {
+		last = last_attempt = now;
+		retry_pending = FALSE;
 		return;
 	}
-	if (now - last < STATE_CHECKPOINT_SECS)
-		return;
-	last = now;
-	write_state(path);
+	if (difftime(now, last) < STATE_CHECKPOINT_SECS) return;
+	/* A full disk must not cause a write/log storm on a busy event loop.
+	 * Retry failed writes after five seconds, not another ten minutes. */
+	if (retry_pending && difftime(now, last_attempt) < 5) return;
+	last_attempt = now;
+	if (write_state(path) >= 0) {
+		last = now;
+		retry_pending = FALSE;
+	} else
+		retry_pending = TRUE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,165 +260,162 @@ static void free_saved(struct saved_state *head)
 static char *next_pair(char *p, char **key, char **val)
 {
 	char *eq, *sp;
-
-	while (*p == ' ' || *p == '\t')
-		p++;
-	if (*p == '\0')
-		return NULL;
-
+	*key = *val = NULL;
+	while (*p == ' ' || *p == '\t') p++;
+	if (*p == '\0') return NULL;
 	eq = strchr(p, '=');
-	if (eq == NULL)
-		return NULL;
+	sp = strpbrk(p, " \t");
+	if (eq == NULL || eq == p || (sp != NULL && sp < eq)) return NULL;
 	*eq = '\0';
 	*key = p;
-
-	/* "name" takes the rest of the line: an object name may contain a
-	   space, and nothing else on the line may. */
-	if (strcmp(p, "name") == 0)
-	{
-		*val = eq + 1;
-		return NULL;
-	}
-
-	sp = strchr(eq + 1, ' ');
-	if (sp != NULL)
-		*sp = '\0';
 	*val = eq + 1;
-	return (sp != NULL) ? sp + 1 : NULL;
+	if (strcmp(p, "name") == 0) return NULL;
+	sp = strpbrk(*val, " \t");
+	if (sp == NULL) return NULL;
+	*sp++ = '\0';
+	while (*sp == ' ' || *sp == '\t') sp++;
+	return *sp != '\0' ? sp : NULL;
+}
+
+static int state_number(const char *text, unsigned long long *out)
+{
+	const unsigned char *p = (const unsigned char *)text;
+	char *end;
+	if (*p == '\0') return FALSE;
+	for (; *p != '\0'; p++)
+		if (*p < '0' || *p > '9') return FALSE;
+	errno = 0;
+	*out = strtoull(text, &end, 10);
+	return errno != ERANGE && *end == '\0';
+}
+
+static char *state_word(char **p)
+{
+	char *word;
+	while (isspace((unsigned char)**p)) (*p)++;
+	if (**p == '\0') return NULL;
+	word = *p;
+	while (**p != '\0' && !isspace((unsigned char)**p)) (*p)++;
+	if (**p != '\0') *(*p)++ = '\0';
+	return word;
+}
+
+static int state_field(struct saved_state *s, const char *key, const char *val)
+{
+	unsigned long long n;
+	/* Unknown keys remain forward-compatible. Known keys must be
+	 * whole nonnegative numbers that fit, not strtoul's valid prefix. */
+#define NUMBER_FIELD(field, flag, limit, type) \
+	if (strcmp(key, #field) == 0) { \
+		if ((s->seen & flag) || !state_number(val, &n) || n > (limit)) return FALSE; \
+		s->field = (type)n; s->seen |= flag; return TRUE; \
+	}
+	NUMBER_FIELD(lastcheck, SEEN_LASTCHECK, UINT_MAX, unsigned int)
+	NUMBER_FIELD(downct, SEEN_DOWNCT, ULONG_MAX, unsigned long)
+	NUMBER_FIELD(upct, SEEN_UPCT, ULONG_MAX, unsigned long)
+	NUMBER_FIELD(totalchecked, SEEN_TOTALCHECKED, ULONG_MAX, unsigned long)
+	NUMBER_FIELD(totaldown, SEEN_TOTALDOWN, ULONG_MAX, unsigned long)
+	NUMBER_FIELD(contacted, SEEN_CONTACTED, 1, bool)
+	NUMBER_FIELD(acked, SEEN_ACKED, 1, bool)
+#undef NUMBER_FIELD
+#define TIME_FIELD(field, flag) \
+	if (strcmp(key, #field) == 0) { \
+		if ((s->seen & flag) || !state_number(val, &n) || n > LLONG_MAX || \
+		    (time_t)n < 0 || (unsigned long long)(time_t)n != n) return FALSE; \
+		s->field = (time_t)n; s->seen |= flag; return TRUE; \
+	}
+	TIME_FIELD(lastcontacted, SEEN_LASTCONTACTED)
+	TIME_FIELD(deathtime, SEEN_DEATHTIME)
+	TIME_FIELD(last_up, SEEN_LAST_UP)
+	TIME_FIELD(last_recovery, SEEN_LAST_RECOVERY)
+#undef TIME_FIELD
+	return TRUE;
+}
+
+static int saved_name_cmp(const void *a, const void *b)
+{
+	const struct saved_state *sa = *(const struct saved_state *const *)a;
+	const struct saved_state *sb = *(const struct saved_state *const *)b;
+	return strcmp(sa->name, sb->name);
 }
 
 static struct saved_state *read_state(const char *path, time_t now)
 {
 	FILE *fh;
-	char line[LARGE_TEMPBUF_SIZE];
-	struct saved_state *head = NULL;
-	int version = 0;
-	long long written = 0;
-	unsigned long claimed = 0;
+	char line[LARGE_TEMPBUF_SIZE], *p, *magic, *version, *stamp, *count;
+	struct saved_state *head = NULL, *s;
+	unsigned long long v, written, claimed, parsed = 0;
 
 	fh = fopen(path, "r");
-	if (fh == NULL)
-		return NULL; /* no checkpoint is normal - a first start */
+	if (fh == NULL) return NULL;
+	if (fgets(line, sizeof(line), fh) == NULL || strchr(line, '\n') == NULL)
+		goto invalid;
+	p = line;
+	magic = state_word(&p);
+	version = state_word(&p);
+	stamp = state_word(&p);
+	count = state_word(&p);
+	if (magic == NULL || version == NULL || stamp == NULL || count == NULL ||
+	    state_word(&p) != NULL || strcmp(magic, STATE_MAGIC) != 0 ||
+	    !state_number(version, &v) || v != STATE_VERSION ||
+	    !state_number(stamp, &written) || written > LLONG_MAX ||
+	    (time_t)written < 0 || (unsigned long long)(time_t)written != written ||
+	    !state_number(count, &claimed) || claimed > SIZE_MAX / sizeof(s))
+		goto invalid;
+	if (difftime(now, (time_t)written) > STATE_MAX_AGE ||
+	    difftime((time_t)written, now) > STATE_FUTURE_SKEW)
+		goto invalid;
 
-	if (fgets(line, sizeof(line), fh) == NULL ||
-		sscanf(line, STATE_MAGIC " %d %lld %lu",
-			&version, &written, &claimed) != 3)
-	{
-		print_err(1, "load_state: %s is not a state file; ignoring it", path);
-		fclose(fh);
-		return NULL;
-	}
-	if (version != STATE_VERSION)
-	{
-		print_err(1, "load_state: %s is version %d, this daemon writes %d; "
-			"starting clean", path, version, STATE_VERSION);
-		fclose(fh);
-		return NULL;
-	}
-	if (now - (time_t)written > STATE_MAX_AGE)
-	{
-		print_err(1, "load_state: %s is %lld hours old; starting clean rather "
-			"than acting on it", path,
-			(long long)((now - (time_t)written) / 3600));
-		fclose(fh);
-		return NULL;
-	}
-
-	while (fgets(line, sizeof(line), fh) != NULL)
-	{
-		struct saved_state *s;
-		char *p, *key, *val;
-		char *nl = strchr(line, '\n');
-
-		if (nl != NULL)
-			*nl = '\0';
-		if (line[0] == '\0')
-			continue;
-
-		s = MALLOC(sizeof(struct saved_state), "savestate:entry");
-		if (s == NULL)
-			break;
+	while (fgets(line, sizeof(line), fh) != NULL) {
+		char *key, *val, *nl = strchr(line, '\n');
+		if (nl == NULL) goto invalid;
+		*nl = '\0';
+		if (nl > line && nl[-1] == '\r') nl[-1] = '\0';
+		if (line[0] == '\0') continue;
+		if (parsed >= claimed) goto invalid;
+		s = MALLOC(sizeof(*s), "savestate:entry");
+		if (s == NULL) goto invalid;
 		memset(s, 0, sizeof(*s));
-
-		p = line;
-		while (p != NULL)
-		{
-			p = next_pair(p, &key, &val);
-			if (key == NULL || val == NULL)
-				break;
-
-			/* Unknown keys fall through untouched, which is what lets
-			   this file be read by a daemon older or newer than the one
-			   that wrote it. */
-			if (strcmp(key, "name") == 0)
-				s->name = STRDUP((unsigned char *)val, "savestate:name");
-			else if (strcmp(key, "lastcheck") == 0)
-			{
-				s->lastcheck = (unsigned int)strtoul(val, NULL, 10);
-				s->seen |= SEEN_LASTCHECK;
-			}
-			else if (strcmp(key, "downct") == 0)
-			{
-				s->downct = strtoul(val, NULL, 10);
-				s->seen |= SEEN_DOWNCT;
-			}
-			else if (strcmp(key, "upct") == 0)
-			{
-				s->upct = strtoul(val, NULL, 10);
-				s->seen |= SEEN_UPCT;
-			}
-			else if (strcmp(key, "totalchecked") == 0)
-			{
-				s->totalchecked = strtoul(val, NULL, 10);
-				s->seen |= SEEN_TOTALCHECKED;
-			}
-			else if (strcmp(key, "totaldown") == 0)
-			{
-				s->totaldown = strtoul(val, NULL, 10);
-				s->seen |= SEEN_TOTALDOWN;
-			}
-			else if (strcmp(key, "contacted") == 0)
-			{
-				s->contacted = (strtol(val, NULL, 10) != 0);
-				s->seen |= SEEN_CONTACTED;
-			}
-			else if (strcmp(key, "acked") == 0)
-			{
-				s->acked = (strtol(val, NULL, 10) != 0);
-				s->seen |= SEEN_ACKED;
-			}
-			else if (strcmp(key, "lastcontacted") == 0)
-			{
-				s->lastcontacted = (time_t)strtoll(val, NULL, 10);
-				s->seen |= SEEN_LASTCONTACTED;
-			}
-			else if (strcmp(key, "deathtime") == 0)
-			{
-				s->deathtime = (time_t)strtoll(val, NULL, 10);
-				s->seen |= SEEN_DEATHTIME;
-			}
-			else if (strcmp(key, "last_up") == 0)
-			{
-				s->last_up = (time_t)strtoll(val, NULL, 10);
-				s->seen |= SEEN_LAST_UP;
-			}
-			else if (strcmp(key, "last_recovery") == 0)
-			{
-				s->last_recovery = (time_t)strtoll(val, NULL, 10);
-				s->seen |= SEEN_LAST_RECOVERY;
-			}
-		}
-
-		if (s->name == NULL)
-		{
-			FREE(s);
-			continue;
-		}
 		s->next = head;
 		head = s;
+		p = line;
+		do {
+			p = next_pair(p, &key, &val);
+			if (key == NULL || val == NULL) goto invalid;
+			if (strcmp(key, "name") == 0) {
+				if (*val == '\0') goto invalid;
+				s->name = STRDUP(val, "savestate:name");
+				if (s->name == NULL) goto invalid;
+			} else if (!state_field(s, key, val))
+				goto invalid;
+		} while (p != NULL);
+		if (s->name == NULL) goto invalid;
+		parsed++;
 	}
-	fclose(fh);
+	if (ferror(fh) || parsed != claimed) goto invalid;
+	/* Duplicate identities cannot stand in for missing records. */
+	if (parsed > 1) {
+		struct saved_state **names = malloc((size_t)parsed * sizeof(*names));
+		size_t i = 0;
+		int duplicate = FALSE;
+		if (names == NULL) goto invalid;
+		for (s = head; s != NULL; s = s->next) names[i++] = s;
+		qsort(names, (size_t)parsed, sizeof(*names), saved_name_cmp);
+		for (i = 1; i < (size_t)parsed; i++)
+			if (strcmp(names[i - 1]->name, names[i]->name) == 0) duplicate = TRUE;
+		free(names);
+		if (duplicate) goto invalid;
+	}
+	if (fclose(fh) != 0) {
+		free_saved(head);
+		return NULL;
+	}
 	return head;
+invalid:
+	print_err(1, "load_state: invalid, stale or incomplete checkpoint %s; starting clean", path);
+	fclose(fh);
+	free_saved(head);
+	return NULL;
 }
 
 /*

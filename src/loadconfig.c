@@ -6,6 +6,7 @@ extern char *parser_root;
 
 /* Forward declaration for lex-generated function */
 int sysmon_conf_yylex(void);
+void yyrestart(FILE *);
 
 struct set_type {
 	unsigned char *name;
@@ -221,6 +222,16 @@ void free_struct_hostinfo(struct hostinfo *item_to_free)
 	if (item_to_free->ipv4_str != NULL)
 		FREE(item_to_free->ipv4_str);
 	
+	if (item_to_free->snmp_oid_sec != NULL)
+		FREE(item_to_free->snmp_oid_sec);
+	if (item_to_free->snmp_up_msg != NULL)
+		FREE(item_to_free->snmp_up_msg);
+	if (item_to_free->snmp_down_msg != NULL)
+		FREE(item_to_free->snmp_down_msg);
+	if (item_to_free->pmesg != NULL)
+		FREE(item_to_free->pmesg);
+	if (item_to_free->group != NULL)
+		FREE(item_to_free->group);
 	/* This must be the last thing */
 	FREE(item_to_free);
 	return;
@@ -236,6 +247,8 @@ void free_struct_graph_elements(struct graph_elements *struct_to_free)
 	{
 		FREE(struct_to_free->dep_txt_name[x]);
 	}
+	if (struct_to_free->dep_txt_name != NULL)
+		FREE(struct_to_free->dep_txt_name);
 	/* This is just an ARRAY, so just free it, not the values
 		inside it */
 	if (struct_to_free->neighbors != NULL)
@@ -397,6 +410,7 @@ void copy_alerts(struct all_elements_list *old, struct all_elements_list *new)
 void update_globs_from_parser()
 {
 	set_defaults();
+	heartbeat = parser_heartbeat;
 
 	/*
 	 * First, before anything that derives a path from it - the pidfile,
@@ -481,7 +495,8 @@ void update_globs_from_parser()
 		if (subject != NULL)
 			FREE(subject);
 		subject = STRDUP(parser_subject,"subject mail header");
-	} else {
+	} else if (subject == NULL) {
+		/* set_defaults already replaced an existing subject. */
 		subject = STRDUP(SUBJECT,"subject mail header");
 	}
 	if (parser_upcolor != NULL)
@@ -617,50 +632,56 @@ void update_globs_from_parser()
  *
  */
 struct all_elements_list *sync_after_sighup(struct all_elements_list *oldhead, char *cnffile)
-
 {
-	struct all_elements_list *newhead = NULL;
-	
-	if (debug)
-	{
-		print_err(0, "entering sync_after_sighup");
-	}
+	struct all_elements_list *newhead;
+	struct all_elements_list *saved_head = parser_head;
+	struct graph_elements *saved_root = configed_root;
+	struct spawn_def *saved_spawns = spawn_defs_head;
+	struct parser_snapshot *saved_parser;
+	struct confset_snapshot *saved_files;
+	int saved_max = max_numnei;
+	bool saved_starting = not_started_yet;
 
-	/* load the config file */
+	saved_parser = parser_save_state();
+	if (saved_parser == NULL) return oldhead;
+	saved_files = confset_save_state();
+	if (saved_files == NULL) {
+		parser_restore_state(saved_parser);
+		return oldhead;
+	}
+	spawn_defs_head = NULL;
+	/* No parse-time logging or other startup side effects on reload. */
+	not_started_yet = FALSE;
 	newhead = loadconfig(cnffile);
-	if (badconfig)
-	{
-		print_err(1, "New configuration file is invalid.  Will not use it");
+	not_started_yet = saved_starting;
+	if (badconfig || newhead == NULL || configed_root == NULL) {
+		print_err(1, "New configuration is not runnable; keeping the live configuration");
 		free_tree(newhead);
-		return currenthead;
+		free_spawn_defs();
+		spawn_defs_head = saved_spawns;
+		parser_restore_state(saved_parser);
+		confset_restore_state(saved_files);
+		parser_head = saved_head;
+		configed_root = saved_root;
+		max_numnei = saved_max;
+		return oldhead;
 	}
 
-        update_globs_from_parser();
-
-        if (max_numnei > maxqueued && (!quiet))
-        {
-                print_err(1, "WARNING: one object has %d nei/adj and maxqueued is %d, may cause trouble",
-                        max_numnei, maxqueued);
-        }
-
-	if (debug)
-	{
-		print_err(0, "calling copy_alerts");
-	}
-
-	/* copy the alerts */
+	/* Commit only after the candidate succeeds. Cancel with the OLD
+	 * globals still installed: protocol stop routines may use them. */
+	fast_cleanup_checks();
 	copy_alerts(oldhead, newhead);
-
-	/* free the old tree */
-	free_tree(oldhead);
-	oldhead = NULL;
-
-	if (debug)
+	update_globs_from_parser();
+	parser_discard_state(saved_parser);
+	confset_discard_state(saved_files);
 	{
-		print_err(0, "exiting sync_after_sighup");
+		struct spawn_def *new_spawns = spawn_defs_head;
+		spawn_defs_head = saved_spawns;
+		free_spawn_defs();
+		spawn_defs_head = new_spawns;
 	}
+	free_tree(oldhead);
 	print_err(1, "Done reloading new config file");
-
 	return newhead;
 }
 
@@ -789,6 +810,14 @@ void make_adjs(struct all_elements_list *root)
 		{	
 			/* Use the textual name to find the struct that references it */
 			find_result = find_object_by_name(here->value->dep_txt_name[x]);
+			if (find_result == NULL)
+			{
+				print_err(1, "object %s depends on undefined object %s",
+					here->value->unique_name,
+					here->value->dep_txt_name[x]);
+				badconfig = TRUE;
+				continue;
+			}
 
 			/* If a result is found */
 			/* AND If it's not been visited */
@@ -929,17 +958,26 @@ struct all_elements_list *loadconfig(char *cfg_path)
 	FILE *file_to_parse = NULL;
 	struct all_elements_list *root = NULL;
 
+	/* Every parse is its own verdict. A failed reload must not poison
+	   the next valid one through this process-global flag. Named spawn
+	   definitions belong to this file too; removed definitions must not
+	   survive from an earlier generation. */
+	badconfig = FALSE;
+	free_spawn_defs();
+
 	/* Open the file */
 	file_to_parse = fopen(cfg_path, "r");
 
 	if (file_to_parse == NULL)
 	{
 		perror(cfg_path);
+		badconfig = TRUE;
 		return NULL;
 	}
 
 	/* set what to parse */
 	yyin = file_to_parse;
+	yyrestart(file_to_parse);
 
 	/* Start the file set over. What the parser opens from here is what
 	   this daemon considers "the config" for hashing and for fleet
@@ -977,6 +1015,12 @@ struct all_elements_list *loadconfig(char *cfg_path)
 	root=parser_head;
 
 	configed_root = find_object_by_name(parser_root);
+	if (configed_root == NULL)
+	{
+		print_err(1, "configured root %s does not name an object",
+			(parser_root != NULL) ? parser_root : "(unset)");
+		badconfig = TRUE;
+	}
 
 	/* Free generic variables */
 	free_sets();

@@ -251,6 +251,7 @@ static void writefile(const char *path, const char *content)
  * same total bytes across files must not collide. That last one is the
  * whole reason each contribution is length-prefixed.
  */
+#ifdef HAVE_TLS
 static void test_hash(void)
 {
 	char dir[] = "/tmp/sysmon-confgen-test-XXXXXX";
@@ -373,6 +374,8 @@ static void test_hash_is_path_independent(void)
  * this side says so rather than copying a file that would then never be
  * read.
  */
+#endif
+
 static void test_manageable(void)
 {
 	char dir[] = "/tmp/sysmon-confgen-mng-XXXXXX";
@@ -454,8 +457,21 @@ int main(int argc, char **argv)
 	test_b64_binary();
 	test_b64_rejects_junk();
 	test_b64_prefixes();
+#ifdef HAVE_TLS
 	test_hash();
 	test_hash_is_path_independent();
+#else
+	{
+		char h[80] = "stale hash";
+		struct confgen_file f = { "seed.conf", (unsigned char *)"bytes", 5 };
+		check(!confgen_hash(h, sizeof(h)) && h[0] == '\0',
+		    "no-TLS hashing fails closed and clears stale output");
+		strcpy(h, "stale hash");
+		check(!confgen_hash_files(&f, 1, h, sizeof(h)) && h[0] == '\0',
+		    "no-TLS delivered-file hashing fails closed");
+		puts("confgen: TLS-only hash success cases unavailable; fail-closed cases checked");
+	}
+#endif
 	test_manageable();
 	test_hash_missing_file();
 	fuzz_b64(rounds);
