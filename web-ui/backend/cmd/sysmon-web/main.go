@@ -526,8 +526,8 @@ func main() {
 				certFile = ""
 			} else if valid, verr := monitoring.CertNames(certFile); verr == nil {
 				log.Printf("agents: using %s, valid for %s", certFile, valid)
-				log.Printf("agents: each sysmond needs this file as " +
-					"'config aggregator-ca' and must dial one of those names")
+				log.Printf("agents: each sysmond needs this file copied to its " +
+					"state directory as aggregator-ca.pem, and must dial one of those names")
 			}
 		}
 
