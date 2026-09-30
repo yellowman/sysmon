@@ -11,9 +11,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -191,9 +193,17 @@ func (c *OIDCClient) Exchange(ctx context.Context, code, verifier, nonce string)
 }
 
 func (c *OIDCClient) Refresh(ctx context.Context, old OIDCIdentity) (identity OIDCIdentity, err error) {
+	var connected atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
 	source := c.oauth.TokenSource(oidc.ClientContext(ctx, c.http), &oauth2.Token{RefreshToken: old.RefreshToken, Expiry: time.Unix(0, 0)})
 	token, err := source.Token()
 	if err != nil {
+		var transportError *url.Error
+		// Only failures before acquiring a connection prove that the token
+		// request could not reach authd. Any connected request is ambiguous.
+		if !connected.Load() && errors.As(err, &transportError) {
+			return OIDCIdentity{}, errOIDCRefreshNotSent
+		}
 		return OIDCIdentity{}, errors.New("OIDC refresh failed")
 	}
 	defer func() {

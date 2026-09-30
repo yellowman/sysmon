@@ -125,20 +125,37 @@ func (s *Service) CreateOIDCSession(identity OIDCIdentity) (*Session, error) {
 	return session, err
 }
 
+const (
+	oidcOutageGrace  = 5 * time.Minute
+	oidcRefreshRetry = 30 * time.Second
+)
+
+var errOIDCRefreshNotSent = errors.New("OIDC refresh request did not reach the provider")
+var ErrOIDCProviderUnavailable = errors.New("authd is temporarily unavailable; retry shortly")
+
 func (s *Service) validateOIDCSession(session Session) *Session {
+	current, _ := s.validateOIDCSessionResult(session)
+	return current
+}
+
+func (s *Service) validOIDCSession(session Session, now time.Time) bool {
 	expires, err := time.Parse(time.RFC3339, session.ExpiresAt)
 	grant := session.OIDCGrant
-	if s.oidc == nil || grant == nil || grant.Issuer != s.oidc.issuer || grant.ClientID != s.oidc.clientID || err != nil || !time.Now().Before(expires) {
+	return s.oidc != nil && grant != nil && grant.Issuer == s.oidc.issuer && grant.ClientID == s.oidc.clientID &&
+		err == nil && now.Before(expires)
+}
+
+func (s *Service) validateOIDCSessionResult(session Session) (*Session, error) {
+	if !s.validOIDCSession(session, time.Now()) {
 		s.Logout(session.Token)
-		return nil
+		return nil, nil
 	}
-	if !session.RefreshInFlight && time.Now().Add(15*time.Second).Before(grant.ExpiresAt) {
-		return &session
+	if !session.RefreshInFlight && time.Now().Add(15*time.Second).Before(session.OIDCGrant.ExpiresAt) {
+		return &session, nil
 	}
-	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
-	// Re-read into a new value: omitted JSON fields must not retain the
-	// previous snapshot's in-flight marker after another request finishes.
+	unlock := s.lockOIDCSession(session.Token)
+	defer unlock()
+	// A fresh value clears any omitted fields from the waiting snapshot.
 	var current Session
 	if err := s.db.View(func(tx *bolt.Tx) error {
 		raw := tx.Bucket(bucketSessions).Get([]byte(session.Token))
@@ -147,49 +164,74 @@ func (s *Service) validateOIDCSession(session Session) *Session {
 		}
 		return json.Unmarshal(raw, &current)
 	}); err != nil {
-		return nil
+		return nil, nil
 	}
 	session = current
-	expires, err = time.Parse(time.RFC3339, session.ExpiresAt)
-	if session.RefreshInFlight || err != nil || !time.Now().Before(expires) {
+	now := time.Now()
+	if session.RefreshInFlight || !s.validOIDCSession(session, now) {
 		s.Logout(session.Token)
-		return nil
+		return nil, nil
 	}
-	if time.Now().Add(15 * time.Second).Before(session.OIDCGrant.ExpiresAt) {
-		return &session
+	if now.Add(15 * time.Second).Before(session.OIDCGrant.ExpiresAt) {
+		return &session, nil
+	}
+	graceUntil := session.OIDCGrant.ExpiresAt.Add(oidcOutageGrace)
+	if retryAt, err := time.Parse(time.RFC3339Nano, session.RefreshRetryAt); err == nil && now.Before(retryAt) {
+		if now.Before(graceUntil) {
+			return &session, nil
+		}
+		return nil, ErrOIDCProviderUnavailable
 	}
 	session.RefreshInFlight = true
-	raw, _ := json.Marshal(session)
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+	if err := s.saveOIDCSession(session); err != nil {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	identity, err := s.oidc.Refresh(ctx, *session.OIDCGrant)
+	if errors.Is(err, errOIDCRefreshNotSent) {
+		session.RefreshInFlight = false
+		session.RefreshRetryAt = time.Now().Add(oidcRefreshRetry).Format(time.RFC3339Nano)
+		if err := s.saveOIDCSession(session); err != nil {
+			s.Logout(session.Token)
+			return nil, nil
+		}
+		if time.Now().Before(graceUntil) && s.validOIDCSession(session, time.Now()) {
+			return &session, nil
+		}
+		return nil, ErrOIDCProviderUnavailable
+	}
+	if err != nil {
+		s.Logout(session.Token)
+		return nil, nil
+	}
+	session.OIDCGrant, session.Role, session.RefreshInFlight = &identity, identity.Role, false
+	session.RefreshRetryAt = ""
+	if !s.validOIDCSession(session, time.Now()) {
+		s.Logout(session.Token)
+		s.revokeGrant(context.Background(), &identity)
+		return nil, nil
+	}
+	if err := s.saveOIDCSession(session); err != nil {
+		s.Logout(session.Token)
+		s.revokeGrant(context.Background(), &identity)
+		return nil, nil
+	}
+	return &session, nil
+}
+
+func (s *Service) saveOIDCSession(session Session) error {
+	raw, err := json.Marshal(session)
+	if err != nil {
+		return err
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSessions)
 		if b.Get([]byte(session.Token)) == nil {
 			return errors.New("session ended")
 		}
 		return b.Put([]byte(session.Token), raw)
-	}); err != nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	identity, err := s.oidc.Refresh(ctx, *session.OIDCGrant)
-	if err != nil {
-		s.Logout(session.Token)
-		return nil
-	}
-	session.OIDCGrant, session.Role, session.RefreshInFlight = &identity, identity.Role, false
-	raw, _ = json.Marshal(session)
-	if err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketSessions)
-		if b.Get([]byte(session.Token)) == nil {
-			return errors.New("session ended during refresh")
-		}
-		return b.Put([]byte(session.Token), raw)
-	}); err != nil {
-		s.Logout(session.Token)
-		_ = s.oidc.Revoke(ctx, identity.RefreshToken)
-		return nil
-	}
-	return &session
+	})
 }
 
 func (s *Service) StartMobileHandoff(identity OIDCIdentity, challenge string) (string, error) {
@@ -204,37 +246,8 @@ func (s *Service) StartMobileHandoff(identity OIDCIdentity, challenge string) (s
 	if err != nil {
 		return "", err
 	}
-	var expired []string
-	err = s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketMobileHandoffs)
-		var stale [][]byte
-		now := time.Now()
-		if err := b.ForEach(func(k, v []byte) error {
-			var old mobileHandoff
-			if json.Unmarshal(v, &old) != nil || !now.Before(old.ExpiresAt) {
-				stale = append(stale, append([]byte(nil), k...))
-				if old.Identity.RefreshToken != "" {
-					expired = append(expired, old.Identity.RefreshToken)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		for _, key := range stale {
-			if err := b.Delete(key); err != nil {
-				return err
-			}
-		}
-		return b.Put([]byte(code), raw)
-	})
-	if err == nil && s.oidc != nil && len(expired) > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		for _, refresh := range expired {
-			_ = s.oidc.Revoke(ctx, refresh)
-		}
-	}
+	s.sweepExpiredMobileHandoffs(context.Background())
+	err = s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bucketMobileHandoffs).Put([]byte(code), raw) })
 	return code, err
 }
 
@@ -260,11 +273,7 @@ func (s *Service) ConsumeMobileHandoff(code, verifier string) (OIDCIdentity, err
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	if time.Now().After(entry.ExpiresAt) || !hmac.Equal([]byte(challenge), []byte(entry.Challenge)) {
-		if s.oidc != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = s.oidc.Revoke(ctx, entry.Identity.RefreshToken)
-		}
+		s.revokeGrant(context.Background(), &entry.Identity)
 		return OIDCIdentity{}, errors.New("invalid or expired mobile handoff")
 	}
 	return entry.Identity, nil

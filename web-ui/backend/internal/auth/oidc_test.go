@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -126,6 +128,75 @@ func TestOIDCExchangeAndConcurrentRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A refused connection cannot spend a rotating refresh credential.
+	var unreachable atomic.Bool
+	var dials atomic.Int32
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dials.Add(1)
+		if unreachable.Load() {
+			return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+	defer transport.CloseIdleConnections()
+	client.http.Transport = transport
+	unreachable.Store(true)
+	if got := s.ValidateSession(session.Token); got == nil || got.Role != RoleUser || got.RefreshInFlight || got.RefreshRetryAt == "" {
+		t.Fatalf("refused connection lost the retained session: %+v", got)
+	}
+	calls := dials.Load()
+	if got := s.ValidateSession(session.Token); got == nil || dials.Load() != calls {
+		t.Fatal("outage requests ignored the retry delay")
+	}
+	// Once grace expires, return 503 while preserving the session and token.
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSessions)
+		var current Session
+		if err := json.Unmarshal(b.Get([]byte(session.Token)), &current); err != nil {
+			return err
+		}
+		current.OIDCGrant.ExpiresAt = time.Now().Add(-oidcOutageGrace - time.Second)
+		raw, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(session.Token), raw)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	protected := RequireAuth(s, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	for _, path := range []string{"/api/auth/me", "/"} {
+		request := httptest.NewRequest("GET", path, nil)
+		request.Header.Set("Authorization", "Bearer "+session.Token)
+		response := httptest.NewRecorder()
+		protected.ServeHTTP(response, request)
+		if response.Code != 503 || response.Header().Get("Retry-After") != "30" {
+			t.Fatalf("expired grace returned %d for %s", response.Code, path)
+		}
+	}
+	if refreshes.Load() != 0 {
+		t.Fatal("unreachable request reached the provider")
+	}
+	// Restore connectivity and make the retained session eligible to retry.
+	unreachable.Store(false)
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSessions)
+		var current Session
+		if err := json.Unmarshal(b.Get([]byte(session.Token)), &current); err != nil {
+			return err
+		}
+		current.OIDCGrant.ExpiresAt = time.Now().Add(-time.Second)
+		current.RefreshRetryAt = time.Now().Add(-time.Second).Format(time.RFC3339Nano)
+		raw, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(session.Token), raw)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	results := make(chan *Session, 16)
 	for range 16 {
@@ -135,7 +206,7 @@ func TestOIDCExchangeAndConcurrentRefresh(t *testing.T) {
 	wg.Wait()
 	close(results)
 	for got := range results {
-		if got == nil || got.Role != RoleAdmin || got.OIDCGrant.RefreshToken != "refresh-2" {
+		if got == nil || got.Role != RoleAdmin || got.OIDCGrant.RefreshToken != "refresh-2" || got.RefreshRetryAt != "" {
 			t.Fatalf("wrong refreshed session: %+v", got)
 		}
 	}

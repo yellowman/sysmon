@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -18,7 +19,7 @@ func RequireAuth(authSvc *Service, next http.Handler) http.Handler {
 		path := r.URL.Path
 
 		// Login endpoint and login page are always open
-		if path == "/api/auth/login" || path == "/api/auth/mode" || path == "/api/auth/mobile-exchange" || path == "/auth/login" || path == "/auth/callback" || path == "/login.html" {
+		if path == "/api/auth/login" || path == "/api/auth/logout" || path == "/api/auth/mode" || path == "/api/auth/mobile-exchange" || path == "/auth/login" || path == "/auth/callback" || path == "/login.html" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -29,7 +30,19 @@ func RequireAuth(authSvc *Service, next http.Handler) http.Handler {
 			return
 		}
 
-		sess := authSvc.GetSessionFromRequest(r)
+		sess, err := authSvc.AuthenticateRequest(r)
+		if errors.Is(err, ErrOIDCProviderUnavailable) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Retry-After", "30")
+			if strings.HasPrefix(path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "Service Unavailable", "message": err.Error()})
+			} else {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			}
+			return
+		}
 		if sess == nil {
 			// For API requests, return JSON 401
 			if strings.HasPrefix(path, "/api/") {

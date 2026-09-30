@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -43,6 +44,7 @@ type Session struct {
 	ExpiresAt       string        `json:"expires_at"` // sliding for local sessions; absolute for OIDC
 	OIDCGrant       *OIDCIdentity `json:"oidc_grant,omitempty"`
 	RefreshInFlight bool          `json:"refresh_in_flight,omitempty"`
+	RefreshRetryAt  string        `json:"refresh_retry_at,omitempty"`
 }
 
 const (
@@ -55,9 +57,13 @@ const (
 )
 
 type Service struct {
-	db        *bolt.DB
-	oidc      *OIDCClient
-	refreshMu sync.Mutex
+	db             *bolt.DB
+	oidc           *OIDCClient
+	refreshLocksMu sync.Mutex
+	refreshLocks   map[string]*oidcSessionLock
+	cleanupMu      sync.Mutex
+	cleanupCancel  context.CancelFunc
+	cleanupDone    chan struct{}
 }
 
 func NewService(dbPath string) (*Service, error) {
@@ -102,6 +108,13 @@ func NewServiceWithBootstrap(dbPath string, bootstrap bool) (*Service, error) {
 }
 
 func (s *Service) Close() {
+	s.cleanupMu.Lock()
+	cancel, done := s.cleanupCancel, s.cleanupDone
+	s.cleanupMu.Unlock()
+	if cancel != nil {
+		cancel()
+		<-done
+	}
 	if s.db != nil {
 		s.db.Close()
 	}
@@ -305,9 +318,19 @@ func (s *Service) Login(username, password string) (*Session, error) {
 }
 
 func (s *Service) Logout(token string) {
-	s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketSessions).Delete([]byte(token))
-	})
+	var grant *OIDCIdentity
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketSessions)
+		var session Session
+		if raw := b.Get([]byte(token)); raw != nil && json.Unmarshal(raw, &session) == nil {
+			grant = session.OIDCGrant
+		}
+		return b.Delete([]byte(token))
+	}); err != nil {
+		log.Printf("auth: could not remove session: %v", err)
+		return
+	}
+	s.revokeGrant(context.Background(), grant)
 }
 
 // ValidateSession returns the session if it's still valid. Any successful
@@ -317,8 +340,13 @@ func (s *Service) Logout(token string) {
 // this field existed are treated as having an empty ExpiresAt and never
 // expire on their own; they pick up sliding behaviour on first use.
 func (s *Service) ValidateSession(token string) *Session {
+	session, _ := s.validateSession(token)
+	return session
+}
+
+func (s *Service) validateSession(token string) (*Session, error) {
 	if token == "" {
-		return nil
+		return nil, nil
 	}
 	var session Session
 	s.db.View(func(tx *bolt.Tx) error {
@@ -329,14 +357,14 @@ func (s *Service) ValidateSession(token string) *Session {
 		return json.Unmarshal(v, &session)
 	})
 	if session.Token == "" {
-		return nil
+		return nil, nil
 	}
 	if session.OIDCGrant != nil {
-		return s.validateOIDCSession(session)
+		return s.validateOIDCSessionResult(session)
 	}
 	if s.oidc != nil {
 		s.Logout(token)
-		return nil
+		return nil, nil
 	}
 
 	now := time.Now().UTC()
@@ -346,11 +374,11 @@ func (s *Service) ValidateSession(token string) *Session {
 		expires, err := time.Parse(time.RFC3339, session.ExpiresAt)
 		if err == nil && now.After(expires) {
 			s.Logout(token)
-			return nil
+			return nil, nil
 		}
 		// Skip the bolt write if the window has barely moved.
 		if err == nil && target.Sub(expires) < sessionExtendStep {
-			return &session
+			return &session, nil
 		}
 	}
 
@@ -367,24 +395,29 @@ func (s *Service) ValidateSession(token string) *Session {
 		return b.Put([]byte(token), data)
 	})
 
-	return &session
+	return &session, nil
 }
 
 // GetSessionFromRequest extracts and validates the session from a request.
 // Checks Authorization header (Bearer token) and sysmon_session cookie.
 func (s *Service) GetSessionFromRequest(r *http.Request) *Session {
-	// Check cookie
+	session, _ := s.AuthenticateRequest(r)
+	return session
+}
+
+// AuthenticateRequest distinguishes a temporary provider outage from an
+// invalid session so clients can retain their session on a 503 response.
+func (s *Service) AuthenticateRequest(r *http.Request) (*Session, error) {
 	if cookie, err := r.Cookie("sysmon_session"); err == nil {
-		if sess := s.ValidateSession(cookie.Value); sess != nil {
-			return sess
+		if session, err := s.validateSession(cookie.Value); session != nil || err != nil {
+			return session, err
 		}
 	}
-
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return s.ValidateSession(auth[7:])
+	header := r.Header.Get("Authorization")
+	if strings.HasPrefix(header, "Bearer ") {
+		return s.validateSession(header[7:])
 	}
-	return nil
+	return nil, nil
 }
 
 func generateToken() string {

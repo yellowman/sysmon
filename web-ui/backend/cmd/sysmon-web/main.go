@@ -582,6 +582,8 @@ func main() {
 		authService.SetOIDCClient(client)
 	}
 
+	authService.StartSessionCleanup()
+
 	// Create API router. The returned stopPush shuts down whichever push
 	// service the router ends up owning (boot instance or a lazy reinit).
 	handler, stopPush := api.NewRouter(configService, monitoringService, pushService, pushFactory, authService, settingsStore)
