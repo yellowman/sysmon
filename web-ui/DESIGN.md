@@ -106,7 +106,11 @@ What stays sysmon's own:
   shows.
 - **Below 1024px** the rail becomes a drawer behind a menu button in a
   slim top bar. The same element, the same links, taller touch targets.
-  Escape, the close button or the backdrop dismisses it.
+  Escape, the close button or the backdrop dismisses it, and focus that
+  was inside it returns to the menu button. Closed, it is hidden
+  (`visibility: hidden` once the slide-out ends), not merely moved
+  off-screen, so its links are not in the Tab order or the
+  accessibility tree while nobody can see them.
 - **CSS decides the resting state**, not Alpine. The drawer is closed
   and the desktop rail is shown before any script runs, so neither
   flashes the wrong way while the page loads.

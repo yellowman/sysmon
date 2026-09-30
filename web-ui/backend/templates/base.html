@@ -54,14 +54,14 @@
 
         <!-- Below lg: a slim bar holding the way into the drawer. -->
         <header class="lg:hidden h-14 flex items-center gap-3 px-4 bg-white border-b border-gray-200">
-            <button @click="railOpen = true" class="p-2 -ml-2 text-gray-500 hover:text-gray-900"
+            <button @click="railOpen = true" x-ref="railButton" class="p-2 -ml-2 text-gray-500 hover:text-gray-900"
                     aria-label="Open navigation" aria-controls="app-rail" :aria-expanded="railOpen">
                 <i class="fas fa-bars text-lg" aria-hidden="true"></i>
             </button>
             <a href="/" class="rail-wordmark">sys<span>mon</span></a>
         </header>
 
-        <div x-show="railOpen" x-cloak x-transition.opacity @click="railOpen = false"
+        <div x-show="railOpen" x-cloak x-transition.opacity @click="closeRail()"
              class="lg:hidden fixed inset-0 z-40 bg-gray-900/30"></div>
 
         <aside id="app-rail" class="rail" :class="{ 'open': railOpen }">
@@ -69,7 +69,7 @@
                 <a href="/" class="rail-wordmark" aria-label="sysmon dashboard">
                     <span class="rail-mark-full">sys<span>mon</span></span><span class="rail-mark-short" aria-hidden="true">s<span>m</span></span>
                 </a>
-                <button @click="railOpen = false" class="lg:hidden p-1 text-gray-400 hover:text-gray-700"
+                <button @click="closeRail()" class="lg:hidden p-1 text-gray-400 hover:text-gray-700"
                         aria-label="Close navigation">
                     <i class="fas fa-xmark" aria-hidden="true"></i>
                 </button>
@@ -369,8 +369,17 @@
                         });
                     }
                 },
-                onEscape() {
+                // The drawer, closed by Escape, its close button or the
+                // backdrop. Focus inside it goes back to the menu button
+                // that opened it rather than onto a hidden element.
+                closeRail() {
+                    if (!this.railOpen) return;
+                    const hadFocus = document.getElementById('app-rail').contains(document.activeElement);
                     this.railOpen = false;
+                    if (hadFocus) this.$refs.railButton.focus();
+                },
+                onEscape() {
+                    this.closeRail();
                     if (!this.siteMenuOpen) return;
                     // Closing hides whatever in the panel had focus; hand it
                     // back to the button that opened it, not to the page.
@@ -789,16 +798,23 @@
             width: var(--rail-w);
             display: flex; flex-direction: column;
             background: #fff; border-right: 1px solid #e5e7eb;
-            /* Below lg the rail is a drawer, closed until opened. */
+            /* Below lg the rail is a drawer, closed until opened. Closed
+               means hidden, not just moved: off-screen links would stay in
+               the Tab order and the accessibility tree. Visibility flips
+               once the slide-out ends, and at once on the way in. */
             transform: translateX(-100%);
-            transition: transform 0.2s ease;
+            visibility: hidden;
+            transition: transform 0.2s ease, visibility 0s linear 0.2s;
         }
-        .rail.open { transform: none; box-shadow: 0 10px 25px rgba(17, 24, 39, 0.15); }
+        .rail.open {
+            transform: none; visibility: visible; transition: transform 0.2s ease;
+            box-shadow: 0 10px 25px rgba(17, 24, 39, 0.15);
+        }
         @media (min-width: 1024px) {
             :root { --shell-inset: var(--rail-w); }
-            .rail, .rail.open { transform: none; box-shadow: none; }
+            .rail, .rail.open { transform: none; visibility: visible; box-shadow: none; }
         }
-        @media (prefers-reduced-motion: reduce) { .rail { transition: none; } }
+        @media (prefers-reduced-motion: reduce) { .rail, .rail.open { transition: none; } }
 
         .rail-wordmark {
             font-size: 1.125rem; font-weight: 800; letter-spacing: -0.025em;
