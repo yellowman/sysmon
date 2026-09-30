@@ -29,8 +29,8 @@ import (
 // So: generate one, keep it, and print what a daemon needs to trust it.
 // This is a real key pair with real verification at the other end, pinned
 // by file rather than by a public CA. Each box gets the certificate as
-// `config aggregator-ca`, and sysmond still verifies the name it dialled -
-// self-signed is not the same as unverified.
+// aggregator-ca.pem in its state directory, and sysmond still verifies the
+// name it dialled - self-signed is not the same as unverified.
 //
 // An operator with a proper CA passes -agent-cert/-agent-key and none of
 // this runs.
