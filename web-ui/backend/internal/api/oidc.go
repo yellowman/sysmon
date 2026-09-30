@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -98,7 +99,11 @@ func (r *Router) handleOIDCCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "sysmon_session", Value: session.Token, Path: "/", MaxAge: 30 * 86400, HttpOnly: true, Secure: client.SecureCookies(), SameSite: http.SameSiteStrictMode})
-	http.Redirect(w, req, "/", 302)
+	// Commit a same-origin document before navigating: a 302 would keep
+	// the cross-site redirect chain and withhold the Strict cookie.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+	_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><title>Signed in</title></head><body><a href="/">Continue to Sysmon</a></body></html>`)
 }
 
 func (r *Router) handleAuthMode(w http.ResponseWriter, req *http.Request) {

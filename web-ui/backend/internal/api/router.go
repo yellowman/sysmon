@@ -1818,16 +1818,13 @@ func (r *Router) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	sess := r.auth.GetSessionFromRequest(req)
-	if sess != nil {
-		r.auth.Logout(sess.Token)
-		if sess.OIDCGrant != nil && r.auth.OIDC() != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := r.auth.OIDC().Revoke(ctx, sess.OIDCGrant.RefreshToken); err != nil {
-				log.Printf("OIDC logout revocation failed: %v", err)
-			}
-		}
+	// Ending a possessed session must work even while authd is down.
+	// Strict cookies and explicit bearer tokens retain the logout CSRF boundary.
+	if cookie, err := req.Cookie("sysmon_session"); err == nil {
+		r.auth.Logout(cookie.Value)
+	}
+	if header := req.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+		r.auth.Logout(header[7:])
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -2676,12 +2673,22 @@ func (r *Router) sendErrorWithDetails(w http.ResponseWriter, status int, message
 	})
 }
 
-func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
-	// Try to get user from auth headers (if implemented)
-	user = req.Header.Get("X-Session-User")
-	if user == "" {
-		user = "anonymous"
+// auditUser preserves the stable account ID alongside the verified name.
+// Fold whitespace and delimiters so provider profile text cannot add log rows.
+func auditUser(req *http.Request) string {
+	clean := func(raw string) string { return strings.Join(strings.Fields(strings.ReplaceAll(raw, "|", " ")), " ") }
+	id, name := clean(req.Header.Get("X-Session-User")), clean(req.Header.Get("X-Session-Display"))
+	if id == "" {
+		return "anonymous"
 	}
+	if name != "" && name != id {
+		return name + " (" + id + ")"
+	}
+	return id
+}
+
+func (r *Router) getUserInfo(req *http.Request) (user, ip string) {
+	user = auditUser(req)
 
 	// Get IP from X-Forwarded-For or RemoteAddr
 	ip = req.Header.Get("X-Forwarded-For")

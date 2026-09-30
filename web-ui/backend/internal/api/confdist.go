@@ -153,7 +153,7 @@ func (r *Router) handleConfigAdopt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	gen, err := r.monitoring.AdoptSite(site, req.Header.Get("X-Session-User"))
+	gen, err := r.monitoring.AdoptSite(site, auditUser(req))
 	if err != nil {
 		r.sendError(w, http.StatusBadGateway, err.Error())
 		return
@@ -192,7 +192,7 @@ func (r *Router) handleConfigStage(w http.ResponseWriter, req *http.Request) {
 	}
 
 	gen, hash, err := r.monitoring.StageGeneration(site, files,
-		req.Header.Get("X-Session-User"), body.Note)
+		auditUser(req), body.Note)
 	if err != nil {
 		r.sendError(w, http.StatusBadRequest, err.Error())
 		return
@@ -304,7 +304,7 @@ func (r *Router) handleConfigRollout(w http.ResponseWriter, req *http.Request) {
 	}
 
 	id, err := r.monitoring.StartRollout(body.Sites, body.WatchWindow, body.Tolerance,
-		req.Header.Get("X-Session-User"))
+		auditUser(req))
 	if err != nil {
 		r.sendError(w, http.StatusBadRequest, err.Error())
 		return
