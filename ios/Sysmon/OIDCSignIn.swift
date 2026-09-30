@@ -22,7 +22,7 @@ final class OIDCSignIn: NSObject, ASWebAuthenticationPresentationContextProvidin
         guard let server = URL(string: serverURL), server.host != nil,
               server.user == nil, server.password == nil, server.query == nil, server.fragment == nil,
               server.path.isEmpty || server.path == "/",
-              server.scheme == "https" || (server.scheme == "http" && server.host == "localhost") else {
+              server.scheme == "https" || (server.scheme == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(server.host!)) else {
             throw APIError(status: 0, message: "SSO requires an HTTPS server URL")
         }
         var random = [UInt8](repeating: 0, count: 32)

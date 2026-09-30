@@ -135,7 +135,7 @@ object Session {
         val uri = Uri.parse(normalized)
         require(!uri.host.isNullOrEmpty() && uri.userInfo == null && uri.query == null && uri.fragment == null &&
             (uri.path.isNullOrEmpty() || uri.path == "/") &&
-            (uri.scheme == "https" || (uri.scheme == "http" && uri.host == "localhost"))) { "SSO requires an HTTPS server URL" }
+            (uri.scheme == "https" || (uri.scheme == "http" && uri.host in setOf("localhost", "127.0.0.1", "::1", "[::1]")))) { "SSO requires an HTTPS server URL" }
         val random = ByteArray(32)
         SecureRandom().nextBytes(random)
         val verifier = Base64.encodeToString(random, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
