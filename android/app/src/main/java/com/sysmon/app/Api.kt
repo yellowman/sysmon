@@ -29,6 +29,18 @@ object Api {
             json.decodeFromString(LoginResponse.serializer(), response)
         }
 
+    suspend fun authMode(server: String): AuthModeResponse = withContext(Dispatchers.IO) {
+        val response = rawRequest("$server/api/auth/mode", "GET", null, null)
+        json.decodeFromString(AuthModeResponse.serializer(), response)
+    }
+
+    suspend fun mobileExchange(server: String, code: String, verifier: String): LoginResponse =
+        withContext(Dispatchers.IO) {
+            val body = json.encodeToString(mapOf("code" to code, "verifier" to verifier))
+            val response = rawRequest("$server/api/auth/mobile-exchange", "POST", body, null)
+            json.decodeFromString(LoginResponse.serializer(), response)
+        }
+
     // --- Implicit auth (reads from Session) ---
     suspend fun status(): StatusResponse = withContext(Dispatchers.IO) {
         val response = authedRequest("/api/monitoring/status", "GET", null)
@@ -165,7 +177,7 @@ object Api {
             // ("Invalid credentials") propagate. For every other path
             // a 401 means the bearer is dead, so clear state and bounce
             // back to the login screen.
-            if (status == 401 && !url.endsWith("/api/auth/login")) {
+            if (status == 401 && !url.endsWith("/api/auth/login") && !url.endsWith("/api/auth/mobile-exchange")) {
                 Session.handleUnauthorized()
             }
             if (status !in 200..299) {

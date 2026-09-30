@@ -8,6 +8,7 @@ import FirebaseMessaging
 @MainActor
 class Session: ObservableObject {
     static private(set) weak var shared: Session?
+    private let oidcSignIn = OIDCSignIn()
 
     // Whether a login survives on disk - the gate for scheduling
     // background work. Static and storage-based (UserDefaults +
@@ -92,6 +93,24 @@ class Session: ObservableObject {
         await requestPushPermission()
     }
 
+    func authMode() async throws -> String {
+        let response: AuthModeResponse = try await API(baseURL: serverURL, token: nil).get("/api/auth/mode")
+        guard response.mode == "oidc" || response.mode == "local" else {
+            throw APIError(status: 0, message: "Unknown server authentication mode")
+        }
+        return response.mode
+    }
+
+    func loginOIDC() async throws {
+        loginNote = nil
+        let response = try await oidcSignIn.signIn(serverURL: serverURL)
+        token = response.token
+        username = response.displayName ?? response.username
+        role = response.role
+        pushStatus = nil
+        await requestPushPermission()
+    }
+
     // The persisted role is whatever the login response said, possibly
     // versions ago - a session predating role storage has none, and every
     // admin control stays hidden while the server still says admin. Ask
@@ -101,7 +120,7 @@ class Session: ObservableObject {
         let api = API(baseURL: serverURL, token: token)
         if let me: MeResponse = try? await api.get("/api/auth/me"),
            !me.username.isEmpty {
-            self.username = me.username
+            self.username = me.displayName ?? me.username
             self.role = me.role
         }
     }

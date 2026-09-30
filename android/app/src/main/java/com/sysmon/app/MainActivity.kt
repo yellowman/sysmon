@@ -9,9 +9,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
 import com.sysmon.app.ui.RootScreen
 import com.sysmon.app.ui.theme.SysmonTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -34,12 +36,14 @@ class MainActivity : ComponentActivity() {
         }
         if (Session.isLoggedIn()) requestPushPermission()
         handlePushIntent(intent)
+        handleOIDCCallback(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePushIntent(intent)
+        handleOIDCCallback(intent)
     }
 
     override fun onResume() {
@@ -73,6 +77,23 @@ class MainActivity : ComponentActivity() {
             // the Alerts tab forever after one notification tap.
             intent.removeExtra(EXTRA_NAVIGATE)
             intent.removeExtra("hostname")
+        }
+    }
+
+    private fun handleOIDCCallback(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        if (uri.scheme != "sysmon" || uri.host != "auth" || uri.path != "/callback") return
+        intent.data = null
+        val code = uri.getQueryParameter("code")
+        if (code.isNullOrEmpty()) {
+            Session.loginNote = "Incomplete SSO callback"
+            return
+        }
+        lifecycleScope.launch {
+            runCatching { Session.completeOIDC(code) }
+                .onSuccess { requestPushPermission() }
+                .onFailure { Session.loginNote = it.message ?: "SSO sign-in failed" }
         }
     }
 

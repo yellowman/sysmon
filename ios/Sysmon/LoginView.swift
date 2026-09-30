@@ -7,6 +7,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var loading = false
     @State private var error: String?
+    @State private var authMode: String?
 
     private var displayMessage: String? { session.loginNote ?? error }
 
@@ -64,19 +65,23 @@ struct LoginView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         .textFieldStyle(SysmonFieldStyle())
+                        .disabled(loading)
+                        .onChange(of: serverURL) { _ in authMode = nil; password = "" }
 
-                    FieldLabel("USERNAME")
-                    TextField("", text: $username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(SysmonFieldStyle())
+                    if authMode == "local" {
+                        FieldLabel("USERNAME")
+                        TextField("", text: $username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(SysmonFieldStyle())
 
-                    FieldLabel("PASSWORD")
-                    SecureField("", text: $password)
-                        .textFieldStyle(SysmonFieldStyle())
+                        FieldLabel("PASSWORD")
+                        SecureField("", text: $password)
+                            .textFieldStyle(SysmonFieldStyle())
+                    }
 
                     Button(action: login) {
-                        Text(loading ? "SIGNING IN..." : "SIGN IN")
+                        Text(buttonTitle)
                     }
                     .buttonStyle(SlabButtonStyle(enabled: canSubmit))
                     .disabled(!canSubmit)
@@ -95,8 +100,15 @@ struct LoginView: View {
         }
     }
 
+    private var buttonTitle: String {
+        if loading { return "SIGNING IN..." }
+        if authMode == "oidc" { return "CONTINUE WITH AUTHD" }
+        if authMode == "local" { return "SIGN IN" }
+        return "CONTINUE"
+    }
+
     private var canSubmit: Bool {
-        !loading && !serverURL.isEmpty && !username.isEmpty && !password.isEmpty
+        !loading && !serverURL.isEmpty && (authMode != "local" || (!username.isEmpty && !password.isEmpty))
     }
 
     private func login() {
@@ -106,16 +118,20 @@ struct LoginView: View {
         session.loginNote = nil
         let normalized = Session.normalize(serverURL)
         session.serverURL = normalized
-        serverURL = normalized
         Task {
             do {
-                try await session.login(username: username, password: password)
+                if authMode == nil { authMode = try await session.authMode() }
+                if authMode == "oidc" {
+                    try await session.loginOIDC()
+                } else if !username.isEmpty && !password.isEmpty {
+                    try await session.login(username: username, password: password)
+                }
             } catch let e as APIError {
                 error = e.message
             } catch {
                 // `self.` required: a bare catch binds the thrown value to
                 // an implicit constant named `error`, shadowing our @State.
-                self.error = "Connection failed"
+                self.error = error.localizedDescription
             }
             loading = false
         }

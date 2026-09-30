@@ -109,7 +109,7 @@ struct API {
         // pretending a session expired. For every other path, a 401 means
         // the bearer token is dead so clear session state and bounce to
         // the login screen.
-        if http.statusCode == 401 && path != "/api/auth/login" {
+        if http.statusCode == 401 && path != "/api/auth/login" && path != "/api/auth/mobile-exchange" {
             await MainActor.run { Session.shared?.handleUnauthorized() }
         }
         if !(200..<300).contains(http.statusCode) {

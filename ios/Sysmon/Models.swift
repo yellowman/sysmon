@@ -1,9 +1,17 @@
 import Foundation
 
+struct AuthModeResponse: Codable { let mode: String }
+
 struct LoginResponse: Codable {
     let token: String
     let username: String
     let role: String
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case token, username, role
+        case displayName = "display_name"
+    }
 }
 
 // Response to POST /api/push/subscribe. tokenStatus is "invalid" when
@@ -175,6 +183,12 @@ struct Stats: Codable, Equatable {
 struct MeResponse: Codable {
     let username: String
     let role: String
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case username, role
+        case displayName = "display_name"
+    }
 }
 
 struct StatusResponse: Codable {

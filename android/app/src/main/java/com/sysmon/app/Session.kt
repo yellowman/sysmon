@@ -1,6 +1,8 @@
 package com.sysmon.app
 
 import android.content.Context
+import android.net.Uri
+import android.util.Base64
 import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,12 +15,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 object Session {
     private const val KEY_SERVER = "server_url"
     private const val KEY_TOKEN = "session_token"
     private const val KEY_USERNAME = "username"
     private const val KEY_ROLE = "role"
+    private const val KEY_OIDC_VERIFIER = "oidc_verifier"
+    private const val KEY_OIDC_SERVER = "oidc_server"
+    private const val KEY_OIDC_STARTED = "oidc_started"
 
     private lateinit var prefs: SharedPreferences
     private lateinit var appContext: Context
@@ -76,10 +83,10 @@ object Session {
         if (!isLoggedIn()) return
         runCatching { Api.me() }.onSuccess { me ->
             if (me.username.isNotEmpty()) {
-                username = me.username
+                username = me.displayName ?: me.username
                 role = me.role
                 prefs.edit()
-                    .putString(KEY_USERNAME, me.username)
+                    .putString(KEY_USERNAME, username)
                     .putString(KEY_ROLE, me.role)
                     .apply()
             }
@@ -114,6 +121,45 @@ object Session {
             .apply()
         // Now there is a sysmon to talk to, the daily token health
         // check has something to check.
+        PushHealthWorker.schedule(appContext)
+    }
+
+    suspend fun authMode(server: String): String {
+        val mode = Api.authMode(normalize(server)).mode
+        require(mode == "local" || mode == "oidc") { "Unknown server authentication mode" }
+        return mode
+    }
+
+    fun beginOIDC(server: String): String {
+        val normalized = normalize(server)
+        val uri = Uri.parse(normalized)
+        require(!uri.host.isNullOrEmpty() && uri.userInfo == null && uri.query == null && uri.fragment == null &&
+            (uri.path.isNullOrEmpty() || uri.path == "/") &&
+            (uri.scheme == "https" || (uri.scheme == "http" && uri.host == "localhost"))) { "SSO requires an HTTPS server URL" }
+        val random = ByteArray(32)
+        SecureRandom().nextBytes(random)
+        val verifier = Base64.encodeToString(random, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        val challenge = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        prefs.edit().putString(KEY_OIDC_VERIFIER, verifier).putString(KEY_OIDC_SERVER, normalized)
+            .putLong(KEY_OIDC_STARTED, System.currentTimeMillis()).apply()
+        return Uri.parse("$normalized/auth/login").buildUpon().appendQueryParameter("mobile_challenge", challenge).build().toString()
+    }
+
+    suspend fun completeOIDC(code: String) {
+        val verifier = prefs.getString(KEY_OIDC_VERIFIER, null) ?: error("No pending SSO sign-in")
+        val server = prefs.getString(KEY_OIDC_SERVER, null) ?: error("No pending SSO server")
+        val started = prefs.getLong(KEY_OIDC_STARTED, 0)
+        prefs.edit().remove(KEY_OIDC_VERIFIER).remove(KEY_OIDC_SERVER).remove(KEY_OIDC_STARTED).apply()
+        require(System.currentTimeMillis() - started in 0L..600_000L) { "SSO sign-in expired; try again" }
+        val response = Api.mobileExchange(server, code, verifier)
+        serverUrl = server
+        token = response.token
+        username = response.displayName ?: response.username
+        role = response.role
+        loginNote = null
+        prefs.edit().putString(KEY_SERVER, server).putString(KEY_TOKEN, token)
+            .putString(KEY_USERNAME, username).putString(KEY_ROLE, role).apply()
         PushHealthWorker.schedule(appContext)
     }
 

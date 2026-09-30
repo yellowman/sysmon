@@ -1,5 +1,8 @@
 package com.sysmon.app.ui
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +41,8 @@ fun LoginScreen(onSuccess: () -> Unit) {
     var pass by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var authMode by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val displayMessage = error ?: Session.loginNote
 
@@ -75,7 +80,8 @@ fun LoginScreen(onSuccess: () -> Unit) {
                 FieldLabel("Server")
                 OutlinedTextField(
                     value = server,
-                    onValueChange = { server = it; error = null },
+                    onValueChange = { server = it; error = null; authMode = null; pass = "" },
+                    enabled = !loading,
                     placeholder = { Text("sysmon.example.com") },
                     singleLine = true,
                     shape = RoundedCornerShape(4.dp),
@@ -84,28 +90,30 @@ fun LoginScreen(onSuccess: () -> Unit) {
                 )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                FieldLabel("Username")
-                OutlinedTextField(
-                    value = user,
-                    onValueChange = { user = it; error = null },
-                    singleLine = true,
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+            if (authMode == "local") {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FieldLabel("Username")
+                    OutlinedTextField(
+                        value = user,
+                        onValueChange = { user = it; error = null },
+                        singleLine = true,
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                FieldLabel("Password")
-                OutlinedTextField(
-                    value = pass,
-                    onValueChange = { pass = it; error = null },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FieldLabel("Password")
+                    OutlinedTextField(
+                        value = pass,
+                        onValueChange = { pass = it; error = null },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             if (displayMessage != null) ErrorBanner(displayMessage)
@@ -116,13 +124,21 @@ fun LoginScreen(onSuccess: () -> Unit) {
                     Session.loginNote = null
                     loading = true
                     scope.launch {
-                        runCatching { Session.login(server, user, pass) }
-                            .onSuccess { onSuccess() }
+                        runCatching {
+                            if (authMode == null) authMode = Session.authMode(server)
+                            when (authMode) {
+                                "oidc" -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Session.beginOIDC(server))))
+                                "local" -> if (user.isNotBlank() && pass.isNotBlank()) {
+                                    Session.login(server, user, pass)
+                                    onSuccess()
+                                }
+                            }
+                        }
                             .onFailure { error = it.message ?: "Login failed" }
                         loading = false
                     }
                 },
-                enabled = !loading && server.isNotBlank() && user.isNotBlank() && pass.isNotBlank(),
+                enabled = !loading && server.isNotBlank() && (authMode != "local" || (user.isNotBlank() && pass.isNotBlank())),
                 shape = RoundedCornerShape(4.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -139,7 +155,14 @@ fun LoginScreen(onSuccess: () -> Unit) {
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text("SIGN IN", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        when (authMode) {
+                            "oidc" -> "CONTINUE WITH AUTHD"
+                            "local" -> "SIGN IN"
+                            else -> "CONTINUE"
+                        },
+                        style = MaterialTheme.typography.labelLarge
+                    )
                 }
             }
         }

@@ -10,8 +10,12 @@ data class LoginRequest(val username: String, val password: String)
 data class LoginResponse(
     val token: String,
     val username: String,
-    val role: String
+    val role: String,
+    @SerialName("display_name") val displayName: String? = null
 )
+
+@Serializable
+data class AuthModeResponse(val mode: String)
 
 @Serializable
 data class Host(
@@ -109,7 +113,8 @@ data class Stats(
 @Serializable
 data class MeResponse(
     val username: String = "",
-    val role: String = ""
+    val role: String = "",
+    @SerialName("display_name") val displayName: String? = null
 )
 
 @Serializable
