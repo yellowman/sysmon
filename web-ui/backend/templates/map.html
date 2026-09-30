@@ -239,10 +239,14 @@
         <!-- Host inspector: a drawer beside the map, not a modal over it.
              Inspecting a node must not hide the topology it sits in -
              clicking another host updates the drawer without destroying
-             the operator's spatial context. -->
+             the operator's spatial context.
+             The height is bound as an object, not a string: Alpine applies
+             a string by replacing the whole style attribute, which drops
+             the display:none x-show set and opens an empty drawer the
+             first time the canvas height changes. -->
         <div x-show="selected" x-cloak @keydown.escape.window="closeInspector()"
              class="w-80 shrink-0 ml-3 bg-white rounded-lg border border-gray-200 overflow-y-auto flex flex-col"
-             :style="'height:' + canvasHeight + 'px'">
+             :style="{ height: canvasHeight + 'px' }">
             <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 sticky top-0 bg-white">
                 <h3 class="font-semibold text-gray-900 text-sm min-w-0">
                     <span class="mono truncate" x-text="selected?.id || '(new host)'"></span>
