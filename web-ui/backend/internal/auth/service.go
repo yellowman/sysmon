@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -35,11 +36,13 @@ type User struct {
 }
 
 type Session struct {
-	Token     string `json:"token"`
-	Username  string `json:"username"`
-	Role      string `json:"role"`
-	CreatedAt string `json:"created_at"`
-	ExpiresAt string `json:"expires_at"` // sliding 30-day window
+	Token           string        `json:"token"`
+	Username        string        `json:"username"`
+	Role            string        `json:"role"`
+	CreatedAt       string        `json:"created_at"`
+	ExpiresAt       string        `json:"expires_at"` // sliding for local sessions; absolute for OIDC
+	OIDCGrant       *OIDCIdentity `json:"oidc_grant,omitempty"`
+	RefreshInFlight bool          `json:"refresh_in_flight,omitempty"`
 }
 
 const (
@@ -52,10 +55,16 @@ const (
 )
 
 type Service struct {
-	db *bolt.DB
+	db        *bolt.DB
+	oidc      *OIDCClient
+	refreshMu sync.Mutex
 }
 
 func NewService(dbPath string) (*Service, error) {
+	return NewServiceWithBootstrap(dbPath, true)
+}
+
+func NewServiceWithBootstrap(dbPath string, bootstrap bool) (*Service, error) {
 	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
 		os.MkdirAll(dir, 0755)
 	}
@@ -69,8 +78,12 @@ func NewService(dbPath string) (*Service, error) {
 		if _, err := tx.CreateBucketIfNotExists(bucketUsers); err != nil {
 			return err
 		}
-		_, err := tx.CreateBucketIfNotExists(bucketSessions)
-		return err
+		for _, bucket := range [][]byte{bucketSessions, bucketOIDCFlows, bucketMobileHandoffs} {
+			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		db.Close()
@@ -79,7 +92,7 @@ func NewService(dbPath string) (*Service, error) {
 
 	s := &Service{db: db}
 
-	if s.UserCount() == 0 {
+	if bootstrap && s.UserCount() == 0 {
 		log.Printf("auth: no users exist, creating default admin (admin/sysmon)")
 		s.CreateUser("admin", "sysmon", RoleAdmin)
 	}
@@ -240,6 +253,9 @@ func (s *Service) ChangeRole(username, newRole string) error {
 }
 
 func (s *Service) Login(username, password string) (*Session, error) {
+	if s.oidc != nil {
+		return nil, fmt.Errorf("local accounts are disabled in OIDC mode")
+	}
 	var user User
 	err := s.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketUsers).Get([]byte(username))
@@ -315,6 +331,13 @@ func (s *Service) ValidateSession(token string) *Session {
 	if session.Token == "" {
 		return nil
 	}
+	if session.OIDCGrant != nil {
+		return s.validateOIDCSession(session)
+	}
+	if s.oidc != nil {
+		s.Logout(token)
+		return nil
+	}
 
 	now := time.Now().UTC()
 	target := now.Add(sessionIdleTTL)
@@ -350,14 +373,6 @@ func (s *Service) ValidateSession(token string) *Session {
 // GetSessionFromRequest extracts and validates the session from a request.
 // Checks Authorization header (Bearer token) and sysmon_session cookie.
 func (s *Service) GetSessionFromRequest(r *http.Request) *Session {
-	// Check Authorization header
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		if sess := s.ValidateSession(auth[7:]); sess != nil {
-			return sess
-		}
-	}
-
 	// Check cookie
 	if cookie, err := r.Cookie("sysmon_session"); err == nil {
 		if sess := s.ValidateSession(cookie.Value); sess != nil {
@@ -365,6 +380,10 @@ func (s *Service) GetSessionFromRequest(r *http.Request) *Session {
 		}
 	}
 
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return s.ValidateSession(auth[7:])
+	}
 	return nil
 }
 

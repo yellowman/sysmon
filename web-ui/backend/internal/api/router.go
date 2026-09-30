@@ -196,6 +196,10 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 
 	// Auth endpoints
 	r.mux.HandleFunc("/api/auth/login", r.handleAuthLogin)
+	r.mux.HandleFunc("/api/auth/mode", r.handleAuthMode)
+	r.mux.HandleFunc("/api/auth/mobile-exchange", r.handleMobileExchange)
+	r.mux.HandleFunc("/auth/login", r.handleOIDCLogin)
+	r.mux.HandleFunc("/auth/callback", r.handleOIDCCallback)
 	r.mux.HandleFunc("/api/auth/logout", r.handleAuthLogout)
 	r.mux.HandleFunc("/api/auth/me", r.handleAuthMe)
 	r.mux.HandleFunc("/api/auth/users", auth.RequireAdmin(r.handleAuthUsers))
@@ -249,7 +253,7 @@ func NewRouter(cfg *config.Service, mon *monitoring.Service, pushSvc *push.Servi
 		switch req.URL.Path {
 		case "/api/auth/logout":
 			unlimited.ServeHTTP(w, req)
-		case "/api/auth/login":
+		case "/api/auth/login", "/api/auth/mobile-exchange", "/auth/login":
 			loginLimited.ServeHTTP(w, req)
 		default:
 			limited.ServeHTTP(w, req)
@@ -1765,6 +1769,10 @@ func (r *Router) handleXMLObject(w http.ResponseWriter, req *http.Request) {
 // Auth handlers
 
 func (r *Router) handleAuthLogin(w http.ResponseWriter, req *http.Request) {
+	if r.auth.OIDC() != nil {
+		r.sendError(w, http.StatusForbidden, "Local password sign-in is disabled in OIDC mode")
+		return
+	}
 	if req.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1813,6 +1821,13 @@ func (r *Router) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
 	sess := r.auth.GetSessionFromRequest(req)
 	if sess != nil {
 		r.auth.Logout(sess.Token)
+		if sess.OIDCGrant != nil && r.auth.OIDC() != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := r.auth.OIDC().Revoke(ctx, sess.OIDCGrant.RefreshToken); err != nil {
+				log.Printf("OIDC logout revocation failed: %v", err)
+			}
+		}
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -1832,12 +1847,17 @@ func (r *Router) handleAuthMe(w http.ResponseWriter, req *http.Request) {
 	}
 
 	r.sendJSON(w, map[string]string{
-		"username": req.Header.Get("X-Session-User"),
-		"role":     req.Header.Get("X-Session-Role"),
+		"username":     req.Header.Get("X-Session-User"),
+		"display_name": req.Header.Get("X-Session-Display"),
+		"role":         req.Header.Get("X-Session-Role"),
 	})
 }
 
 func (r *Router) handleAuthUsers(w http.ResponseWriter, req *http.Request) {
+	if r.auth.OIDC() != nil {
+		r.sendError(w, http.StatusNotFound, "Local accounts are disabled in OIDC mode")
+		return
+	}
 	switch req.Method {
 	case http.MethodGet:
 		users := r.auth.ListUsers()
@@ -1868,6 +1888,10 @@ func (r *Router) handleAuthUsers(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleAuthUserAction(w http.ResponseWriter, req *http.Request) {
+	if r.auth.OIDC() != nil {
+		r.sendError(w, http.StatusNotFound, "Local accounts are disabled in OIDC mode")
+		return
+	}
 	username := strings.TrimPrefix(req.URL.Path, "/api/auth/users/")
 	if username == "" {
 		r.sendError(w, http.StatusBadRequest, "Username required")

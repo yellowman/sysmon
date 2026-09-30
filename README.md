@@ -366,7 +366,8 @@ sysmon-web -listen 127.0.0.1:8180 -config /usr/local/etc/sysmon.conf -debug
 ```
 `make dev` does the same thing without installing. Templates and static
 assets are read at startup, so restart the service after `make install`.
-First login is `admin` / `sysmon` - change it immediately (Admin page).
+In local-account mode, first login is `admin` / `sysmon` - change it immediately (Admin page).
+For web, iOS, and Android sign-in through authd, see [OIDC setup](web-ui/OIDC.md).
 State lives in `/var/lib/sysmon` (auth, push credentials, settings,
 alert history).
 

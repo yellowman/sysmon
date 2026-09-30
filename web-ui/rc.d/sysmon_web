@@ -26,6 +26,12 @@ daemon_flags="-foreground \
   -audit /var/log/sysmon-web-audit.log"
 daemon_user="root"
 
+if [ -r /etc/sysmon-web/oidc.env ]; then
+	set -a
+	. /etc/sysmon-web/oidc.env
+	set +a
+fi
+
 . /etc/rc.d/rc.subr
 
 # rc_bg=YES: rc.d backgrounds the process. We pass -foreground so the

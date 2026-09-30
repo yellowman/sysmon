@@ -709,9 +709,9 @@
             });
             apiCall('/api/auth/me').then(me => {
                 if (me && me.username) {
-                    Alpine.store('auth').user = me.username;
+                    Alpine.store('auth').user = me.display_name || me.username;
                     Alpine.store('auth').role = me.role || '';
-                    sessionStorage.setItem('sysmon_user', me.username);
+                    sessionStorage.setItem('sysmon_user', me.display_name || me.username);
                     sessionStorage.setItem('sysmon_role', me.role || '');
                 }
             }).catch(() => {});

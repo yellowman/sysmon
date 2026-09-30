@@ -9,6 +9,7 @@ After=network.target
 
 [Service]
 Type=simple
+EnvironmentFile=-/etc/sysmon-web/oidc.env
 User=www-data
 Group=www-data
 # -foreground: don't self-daemonize, so systemd (Type=simple) tracks the

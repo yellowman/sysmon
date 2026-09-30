@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -180,6 +181,9 @@ func signalReady() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "oidc-bootstrap" {
+		os.Exit(runOIDCBootstrap(os.Args[2:]))
+	}
 	// Command line flags
 	socketPath := flag.String("socket", defaultSocket, "FastCGI socket path")
 	configPath := flag.String("config", "/etc/sysmon.conf", "Sysmon config file path")
@@ -554,11 +558,29 @@ func main() {
 	}
 
 	// Initialize auth service
-	authService, err := auth.NewService(filepath.Join(stateDir, "auth.db"))
+	oidcCfg, err := auth.OIDCConfigFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid OIDC configuration: %v", err)
+	}
+	authService, err := auth.NewServiceWithBootstrap(filepath.Join(stateDir, "auth.db"), oidcCfg.Issuer == "")
 	if err != nil {
 		log.Fatalf("Failed to initialize auth: %v", err)
 	}
 	defer authService.Close()
+	if oidcCfg.Issuer != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		registered, err := auth.EnsureOIDCRegistered(ctx, oidcCfg)
+		if err != nil {
+			cancel()
+			log.Fatalf("OIDC bootstrap failed: %v", err)
+		}
+		client, err := auth.NewOIDCClient(ctx, registered)
+		cancel()
+		if err != nil {
+			log.Fatalf("OIDC initialization failed: %v", err)
+		}
+		authService.SetOIDCClient(client)
+	}
 
 	// Create API router. The returned stopPush shuts down whichever push
 	// service the router ends up owning (boot instance or a lazy reinit).

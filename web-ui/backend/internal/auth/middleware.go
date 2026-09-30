@@ -13,11 +13,12 @@ func RequireAuth(authSvc *Service, next http.Handler) http.Handler {
 		// Strip auth headers to prevent client spoofing
 		r.Header.Del("X-Session-User")
 		r.Header.Del("X-Session-Role")
+		r.Header.Del("X-Session-Display")
 
 		path := r.URL.Path
 
 		// Login endpoint and login page are always open
-		if path == "/api/auth/login" || path == "/login.html" {
+		if path == "/api/auth/login" || path == "/api/auth/mode" || path == "/api/auth/mobile-exchange" || path == "/auth/login" || path == "/auth/callback" || path == "/login.html" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -48,6 +49,11 @@ func RequireAuth(authSvc *Service, next http.Handler) http.Handler {
 		// Store session in context-like header for downstream handlers
 		r.Header.Set("X-Session-User", sess.Username)
 		r.Header.Set("X-Session-Role", sess.Role)
+		display := sess.Username
+		if sess.OIDCGrant != nil {
+			display = sess.OIDCGrant.DisplayName
+		}
+		r.Header.Set("X-Session-Display", display)
 
 		next.ServeHTTP(w, r)
 	})

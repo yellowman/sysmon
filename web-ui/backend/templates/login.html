@@ -16,6 +16,9 @@
         </div>
 
         <div class="bg-white border border-gray-200 rounded-xl p-6">
+            {{if .SSOEnabled}}
+            <a href="/auth/login" class="block w-full py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-lg text-center">Continue with authd</a>
+            {{else}}
             <div x-show="error" class="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700" x-text="error"></div>
 
             <form @submit.prevent="
@@ -49,6 +52,7 @@
                     <span x-show="loading">Signing in...</span>
                 </button>
             </form>
+            {{end}}
         </div>
     </div>
 </body>

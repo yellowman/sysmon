@@ -121,8 +121,9 @@ func isBrokenPipe(err error) bool {
 
 // PageData contains template data for page rendering
 type PageData struct {
-	Active   string // Current active page for navigation highlighting
-	Hostname string // Hostname for host detail pages
+	SSOEnabled bool
+	Active     string // Current active page for navigation highlighting
+	Hostname   string // Hostname for host detail pages
 }
 
 // Page handlers
@@ -131,7 +132,7 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleLoginPage(w http.ResponseWriter, req *http.Request) {
-	r.renderTemplate(w, "login.html", PageData{Active: ""})
+	r.renderTemplate(w, "login.html", PageData{SSOEnabled: r.auth.OIDC() != nil})
 }
 
 func (r *Router) handleHostsPage(w http.ResponseWriter, req *http.Request) {
@@ -185,7 +186,7 @@ func (r *Router) handleAgentsPage(w http.ResponseWriter, req *http.Request) {
 		http.Redirect(w, req, "/admin.html", http.StatusSeeOther)
 		return
 	}
-	r.renderTemplate(w, "agents.html", PageData{Active: "admin"})
+	r.renderTemplate(w, "agents.html", PageData{Active: "admin", SSOEnabled: r.auth.OIDC() != nil})
 }
 
 // Device templates: what a "Mikrotik netPower" or a "Siklu PTP" is, in

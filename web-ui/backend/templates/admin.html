@@ -115,6 +115,9 @@
         </div>
     </div>
 
+    {{if .SSOEnabled}}
+    <div class="card mb-6"><div class="card-header"><h2 class="section-title">Access</h2></div><div class="p-6 text-sm text-gray-600">Manage sysmon.viewer and sysmon.administrator assignments in authd.</div></div>
+    {{else}}
     <!-- User Management -->
     <div class="card mb-6" x-show="currentRole === 'admin'">
         <div class="card-header flex justify-between items-center">
@@ -195,6 +198,7 @@
         </div>
     </div>
 
+    {{end}}
     <!-- Push Configuration (FCM / APNs credentials, stored in settings.db) -->
     <div id="push-config" class="card mb-6">
         <div class="card-header flex justify-between items-center">
@@ -803,7 +807,7 @@ function adminPage() {
             this.loadPushLog();
             this.loadPushCfg();
             this.loadPushHealth();
-            this.loadUsers();
+            {{if not .SSOEnabled}}this.loadUsers();{{end}}
 
             // Refresh the live tables every 30s. The previous 5s interval
             // fired 3 parallel requests, chewing 36/min of the 60/min/IP
