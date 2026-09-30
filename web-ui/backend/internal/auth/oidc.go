@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strings"
@@ -193,16 +192,17 @@ func (c *OIDCClient) Exchange(ctx context.Context, code, verifier, nonce string)
 }
 
 func (c *OIDCClient) Refresh(ctx context.Context, old OIDCIdentity) (identity OIDCIdentity, err error) {
-	var connected atomic.Bool
-	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
-	source := c.oauth.TokenSource(oidc.ClientContext(ctx, c.http), &oauth2.Token{RefreshToken: old.RefreshToken, Expiry: time.Unix(0, 0)})
+	transport := &oidcRefreshTransport{base: c.http.Transport}
+	if transport.base == nil {
+		transport.base = http.DefaultTransport
+	}
+	httpClient := *c.http
+	httpClient.Transport = transport
+	source := c.oauth.TokenSource(oidc.ClientContext(ctx, &httpClient), &oauth2.Token{RefreshToken: old.RefreshToken, Expiry: time.Unix(0, 0)})
 	token, err := source.Token()
 	if err != nil {
-		var transportError *url.Error
-		// Only failures before acquiring a connection prove that the token
-		// request could not reach authd. Any connected request is ambiguous.
-		if !connected.Load() && errors.As(err, &transportError) {
-			return OIDCIdentity{}, errOIDCRefreshNotSent
+		if transport.retryable(err) {
+			return OIDCIdentity{}, errOIDCRefreshRetryable
 		}
 		return OIDCIdentity{}, errors.New("OIDC refresh failed")
 	}
@@ -226,6 +226,59 @@ func (c *OIDCClient) Refresh(ctx context.Context, old OIDCIdentity) (identity OI
 	}
 	identity.RefreshToken, identity.DisplayName = token.RefreshToken, old.DisplayName
 	return identity, nil
+}
+
+// The oauth2 library formats body-read failures without wrapping the
+// underlying error. Record HTTP failures at retrieval instead of parsing
+// those formatted messages or exposing provider response bodies.
+type oidcRefreshTransport struct {
+	base   http.RoundTripper
+	failed atomic.Bool
+	status atomic.Int32
+}
+
+func (t *oidcRefreshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(req)
+	if err != nil {
+		t.failed.Store(true)
+		return response, err
+	}
+	t.status.Store(int32(response.StatusCode))
+	if response.Body != nil {
+		response.Body = &oidcRefreshBody{ReadCloser: response.Body, failed: &t.failed}
+	}
+	return response, nil
+}
+
+type oidcRefreshBody struct {
+	io.ReadCloser
+	failed *atomic.Bool
+}
+
+func (b *oidcRefreshBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.failed.Store(true)
+	}
+	return n, err
+}
+
+func (t *oidcRefreshTransport) retryable(err error) bool {
+	var refusal *oauth2.RetrieveError
+	if errors.As(err, &refusal) {
+		switch refusal.ErrorCode {
+		case "invalid_grant", "invalid_client", "invalid_request", "unauthorized_client", "unsupported_grant_type", "invalid_scope":
+			return false
+		}
+	}
+	status := int(t.status.Load())
+	if status == http.StatusBadRequest || status == http.StatusUnauthorized {
+		return false
+	}
+	if status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout {
+		return true
+	}
+	return t.failed.Load() || (refusal != nil && refusal.ErrorCode == "temporarily_unavailable")
 }
 
 func (c *OIDCClient) identityFromAccess(ctx context.Context, token *oauth2.Token, issuer, subject string) (OIDCIdentity, error) {

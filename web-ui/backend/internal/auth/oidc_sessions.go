@@ -130,7 +130,7 @@ const (
 	oidcRefreshRetry = 30 * time.Second
 )
 
-var errOIDCRefreshNotSent = errors.New("OIDC refresh request did not reach the provider")
+var errOIDCRefreshRetryable = errors.New("OIDC refresh is temporarily unavailable")
 var ErrOIDCProviderUnavailable = errors.New("authd is temporarily unavailable; retry shortly")
 
 func (s *Service) validateOIDCSession(session Session) *Session {
@@ -189,7 +189,7 @@ func (s *Service) validateOIDCSessionResult(session Session) (*Session, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	identity, err := s.oidc.Refresh(ctx, *session.OIDCGrant)
-	if errors.Is(err, errOIDCRefreshNotSent) {
+	if errors.Is(err, errOIDCRefreshRetryable) {
 		session.RefreshInFlight = false
 		session.RefreshRetryAt = time.Now().Add(oidcRefreshRetry).Format(time.RFC3339Nano)
 		if err := s.saveOIDCSession(session); err != nil {
