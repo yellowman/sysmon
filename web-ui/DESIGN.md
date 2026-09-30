@@ -64,9 +64,18 @@ What stays sysmon's own:
 
 `templates/base.html` renders it once for every page.
 
-- **Width** 12rem (192px) labeled, 3rem (48px) collapsed. Both come from
-  one CSS variable (`--rail-w`) that the rail and the content offset
-  both read, so they cannot drift.
+- **Width** 12rem (192px) labeled, both as the desktop rail and as the
+  phone drawer, so there is one labeled width; 3rem (48px) collapsed,
+  desktop only. Both come from one CSS variable, `--rail-w`.
+- **Where the content starts** is a second variable, `--shell-inset`:
+  `--rail-w` on the desktop, 0 where the rail is a drawer over the page.
+  The content offset reads it, so the content cannot drift from the
+  rail. Anything a page floats over its content - the Hosts bulk
+  toolbar - uses `.shell-center-x`, which centres a fixed element on
+  that working region instead of on the viewport, with a 1rem gutter,
+  and moves with the rail when it collapses. Centring on the viewport
+  (`left: 50%`) puts it half a rail off-centre, and the offset changes
+  every time the rail does.
 - **Labeled by default.** SNMP Traps, Templates, Fleet, Metrics and
   Configuration are not destinations an operator should have to decode
   from a tooltip, least of all during an outage, so a first visit shows
@@ -119,10 +128,18 @@ The shared rule above, applied to sysmon-web:
 - **The site selector stays a control.** It becomes a location icon
   button - filled and blue when one site is selected, amber when the
   selected site has left the fleet, named "Site: ..." either way. It
-  opens a small menu anchored beside the rail with exactly the choices
+  opens a small panel anchored beside the rail with exactly the choices
   the labeled selector offers. Choosing one sets the same global scope,
-  so the two presentations cannot disagree. Escape or a click elsewhere
-  closes it, and focus opens on the current choice.
+  so the two presentations cannot disagree.
+- **It is a disclosure, not an ARIA menu.** The button carries
+  `aria-controls` and `aria-expanded` but not `aria-haspopup`, and the
+  panel is a labeled group of ordinary buttons reached with Tab, with
+  the current one marked `aria-pressed`. Claiming `role="menu"` would
+  promise arrow-key menu navigation it does not have. Opening it puts
+  focus on the current choice. Escape closes it and hands focus back to
+  the site button, so focus is never left on something that has just
+  disappeared; if focus has already moved elsewhere, Escape closes the
+  panel and leaves focus where it is. A click elsewhere also closes it.
 - **The wordmark shortens** to "sm" and still links to the dashboard.
   The signed-in user shows as their initial, named in full on hover.
 - **Remembered per browser** in `localStorage` (`sysmon-rail`:
@@ -130,8 +147,8 @@ The shared rule above, applied to sysmon-web:
   first paint, so a collapsed rail never loads wide and then snaps
   narrow. If storage is unavailable the rail simply starts labeled.
 - **Desktop only.** Below 1024px the rail is the drawer, always labeled
-  and full width, with the full site selector, whatever the desktop
-  preference is. A 48px drawer would save nothing on a phone and would
+  and at the same 192px, with the full site selector, whatever the
+  desktop preference is. A 48px drawer would save nothing on a phone and would
   only make the targets harder to hit. The toggle is not shown there.
 - Collapsing or expanding changes the width of the content area, so the
   shell fires a `resize` once the change settles; the map and charts
@@ -150,7 +167,9 @@ never the only thing standing between a user and a page.
 - **No shared package.** Two implementations are not enough to know
   which parts of the grammar are real. If a third product adopts it,
   that is the point to extract it into a standalone design document.
-- **Pages were not restyled** when the shell changed. The map and
-  configuration editor still carry their own site picker, because they
+- **Pages were not restyled** when the shell changed. The one page
+  change is the Hosts bulk toolbar taking `.shell-center-x`, because
+  centring it on the viewport was a defect the rail introduced. The map
+  and configuration editor still carry their own site picker, because they
   act on exactly one box and cannot use "All sites"; folding them into
   the global selector is a page-level change of its own.

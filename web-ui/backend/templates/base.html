@@ -50,7 +50,7 @@
 
          See web-ui/DESIGN.md for the grammar this follows. -->
     <div x-data="shellState()" x-init="loadSites()"
-         @keydown.escape.window="railOpen = false; siteMenuOpen = false">
+         @keydown.escape.window="onEscape()">
 
         <!-- Below lg: a slim bar holding the way into the drawer. -->
         <header class="lg:hidden h-14 flex items-center gap-3 px-4 bg-white border-b border-gray-200">
@@ -81,15 +81,18 @@
                  nothing to choose between. -->
             <div x-show="multiSite() || siteGone" x-cloak class="px-2 pb-3">
                 <!-- Collapsed, the same control in a compact form: a button
-                     that opens an anchored menu of exactly the choices the
+                     that opens an anchored panel of exactly the choices the
                      select offers. Scope never disappears with the labels -
                      the button is blue while a single site is selected and
                      amber if that site has left the fleet, so an operator
-                     filtered to one box can still see that they are. -->
+                     filtered to one box can still see that they are.
+                     A disclosure, not an ARIA menu: the popup is a group of
+                     ordinary buttons, reached with Tab, so the trigger says
+                     only what it controls and whether it is open. -->
                 <div class="rail-site-short relative" @click.outside="siteMenuOpen = false">
-                    <button type="button" class="rail-link w-full" @click="toggleSiteMenu()"
+                    <button type="button" class="rail-link w-full" @click="toggleSiteMenu()" x-ref="siteButton"
                             :class="{ 'rail-scoped': site !== '' && !siteGone, 'rail-gone': !!siteGone }"
-                            aria-haspopup="true" aria-controls="rail-site-menu" :aria-expanded="siteMenuOpen.toString()"
+                            aria-controls="rail-site-menu" :aria-expanded="siteMenuOpen.toString()"
                             :title="siteMenuOpen ? null : (siteGone ? ('Site ' + siteGone + ' is no longer in the fleet') : ('Site: ' + currentSiteLabel()))"
                             :aria-label="siteGone ? ('Site ' + siteGone + ' is no longer in the fleet, choose another') : ('Site: ' + currentSiteLabel() + ', change')">
                         <i class="fas" :class="siteGone ? 'fa-triangle-exclamation' : 'fa-location-dot'" aria-hidden="true"></i>
@@ -354,7 +357,7 @@
                     return s ? (s.description || s.site) : this.site;
                 },
                 // The collapsed site control: the same choices as the select,
-                // in a menu anchored to the button. Focus goes to the current
+                // in a panel anchored to the button. Focus goes to the current
                 // choice so the keyboard lands where the operator already is.
                 siteMenuOpen: false,
                 toggleSiteMenu() {
@@ -365,6 +368,18 @@
                             if (cur) cur.focus();
                         });
                     }
+                },
+                onEscape() {
+                    this.railOpen = false;
+                    if (!this.siteMenuOpen) return;
+                    // Closing hides whatever in the panel had focus; hand it
+                    // back to the button that opened it, not to the page.
+                    // Focus that has already moved elsewhere stays put.
+                    const menu = document.getElementById('rail-site-menu');
+                    const hadFocus = menu.contains(document.activeElement) ||
+                                     document.activeElement === this.$refs.siteButton;
+                    this.siteMenuOpen = false;
+                    if (hadFocus) this.$refs.siteButton.focus();
                 },
             }, fleetState());
         }
@@ -752,6 +767,23 @@
         /* The application rail. One width, used by the rail and by the
            offset of the content beside it, so the two cannot drift. */
         :root { --rail-w: 12rem; }
+        /* Where the working region starts: past the rail on the desktop,
+           the viewport edge where the rail is a drawer. The content offset
+           reads it, and so does anything a page floats over the content.
+           .shell-center-x centres a fixed element on the working region,
+           not the viewport, and follows the rail when it collapses. It
+           spans the region and centres with auto margins rather than
+           left:50% plus translateX(-50%), because a transform does not
+           move the layout box: that box shrink-wraps to the space right
+           of its left edge, so a wide toolbar wraps in a region it fits.
+           A 1rem gutter each side: one too wide for the region wraps
+           inside it rather than running into the rail. */
+        :root { --shell-inset: 0px; }
+        .shell-content { padding-left: var(--shell-inset); }
+        .shell-center-x {
+            left: calc(var(--shell-inset) + 1rem); right: 1rem;
+            width: fit-content; margin-left: auto; margin-right: auto;
+        }
         .rail {
             position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
             width: var(--rail-w);
@@ -763,8 +795,8 @@
         }
         .rail.open { transform: none; box-shadow: 0 10px 25px rgba(17, 24, 39, 0.15); }
         @media (min-width: 1024px) {
+            :root { --shell-inset: var(--rail-w); }
             .rail, .rail.open { transform: none; box-shadow: none; }
-            .shell-content { padding-left: var(--rail-w); }
         }
         @media (prefers-reduced-motion: reduce) { .rail { transition: none; } }
 
@@ -818,7 +850,7 @@
             font-size: 0.6875rem; font-weight: 600;
         }
 
-        /* The collapsed site menu, anchored beside its button. The button
+        /* The collapsed site panel, anchored beside its button. The button
            sits inside the rail's 0.5rem gutter and 1px border, so clear
            both and leave a small gap past the rail's outer edge. */
         .rail-popover {
