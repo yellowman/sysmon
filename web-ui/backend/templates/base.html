@@ -18,118 +18,135 @@
     </style>
 </head>
 <body class="bg-gray-50 antialiased">
-    <!-- Navigation -->
-    <nav class="bg-white border-b border-gray-200"
-         x-data="Object.assign({mobileOpen: false}, fleetState())" x-init="loadSites()">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between gap-4 h-14">
-                <!-- The links give way, the controls never do: ten links
-                     plus a fleet selector overflow a ~1300px window, and
-                     an overflowing flex row silently pushes whatever is
-                     rightmost - the Logout button - off screen. -->
-                <div class="flex min-w-0">
-                    <div class="flex-shrink-0 flex items-center">
-                        <span class="text-lg font-extrabold tracking-tight text-gray-900">sys<span class="text-blue-600">mon</span></span>
-                    </div>
-                    <div class="hidden min-w-0 overflow-x-auto nav-scroll lg:ml-8 lg:flex lg:space-x-5 items-center">
-                        <a href="/" class="nav-link {{if eq .Active "dashboard"}}active{{end}}">
-                            <i class="fas fa-tachometer-alt mr-2"></i>Dashboard
-                        </a>
-                        <a href="/hosts.html" class="nav-link {{if eq .Active "hosts"}}active{{end}}">
-                            <i class="fas fa-server mr-2"></i>Hosts
-                        </a>
-                        <a href="/map.html" class="nav-link {{if eq .Active "map"}}active{{end}}">
-                            <i class="fas fa-sitemap mr-2"></i>Map
-                        </a>
-                        <a href="/traps.html" class="nav-link {{if eq .Active "traps"}}active{{end}}">
-                            <i class="fas fa-exclamation-triangle mr-2"></i>SNMP Traps
-                        </a>
-                        <a href="/history.html" class="nav-link {{if eq .Active "history"}}active{{end}}">
-                            <i class="fas fa-clock-rotate-left mr-2"></i>History
-                        </a>
-                        <!-- Admin-only pages are hidden from an ordinary
-                             user rather than offered and then refused: the
-                             server gates them (config contents carry the
-                             authkey, SNMP communities and RADIUS secrets),
-                             so a link here could only ever lead to a 403. -->
-                        <a x-show="$store.auth.role === 'admin'" x-cloak
-                           href="/config.html" class="nav-link {{if eq .Active "config"}}active{{end}}">
-                            <i class="fas fa-cog mr-2"></i>Configuration
-                        </a>
-                        <a href="/fleet.html" class="nav-link {{if eq .Active "fleet"}}active{{end}}">
-                            <i class="fas fa-server mr-1"></i>Fleet
-                        </a>
-                        <a href="/templates.html" class="nav-link {{if eq .Active "templates"}}active{{end}}">
-                            <i class="fas fa-cubes mr-2"></i>Templates
-                        </a>
-                        <a x-show="$store.auth.role === 'admin'" x-cloak
-                           href="/admin.html" class="nav-link {{if eq .Active "admin"}}active{{end}}">
-                            <i class="fas fa-tools mr-2"></i>Admin
-                        </a>
-                        <a href="/metrics.html" class="nav-link {{if eq .Active "metrics"}}active{{end}}">
-                            <i class="fas fa-chart-line mr-2"></i>Metrics
-                        </a>
-                    </div>
-                </div>
-                <div class="flex flex-shrink-0 items-center gap-3">
-                    <!-- Which sysmond are we looking at. Only shown when
-                         there is more than one; a single-box install sees
-                         no selector at all. -->
-                    <template x-if="multiSite()">
-                        <select class="text-xs border border-gray-200 rounded px-2 py-1 max-w-[15rem]"
-                                :value="site"
-                                @change="setSite($event.target.value)"
-                                title="Which monitoring instance to show">
-                            <option value="">All sites</option>
-                            <template x-for="s in sites" :key="s.site">
-                                <option :value="s.site"
-                                        x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
-                            </template>
-                        </select>
-                    </template>
-                    <template x-if="siteGone">
-                        <span class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
-                              x-text="'site ' + siteGone + ' is no longer in the fleet'"></span>
-                    </template>
-                    <span class="hidden sm:inline text-xs text-gray-400" x-data x-text="$store.auth.user"></span>
-                    <button onclick="doLogout()"
-                            class="px-2.5 py-1 border border-gray-300 rounded text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900">
-                        <i class="fas fa-sign-out-alt mr-1"></i>Logout
-                    </button>
-                    <div class="lg:hidden">
-                        <button @click="mobileOpen = !mobileOpen" class="text-gray-500 hover:text-gray-700 p-2">
-                            <i :class="mobileOpen ? 'fa-times' : 'fa-bars'" class="fas text-xl"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Mobile menu -->
-        <div x-show="mobileOpen" x-cloak class="lg:hidden border-t border-gray-200 bg-white">
-            <div class="px-4 py-3 space-y-2">
-                <a href="/" class="mobile-nav {{if eq .Active "dashboard"}}active{{end}}"><i class="fas fa-tachometer-alt mr-2 w-5 text-center"></i>Dashboard</a>
-                <a href="/hosts.html" class="mobile-nav {{if eq .Active "hosts"}}active{{end}}"><i class="fas fa-server mr-2 w-5 text-center"></i>Hosts</a>
-                <a href="/map.html" class="mobile-nav {{if eq .Active "map"}}active{{end}}"><i class="fas fa-sitemap mr-2 w-5 text-center"></i>Map</a>
-                <a href="/traps.html" class="mobile-nav {{if eq .Active "traps"}}active{{end}}"><i class="fas fa-exclamation-triangle mr-2 w-5 text-center"></i>SNMP Traps</a>
-                <a href="/history.html" class="mobile-nav {{if eq .Active "history"}}active{{end}}"><i class="fas fa-clock-rotate-left mr-2 w-5 text-center"></i>History</a>
-                <a x-show="$store.auth.role === 'admin'" x-cloak href="/config.html" class="mobile-nav {{if eq .Active "config"}}active{{end}}"><i class="fas fa-cog mr-2 w-5 text-center"></i>Configuration</a>
-                <a href="/fleet.html" class="mobile-nav {{if eq .Active "fleet"}}active{{end}}"><i class="fas fa-server mr-2 w-5 text-center"></i>Fleet</a>
-                <a href="/templates.html" class="mobile-nav {{if eq .Active "templates"}}active{{end}}"><i class="fas fa-cubes mr-2 w-5 text-center"></i>Templates</a>
-                <a x-show="$store.auth.role === 'admin'" x-cloak href="/admin.html" class="mobile-nav {{if eq .Active "admin"}}active{{end}}"><i class="fas fa-tools mr-2 w-5 text-center"></i>Admin</a>
-                <a href="/metrics.html" class="mobile-nav {{if eq .Active "metrics"}}active{{end}}"><i class="fas fa-chart-line mr-2 w-5 text-center"></i>Metrics</a>
-            </div>
-        </div>
-    </nav>
+    <!-- Application shell.
 
-    <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {{block "content" .}}{{end}}
-    </main>
+         The rail answers one question - which part of sysmon am I in -
+         and nothing else: it is navigation, not a toolbar. It replaced a
+         top bar that had outgrown the job; ten destinations, a fleet
+         selector, the user and Logout in one row overflowed a ~1300px
+         window, and an overflowing flex row silently pushes whatever is
+         rightmost - Logout - off the screen.
+
+         The navigation is rendered once. At lg and up CSS pins it as a
+         rail; below that the same element becomes a drawer behind the
+         menu button, so phones get this navigation rather than a second
+         one to keep in step. Which of the two you get is decided in CSS,
+         not by Alpine, so a phone never flashes an open drawer while the
+         scripts load.
+
+         Kept in its own scope, as a sibling of <main> rather than a
+         parent: pages nest their own components, and would otherwise
+         silently inherit this one's site/sites/setSite.
+
+         See web-ui/DESIGN.md for the grammar this follows. -->
+    <div x-data="Object.assign({ railOpen: false }, fleetState())" x-init="loadSites()"
+         @keydown.escape.window="railOpen = false">
+
+        <!-- Below lg: a slim bar holding the way into the drawer. -->
+        <header class="lg:hidden h-14 flex items-center gap-3 px-4 bg-white border-b border-gray-200">
+            <button @click="railOpen = true" class="p-2 -ml-2 text-gray-500 hover:text-gray-900"
+                    aria-label="Open navigation" aria-controls="app-rail" :aria-expanded="railOpen">
+                <i class="fas fa-bars text-lg" aria-hidden="true"></i>
+            </button>
+            <a href="/" class="rail-wordmark">sys<span>mon</span></a>
+        </header>
+
+        <div x-show="railOpen" x-cloak x-transition.opacity @click="railOpen = false"
+             class="lg:hidden fixed inset-0 z-40 bg-gray-900/30"></div>
+
+        <aside id="app-rail" class="rail" :class="{ 'open': railOpen }">
+            <div class="flex items-center justify-between px-4 pt-4 pb-3">
+                <a href="/" class="rail-wordmark">sys<span>mon</span></a>
+                <button @click="railOpen = false" class="lg:hidden p-1 text-gray-400 hover:text-gray-700"
+                        aria-label="Close navigation">
+                    <i class="fas fa-xmark" aria-hidden="true"></i>
+                </button>
+            </div>
+
+            <!-- Global scope: which sysmond the whole console is looking
+                 at. It belongs to the shell, not to any one page. Shown
+                 only with more than one box - a single-box install has
+                 nothing to choose between. -->
+            <div x-show="multiSite() || siteGone" x-cloak class="px-2 pb-3">
+                <template x-if="multiSite()">
+                    <select class="w-full text-xs border border-gray-200 rounded px-2 py-1.5 bg-white"
+                            :value="site"
+                            @change="setSite($event.target.value)"
+                            aria-label="Which monitoring instance to show"
+                            title="Which monitoring instance to show">
+                        <option value="">All sites</option>
+                        <template x-for="s in sites" :key="s.site">
+                            <option :value="s.site"
+                                    x-text="(s.description || s.site) + (s.reachable ? '' : ' - unreachable')"></option>
+                        </template>
+                    </select>
+                </template>
+                <template x-if="siteGone">
+                    <p class="mt-2 text-[11px] leading-snug text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
+                       x-text="'site ' + siteGone + ' is no longer in the fleet'"></p>
+                </template>
+            </div>
+
+            <!-- Destinations, grouped by whitespace rather than rules:
+                 watching the network, then managing what watches it. -->
+            <nav class="flex-1 overflow-y-auto px-2 pb-3" aria-label="Application">
+                <div class="rail-group">
+            <a href="/" class="rail-link {{if eq .Active "dashboard"}}active{{end}}"
+               {{if eq .Active "dashboard"}}aria-current="page"{{end}}><i class="fas fa-tachometer-alt" aria-hidden="true"></i>Dashboard</a>
+            <a href="/hosts.html" class="rail-link {{if eq .Active "hosts"}}active{{end}}"
+               {{if eq .Active "hosts"}}aria-current="page"{{end}}><i class="fas fa-server" aria-hidden="true"></i>Hosts</a>
+            <a href="/map.html" class="rail-link {{if eq .Active "map"}}active{{end}}"
+               {{if eq .Active "map"}}aria-current="page"{{end}}><i class="fas fa-sitemap" aria-hidden="true"></i>Map</a>
+            <a href="/traps.html" class="rail-link {{if eq .Active "traps"}}active{{end}}"
+               {{if eq .Active "traps"}}aria-current="page"{{end}}><i class="fas fa-exclamation-triangle" aria-hidden="true"></i>SNMP Traps</a>
+            <a href="/history.html" class="rail-link {{if eq .Active "history"}}active{{end}}"
+               {{if eq .Active "history"}}aria-current="page"{{end}}><i class="fas fa-clock-rotate-left" aria-hidden="true"></i>History</a>
+            <a href="/metrics.html" class="rail-link {{if eq .Active "metrics"}}active{{end}}"
+               {{if eq .Active "metrics"}}aria-current="page"{{end}}><i class="fas fa-chart-line" aria-hidden="true"></i>Metrics</a>
+                </div>
+                <div class="rail-group">
+            <a href="/fleet.html" class="rail-link {{if eq .Active "fleet"}}active{{end}}"
+               {{if eq .Active "fleet"}}aria-current="page"{{end}}><i class="fas fa-network-wired" aria-hidden="true"></i>Fleet</a>
+            <a href="/templates.html" class="rail-link {{if eq .Active "templates"}}active{{end}}"
+               {{if eq .Active "templates"}}aria-current="page"{{end}}><i class="fas fa-cubes" aria-hidden="true"></i>Templates</a>
+                </div>
+            </nav>
+
+            <!-- Kept apart from the destinations above: administration,
+                 then the account. Admin-only pages are hidden from an
+                 ordinary user rather than offered and then refused - the
+                 server gates them too (config contents carry the authkey,
+                 SNMP communities and RADIUS secrets), so a link here could
+                 only ever lead to a redirect. -->
+            <div class="px-2 pb-4">
+                <div x-show="$store.auth.role === 'admin'" x-cloak class="rail-group">
+            <a href="/config.html" class="rail-link {{if eq .Active "config"}}active{{end}}"
+               {{if eq .Active "config"}}aria-current="page"{{end}}><i class="fas fa-cog" aria-hidden="true"></i>Configuration</a>
+            <a href="/admin.html" class="rail-link {{if eq .Active "admin"}}active{{end}}"
+               {{if eq .Active "admin"}}aria-current="page"{{end}}><i class="fas fa-tools" aria-hidden="true"></i>Admin</a>
+                </div>
+                <div class="rail-group">
+                    <div class="px-2.5 pb-1 text-xs text-gray-400 truncate" x-text="$store.auth.user"></div>
+                    <button type="button" onclick="doLogout()" class="rail-link w-full">
+                        <i class="fas fa-right-from-bracket" aria-hidden="true"></i>Log out
+                    </button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Main Content: unchanged, moved to the right of the rail. Pages own
+         everything in here; the shell does not reach in. -->
+    <div class="shell-content">
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {{block "content" .}}{{end}}
+        </main>
+    </div>
 
     <!-- Protocol Error Notification (Fixed Position Right Side) -->
     <div id="protocol-error-indicator" x-data="protocolErrors()" x-show="errors.length > 0" x-cloak
          @click.outside="showDetails = false"
-         class="fixed top-20 right-4 z-50">
+         class="fixed top-16 lg:top-4 right-4 z-50">
         <div @click="showDetails = !showDetails"
              class="bg-red-500 text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg cursor-pointer hover:bg-red-600 transition-colors">
             <i class="fas fa-exclamation-triangle text-xl"></i>
@@ -639,33 +656,55 @@
     </script>
 
     <style>
-        .nav-scroll { scrollbar-width: none; }
-        .nav-scroll::-webkit-scrollbar { display: none; }
-        .nav-link {
-            display: inline-flex;
-            align-items: center;
-            white-space: nowrap;
-            padding: 0 0.25rem;
-            border-bottom: 2px solid transparent;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            color: #9ca3af;
-            letter-spacing: 0.01em;
-            transition: color 0.15s, border-color 0.15s;
+        /* The application rail. One width, used by the rail and by the
+           offset of the content beside it, so the two cannot drift. */
+        :root { --rail-w: 11.5rem; }
+        .rail {
+            position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
+            width: var(--rail-w);
+            display: flex; flex-direction: column;
+            background: #fff; border-right: 1px solid #e5e7eb;
+            /* Below lg the rail is a drawer, closed until opened. */
+            transform: translateX(-100%);
+            transition: transform 0.2s ease;
         }
-        .nav-link:hover { color: #111827; border-bottom-color: #e5e7eb; }
-        .nav-link.active { border-bottom-color: #111827; color: #111827; font-weight: 600; }
-        .mobile-nav {
-            display: block;
-            padding: 0.625rem 0.875rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            color: #6b7280;
-            letter-spacing: 0.01em;
+        .rail.open { transform: none; box-shadow: 0 10px 25px rgba(17, 24, 39, 0.15); }
+        @media (min-width: 1024px) {
+            .rail, .rail.open { transform: none; box-shadow: none; }
+            .shell-content { padding-left: var(--rail-w); }
         }
-        .mobile-nav:hover { background-color: #f9fafb; color: #111827; }
-        .mobile-nav.active { background-color: #f0f0f0; color: #111827; font-weight: 600; }
+        @media (prefers-reduced-motion: reduce) { .rail { transition: none; } }
+
+        .rail-wordmark {
+            font-size: 1.125rem; font-weight: 800; letter-spacing: -0.025em;
+            color: #111827; text-decoration: none;
+        }
+        .rail-wordmark span { color: #2563eb; }
+
+        .rail-group + .rail-group { margin-top: 1.25rem; }
+        .rail-link {
+            position: relative;
+            display: flex; align-items: center; gap: 0.625rem;
+            padding: 0.4375rem 0.625rem;
+            border-radius: 0.375rem;
+            font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.01em;
+            color: #4b5563; text-decoration: none; text-align: left;
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .rail-link i { width: 1rem; text-align: center; color: #9ca3af; }
+        .rail-link:hover { background-color: #f9fafb; color: #111827; }
+        .rail-link:hover i { color: #6b7280; }
+        .rail-link:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+        /* Where you are carries two signals - a faint accent fill and a
+           2px marker - plus weight, so it never rests on colour alone. */
+        .rail-link.active { background-color: #eff6ff; color: #111827; font-weight: 600; }
+        .rail-link.active i { color: #2563eb; }
+        .rail-link.active::before {
+            content: ""; position: absolute; left: 0; top: 0.375rem; bottom: 0.375rem;
+            width: 2px; border-radius: 1px; background: #2563eb;
+        }
+        /* In the drawer the same links are touch targets. */
+        @media (max-width: 1023px) { .rail-link { padding-top: 0.625rem; padding-bottom: 0.625rem; } }
         [x-cloak] { display: none !important; }
         .stat-label { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #9ca3af; }
         .stat-value { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.025em; line-height: 1; }
