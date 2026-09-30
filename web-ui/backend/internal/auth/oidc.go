@@ -190,15 +190,19 @@ func (c *OIDCClient) Exchange(ctx context.Context, code, verifier, nonce string)
 	return identity, nil
 }
 
-func (c *OIDCClient) Refresh(ctx context.Context, old OIDCIdentity) (OIDCIdentity, error) {
+func (c *OIDCClient) Refresh(ctx context.Context, old OIDCIdentity) (identity OIDCIdentity, err error) {
 	source := c.oauth.TokenSource(oidc.ClientContext(ctx, c.http), &oauth2.Token{RefreshToken: old.RefreshToken, Expiry: time.Unix(0, 0)})
 	token, err := source.Token()
 	if err != nil {
 		return OIDCIdentity{}, errors.New("OIDC refresh failed")
 	}
-	identity, err := c.identityFromAccess(ctx, token, old.Issuer, old.Subject)
+	defer func() {
+		if err != nil {
+			_ = c.Revoke(ctx, token.RefreshToken)
+		}
+	}()
+	identity, err = c.identityFromAccess(ctx, token, old.Issuer, old.Subject)
 	if err != nil {
-		_ = c.Revoke(ctx, token.RefreshToken)
 		return OIDCIdentity{}, err
 	}
 	if token.RefreshToken == "" || token.RefreshToken == old.RefreshToken {

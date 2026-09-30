@@ -137,16 +137,19 @@ func (s *Service) validateOIDCSession(session Session) *Session {
 	}
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	// Re-read after waiting: another request may have refreshed or logged out.
+	// Re-read into a new value: omitted JSON fields must not retain the
+	// previous snapshot's in-flight marker after another request finishes.
+	var current Session
 	if err := s.db.View(func(tx *bolt.Tx) error {
 		raw := tx.Bucket(bucketSessions).Get([]byte(session.Token))
 		if raw == nil {
 			return errors.New("session ended")
 		}
-		return json.Unmarshal(raw, &session)
+		return json.Unmarshal(raw, &current)
 	}); err != nil {
 		return nil
 	}
+	session = current
 	expires, err = time.Parse(time.RFC3339, session.ExpiresAt)
 	if session.RefreshInFlight || err != nil || !time.Now().Before(expires) {
 		s.Logout(session.Token)
@@ -201,7 +204,37 @@ func (s *Service) StartMobileHandoff(identity OIDCIdentity, challenge string) (s
 	if err != nil {
 		return "", err
 	}
-	err = s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bucketMobileHandoffs).Put([]byte(code), raw) })
+	var expired []string
+	err = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketMobileHandoffs)
+		var stale [][]byte
+		now := time.Now()
+		if err := b.ForEach(func(k, v []byte) error {
+			var old mobileHandoff
+			if json.Unmarshal(v, &old) != nil || !now.Before(old.ExpiresAt) {
+				stale = append(stale, append([]byte(nil), k...))
+				if old.Identity.RefreshToken != "" {
+					expired = append(expired, old.Identity.RefreshToken)
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, key := range stale {
+			if err := b.Delete(key); err != nil {
+				return err
+			}
+		}
+		return b.Put([]byte(code), raw)
+	})
+	if err == nil && s.oidc != nil && len(expired) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, refresh := range expired {
+			_ = s.oidc.Revoke(ctx, refresh)
+		}
+	}
 	return code, err
 }
 

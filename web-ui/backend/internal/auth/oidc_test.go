@@ -142,6 +142,16 @@ func TestOIDCExchangeAndConcurrentRefresh(t *testing.T) {
 	if refreshes.Load() != 1 {
 		t.Fatalf("%d refresh calls; want one", refreshes.Load())
 	}
+	// A request can have captured the in-flight marker before waiting for
+	// the refresh lock. Its reread must clear the omitted marker field.
+	waiting := *session
+	waiting.RefreshInFlight = true
+	if got := s.validateOIDCSession(waiting); got == nil || got.Role != RoleAdmin || got.RefreshInFlight {
+		t.Fatalf("waiting request retained an old refresh marker: %+v", got)
+	}
+	if refreshes.Load() != 1 {
+		t.Fatal("waiting request refreshed the already renewed session")
+	}
 	// A crash after sending a rotating token must require a fresh sign-in.
 	if err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSessions)
@@ -229,6 +239,62 @@ func TestOIDCModeAndMobileHandoff(t *testing.T) {
 	}
 	if _, err := s.ConsumeMobileHandoff(code, verifier); err == nil {
 		t.Fatal("used mobile code accepted")
+	}
+}
+
+func TestMobileHandoffPrunesAbandonedGrant(t *testing.T) {
+	var revoked atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		revoked.Store(r.Form.Get("token"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	s, err := NewServiceWithBootstrap(filepath.Join(t.TempDir(), "auth.db"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetOIDCClient(&OIDCClient{revocation: server.URL, http: server.Client()})
+	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH"
+	hash := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(hash[:])
+	abandoned, err := s.StartMobileHandoff(OIDCIdentity{RefreshToken: "abandoned-refresh"}, challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketMobileHandoffs)
+		var entry mobileHandoff
+		if err := json.Unmarshal(b.Get([]byte(abandoned)), &entry); err != nil {
+			return err
+		}
+		entry.ExpiresAt = time.Now().Add(-time.Second)
+		raw, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(abandoned), raw)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.StartMobileHandoff(OIDCIdentity{RefreshToken: "fresh-refresh"}, challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Load() != "abandoned-refresh" {
+		t.Fatalf("revoked %q; want the abandoned grant", revoked.Load())
+	}
+	if err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketMobileHandoffs)
+		if b.Get([]byte(abandoned)) != nil || b.Get([]byte(fresh)) == nil {
+			t.Error("expired handoff retained or fresh handoff removed")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
