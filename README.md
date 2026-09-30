@@ -91,7 +91,7 @@ numbers, so the card carries them: mean round trip with its min-max
 range, RFC 3550 jitter, the loss ratio from the packet-loss check, and
 the device's own uptime from the SNMP reboot watch. Figures are coloured
 against the threshold *you* set for that object rather than a number
-picked here - the backhaul in red is at 64ms against the 20ms its
+picked here - the backhaul in red is at 67ms against the 20ms its
 template asked for.
 
 #### Dependency map
