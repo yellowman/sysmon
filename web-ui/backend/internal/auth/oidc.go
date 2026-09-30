@@ -272,10 +272,11 @@ func (t *oidcRefreshTransport) retryable(err error) bool {
 		}
 	}
 	status := int(t.status.Load())
-	if status == http.StatusBadRequest || status == http.StatusUnauthorized {
+	switch status {
+	case http.StatusBadRequest, http.StatusUnauthorized:
 		return false
-	}
-	if status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout {
+	case http.StatusTooManyRequests, http.StatusInternalServerError,
+		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return true
 	}
 	return t.failed.Load() || (refusal != nil && refusal.ErrorCode == "temporarily_unavailable")
