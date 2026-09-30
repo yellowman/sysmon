@@ -14,9 +14,21 @@
  * These tests hold the rule from both sides: an unprivileged document
  * contains no secret and still contains the status a monitoring client
  * needs, and a privileged one is unchanged.
+ *
+ * They do it at two levels. The serializer tests call send_object_xml()
+ * directly with each privilege value. The dispatch tests go through
+ * do_service() with a real "SHOWOBJ <name>" command line and a client in
+ * each auth state, which is the path a connection actually takes - so
+ * they also pin the linkage the serializer tests cannot see: that the
+ * SHOWOBJ handler derives the privilege from client->authlvl at all. A
+ * call site passing a constant 1 would leave every serializer test green
+ * and hand out every credential.
  */
 
 #include "config.h"
+
+/* The command dispatcher, which config.h does not export. */
+void do_service(struct clientstatus *, char *, time_t);
 
 /* Daemon stand-ins. Kept short on purpose. */
 bool debug = 0;
@@ -39,11 +51,39 @@ void print_err(int a, const char *fmt, ...) { (void)a; (void)fmt; }
 void *MALLOC(size_t n, char *why) { (void)why; return malloc(n); }
 void FREE(void *p) { free(p); }
 void ABORT(void) { }
-int sendline(int fd, char *s) { (void)fd; (void)s; return 0; }
+/*
+ * Everything the daemon says to a client goes through sendline() - the
+ * XML lines of a document (do_send_xml with no FILE*) and the numeric
+ * replies alike - so capturing it here is capturing the wire.
+ */
+static char wire[65536];
+static size_t wirelen = 0;
+
+int sendline(int fd, char *s)
+{
+	size_t n = strlen(s);
+
+	(void)fd;
+	if (wirelen + n + 2 < sizeof(wire))
+	{
+		memcpy(wire + wirelen, s, n);
+		wirelen += n;
+		wire[wirelen++] = '\n';
+		wire[wirelen] = '\0';
+	}
+	return 0;
+}
 int getline_tcp(int fd, char *b) { (void)fd; (void)b; return 0; }
 int nextfd(void) { return 0; }
 void tls_disconnect(int fd) { (void)fd; }
-struct graph_elements *find_object_by_name(char *n) { (void)n; return NULL; }
+static struct graph_elements *registered = NULL;
+
+struct graph_elements *find_object_by_name(char *n)
+{
+	if (registered != NULL && strcmp(n, (char *)registered->unique_name) == 0)
+		return registered;
+	return NULL;
+}
 void object_changed(struct hostinfo *o) { (void)o; }
 void expire_dns(time_t t) { (void)t; }
 void print_queue(int fd) { (void)fd; }
@@ -132,6 +172,86 @@ static char *render(struct graph_elements *g, int privileged)
 	return buf;
 }
 
+/*
+ * Send one command line through the daemon's dispatcher, as a client in
+ * the given state, and return everything the daemon wrote back.
+ */
+static char *dispatch(char *line, int authlvl, int xml)
+{
+	struct clientstatus c;
+	char cmd[256];
+
+	memset(&c, 0, sizeof(c));
+	c.filedes = 7;
+	c.ip = (unsigned char *)"192.0.2.1";
+	c.authlvl = authlvl;
+	c.xml = xml;
+
+	wirelen = 0;
+	wire[0] = '\0';
+	/* do_service may tokenise its buffer; never hand it a literal. */
+	snprintf(cmd, sizeof(cmd), "%s", line);
+	do_service(&c, cmd, time(NULL));
+	return wire;
+}
+
+static void dispatch_tests(struct graph_elements *g)
+{
+	char *out;
+
+	registered = g;
+
+	/*
+	 * An unauthenticated client in xml mode: the case the leak lived in.
+	 * It gets the status document and none of the credentials.
+	 */
+	out = dispatch("SHOWOBJ awbreyrouter", 0, 1);
+	check(strstr(out, "<ObjectStatus>") != NULL,
+		"dispatch: unauthenticated SHOWOBJ still returns the status document");
+	check(strstr(out, "10.20.4.1") != NULL,
+		"dispatch: unauthenticated SHOWOBJ still carries the hostname");
+	check(strstr(out, MARKER) == NULL,
+		"dispatch: unauthenticated SHOWOBJ must return no credential");
+	check(strstr(out, "ObjectSNMPCommunity") == NULL,
+		"dispatch: unauthenticated SHOWOBJ has no SNMP community tag");
+	check(strstr(out, "ObjectAuthPassword") == NULL,
+		"dispatch: unauthenticated SHOWOBJ has no auth password tag");
+	check(strstr(out, "ObjectRadiusSecret") == NULL,
+		"dispatch: unauthenticated SHOWOBJ has no RADIUS secret tag");
+	check(strstr(out, "ObjectExecCmd") == NULL,
+		"dispatch: unauthenticated SHOWOBJ has no exec command tag");
+
+	/*
+	 * Authenticated at either level: the full record, as before. This is
+	 * what sysmon-web's own connection is, so narrowing it would break
+	 * config round-tripping.
+	 */
+	out = dispatch("SHOWOBJ awbreyrouter", 1, 1);
+	check(strstr(out, "ObjectSNMPCommunity") != NULL &&
+	      strstr(out, "ObjectAuthPassword") != NULL,
+		"dispatch: authlvl 1 SHOWOBJ still carries credentials");
+	out = dispatch("SHOWOBJ awbreyrouter", 2, 1);
+	check(strstr(out, "ObjectRadiusSecret") != NULL &&
+	      strstr(out, "ObjectExecCmd") != NULL,
+		"dispatch: authlvl 2 SHOWOBJ still carries credentials");
+
+	/* Not in xml mode: refused, and nothing of the object at all. */
+	out = dispatch("SHOWOBJ awbreyrouter", 0, 0);
+	check(strstr(out, "403") != NULL,
+		"dispatch: SHOWOBJ outside xml mode is refused");
+	check(strstr(out, "<ObjectStatus>") == NULL && strstr(out, MARKER) == NULL,
+		"dispatch: a refused SHOWOBJ sends none of the object");
+
+	/* An unknown name is refused, and must not fall back to anything. */
+	out = dispatch("SHOWOBJ nosuchobject", 0, 1);
+	check(strstr(out, "403") != NULL,
+		"dispatch: SHOWOBJ of an unknown object is refused");
+	check(strstr(out, "<ObjectStatus>") == NULL,
+		"dispatch: SHOWOBJ of an unknown object sends no document");
+
+	registered = NULL;
+}
+
 int main(void)
 {
 	struct graph_elements *g = object_with_secrets();
@@ -173,6 +293,8 @@ int main(void)
 		"privileged status XML still carries the RADIUS secret");
 	check(strstr(doc, "ObjectExecCmd") != NULL,
 		"privileged status XML still carries the command");
+
+	dispatch_tests(g);
 
 	if (failures == 0)
 		printf("showobj-test: all checks passed\n");

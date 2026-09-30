@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/xml"
+	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -109,33 +112,77 @@ var objectDetailFields = map[string]detailKind{
 	"ObjectSNMPType": kindAuto,
 }
 
-// objectDetail parses an ObjectStatus document and returns only the
-// allow-listed tags. Numbers come back as numbers so the page can format
-// them without re-sniffing types in JavaScript.
-func objectDetail(doc string) map[string]interface{} {
+// objectDetail parses one ObjectStatus document and returns only the
+// allow-listed tags. Numeric fields come back as numbers so the page can
+// compare and format them without re-sniffing types in JavaScript.
+//
+// It refuses anything that is not exactly one complete, well-formed
+// ObjectStatus document, instead of returning whatever parsed before the
+// problem. A prefix is not a partial answer, it is a wrong one: every
+// field after the break is missing, and the page cannot tell a field the
+// daemon never sent from a field that was cut off, so it renders a
+// plausible host detail that quietly omits the half it lost. The daemon
+// formats each line with snprintf into a fixed buffer, which truncates
+// an oversized value silently and takes its closing tag with it - that
+// is the realistic way a document arrives whole but broken.
+//
+// The decoder alone does not enforce this. It reports syntax errors
+// (a truncated tail, a mismatched tag, a bad entity) but accepts an
+// empty input, a different root element, two documents back to back and
+// stray text around the root without complaint. Those are structural
+// questions, so they are checked here.
+//
+// The error never quotes the document. A decoder message can carry a
+// fragment of it, and the privileged SHOWOBJ this server makes returns
+// the object's credentials - callers must not pass err to a browser.
+func objectDetail(doc string) (map[string]interface{}, error) {
 	out := map[string]interface{}{}
 	dec := xml.NewDecoder(strings.NewReader(doc))
-	var current string
+
+	var (
+		current             string
+		depth               int
+		sawRoot, closedRoot bool
+	)
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			// A malformed tail still leaves what parsed cleanly; the
-			// caller decides whether that is enough to render.
-			break
+			return nil, fmt.Errorf("malformed status document: %w", err)
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if depth == 0 {
+				if closedRoot {
+					return nil, errors.New("a second element follows the status document")
+				}
+				if t.Name.Local != "ObjectStatus" {
+					return nil, fmt.Errorf("expected an ObjectStatus document, got <%s>", t.Name.Local)
+				}
+				sawRoot = true
+			}
+			depth++
 			current = t.Name.Local
+		case xml.EndElement:
+			depth--
+			if depth == 0 {
+				closedRoot = true
+			}
+			current = ""
 		case xml.CharData:
-			kind, ok := objectDetailFields[current]
-			if current == "" || !ok {
+			text := strings.TrimSpace(string(t))
+			if depth == 0 {
+				// Outside the root only whitespace belongs. Anything else
+				// means the stream was not the document we asked for.
+				if text != "" {
+					return nil, errors.New("text outside the status document")
+				}
 				continue
 			}
-			text := strings.TrimSpace(string(t))
-			if text == "" {
+			kind, ok := objectDetailFields[current]
+			if !ok || text == "" {
 				continue
 			}
 			if n, err := strconv.ParseFloat(text, 64); kind == kindAuto && err == nil {
@@ -143,11 +190,17 @@ func objectDetail(doc string) map[string]interface{} {
 			} else {
 				out[current] = text
 			}
-		case xml.EndElement:
-			current = ""
 		}
 	}
-	return out
+	if !sawRoot {
+		return nil, errors.New("no ObjectStatus document in the response")
+	}
+	if !closedRoot {
+		// The decoder reports this itself as unexpected EOF; checked
+		// again so the rule does not rest on that behaviour.
+		return nil, errors.New("status document ended before </ObjectStatus>")
+	}
+	return out, nil
 }
 
 // handleObjectDetail serves the host detail page:
@@ -176,13 +229,25 @@ func (r *Router) handleObjectDetail(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	fields := objectDetail(doc)
-	if len(fields) == 0 {
-		// Say what happened without quoting the document: the raw
-		// response is protocol debugging, and it is exactly the thing
-		// this endpoint exists to stop handing out.
+	r.writeObjectDetail(w, key, doc)
+}
+
+// writeObjectDetail turns a fetched status document into the response.
+//
+// Split out of the handler so the refusal path can be tested against a
+// real malformed document; through the handler it cannot be, because
+// fetching one needs a daemon.
+func (r *Router) writeObjectDetail(w http.ResponseWriter, key, doc string) {
+	fields, err := objectDetail(doc)
+	if err != nil {
+		// Logged here, never sent: a decoder message can quote a
+		// fragment of the privileged document - Go's quotes a bad
+		// entity's name verbatim. The page gets which object and that
+		// it failed, which is the part it can act on; an admin wanting
+		// the document itself has /api/xml/object/.
+		log.Printf("object-detail %s: %v", key, err)
 		r.sendError(w, http.StatusBadGateway,
-			"object "+key+" returned a status document this server could not read")
+			"object "+key+" returned a status document this server could not read - it was incomplete or malformed")
 		return
 	}
 	r.sendJSON(w, fields)
