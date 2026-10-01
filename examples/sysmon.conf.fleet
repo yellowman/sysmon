@@ -7,6 +7,21 @@
 # real network, and it is the config behind the screenshots in the
 # README.
 #
+# Some readings have no OID a template can know, so applying the
+# template asks for one. These are the OIDs this site supplied:
+#   - Datacenter A's environment: an AKCP sensorProbe (SPAGENT-MIB) set
+#     to Celsius, with temperature and humidity on port 1 and the door
+#     contact on port 2. The contact reads normal(2) when closed, so the
+#     door check expects 2.
+#   - The generator: a second sensorProbe in its enclosure. The run relay
+#     is on the port 1 contact, normal(2) while stopped. The tank sender
+#     is on a 4-20mA input, scaled to percent.
+#   - The Netonix tower switches (NETONIX-SWITCH-MIB): tempTable row 1,
+#     and voltageTable row 4, the DC input on these units. Voltage is in
+#     hundredths of a volt, so 46V is 4600.
+#   - The OLTs and fiber aggregation switches: ENTITY-SENSOR-MIB
+#     entPhySensorValue for the chassis sensor, entPhysicalIndex 1.
+#
 # The addresses are loopback so the file can be run as-is on one machine
 # for a look around. Two towers - cedar-gap and birch-summit - are on
 # reserved documentation ranges that answer nothing, which is what puts
@@ -399,7 +414,7 @@ object dc-a-env-temp {
 	contact "noc@example.net";
 	dep "dc-a-env";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.3854.1.2.2.1.16.1.3.0";
 	snmp-type "high";
 	snmp-high "35";
 };
@@ -411,7 +426,7 @@ object dc-a-env-humidity {
 	contact "noc@example.net";
 	dep "dc-a-env";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.3854.1.2.2.1.17.1.3.0";
 	snmp-type "high";
 	snmp-high "80";
 };
@@ -423,9 +438,9 @@ object dc-a-env-door {
 	contact "noc@example.net";
 	dep "dc-a-env";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.3854.1.2.2.1.18.1.3.1";
 	snmp-type "exact";
-	snmp-exact "1";
+	snmp-exact "2";
 };
 
 object dc-a-gen {
@@ -443,9 +458,9 @@ object dc-a-gen-running {
 	contact "noc@example.net";
 	dep "dc-a-gen";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.3854.1.2.2.1.18.1.3.0";
 	snmp-type "exact";
-	snmp-exact "1";
+	snmp-exact "2";
 };
 
 object dc-a-gen-fuel {
@@ -455,7 +470,7 @@ object dc-a-gen-fuel {
 	contact "noc@example.net";
 	dep "dc-a-gen";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.3854.1.2.2.1.17.1.3.1";
 	snmp-type "low";
 	snmp-low "25";
 };
@@ -899,9 +914,9 @@ object mill-creek-sw-volt {
 	contact "noc@example.net";
 	dep "mill-creek-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.4.1.3.4";
 	snmp-type "low";
-	snmp-low "46";
+	snmp-low "4600";
 };
 
 object mill-creek-sw-temp {
@@ -911,7 +926,7 @@ object mill-creek-sw-temp {
 	contact "noc@example.net";
 	dep "mill-creek-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.3.1.3.1";
 	snmp-type "high";
 	snmp-high "65";
 };
@@ -1465,9 +1480,9 @@ object sandhill-sw-volt {
 	contact "noc@example.net";
 	dep "sandhill-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.4.1.3.4";
 	snmp-type "low";
-	snmp-low "46";
+	snmp-low "4600";
 };
 
 object sandhill-sw-temp {
@@ -1477,7 +1492,7 @@ object sandhill-sw-temp {
 	contact "noc@example.net";
 	dep "sandhill-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.3.1.3.1";
 	snmp-type "high";
 	snmp-high "65";
 };
@@ -2068,9 +2083,9 @@ object lone-pine-sw-volt {
 	contact "noc@example.net";
 	dep "lone-pine-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.4.1.3.4";
 	snmp-type "low";
-	snmp-low "46";
+	snmp-low "4600";
 };
 
 object lone-pine-sw-temp {
@@ -2080,7 +2095,7 @@ object lone-pine-sw-temp {
 	contact "noc@example.net";
 	dep "lone-pine-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.3.1.3.1";
 	snmp-type "high";
 	snmp-high "65";
 };
@@ -2634,9 +2649,9 @@ object fox-hollow-sw-volt {
 	contact "noc@example.net";
 	dep "fox-hollow-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.4.1.3.4";
 	snmp-type "low";
-	snmp-low "46";
+	snmp-low "4600";
 };
 
 object fox-hollow-sw-temp {
@@ -2646,7 +2661,7 @@ object fox-hollow-sw-temp {
 	contact "noc@example.net";
 	dep "fox-hollow-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.3.1.3.1";
 	snmp-type "high";
 	snmp-high "65";
 };
@@ -3237,9 +3252,9 @@ object willow-bend-sw-volt {
 	contact "noc@example.net";
 	dep "willow-bend-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.4.1.3.4";
 	snmp-type "low";
-	snmp-low "46";
+	snmp-low "4600";
 };
 
 object willow-bend-sw-temp {
@@ -3249,7 +3264,7 @@ object willow-bend-sw-temp {
 	contact "noc@example.net";
 	dep "willow-bend-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.3.1.3.1";
 	snmp-type "high";
 	snmp-high "65";
 };
@@ -3803,9 +3818,9 @@ object birch-summit-sw-volt {
 	contact "noc@example.net";
 	dep "birch-summit-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.4.1.3.4";
 	snmp-type "low";
-	snmp-low "46";
+	snmp-low "4600";
 };
 
 object birch-summit-sw-temp {
@@ -3815,7 +3830,7 @@ object birch-summit-sw-temp {
 	contact "noc@example.net";
 	dep "birch-summit-sw";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.4.1.46242.3.1.3.1";
 	snmp-type "high";
 	snmp-high "65";
 };
@@ -4356,7 +4371,7 @@ object olt-1-temp {
 	contact "noc@example.net";
 	dep "olt-1";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.2.1.99.1.1.1.4.1";
 	snmp-type "high";
 	snmp-high "60";
 };
@@ -4399,7 +4414,7 @@ object fiber-agg-1-temp {
 	contact "noc@example.net";
 	dep "fiber-agg-1";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.2.1.99.1.1.1.4.1";
 	snmp-type "high";
 	snmp-high "60";
 };
@@ -4519,7 +4534,7 @@ object olt-2-temp {
 	contact "noc@example.net";
 	dep "olt-2";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.2.1.99.1.1.1.4.1";
 	snmp-type "high";
 	snmp-high "60";
 };
@@ -4562,7 +4577,7 @@ object fiber-agg-2-temp {
 	contact "noc@example.net";
 	dep "fiber-agg-2";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.2.1.99.1.1.1.4.1";
 	snmp-type "high";
 	snmp-high "60";
 };
@@ -4682,7 +4697,7 @@ object olt-3-temp {
 	contact "noc@example.net";
 	dep "olt-3";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.2.1.99.1.1.1.4.1";
 	snmp-type "high";
 	snmp-high "60";
 };
@@ -4725,7 +4740,7 @@ object fiber-agg-3-temp {
 	contact "noc@example.net";
 	dep "fiber-agg-3";
 	community "public";
-	oid ".1.3.6.1.2.1.1.3.0";
+	oid ".1.3.6.1.2.1.99.1.1.1.4.1";
 	snmp-type "high";
 	snmp-high "60";
 };
