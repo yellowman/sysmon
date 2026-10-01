@@ -172,6 +172,7 @@ function templatesPage() {
             const bits = [];
             if (c.port) bits.push('port ' + c.port);
             if (c.oid) bits.push(c.oid + (c.snmp_type ? ' (' + c.snmp_type + ')' : ''));
+            else if (c.type === 'snmp') bits.push('OID asked for when applied' + (c.snmp_type ? ' (' + c.snmp_type + ')' : ''));
             if (c.snmp_low) bits.push('low ' + c.snmp_low);
             if (c.snmp_high) bits.push('high ' + c.snmp_high);
             if (c.rtt_threshold) bits.push(c.rtt_threshold + 'ms');

@@ -11,6 +11,7 @@ package templates
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -28,8 +29,18 @@ type Check struct {
 	Desc string `json:"desc,omitempty"`
 
 	// SNMP specifics
-	SNMPType   string `json:"snmp_type,omitempty"` // low, high, range, exact, rate, reboot, compare
-	OID        string `json:"oid,omitempty"`
+	SNMPType string `json:"snmp_type,omitempty"` // low, high, range, exact, rate, reboot, compare
+	OID      string `json:"oid,omitempty"`
+	// OIDHint, on a check with no OID, says where the operator finds
+	// one. Some readings have no OID a template can know: an
+	// environmental sensor's or a generator controller's depends on its
+	// make, and a table row such as a switch's input-voltage sensor on
+	// its model. Such a check ships empty and Expand refuses to write it
+	// until the operator supplies an OID. The alternative - a stand-in
+	// that answers, such as sysUpTime - is a check that lies: a
+	// "temperature above 60C" comparing an uptime is always red, and a
+	// "voltage below 46V" is always green.
+	OIDHint    string `json:"oid_hint,omitempty"`
 	OIDSec     string `json:"oid_sec,omitempty"`
 	SNMPHigh   int64  `json:"snmp_high,omitempty"`
 	SNMPLow    int64  `json:"snmp_low,omitempty"`
@@ -107,6 +118,37 @@ type Params struct {
 	Community  string `json:"community,omitempty"` // SNMP community for snmp checks
 	Contact    string `json:"contact,omitempty"`
 	Spawn      string `json:"spawn,omitempty"`
+	// OIDs supplies an SNMP check's OID by check suffix: required for a
+	// check that ships without one (see Check.OIDHint), and an override
+	// for one that ships with one, such as a different table row.
+	OIDs map[string]string `json:"oids,omitempty"`
+}
+
+// numericOID is what sysmond accepts: dotted decimal, leading dot.
+var numericOID = regexp.MustCompile(`^\.?[0-9]+(\.[0-9]+)+$`)
+
+// snmpOID is the OID a check is written with: the operator's if given,
+// else the template's. A check with neither is refused rather than
+// written with a stand-in.
+func snmpOID(name string, c Check, p Params) (string, error) {
+	oid := strings.TrimSpace(p.OIDs[c.Suffix])
+	if oid == "" {
+		oid = c.OID
+	}
+	if oid == "" {
+		hint := ""
+		if c.OIDHint != "" {
+			hint = " - " + c.OIDHint
+		}
+		return "", fmt.Errorf("%s%s needs an OID%s", name, c.Suffix, hint)
+	}
+	if !numericOID.MatchString(oid) {
+		return "", fmt.Errorf("%s%s: %q is not a numeric OID", name, c.Suffix, oid)
+	}
+	if !strings.HasPrefix(oid, ".") {
+		oid = "." + oid
+	}
+	return oid, nil
 }
 
 // Expand turns a template plus params into the objects to add to the
@@ -156,8 +198,12 @@ func Expand(t *Template, p Params) ([]models.Host, error) {
 		}
 		switch c.Type {
 		case "snmp":
+			oid, err := snmpOID(name, c, p)
+			if err != nil {
+				return nil, err
+			}
 			h.SNMPType = c.SNMPType
-			h.SNMPOID = c.OID
+			h.SNMPOID = oid
 			h.SNMPOIDSec = c.OIDSec
 			h.SNMPHigh = c.SNMPHigh
 			h.SNMPLow = c.SNMPLow
@@ -186,9 +232,18 @@ func Expand(t *Template, p Params) ([]models.Host, error) {
 // Builtins ship with sysmon: the device classes a network operator
 // actually racks, from the tower down to the plant that powers it.
 //
-// OIDs are the vendors' documented ones. Thresholds are starting points
-// and nothing more - every one of these can be edited on the Templates
-// page, and the edit is stored over the top keeping the same id.
+// OIDs are the vendors' documented ones, or a standard MIB's. Where the
+// right OID depends on the make (an environmental sensor, a generator
+// controller, a DC plant) or on the unit (which row of a sensor table is
+// the input), the check ships without one and with an OIDHint, and
+// applying the template asks for it. sysUpTime is only ever a reboot
+// watch here: as a stand-in for a reading it makes a check that lies.
+//
+// Thresholds are starting points and nothing more - every one of these
+// can be edited on the Templates page, and the edit is stored over the
+// top keeping the same id. They are in the units of the OID they ship
+// with: the Netonix voltage is in hundredths of a volt because that is
+// what the switch reports.
 //
 // Thresholds are pitched by role rather than uniformly, because the same
 // number means different things in different places:
@@ -201,6 +256,21 @@ func Expand(t *Template, p Params) ([]models.Host, error) {
 //     teaches people to ignore the pager.
 //   - Power and environment: tight on the things that destroy hardware
 //     (voltage, temperature), because those are slow and preventable.
+//
+// entitySensorHint points generic gear at the standard MIB for its
+// temperature. The column is fixed by RFC 3433; the row is the sensor's
+// entPhysicalIndex, which only the device knows.
+func entitySensorHint(which string) string {
+	return "the " + which + " temperature sensor: ENTITY-SENSOR-MIB entPhySensorValue, " +
+		".1.3.6.1.2.1.99.1.1.1.4.<entPhysicalIndex>, for the row whose entPhySensorType is " +
+		"celsius(8) - or the vendor's own OID - in whole degrees C"
+}
+
+// DC plant controllers each have their own MIB, and their own idea of
+// the units.
+const rectifierHint = "the plant controller's bus voltage in whole volts (or set the " +
+	"thresholds in its units)"
+
 func Builtins() []Template {
 	return []Template{
 		// ---------------------------------------------------------------
@@ -281,11 +351,20 @@ func Builtins() []Template {
 				"what tells you a tower is running off a dying battery string.",
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
-				{Suffix: "-volt", Type: "snmp", SNMPType: "low", SNMPLow: 46,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} input voltage below 46V - check the plant",
-					DependsOnDevice: true},
+				// NETONIX-SWITCH-MIB voltageTable: VoltageTC, two implied
+				// decimals, so 46.00V is 4600. The rows differ by model -
+				// board rails and, on DC units, the input - so the row is
+				// the operator's; a rail compared against 46V would be
+				// red forever.
+				{Suffix: "-volt", Type: "snmp", SNMPType: "low", SNMPLow: 4600,
+					OIDHint: "the input row of the Netonix voltageTable, .1.3.6.1.4.1.46242.4.1.3.<row> " +
+						"(walk voltageDescription to find it); it reads hundredths of a volt",
+					Desc: "{name} input voltage below 46V - check the plant", DependsOnDevice: true},
+				// tempTable, whole degrees C. Row 1 is the first sensor;
+				// every row is a temperature, so another one is still an
+				// honest check.
 				{Suffix: "-temp", Type: "snmp", SNMPType: "high", SNMPHigh: 65,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} switch temperature above 65C",
+					OID: ".1.3.6.1.4.1.46242.3.1.3.1", Desc: "{name} switch temperature above 65C",
 					DependsOnDevice: true},
 			},
 		},
@@ -400,8 +479,8 @@ func Builtins() []Template {
 				{Suffix: "-loss", Type: "pktloss", PktLossTolerance: 1,
 					Desc: "{name} packet loss at the OLT", DependsOnDevice: true},
 				{Suffix: "-temp", Type: "snmp", SNMPType: "high", SNMPHigh: 60,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} chassis temperature above 60C",
-					DependsOnDevice: true},
+					OIDHint: entitySensorHint("chassis"),
+					Desc:    "{name} chassis temperature above 60C", DependsOnDevice: true},
 				{Suffix: "-uptime", Type: "snmp", SNMPType: "reboot",
 					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} reboot watch", DependsOnDevice: true},
 			},
@@ -424,8 +503,8 @@ func Builtins() []Template {
 					RTTSamples: 5, RTTInterval: 100,
 					Desc: "{name} latency above 15ms", DependsOnDevice: true},
 				{Suffix: "-temp", Type: "snmp", SNMPType: "high", SNMPHigh: 60,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} temperature above 60C",
-					DependsOnDevice: true},
+					OIDHint: entitySensorHint("board"),
+					Desc:    "{name} temperature above 60C", DependsOnDevice: true},
 				{Suffix: "-uptime", Type: "snmp", SNMPType: "reboot",
 					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} reboot watch", DependsOnDevice: true},
 			},
@@ -588,11 +667,13 @@ func Builtins() []Template {
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
 				{Suffix: "-running", Type: "snmp", SNMPType: "exact", SNMPExact: 1,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} generator running - site is on backup power",
-					DependsOnDevice: true},
+					OIDHint: "the controller's run status, or a dry contact on the run relay; healthy only " +
+						"while it reads 1, so edit the expected value after adding if yours reads otherwise " +
+						"when stopped",
+					Desc: "{name} generator running - site is on backup power", DependsOnDevice: true},
 				{Suffix: "-fuel", Type: "snmp", SNMPType: "low", SNMPLow: 25,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} fuel below 25%",
-					DependsOnDevice: true},
+					OIDHint: "the fuel level in percent, from the controller or a tank sender",
+					Desc:    "{name} fuel below 25%", DependsOnDevice: true},
 			},
 		},
 		{
@@ -603,11 +684,11 @@ func Builtins() []Template {
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
 				{Suffix: "-volt-low", Type: "snmp", SNMPType: "low", SNMPLow: 46,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} bus voltage below 46V",
-					DependsOnDevice: true},
+					OIDHint: rectifierHint,
+					Desc:    "{name} bus voltage below 46V", DependsOnDevice: true},
 				{Suffix: "-volt-high", Type: "snmp", SNMPType: "high", SNMPHigh: 58,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} bus voltage above 58V - check the charger",
-					DependsOnDevice: true},
+					OIDHint: rectifierHint,
+					Desc:    "{name} bus voltage above 58V - check the charger", DependsOnDevice: true},
 			},
 		},
 		{
@@ -630,14 +711,15 @@ func Builtins() []Template {
 			Checks: []Check{
 				{Suffix: "", Type: "ping", Desc: "{desc}"},
 				{Suffix: "-temp", Type: "snmp", SNMPType: "high", SNMPHigh: 35,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} shelter temperature above 35C",
-					DependsOnDevice: true},
+					OIDHint: "the sensor's temperature in whole degrees C",
+					Desc:    "{name} shelter temperature above 35C", DependsOnDevice: true},
 				{Suffix: "-humidity", Type: "snmp", SNMPType: "high", SNMPHigh: 80,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} humidity above 80%",
-					DependsOnDevice: true},
+					OIDHint: "the sensor's relative humidity in percent",
+					Desc:    "{name} humidity above 80%", DependsOnDevice: true},
 				{Suffix: "-door", Type: "snmp", SNMPType: "exact", SNMPExact: 1,
-					OID: ".1.3.6.1.2.1.1.3.0", Desc: "{name} door open",
-					DependsOnDevice: true},
+					OIDHint: "the door contact's input; healthy only while it reads 1, so edit the " +
+						"expected value after adding if yours reads otherwise when closed",
+					Desc: "{name} door open", DependsOnDevice: true},
 			},
 		},
 	}

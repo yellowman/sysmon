@@ -68,6 +68,12 @@ func TestEveryBuiltinExpandsCompletely(t *testing.T) {
 					got = c.URLText
 				case "oid":
 					got = c.OID
+					// A check whose OID depends on the make or the unit
+					// ships without one and says where to find it;
+					// Expand refuses it until the operator supplies one.
+					if got == "" && c.OIDHint != "" {
+						got = "operator-supplied"
+					}
 				case "username", "password":
 					// A template cannot carry credentials, so it must not
 					// ship a check type that requires them.
@@ -84,10 +90,16 @@ func TestEveryBuiltinExpandsCompletely(t *testing.T) {
 			}
 		}
 
-		// And it has to actually expand.
+		// And it has to actually expand, given the OIDs it asks for.
+		oids := map[string]string{}
+		for _, c := range tpl.Checks {
+			if c.Type == "snmp" && c.OID == "" {
+				oids[c.Suffix] = ".1.3.6.1.4.1.99999.1"
+			}
+		}
 		hosts, err := Expand(&tpl, Params{
 			Name: "dev", IP: "10.0.0.1", Parent: "core",
-			Desc: "test", Contact: "noc@example.net", Community: "public"})
+			Desc: "test", Contact: "noc@example.net", Community: "public", OIDs: oids})
 		if err != nil {
 			t.Errorf("%s: %v", tpl.ID, err)
 			continue

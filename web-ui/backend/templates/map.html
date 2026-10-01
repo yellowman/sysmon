@@ -423,7 +423,8 @@
             <div class="p-6 space-y-4">
                 <div>
                     <label class="block text-xs font-medium text-gray-600 mb-1">Device type</label>
-                    <select x-model="tplForm.template_id" class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
+                    <select x-model="tplForm.template_id" @change="tplForm.oids = {}; tplPreview = []; tplError = ''"
+                            class="w-full px-3 py-2 border border-gray-200 rounded text-sm">
                         <template x-for="t in tplList" :key="t.id">
                             <option :value="t.id" x-text="t.name + (t.vendor ? ' - ' + t.vendor : '')"></option>
                         </template>
@@ -473,6 +474,26 @@
                         <input type="text" x-model="tplForm.spawn" placeholder="sendalert %I %U %s %w %t"
                                class="w-full px-3 py-2 border border-gray-200 rounded text-sm mono">
                     </div>
+                </div>
+
+                <!-- Readings whose OID depends on the make or the unit: the
+                     template ships them without one rather than with a
+                     stand-in that answers, so they are asked for here. -->
+                <div x-show="tplNeedOIDs().length" class="space-y-3">
+                    <div class="text-xs font-semibold text-gray-600">This device's sensor OIDs</div>
+                    <template x-for="c in tplNeedOIDs()" :key="tplForm.template_id + c.suffix">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">
+                                <span class="mono" x-text="(tplForm.name.trim() || 'device') + c.suffix"></span>
+                                <span class="text-gray-400" x-text="' - ' + tplCheckDesc(c)"></span>
+                                <span x-show="!(tplForm.oids[c.suffix] || '').trim()" class="text-red-600 font-semibold">- required</span>
+                            </label>
+                            <input type="text" x-model="tplForm.oids[c.suffix]" placeholder=".1.3.6.1.4.1..."
+                                   :class="(tplForm.oids[c.suffix] || '').trim() ? 'border-gray-200' : 'border-red-500 ring-1 ring-red-400 bg-red-50'"
+                                   class="w-full px-3 py-2 border rounded text-sm mono">
+                            <p class="mt-1 text-[11px] leading-snug text-gray-500" x-text="c.oid_hint"></p>
+                        </div>
+                    </template>
                 </div>
 
                 <div x-show="tplPreview.length" class="border border-gray-200 rounded p-3 bg-gray-50">
@@ -644,7 +665,7 @@ function mapPage() {
         tplList: [],
         tplPreview: [],
         tplError: '',
-        tplForm: { template_id: '', name: '', ip: '', parent: '', desc: '', community: 'public', contact: '', spawn: '' },
+        tplForm: { template_id: '', name: '', ip: '', parent: '', desc: '', community: 'public', contact: '', spawn: '', oids: {} },
         drag: null,
         layoutDirty: false,
         statusTimer: null,
@@ -810,6 +831,15 @@ function mapPage() {
             return t ? (t.description || '') : '';
         },
 
+        // The selected template's SNMP checks that ship without an OID.
+        tplNeedOIDs() {
+            const t = this.tplList.find(x => x.id === this.tplForm.template_id);
+            return t ? (t.checks || []).filter(c => c.type === 'snmp' && !c.oid) : [];
+        },
+        tplCheckDesc(c) {
+            return (c.desc || '').replace('{name} ', '').replace('{name}', '');
+        },
+
         openTemplate() {
             // Adding from the map: default the parent to whatever node is
             // selected, which is almost always the switch you just clicked.
@@ -818,6 +848,8 @@ function mapPage() {
             // only produces a duplicate-name error.
             this.tplForm.name = '';
             this.tplForm.ip = '';
+            // Sensor OIDs belong to one unit, like its address.
+            this.tplForm.oids = {};
             this.tplPreview = [];
             this.tplError = '';
             this.tplOpen = true;
